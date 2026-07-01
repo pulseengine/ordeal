@@ -83,18 +83,13 @@ pub enum BvTerm {
 
     // --- Structural ---
     /// Bit extraction `[hi:lo]` (inclusive), yielding a `(hi - lo + 1)`-bit term.
-    Extract {
-        hi: u32,
-        lo: u32,
-        arg: Box<BvTerm>,
-    },
+    Extract { hi: u32, lo: u32, arg: Box<BvTerm> },
     /// Concatenation (`concat`): result width is the sum of operand widths.
     Concat(Box<BvTerm>, Box<BvTerm>),
     /// Zero-extension by `by` bits (`zero_ext`).
     ZeroExt { by: u32, arg: Box<BvTerm> },
     /// Sign-extension by `by` bits (`sign_ext`).
     SignExt { by: u32, arg: Box<BvTerm> },
-
     // --- loom's later sliver (NOT yet implemented; see ROADMAP) ---
     //
     // The following belong to the fragment loom will eventually emit but are

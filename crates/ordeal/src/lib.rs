@@ -29,5 +29,5 @@ pub mod term;
 #[cfg(feature = "oracle")]
 pub mod oracle;
 
-pub use solver::{CheckResult, Certificate, Model, Solver};
+pub use solver::{Certificate, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};
