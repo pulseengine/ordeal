@@ -1,0 +1,338 @@
+# Verification Artifacts (ASPICE SYS.5 / SWE.6)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# sys-verification measures verify system requirements (SYS-*);
+# sw-verification measures verify software requirements (TR-*).
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: VER-001
+    type: sys-verification
+    title: Differential-vs-Z3 verdict agreement on the full op set
+    description: >
+      A differential harness submits every corpus query — covering the full
+      QF_BV operator set (bvadd/bvsub/bvmul/bvudiv, bvand/bvor/bvxor,
+      bvshl/bvlshr/bvashr/bvrotr, extract/concat, zero_ext/sign_ext, and all
+      signed and unsigned comparisons) at widths 8/32/64 — to both Ordeal and
+      Z3 and fails on any verdict disagreement. On SAT the returned model is
+      re-evaluated to confirm it satisfies the original formula.
+    status: draft
+    tags: [differential, z3, oracle, qf-bv]
+    links:
+      - type: verifies
+        target: SYS-001
+      - type: verifies
+        target: SYS-004
+    fields:
+      method: automated-test
+      preconditions:
+        - Z3 available in the CI/dev environment
+        - differential corpus generated
+      steps:
+        run: "cargo test -p ordeal-oracle --features z3-differential"
+        coverage: "Full QF_BV op set at widths 8/32/64, verdict + model cross-check"
+
+  - id: VER-002
+    type: sys-verification
+    title: Checker-only soundness proof
+    description: >
+      The formally-verified LRAT checker's soundness theorem is discharged:
+      if the checker accepts a certificate for a CNF, that CNF is unsatisfiable.
+      The proof depends only on the checker and the LRAT semantics, not on the
+      solver internals, establishing that the trusted computing base is exactly
+      the checker.
+    status: draft
+    tags: [soundness, lrat, checker, formal-verification, trusted-core]
+    links:
+      - type: verifies
+        target: SYS-002
+      - type: verifies
+        target: SYS-003
+    fields:
+      method: formal-verification
+      preconditions:
+        - proof toolchain available
+      steps:
+        run: "checker soundness proof discharges in CI"
+        coverage: "LRAT checker soundness: accept implies UNSAT"
+
+  - id: VER-003
+    type: sys-verification
+    title: Hermetic reproducible build check
+    description: >
+      CI builds the production validator with no C++ toolchain present to
+      confirm no from-source C++ is in the critical path, and builds twice from
+      the same commit to confirm bit-identical validator artifacts. The wasm32
+      fallback (varisat) path is built to confirm portability.
+    status: draft
+    tags: [hermetic, reproducibility, build]
+    links:
+      - type: verifies
+        target: SYS-005
+    fields:
+      method: automated-test
+      preconditions:
+        - hermetic build environment
+      steps:
+        run: "reproducible-build CI job (native + wasm32)"
+        coverage: "No-C++ production build; bit-identical rebuild; wasm32 fallback"
+
+  - id: VER-004
+    type: sys-verification
+    title: Thin API and license conformance
+    description: >
+      Confirms the public one-shot check-sat API compiles against loom and synth
+      call sites and that no incremental (push/pop) surface is exposed, and that
+      crate metadata declares the Apache-2.0 license.
+    status: draft
+    tags: [api, license, integration]
+    links:
+      - type: verifies
+        target: SYS-006
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-api && license-check"
+        coverage: "API surface + Apache-2.0 metadata"
+
+  - id: VER-005
+    type: sys-verification
+    title: Fragment scope rejection tests
+    description: >
+      Confirms out-of-scope constructs — quantifiers, floating-point sorts,
+      optimization objectives, and incremental usage — are each rejected with a
+      distinct, clear error and never reach the solver core.
+    status: draft
+    tags: [scope, errors, validation]
+    links:
+      - type: verifies
+        target: SYS-007
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-api -- scope_rejection"
+        coverage: "Quantifiers, FP, optimize, push/pop each rejected"
+
+  - id: VER-006
+    type: sw-verification
+    title: Op-by-op bit-blaster proofs vs formal BitVec semantics
+    description: >
+      Each bit-blasted operator circuit is proved equisatisfiable with that
+      operator's formal BitVec semantics (P4), closing the encoder trust gap so
+      that Z3 can eventually be dropped from the soundness argument entirely.
+      Covers every operator in the fragment at widths 8/32/64.
+    status: draft
+    tags: [bit-blaster, formal-verification, bitvec, p4]
+    links:
+      - type: verifies
+        target: TR-003
+      - type: verifies
+        target: TR-001
+    fields:
+      method: formal-verification
+      steps:
+        run: "op-by-op bit-blaster equivalence proofs discharge in CI"
+        coverage: "Every QF_BV operator circuit vs BitVec semantics"
+
+  - id: VER-007
+    type: sw-verification
+    title: LRAT emission and checker acceptance/rejection
+    description: >
+      For every UNSAT corpus query the emitted LRAT certificate is accepted by
+      the verified checker; a mutated (invalid) certificate is rejected. Also
+      confirms LRAT trimming preserves acceptance.
+    status: draft
+    tags: [lrat, certificate, checker, mutation]
+    links:
+      - type: verifies
+        target: TR-005
+      - type: verifies
+        target: TR-006
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-lrat"
+        coverage: "Accept valid LRAT; reject mutated LRAT; trimming preserves acceptance"
+
+  - id: VER-008
+    type: sw-verification
+    title: SAT backend parity (CaDiCaL vs varisat vs Z3)
+    description: >
+      Confirms both SAT backends (CaDiCaL primary, varisat wasm32 fallback)
+      agree with Z3 on the corpus, that CaDiCaL emits a valid LRAT proof on
+      UNSAT, and that the varisat path builds and runs on wasm32.
+    status: draft
+    tags: [sat, cadical, varisat, wasm32, parity]
+    links:
+      - type: verifies
+        target: TR-004
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-sat && wasm32 backend smoke test"
+        coverage: "CaDiCaL + varisat vs Z3 parity; wasm32 build"
+
+  - id: VER-009
+    type: sw-verification
+    title: Array/UF sliver reduction correctness
+    description: >
+      Confirms array (non-extensional Array(BV32->BV8) select/store over
+      concrete consecutive offsets, eager read-over-write) and uninterpreted-
+      function congruence (Ackermannized pure_call) queries reduce to QF_BV and
+      agree with Z3, and that whole-array equality and non-concrete offsets are
+      rejected.
+    status: draft
+    tags: [array, uf, read-over-write, ackermannization, differential]
+    links:
+      - type: verifies
+        target: TR-008
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-term -- array_uf --features z3-differential"
+        coverage: "Array/UF reduction vs Z3; out-of-sliver constructs rejected"
+
+  - id: VER-010
+    type: sw-verification
+    title: Benchmark vs Z3 and per-op integration latency
+    description: >
+      Benchmarks Ordeal against Z3 on the corpus and measures amortized
+      per-operation integration latency (in-process, no SMT-LIB parsing, no
+      theory combination) against the CI budget. Confirms AIG structural hashing
+      and LRAT trimming measurably reduce work.
+    status: draft
+    tags: [benchmark, performance, latency, z3-rival]
+    links:
+      - type: verifies
+        target: TR-009
+      - type: verifies
+        target: TR-007
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo bench -p ordeal-oracle"
+        coverage: "Per-op integration latency vs CI budget; structural-hashing/trimming impact"
+
+  - id: VER-011
+    type: sw-verification
+    title: API-level scope and one-shot check-sat unit tests
+    description: >
+      Unit-level confirmation that the one-shot check-sat API returns a
+      satisfying model on SAT and exposes no incremental (push/pop) surface,
+      and that the API and any front end reject each out-of-scope construct with
+      a distinct error — complementing the system-level scope check.
+    status: draft
+    tags: [scope, errors, api, one-shot, unit-tests]
+    links:
+      - type: verifies
+        target: TR-010
+      - type: verifies
+        target: TR-002
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-api -- scope one_shot"
+        coverage: "One-shot model return; no incremental API; distinct scope-rejection errors"
+
+  - id: VER-012
+    type: sw-verification
+    title: Roadmap phase acceptance gates (P0–P5)
+    description: >
+      Per-phase acceptance gate that confirms each roadmap phase's deliverable
+      is complete before the phase is considered done: P0 the differential
+      harness is operational, P1 the QF_BV core returns oracle-checked models,
+      P2 UNSAT is backed by a checker-accepted LRAT certificate, P3 the array/UF
+      sliver reduces and agrees with Z3, P4 op-by-op bit-blaster proofs
+      discharge, and P5 per-op integration latency meets the CI budget. Each
+      gate is satisfied by the phase's underlying verification measures.
+    status: draft
+    tags: [roadmap, acceptance, milestone, gate]
+    links:
+      - type: verifies
+        target: FEAT-P0
+      - type: verifies
+        target: FEAT-P1
+      - type: verifies
+        target: FEAT-P2
+      - type: verifies
+        target: FEAT-P3
+      - type: verifies
+        target: FEAT-P4
+      - type: verifies
+        target: FEAT-P5
+    fields:
+      method: review
+      steps:
+        run: "phase acceptance review against VER-001..VER-010 evidence"
+        coverage: "P0–P5 deliverable completion gates"
+
+  - id: VER-013
+    type: sw-verification
+    title: wasm32-wasip2 buildability gate (zero-dep, no FFI on wasm)
+    description: >
+      A blocking CI job builds ordeal for wasm32-wasip2 on the default
+      (zero-dependency) build and fails if it does not compile, confirming
+      ordeal can run in-process inside a WebAssembly component. Also confirms no
+      C/FFI dependency (CaDiCaL) is linked on the wasm path — varisat is the
+      primary backend there — and that the default build declares no external
+      dependency.
+    status: draft
+    tags: [wasm32-wasip2, build, varisat, zero-dep, gate]
+    links:
+      - type: verifies
+        target: TR-011
+    fields:
+      method: automated-test
+      preconditions:
+        - wasm32-wasip2 rustup target installed
+      steps:
+        run: "rustup target add wasm32-wasip2 && cargo build --target wasm32-wasip2 --release"
+        coverage: "Blocking wasip2 build of the zero-dep default; no FFI on the wasm path"
+
+  - id: VER-014
+    type: sw-verification
+    title: Bazel build via rules_rust and rules_wasm_component
+    description: >
+      Confirms the Bazel build resolves its module graph and builds the native
+      crate targets via rules_rust, that the wasm32-wasip2 component target
+      builds under --config=wasm (once a WIT world exists), and that no
+      synth-specific rules (Rocq/ARM/Renode) are pulled in. rules_lean is
+      present only as a reserved placeholder. Advisory (non-blocking) in CI.
+    status: draft
+    tags: [bazel, rules_rust, rules_wasm_component, build]
+    links:
+      - type: verifies
+        target: TR-012
+    fields:
+      method: automated-test
+      preconditions:
+        - Bazel available; registry/git reachable for the org rules
+      steps:
+        run: "bazel build //... (advisory job); bazel mod graph resolves"
+        coverage: "Native crate targets build; module graph resolves; no synth-only rules"
+
+  - id: VER-015
+    type: sw-verification
+    title: Aeneas-to-Lean checker soundness discharge
+    description: >
+      Confirms the Rust LRAT checker translates via Aeneas to a Lean 4
+      functional model and that the soundness theorem (checker accepts implies
+      CNF UNSAT) discharges in CI against that model, built with rules_lean.
+      Also confirms the checker has no build or link dependency on the solver
+      core, so the trusted computing base is exactly the checker.
+    status: draft
+    tags: [aeneas, lean, lrat, checker, soundness, rules_lean, trusted-core]
+    links:
+      - type: verifies
+        target: TR-013
+      - type: verifies
+        target: TR-006
+    fields:
+      method: formal-verification
+      preconditions:
+        - Aeneas + Lean toolchain available (rules_lean)
+      steps:
+        run: "aeneas translate checker -> lean; lean soundness proof discharges in CI"
+        coverage: "Accept-implies-UNSAT theorem on the Aeneas model; checker independent of solver core"

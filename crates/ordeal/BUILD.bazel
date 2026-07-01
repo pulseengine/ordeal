@@ -1,0 +1,82 @@
+"""
+Ordeal crate — certificate-checked QF_BV SMT solver.
+
+Two build shapes:
+  * Native (host) — rust_library + rust_binary for the production solver and CLI.
+    This is where native CaDiCaL (C++ via FFI) and the Z3 differential oracle
+    live once implemented (both cfg-gated, neither present in the P0 skeleton).
+  * wasm32-wasip2 component — rust_wasm_component, the loom self-optimization
+    path (loom #246). On wasm the pure-Rust varisat SAT backend is primary;
+    native CaDiCaL is cfg-gated out so the wasip2 build stays FFI-free.
+
+The default build has ZERO external dependencies, so `deps` is empty today.
+A future backend split (varisat on wasm, cadical/z3 on native) is expressed in
+Cargo.toml under [target.'cfg(...)'.dependencies]; because MODULE.bazel resolves
+crates via crate_universe from_cargo, those deps flow in as `@crates//:<name>`
+here without a manual registry edit.
+"""
+
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load("@rules_wasm_component//rust:defs.bzl", "rust_wasm_component")
+
+package(default_visibility = ["//visibility:public"])
+
+# ── Native (host) targets ─────────────────────────────────────────────────────
+
+# Solver library — the public one-shot check-sat API surface.
+rust_library(
+    name = "ordeal",
+    srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    deps = [
+        # Zero external dependencies by design (wasip2-clean default build).
+        # Future native backends (cadical FFI, z3 oracle) attach here, gated by
+        # crate_features, once they exist:
+        #   "@crates//:z3",  # behind the `oracle` cargo feature (native only)
+    ],
+)
+
+# CLI binary.
+rust_binary(
+    name = "ordeal-cli",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    edition = "2024",
+    deps = [":ordeal"],
+)
+
+# Unit + integration tests over the library.
+rust_test(
+    name = "ordeal-test",
+    crate = ":ordeal",
+    edition = "2024",
+)
+
+# ── wasm32-wasip2 component (loom #246 self-optimization path) ────────────────
+#
+# Build with:  bazel build --config=wasm //crates/ordeal:ordeal_wasm
+#
+# Produces a WebAssembly Component Model component from the pure-Rust solver.
+# No `wit_bindgen` is wired yet: the P0 skeleton exports no WIT world, and the
+# hard buildability requirement is proven directly by
+#   cargo build --target wasm32-wasip2 --release
+# in CI (the blocking `wasm32-wasip2` job). Once ordeal exposes a WIT world for
+# loom to import, add `wit_bindgen = "//wit:ordeal_interfaces"` here.
+#
+# NOTE: rust_wasm_component builds a cdylib internally; enabling it requires a
+# `[lib] crate-type = ["cdylib"]` variant, which the skeleton does not yet
+# declare (it is lib + bin). Left commented so `bazel build //...` stays green
+# on the P0 skeleton; the cargo wasip2 job is the enforced gate meanwhile.
+#
+# rust_wasm_component(
+#     name = "ordeal_wasm",
+#     srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
+#     crate_root = "src/lib.rs",
+#     profiles = ["release"],
+#     # varisat is the primary SAT backend on wasm; cadical is cfg'd out.
+#     crate_features = ["varisat"],
+#     deps = [
+#         # "@crates//:varisat",  # pure-Rust SAT, wasm-clean
+#     ],
+# )

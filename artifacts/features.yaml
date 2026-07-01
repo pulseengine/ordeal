@@ -1,0 +1,151 @@
+# Features / Roadmap (P0–P5)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# The delivery phases P0–P5 modeled as software requirements (roadmap
+# deliverables). Each phase derives-from the system requirement it advances and
+# satisfies the technical requirements it fulfills, giving a phase-to-requirement
+# trace. See loom issue #246 for the grounding requirements.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: FEAT-P0
+    type: sw-req
+    title: "P0 — Z3 differential-oracle harness"
+    description: >
+      Stand up the differential-oracle harness that cross-checks every query
+      against Z3. This is the safety net every later phase relies on and the
+      starting point of the bespoke-solver journey. Deliverable: a harness that
+      runs both engines on a query corpus and fails on disagreement.
+    status: draft
+    tags: [roadmap, p0, oracle, differential]
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: satisfies
+        target: TR-007
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Harness operational on the corpus; disagreements fail the build.
+
+  - id: FEAT-P1
+    type: sw-req
+    title: "P1 — QF_BV core (bit-blaster, CaDiCaL, SAT models)"
+    description: >
+      Implement the QF_BV core: a bit-blaster for the full operator set at
+      widths 8/32/64, the CaDiCaL backend, and SAT-model return. Prove each
+      operator equivalent to Z3 via the P0 harness. Deliverable: a working
+      QF_BV decision procedure returning models, oracle-checked.
+    status: draft
+    tags: [roadmap, p1, qf-bv, bit-blaster, cadical]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-002
+      - type: satisfies
+        target: TR-003
+      - type: satisfies
+        target: TR-004
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Every operator agrees with Z3 at widths 8/32/64; SAT models re-evaluate
+        to true.
+
+  - id: FEAT-P2
+    type: sw-req
+    title: "P2 — LRAT emission + verified checker (Z3 demoted)"
+    description: >
+      Add LRAT certificate emission and a formally-verified, checker-only
+      soundness argument. Milestone: a bespoke certificate-checked solver whose
+      trusted core is just the checker; Z3 is demoted to oracle and benchmark
+      rival. Deliverable: UNSAT verdicts backed by checker-accepted LRAT.
+    status: draft
+    tags: [roadmap, p2, lrat, checker, milestone]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: satisfies
+        target: TR-005
+      - type: satisfies
+        target: TR-006
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Verified checker accepts LRAT for all UNSAT corpus queries; soundness
+        theorem discharged; Z3 no longer on the production path.
+
+  - id: FEAT-P3
+    type: sw-req
+    title: "P3 — loom array/UF sliver"
+    description: >
+      Add loom's later sliver: non-extensional Array(BV32->BV8) memory via eager
+      read-over-write (concrete consecutive offsets, no whole-array eq) and
+      uninterpreted-function congruence via Ackermannization — both by
+      preprocessing into the QF_BV core, no DPLL(T). Deliverable: loom's memory
+      and pure_call queries decided.
+    status: draft
+    tags: [roadmap, p3, array, uf, loom]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: satisfies
+        target: TR-008
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Array/UF queries reduce to QF_BV and agree with Z3; out-of-sliver
+        constructs rejected.
+
+  - id: FEAT-P4
+    type: sw-req
+    title: "P4 — op-by-op bit-blaster verification"
+    description: >
+      Prove each bit-blaster operator circuit equivalent to the formal BitVec
+      semantics, closing the encoder trust gap so Z3 can eventually be dropped
+      from the soundness argument entirely. Deliverable: op-by-op equivalence
+      proofs for the full fragment.
+    status: draft
+    tags: [roadmap, p4, bit-blaster, formal-verification]
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: satisfies
+        target: TR-003
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Every operator circuit proved equisatisfiable with its BitVec semantics.
+
+  - id: FEAT-P5
+    type: sw-req
+    title: "P5 — performance (hashing, rewrites, trimming, benchmarks)"
+    description: >
+      Optimize for CI-gating latency: AIG structural hashing, a curated
+      Bitwuzla-subset of rewrites, LRAT trimming, and benchmarking vs Z3. The
+      honest win is amortized per-op integration latency, not out-solving Z3's
+      SAT engine. Deliverable: performance within the CI budget with measured
+      benchmarks.
+    status: draft
+    tags: [roadmap, p5, performance, benchmark]
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: satisfies
+        target: TR-009
+    fields:
+      req-type: performance
+      priority: should
+      verification-criteria: >
+        Per-op integration latency below the CI budget; structural hashing and
+        LRAT trimming measurably reduce work.

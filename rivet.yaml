@@ -1,0 +1,49 @@
+project:
+  name: ordeal
+  version: "0.1.0"
+  description: >
+    Certificate-checked QF_BV SMT solver for the PulseEngine toolchain.
+    Replaces the Z3 static-link build burden for loom (verified WASM
+    optimizer) and synth (verified WASM-to-ARM codegen) with an untrusted
+    solver paired with a formally-verified LRAT certificate checker. Only
+    the checker is trusted; Z3 is demoted to a differential oracle and
+    benchmark rival. See loom issue #246 for the grounding requirements.
+
+  schemas:
+    - common
+    - aspice
+
+sources:
+  - path: artifacts
+    format: generic-yaml
+
+docs:
+  - docs
+
+commits:
+  format: trailers
+  trailers:
+    Implements: satisfies
+    Fixes: fixes
+    Verifies: verifies
+    Trace: traces-to
+  skip-trailer: "Trace: skip"
+  exempt-types:
+    - chore
+    - style
+    - ci
+    - docs
+    - build
+  traced-paths:
+    - crates/
+
+externals:
+  loom:
+    git: https://github.com/pulseengine/loom.git
+    ref: main
+    prefix: loom
+
+  synth:
+    git: https://github.com/pulseengine/synth.git
+    ref: main
+    prefix: synth

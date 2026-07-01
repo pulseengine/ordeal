@@ -1,0 +1,26 @@
+"""
+Platform definitions for Ordeal build targets.
+
+Ordeal has two targets:
+  * the host (native) platform — the production CaDiCaL-backed solver + the Z3
+    differential-oracle harness;
+  * wasm32-wasip2 — the WebAssembly Component Model target loom embeds when it
+    self-optimizes as a component (loom #246). On this platform the pure-Rust
+    varisat SAT backend is primary; native CaDiCaL (C++ via FFI) is cfg-gated
+    out.
+"""
+
+load("@platforms//os:os.bzl", "os")
+load("@platforms//cpu:cpu.bzl", "cpu")
+
+package(default_visibility = ["//visibility:public"])
+
+# WebAssembly System Interface, preview 2 (wasm32-wasip2)
+# The Component Model target. Selected via `--config=wasm`.
+platform(
+    name = "wasm32_wasip2",
+    constraint_values = [
+        "@platforms//os:wasi",
+        "@platforms//cpu:wasm32",
+    ],
+)

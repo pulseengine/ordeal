@@ -1,0 +1,121 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Check formatting
+        run: cargo fmt --all --check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Run clippy
+        # Default feature set only — the `oracle` feature pulls in Z3 (z3-sys),
+        # which is exercised by the dedicated non-blocking `oracle` job below.
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  build:
+    name: Build (release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build release
+        run: cargo build --release
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Run tests
+        # Default build must NOT require Z3 — the Z3-backed `oracle` feature is
+        # covered by the separate `oracle` job so the core gate stays hermetic.
+        run: cargo test --all
+
+  # ── wasm32-wasip2 buildability (BLOCKING) ─────────────────────────────
+  # HARD REQUIREMENT: loom self-optimizes as a WebAssembly component and embeds
+  # ordeal in-process, so ordeal MUST build as a wasm32-wasip2 component. The
+  # default build is zero-external-deps and wasip2-clean; on this target the
+  # pure-Rust varisat SAT backend is primary and native CaDiCaL (C++/FFI) is
+  # cfg-gated out. This job is REQUIRED for merge.
+  wasip2:
+    name: Build (wasm32-wasip2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: wasip2
+      - name: Build wasm32-wasip2 (release)
+        run: cargo build --target wasm32-wasip2 --release
+
+  # ── Bazel build via rules_rust + rules_wasm_component (non-blocking) ──
+  # Mirrors the org Bazel setup (see synth). Non-blocking (continue-on-error):
+  # the module graph pulls rules_rust + the pulseengine rules_wasm_component
+  # fork from the registry/git, and a registry/network hiccup must never block
+  # the core cargo gate. The cargo `wasip2` job above is the enforced gate.
+  bazel:
+    name: Bazel build (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bazel build //...
+        run: bazel build //... --config=dev
+
+  # ── Optional Z3 differential oracle (non-blocking) ────────────────────
+  # `ordeal` is a self-contained QF_BV solver; the `oracle` cargo feature
+  # cross-checks its answers against Z3. This job installs system Z3 and runs
+  # the oracle tests, but is NOT required for merge (continue-on-error): a Z3
+  # packaging hiccup on the runner must never block the core cargo gate.
+  oracle:
+    name: Z3 Oracle (optional)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: oracle
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
+      - name: Run oracle tests
+        run: cargo test --all --features oracle

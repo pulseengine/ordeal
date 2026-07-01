@@ -1,0 +1,42 @@
+[package]
+name = "ordeal"
+description = "Ordeal — a specialized, certificate-checked QF_BV SMT solver for the PulseEngine toolchain."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "ordeal"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ordeal"
+path = "src/main.rs"
+
+[features]
+# The Z3 differential oracle. Off by default: the default build has ZERO
+# external dependencies and always compiles. Enabling this feature does NOT
+# (yet) pull in a z3 crate — the oracle module is a documented stub until the
+# solver produces results worth cross-checking (see ROADMAP phase P1+).
+oracle = []
+
+# ── Future SAT backend split (documented, NOT yet active) ────────────────────
+# ordeal MUST stay buildable as wasm32-wasip2 (loom embeds it in a wasm
+# component) AND zero-external-dependency by default. When the P1 SAT backends
+# land, the native-vs-wasm split will be expressed via cfg-scoped dependencies
+# so that no C/FFI dependency ever reaches the wasm path:
+#
+#   # Native: CaDiCaL (C++ via FFI) is the primary backend; Z3 for the oracle.
+#   [target.'cfg(not(target_family = "wasm"))'.dependencies]
+#   # cadical = { version = "...", optional = true }
+#   # z3      = { version = "...", optional = true }   # behind `oracle`
+#
+#   # wasm: varisat (pure Rust) is the PRIMARY backend — no FFI, wasip2-clean.
+#   [target.'cfg(target_family = "wasm")'.dependencies]
+#   # varisat = "..."
+#
+# Until then the default build declares no dependencies at all, which is what
+# keeps `cargo build --target wasm32-wasip2 --release` green with no toolchain
+# beyond rustc.

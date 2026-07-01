@@ -1,0 +1,22 @@
+"""
+Root BUILD file for Ordeal.
+"""
+
+# Make the module metadata visible to the workspace (crate_universe reads the
+# cargo manifests from the root package).
+exports_files([
+    "MODULE.bazel",
+    ".bazelversion",
+    "Cargo.toml",
+    "Cargo.lock",
+])
+
+# Filegroup for all documentation
+filegroup(
+    name = "docs",
+    srcs = glob([
+        "*.md",
+        "docs/**/*.md",
+    ]),
+    visibility = ["//visibility:public"],
+)

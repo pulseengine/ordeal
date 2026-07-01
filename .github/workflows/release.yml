@@ -1,0 +1,173 @@
+name: Release
+
+# Release variant: serialize per-tag, never cancel. A cancelled release
+# mid-publish leaves the GitHub Release page and per-target binary archives in
+# an inconsistent state — better to queue than abort. Mirrors the
+# pulseengine/synth release workflow.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+on:
+  push:
+    tags:
+      - "v*"
+  # Manual re-run for a tag whose initial run failed partway. The tag must
+  # already exist; this does not create tags.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to (re)build (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Cross-platform binary builds ──────────────────────────────────────
+  # The `ordeal` bin builds with the default feature set (no `oracle`/Z3):
+  # z3-sys vendors and compiles Z3 from source, needs network + a large C++
+  # build, and the solver is fully self-contained without it. Keeping it out
+  # makes the release build fast and hermetic.
+  build-binaries:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
+          - target: x86_64-apple-darwin
+            os: macos-14
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.cross
+        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+
+      - name: Build ordeal (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} -p ordeal
+
+      - name: Build ordeal (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} -p ordeal
+
+      - name: Strip binary
+        if: ${{ !matrix.cross }}
+        run: strip "target/${{ matrix.target }}/release/ordeal" 2>/dev/null || true
+
+      - name: Package archive
+        env:
+          TARGET: ${{ matrix.target }}
+          # Resolve the version once: tag push -> refs/tags/vX.Y.Z;
+          # workflow_dispatch -> the user-supplied tag input. Bound via env:
+          # and dereferenced as $VERSION below — never expand ${{ ... }}
+          # directly inside run: (command-injection vector).
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          ARCHIVE="ordeal-${VERSION}-${TARGET}.tar.gz"
+          mkdir -p staging
+          cp "target/${TARGET}/release/ordeal" staging/
+          cp README.md LICENSE staging/ 2>/dev/null || true
+          tar -czf "$ARCHIVE" -C staging .
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 7
+
+  # ── Create the GitHub Release: checksums + provenance ─────────────────
+  create-release:
+    name: Create GitHub Release
+    needs: [build-binaries]
+    runs-on: ubuntu-latest
+    permissions:
+      # Release-asset upload needs contents: write; SLSA build-provenance
+      # attestation needs id-token + attestations: write.
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten release assets
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find artifacts -type f -name "*.tar.gz" -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      - name: Generate SHA256 checksums
+        run: |
+          set -euo pipefail
+          cd release-assets
+          sha256sum ./* > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # ── SLSA build provenance (GitHub-native) ──────────────────────────
+      # Generates an in-toto SLSA v1 provenance statement for every binary
+      # archive, signed keyless via Sigstore and recorded in Rekor. Verify
+      # with `gh attestation verify <file> --repo pulseengine/ordeal`.
+      - name: Generate SLSA build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: "release-assets/*.tar.gz"
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Untrusted-input safety: the tag name flows in via env: and is
+          # dereferenced through $VERSION, never expanded into the shell.
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          # Idempotent: re-running the workflow for an existing release
+          # uploads/overwrites assets rather than failing.
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "::notice::Release $VERSION exists; uploading assets"
+            gh release upload "$VERSION" --clobber release-assets/*
+          else
+            echo "::notice::Creating Release $VERSION with assets"
+            gh release create "$VERSION" \
+              --title "ordeal $VERSION" \
+              --generate-notes \
+              release-assets/*
+          fi

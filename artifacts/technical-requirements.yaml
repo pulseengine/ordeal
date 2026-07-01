@@ -1,0 +1,307 @@
+# Technical Requirements (ASPICE SWE.1)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# Software-level requirements derived from the system requirements. These pin
+# the exact operator set, widths, backends, and pipeline the implementation
+# must provide.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: TR-001
+    type: sw-req
+    title: QF_BV operator set and widths
+    description: >
+      Ordeal shall support QF_BV terms at bit-vector widths 8, 32, and 64 with
+      the operators: bvadd, bvsub, bvmul, bvudiv; bvand, bvor, bvxor; bvshl,
+      bvlshr, bvashr, bvrotr; extract and concat; zero_ext and sign_ext; and
+      the full family of signed and unsigned comparisons (bvult, bvule, bvugt,
+      bvuge, bvslt, bvsle, bvsgt, bvsge). This is exactly the set loom and synth
+      use — no more.
+    status: draft
+    tags: [qf-bv, operators, widths]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: derives-from
+        target: SYS-007
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Each listed operator has a differential-vs-Z3 test at widths 8/32/64;
+        out-of-set operators are rejected by the API.
+
+  - id: TR-002
+    type: sw-req
+    title: One-shot check-sat and model API
+    description: >
+      Ordeal shall expose a one-shot check-sat entry point that takes a QF_BV
+      formula and returns SAT-with-model or UNSAT-with-certificate. There shall
+      be no assertion stack, push/pop, or incremental reuse. On SAT the model
+      shall assign a concrete bit-vector value to each free variable.
+    status: draft
+    tags: [api, check-sat, model, one-shot]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: derives-from
+        target: SYS-006
+    fields:
+      req-type: interface
+      priority: must
+      verification-criteria: >
+        API returns a model on SAT that re-evaluates to true; no incremental
+        API surface is exposed.
+
+  - id: TR-003
+    type: sw-req
+    title: AIG bit-blasting to CNF
+    description: >
+      Ordeal shall bit-blast each QF_BV term to an And-Inverter Graph (AIG) and
+      lower the AIG to CNF via Tseitin transformation. The bit-blaster shall
+      emit, per operator, a circuit whose semantics match the formal BitVec
+      semantics of that operator.
+    status: draft
+    tags: [bit-blasting, aig, cnf, tseitin]
+    links:
+      - type: derives-from
+        target: SYS-001
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Bit-blasted CNF for each operator is equisatisfiable with the operator's
+        BitVec semantics (checked op-by-op, see P4 verification).
+
+  - id: TR-004
+    type: sw-req
+    title: SAT backends — CaDiCaL primary, varisat wasm32 fallback
+    description: >
+      Ordeal shall solve the CNF using CaDiCaL as the primary backend via FFI,
+      and a pure-Rust varisat backend as the wasm32 fallback where FFI/native
+      CaDiCaL is unavailable. Both backends shall produce results consumable by
+      the certificate pipeline; the primary backend shall emit an LRAT proof on
+      UNSAT.
+    status: draft
+    tags: [sat, cadical, varisat, wasm32, ffi]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Both backends agree with Z3 on the corpus; CaDiCaL emits an LRAT proof
+        on UNSAT; the varisat path builds and runs on a wasm32 target.
+
+  - id: TR-005
+    type: sw-req
+    title: LRAT certificate emission
+    description: >
+      On UNSAT, Ordeal shall emit an LRAT (Linear Resolution Asymmetric
+      Tautology) certificate for the CNF, suitable for independent checking.
+      The certificate shall be produced from the SAT backend's proof trace and
+      threaded back through the CNF/AIG encoding so it certifies the original
+      QF_BV query's unsatisfiability.
+    status: draft
+    tags: [lrat, certificate, unsat]
+    links:
+      - type: derives-from
+        target: SYS-002
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Emitted LRAT certificate is accepted by the verified checker for every
+        UNSAT corpus query.
+
+  - id: TR-006
+    type: sw-req
+    title: Formally-verified LRAT checker
+    description: >
+      Ordeal shall include a small LRAT certificate checker whose soundness is
+      formally verified: if the checker accepts a certificate for a CNF, that
+      CNF is unsatisfiable. The checker is the sole trusted component and must
+      be independent of the solver's internal data structures.
+    status: draft
+    tags: [lrat, checker, verified, trusted-core]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Checker soundness theorem discharged; checker rejects mutated/invalid
+        certificates; checker has no build/link dependency on the solver core.
+
+  - id: TR-007
+    type: sw-req
+    title: Z3 cross-check harness for verdicts and models
+    description: >
+      Ordeal shall provide a harness that submits every query to both Ordeal and
+      Z3 and compares verdicts (and, on SAT, cross-validates models). The
+      harness is a development/CI dependency only and shall be excluded from the
+      production critical path and the soundness argument.
+    status: draft
+    tags: [z3, differential, oracle, harness]
+    links:
+      - type: derives-from
+        target: SYS-004
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Harness runs on the full corpus in CI and fails on any disagreement;
+        production build excludes the Z3 dependency.
+
+  - id: TR-008
+    type: sw-req
+    title: Array and uninterpreted-function sliver
+    description: >
+      Ordeal shall support loom's later sliver: non-extensional Array(BV32->BV8)
+      memory with select/store over concrete consecutive offsets (no whole-array
+      equality) via eager read-over-write rewriting, and uninterpreted-function
+      congruence (pure_call) via Ackermannization. This sliver shall be handled
+      by preprocessing into the QF_BV core — no DPLL(T) theory solver.
+    status: draft
+    tags: [array, uf, ackermannization, read-over-write, loom]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: derives-from
+        target: SYS-001
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Array/UF queries reduce to QF_BV and agree with Z3; whole-array
+        equality and non-concrete offsets are rejected.
+
+  - id: TR-009
+    type: sw-req
+    title: Amortized integration-latency optimizations
+    description: >
+      To meet CI-gating latency, Ordeal shall apply AIG structural hashing, a
+      curated Bitwuzla-subset of local rewrites, and LRAT trimming, and shall be
+      benchmarked against Z3. The honest performance claim is amortized
+      per-operation integration latency (in-process, no SMT-LIB parsing, no
+      theory combination), not out-solving Z3's SAT engine.
+    status: draft
+    tags: [performance, structural-hashing, rewrites, trimming, benchmark]
+    links:
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: performance
+      priority: should
+      verification-criteria: >
+        Benchmark suite shows per-op integration latency below the CI budget;
+        structural hashing and LRAT trimming measurably reduce work.
+
+  - id: TR-010
+    type: sw-req
+    title: Scope enforcement and error reporting
+    description: >
+      Ordeal's API and any front end shall explicitly reject out-of-scope
+      constructs — quantifiers, floating-point sorts, optimization objectives,
+      and incremental (push/pop) usage — with clear, actionable error messages,
+      rather than silently mis-handling them.
+    status: draft
+    tags: [scope, errors, validation]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: derives-from
+        target: SYS-006
+    fields:
+      req-type: constraint
+      priority: must
+      verification-criteria: >
+        Each out-of-scope construct produces a distinct error; no out-of-scope
+        construct reaches the solver core.
+
+  - id: TR-011
+    type: sw-req
+    title: wasm32-wasip2 buildability with varisat-primary backend split
+    description: >
+      Ordeal shall build as a wasm32-wasip2 target so it can run in-process
+      inside a WebAssembly component (loom self-optimizes as a wasip2 component
+      and embeds ordeal). On the wasm path the pure-Rust varisat backend is the
+      primary SAT engine and native CaDiCaL (C++ via FFI) shall be cfg-gated
+      out. The default build shall remain zero-external-dependency and
+      wasip2-clean; the native-vs-wasm backend split shall be expressed via
+      target.'cfg(...)'.dependencies, never pulling a C/FFI dep onto the wasm
+      path.
+    status: draft
+    tags: [wasm32-wasip2, varisat, cadical, backend-split, zero-dep]
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: derives-from
+        target: SYS-001
+    fields:
+      req-type: constraint
+      priority: must
+      verification-criteria: >
+        `cargo build --target wasm32-wasip2 --release` succeeds on the default
+        (zero-dep) build in CI as a blocking gate; no FFI/C dependency is linked
+        on the wasm path; the default build declares no external dependency.
+
+  - id: TR-012
+    type: sw-req
+    title: Bazel build via rules_rust and rules_wasm_component
+    description: >
+      Ordeal shall build with the PulseEngine org Bazel rules, mirroring synth:
+      rules_rust builds the cargo crate (native library, CLI binary, tests) with
+      the crate set resolved from Cargo.lock via crate_universe from_cargo, and
+      rules_wasm_component packages the wasm32-wasip2 component. rules_lean shall
+      be reserved (documented placeholder) for the future verified checker. The
+      Bazel build shall not depend on synth-specific toolchains (Rocq, ARM,
+      Renode, Zephyr).
+    status: draft
+    tags: [bazel, rules_rust, rules_wasm_component, rules_lean, build]
+    links:
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        MODULE.bazel resolves its module graph; `bazel build //...` builds the
+        native crate targets (advisory CI job); the wasm component target builds
+        under `--config=wasm` once a WIT world exists; no synth-only rules are
+        pulled in.
+
+  - id: TR-013
+    type: sw-req
+    title: Verified LRAT checker via Aeneas-to-Lean translation
+    description: >
+      The formally-verified LRAT checker's soundness (accept implies UNSAT)
+      shall be discharged by translating the Rust checker to Lean 4 via Aeneas
+      and proving the theorem against the Aeneas-produced functional model,
+      rather than by hand-transcribing the checker into a proof assistant. The
+      Lean side shall be built with rules_lean. Writing the checker directly in
+      Lean (bv_decide style) is retained as a documented fallback. This refines
+      how the verified-checker soundness obligation is met; the checker remains
+      the sole trusted component with no link dependency on the solver core.
+    status: draft
+    tags: [lrat, checker, aeneas, lean, rules_lean, verified, trusted-core]
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: derives-from
+        target: SYS-002
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        The Rust checker translates via Aeneas to a Lean model whose soundness
+        theorem (accept implies UNSAT) discharges in CI; the checker has no
+        build/link dependency on the solver core.

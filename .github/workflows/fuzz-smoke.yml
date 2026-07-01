@@ -1,0 +1,100 @@
+# Fuzz smoke — light smoke gate on every PR + push to main.
+#
+# `ordeal` parses and solves SMT-LIB QF_BV queries, so the primary robustness
+# concern is the parser / solver never panicking on adversarial input. This is
+# the SMOKE gate: a short (~60s) cargo-fuzz run if a `fuzz/` crate exists,
+# otherwise it degrades to the regular test suite so the job stays green on a
+# skeleton. Long-budget fuzzing with corpus persistence is out of scope here.
+#
+# When a `fuzz/` cargo-fuzz crate is added, list its target(s) in
+# `matrix.target` (mirrors the fuzz/Cargo.toml `[[bin]]` entries).
+
+name: Fuzz Smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/fuzz-smoke.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'crates/**'
+      - 'fuzz/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/fuzz-smoke.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  fuzz:
+    name: Fuzz smoke (60s)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install nightly Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: fuzz
+
+      - name: Detect fuzz crate
+        id: detect
+        run: |
+          set -euo pipefail
+          if [ -f fuzz/Cargo.toml ]; then
+            echo "have_fuzz=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "have_fuzz=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install cargo-fuzz
+        if: steps.detect.outputs.have_fuzz == 'true'
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      - name: Run each fuzz target for 60s
+        if: steps.detect.outputs.have_fuzz == 'true'
+        run: |
+          set -euo pipefail
+          # Force the GNU target — cargo-fuzz defaults to musl on Linux, whose
+          # statically-linked libc is incompatible with ASan (on by default in
+          # libfuzzer-sys). The GNU target has a dynamic libc and works.
+          for target in $(cargo +nightly fuzz list); do
+            echo "::group::fuzz $target"
+            cargo +nightly fuzz run "$target" \
+              --target x86_64-unknown-linux-gnu \
+              -- -max_total_time=60 -print_final_stats=1
+            echo "::endgroup::"
+          done
+
+      - name: Fallback smoke (no fuzz crate yet)
+        if: steps.detect.outputs.have_fuzz != 'true'
+        run: |
+          echo "::notice::No fuzz/ crate present; running the test suite as the smoke gate."
+          cargo test --all
+
+      - name: Upload crash artifacts
+        if: failure() && steps.detect.outputs.have_fuzz == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            fuzz/artifacts/
+            fuzz/corpus/
+          retention-days: 30
+          if-no-files-found: ignore

@@ -1,0 +1,60 @@
+# Ordeal Bazel Configuration
+#
+# Mirrors the PulseEngine org conventions (see synth/.bazelrc), trimmed to what
+# ordeal needs: a native Rust build and a wasm32-wasip2 component build. No
+# ARM / Renode / Rocq configs — ordeal is a host-side solver + wasip2 target.
+
+# Common settings
+common --enable_bzlmod
+common --enable_platform_specific_config
+
+# Build settings
+build --incompatible_strict_action_env
+build --verbose_failures
+# CC toolchain auto-detection via rules_cc in MODULE.bazel
+
+# Network configuration (git gateway proxy)
+# These are set by the environment but Bazel needs them explicitly
+build --action_env=HTTP_PROXY
+build --action_env=HTTPS_PROXY
+build --action_env=NO_PROXY
+build --action_env=http_proxy
+build --action_env=https_proxy
+build --action_env=no_proxy
+
+# Rust settings
+build --@rules_rust//rust/toolchain/channel=stable
+
+# Enable workers for faster builds
+build --worker_max_instances=4
+
+# Test configuration
+test --test_output=errors
+test --test_summary=detailed
+
+# Performance settings
+build --experimental_reuse_sandbox_directories
+build --experimental_inmemory_jdeps_files
+build --experimental_inmemory_dotd_files
+
+# WASM Component Model settings (wasm32-wasip2 — the loom self-optimization path)
+# Ordeal MUST build as a wasip2 component: loom compiles itself to a wasm
+# component and embeds ordeal in-process, so the varisat SAT backend is the
+# primary engine on this path (native CaDiCaL is cfg-gated off here).
+build:wasm --platforms=//bazel/platforms:wasm32_wasip2
+build:wasm --@rules_wasm_component//wasm:component_model=true
+
+# Debug build
+build:debug --compilation_mode=dbg
+build:debug --strip=never
+
+# Optimized build
+build:opt --compilation_mode=opt
+build:opt --strip=always
+
+# Fast incremental builds (for development)
+build:dev --compilation_mode=fastbuild
+build:dev --config=debug
+
+# Try to import local settings (optional)
+try-import %workspace%/.bazelrc.local

@@ -1,0 +1,155 @@
+# System Requirements (ASPICE SYS.2)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# Each system requirement derives from one or more stakeholder requirements.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: SYS-001
+    type: system-req
+    title: Decide QF_BV check-sat with counterexample model
+    description: >
+      Ordeal shall decide satisfiability of quantifier-free bit-vector (QF_BV)
+      formulas over the fragment used by loom and synth, and on SAT return a
+      concrete counterexample model assigning a value to every free bit-vector
+      variable. The interface is one-shot check-sat (no incremental solving).
+    status: draft
+    tags: [qf-bv, check-sat, model]
+    links:
+      - type: derives-from
+        target: STK-005
+      - type: derives-from
+        target: STK-002
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        For every formula in the differential corpus, ordeal's SAT/UNSAT
+        verdict agrees with Z3; on SAT the returned model satisfies the
+        original formula when evaluated.
+
+  - id: SYS-002
+    type: system-req
+    title: Certificate-backed UNSAT verdicts
+    description: >
+      Every UNSAT verdict Ordeal returns shall be accompanied by a
+      machine-checkable LRAT certificate that a small, formally-verified
+      checker validates independently of the (untrusted) solver. A verdict
+      whose certificate the checker rejects shall not be reported as UNSAT.
+    status: draft
+    tags: [certificate, lrat, soundness]
+    links:
+      - type: derives-from
+        target: STK-003
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        The verified checker accepts the LRAT certificate for every UNSAT
+        result in the corpus; a mutated (invalid) certificate is rejected.
+
+  - id: SYS-003
+    type: system-req
+    title: Trusted computing base limited to the checker
+    description: >
+      The soundness argument for Ordeal shall rest only on the formally-verified
+      certificate checker. The solver, bit-blaster, CNF encoder and SAT backend
+      shall be untrusted: a bug in any of them can at worst produce a wrong SAT
+      model (caught by model re-evaluation) or a certificate the checker rejects,
+      never an unsound UNSAT.
+    status: draft
+    tags: [trusted-core, architecture, soundness]
+    links:
+      - type: derives-from
+        target: STK-003
+    fields:
+      req-type: safety
+      priority: must
+      verification-criteria: >
+        Trust boundary documented in the architecture; the checker soundness
+        proof discharges without depending on solver internals.
+
+  - id: SYS-004
+    type: system-req
+    title: Z3 as differential oracle and benchmark rival
+    description: >
+      Ordeal shall integrate Z3 solely as a differential oracle that cross-checks
+      every query during development and CI, and as a benchmark rival for
+      performance comparison. Z3 shall not be part of the production solving path
+      nor part of the soundness argument.
+    status: draft
+    tags: [z3, oracle, differential, benchmark]
+    links:
+      - type: derives-from
+        target: STK-003
+      - type: derives-from
+        target: STK-001
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        A differential harness runs both engines on every corpus query and
+        fails the build on any verdict disagreement.
+
+  - id: SYS-005
+    type: system-req
+    title: Hermetic reproducible production build
+    description: >
+      The Ordeal production build shall be hermetic and reproducible with no
+      from-source C++ compilation in the critical path, and shall build on the
+      platforms loom and synth target (Linux, macOS, and wasm32 for the
+      fallback backend). The Z3 oracle, being development/CI-only, is exempt
+      from the production critical-path constraint.
+    status: draft
+    tags: [hermetic, build, reproducibility]
+    links:
+      - type: derives-from
+        target: STK-001
+    fields:
+      req-type: constraint
+      priority: must
+      verification-criteria: >
+        Production build succeeds with no C++ toolchain present; two builds
+        from the same commit produce bit-identical validator artifacts.
+
+  - id: SYS-006
+    type: system-req
+    title: Thin stable Rust API under a permissive license
+    description: >
+      Ordeal shall expose a thin, stable Rust API for one-shot check-sat and
+      model retrieval suitable for direct in-process embedding in loom and
+      synth, and shall be distributed under the Apache-2.0 license.
+    status: draft
+    tags: [api, license, integration]
+    links:
+      - type: derives-from
+        target: STK-004
+    fields:
+      req-type: interface
+      priority: must
+      verification-criteria: >
+        The public API compiles against loom and synth call sites; the crate
+        metadata declares Apache-2.0.
+
+  - id: SYS-007
+    type: system-req
+    title: Scope-limited fragment
+    description: >
+      Ordeal shall implement exactly the fragment loom and synth require and no
+      more: QF_BV plus loom's later non-extensional Array(BV32->BV8) memory and
+      uninterpreted-function congruence sliver. Quantifiers, floating-point,
+      optimization objectives, and incremental solving are explicitly out of
+      scope.
+    status: draft
+    tags: [scope, fragment]
+    links:
+      - type: derives-from
+        target: STK-005
+    fields:
+      req-type: constraint
+      priority: must
+      verification-criteria: >
+        The parser/API rejects out-of-scope constructs (quantifiers, FP,
+        optimize, push/pop) with a clear error.

@@ -1,0 +1,86 @@
+# Stakeholder Requirements (ASPICE SYS.1)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# The stakeholders are the PulseEngine verified toolchain crates (loom, synth)
+# and the ecosystem that must build and ship them. Grounding: loom issue #246.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: STK-001
+    type: stakeholder-req
+    title: Hermetic, reproducible validator build
+    description: >
+      loom (verified WASM optimizer) and synth (verified WASM-to-ARM codegen)
+      need an SMT validator that builds hermetically and reproducibly, with no
+      from-source C++ in the critical path. The current dependence on a
+      statically-linked Z3 makes hermetic, reproducible builds painful across
+      Linux and macOS and across the Bazel and Cargo build systems. Ordeal
+      shall provide a validator whose production build is fully hermetic.
+    status: draft
+    tags: [hermetic, build, reproducibility, loom-246]
+    fields:
+      priority: must
+      source: loom#246
+
+  - id: STK-002
+    type: stakeholder-req
+    title: CI-gating verification performance
+    description: >
+      The validator shall be fast enough to gate continuous integration for
+      loom and synth. Per-operation validation queries are issued in-process
+      during optimization and code generation; amortized integration latency
+      (no SMT-LIB text parsing, no theory-combination overhead) matters more
+      than raw SAT-engine throughput. The validator must not become the CI
+      bottleneck.
+    status: draft
+    tags: [performance, ci, latency, loom-246]
+    fields:
+      priority: must
+      source: loom#246
+
+  - id: STK-003
+    type: stakeholder-req
+    title: Trustworthy answers via a small trusted core
+    description: >
+      loom and synth stake correctness on the validator's verdicts, so a
+      "trust me" solver is unacceptable. The stakeholders require that an UNSAT
+      verdict be backed by a machine-checkable certificate validated by a small,
+      formally-verified checker — the CompCert certifying-algorithm pattern,
+      blueprinted on Lean 4 bv_decide (OOPSLA 2025). Only the checker need be
+      trusted; the solver itself may remain untrusted.
+    status: draft
+    tags: [soundness, certificate, trusted-core, loom-246]
+    fields:
+      priority: must
+      source: loom#246
+
+  - id: STK-004
+    type: stakeholder-req
+    title: Permissive license and thin stable Rust API
+    description: >
+      To be embeddable in loom and synth, the validator shall ship under a
+      permissive license (Apache-2.0) and expose a thin, stable Rust API for
+      one-shot check-sat with counterexample models. No heavyweight SMT-LIB
+      front end is required for the production integration path.
+    status: draft
+    tags: [license, api, integration, loom-246]
+    fields:
+      priority: must
+      source: loom#246
+
+  - id: STK-005
+    type: stakeholder-req
+    title: One solver and build story for the ecosystem
+    description: >
+      The PulseEngine ecosystem wants a single, consistent solver-and-build
+      story shared by loom and synth, rather than each crate wrestling with the
+      Z3 static-link toolchain independently. Ordeal shall serve exactly the
+      QF_BV fragment those crates use (plus loom's later array/UF sliver) and
+      nothing more, so the shared story stays small and auditable.
+    status: draft
+    tags: [ecosystem, consolidation, scope, loom-246]
+    fields:
+      priority: should
+      source: loom#246

@@ -1,0 +1,82 @@
+"""
+Ordeal — certificate-checked QF_BV SMT solver for the PulseEngine toolchain.
+Bazel module definition.
+
+Deliberately minimal and mirrors the org conventions in synth/MODULE.bazel:
+  * rules_rust        — build the cargo crate (native + wasm32-wasip2)
+  * rules_wasm_component — package ordeal as a wasm32-wasip2 component so loom
+                        can embed it in-process when it self-optimizes as a
+                        WebAssembly component (loom #246)
+  * rules_lean        — reserved (commented) for the future verified LRAT
+                        checker, translated Rust -> Lean via Aeneas
+
+None of synth's ARM / Renode / Rocq / Verus deps are pulled in — ordeal is a
+host-side solver plus a wasip2 target, not an embedded codegen project.
+"""
+
+module(
+    name = "ordeal",
+    # Kept in lockstep with [workspace.package] version in Cargo.toml.
+    version = "0.0.0",
+)
+
+# Bazel dependencies
+bazel_dep(name = "platforms", version = "0.0.10")
+bazel_dep(name = "bazel_skylib", version = "1.7.1")
+bazel_dep(name = "rules_rust", version = "0.68.1")
+bazel_dep(name = "rules_cc", version = "0.2.17")
+
+# CC toolchain (required by Bazel 8 for linking Rust binaries)
+cc_configure = use_extension("@rules_cc//cc:extensions.bzl", "cc_configure_extension")
+use_repo(cc_configure, "local_config_cc", "local_config_cc_toolchains")
+register_toolchains("@local_config_cc_toolchains//:all")
+
+# Rust toolchains. `wasm32-wasip2` is registered as an extra target so the
+# component build (config=wasm) resolves a cross-compiling toolchain; the
+# default host target covers the native solver + oracle harness.
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    versions = ["1.88.0"],
+    extra_target_triples = ["wasm32-wasip2"],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+# Rust crates repository — resolved from Cargo.lock via from_cargo so the Bazel
+# crate set always matches the cargo workspace. The default build has ZERO
+# external dependencies (wasip2-clean), so today this resolves an empty set; it
+# is wired now so a future backend dep (varisat on wasm, cadical/z3 on native,
+# added under a [target.'cfg(...)'.dependencies] split) needs no MODULE.bazel
+# edit.
+crate = use_extension("@rules_rust//crate_universe:extension.bzl", "crate")
+crate.from_cargo(
+    cargo_lockfile = "//:Cargo.lock",
+    manifests = ["//:Cargo.toml"],
+)
+use_repo(crate, "crates")
+
+# PulseEngine WebAssembly Component Model rules — packages the wasm32-wasip2
+# module as a Component Model component (same pin as synth).
+bazel_dep(name = "rules_wasm_component", version = "1.0.0")
+git_override(
+    module_name = "rules_wasm_component",
+    remote = "https://github.com/pulseengine/rules_wasm_component.git",
+    commit = "43468cd52f6a09523fc4df08d17e88f67f1cfd82",  # v1.0.0
+)
+
+# ── Reserved: rules_lean for the verified LRAT checker (ROADMAP P2/P4) ─────────
+# The plan (ARCHITECTURE.md) is to translate the Rust LRAT checker to Lean via
+# Aeneas and discharge its soundness theorem in Lean, rather than hand-proving.
+# rules_lean will build/check the extracted Lean. Left commented until the
+# checker crate exists so `bazel build //...` stays green on the P0 skeleton.
+#
+# bazel_dep(name = "rules_lean", version = "0.0.0")
+# git_override(
+#     module_name = "rules_lean",
+#     remote = "https://github.com/pulseengine/rules_lean.git",
+#     commit = "<pin>",
+# )
+# lean = use_extension("@rules_lean//lean:extensions.bzl", "lean")
+# use_repo(lean, "lean_toolchains")
+# register_toolchains("@lean_toolchains//:all")
