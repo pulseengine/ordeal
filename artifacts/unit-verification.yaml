@@ -19,7 +19,7 @@ artifacts:
       fills with the sign bit; rotr rotates modulo width; signed comparisons
       on boundary values (MIN/MAX/-1/0); extract/concat/ext bit positions.
       Cross-checked against u128 reference arithmetic per case.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, eval, unit-test]
     links:
@@ -39,7 +39,7 @@ artifacts:
       (x&0=0, x&1=x, x&x=x, x&!x=0), structural hashing returns the same
       literal for operand-order-swapped and repeated and() calls, complement
       involution, and node-count bounds under repeated common subexpressions.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, aig, unit-test]
     links:
@@ -59,7 +59,7 @@ artifacts:
       the AIG output evaluates true iff the Tseitin CNF (with the output unit
       clause) is satisfiable under the corresponding assignment extended by
       gate-consistent values; clause count is linear in node count.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, cnf, tseitin, unit-test]
     links:
@@ -80,7 +80,7 @@ artifacts:
       both sides of the phase transition cross-checked against a brute-force
       enumerator (<= 20 vars), and every SAT verdict's assignment re-evaluates
       the CNF to true. Learned-clause antecedent recording is exercised.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, sat, cdcl, unit-test]
     links:
@@ -99,7 +99,7 @@ artifacts:
       Exhaustive width-8 equivalence of bvand/bvor/bvxor/eq/ne circuits
       against DES-001 (all operand pairs via AIG simulation), randomized at
       widths 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, bitwise, unit-test]
     links:
@@ -120,7 +120,7 @@ artifacts:
       Exhaustive width-8 equivalence of bvadd/bvsub and all eight ordered
       comparisons against DES-001, randomized at widths 32/64, including
       signed boundary values.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, arithmetic, unit-test]
     links:
@@ -141,7 +141,7 @@ artifacts:
       Exhaustive width-8 equivalence of bvshl/bvlshr/bvashr/bvrotr against
       DES-001 including every out-of-range shift amount, randomized at
       widths 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, shifts, unit-test]
     links:
@@ -162,7 +162,7 @@ artifacts:
       Exhaustive width-8 equivalence of bvmul/bvudiv against DES-001 (all
       65536 operand pairs, including all zero-divisor cases), randomized at
       widths 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, mul, udiv, unit-test]
     links:
@@ -183,7 +183,7 @@ artifacts:
       Exhaustive width-8 equivalence of extract/concat/zero_ext/sign_ext
       against DES-001 across all hi/lo positions and extension amounts within
       the 8/32/64 width family, randomized at widths 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, structural, unit-test]
     links:
@@ -205,7 +205,7 @@ artifacts:
       widths 8/32/64, bounded depth) through both engines via the raw
       (dev-only) verdict API and fail on any disagreement; cross-validate SAT
       models from both engines with DES-001. Reproducible via fixed seeds.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, oracle, differential, unit-test]
     links:
@@ -229,7 +229,7 @@ artifacts:
       CNFs and rejects mutated ones (dropped hint, wrong clause id, reordered
       deletion, truncated proof, missing empty clause). Confirms the crate
       graph has no dependency edge to the solver core.
-    status: draft
+    status: implemented
     release: v0.3.0
     tags: [p2, lrat, checker, unit-test, mutation]
     links:
@@ -250,7 +250,7 @@ artifacts:
       Unsat on the production path); any query containing a disabled op
       returns Unknown; the phase-0 soundness tests (Unknown never authorizes)
       still pass; wasm32-wasip2 build stays green.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, pipeline, soundness, unit-test]
     links:

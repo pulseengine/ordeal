@@ -19,7 +19,7 @@ artifacts:
       the full family of signed and unsigned comparisons (bvult, bvule, bvugt,
       bvuge, bvslt, bvsle, bvsgt, bvsge). This is exactly the set loom and synth
       use — no more.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [qf-bv, operators, widths]
     links:
@@ -44,7 +44,7 @@ artifacts:
       formula and returns SAT-with-model or UNSAT-with-certificate. There shall
       be no assertion stack, push/pop, or incremental reuse. On SAT the model
       shall assign a concrete bit-vector value to each free variable.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [api, check-sat, model, one-shot]
     links:
@@ -69,7 +69,7 @@ artifacts:
       lower the AIG to CNF via Tseitin transformation. The bit-blaster shall
       emit, per operator, a circuit whose semantics match the formal BitVec
       semantics of that operator.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [bit-blasting, aig, cnf, tseitin]
     links:
@@ -175,7 +175,7 @@ artifacts:
       Z3 and compares verdicts (and, on SAT, cross-validates models). The
       harness is a development/CI dependency only and shall be excluded from the
       production critical path and the soundness argument.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [z3, differential, oracle, harness]
     links:
@@ -250,7 +250,7 @@ artifacts:
       constructs — quantifiers, floating-point sorts, optimization objectives,
       and incremental (push/pop) usage — with clear, actionable error messages,
       rather than silently mis-handling them.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [scope, errors, validation]
     links:

@@ -25,7 +25,7 @@ artifacts:
       This unit is the TEST ORACLE for every bit-blasting rule (exhaustive at
       width 8, randomized at 32/64) and performs the SAT-model self-check
       (re-evaluate the model against the assertions).
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, eval, oracle, semantics]
     links:
@@ -50,7 +50,7 @@ artifacts:
       x&!x=0) and structural hashing (operand-order-normalized HashMap) so
       common subexpressions collapse before CNF. A Word is a Vec<Lit>,
       LSB-first, the unit bit-blasting rules produce and consume.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, aig, strashing]
     links:
@@ -72,7 +72,7 @@ artifacts:
       DIMACS-style i32 literals (positive = true polarity). Maintains the
       AIG-literal -> CNF-variable map needed to decode SAT assignments back
       to term-level models and to thread LRAT certificates back to the query.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, cnf, tseitin]
     links:
@@ -96,7 +96,7 @@ artifacts:
       resolution antecedents behind a proof-trace hook so LRAT emission (P2,
       TR-005) is a formatting step, not a redesign. This is the primary
       engine on every target including wasm32-wasip2 (TR-004, TR-011).
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, sat, cdcl, pure-rust]
     links:
@@ -116,7 +116,7 @@ artifacts:
       per-bit gates; eq as the conjunction of per-bit XNORs; ne as its
       negation. Verified exhaustively against DES-001 at width 8 and
       randomized at widths 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, bitwise]
     links:
@@ -140,7 +140,7 @@ artifacts:
       chain; signed comparisons by sign-bit-flipped unsigned comparison.
       Produces ult/ule/ugt/uge/slt/sle/sgt/sge single-literal predicates.
       Verified exhaustively against DES-001 at width 8, randomized at 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, arithmetic, comparisons]
     links:
@@ -166,7 +166,7 @@ artifacts:
       width is a power of two for 8/32/64). Verified exhaustively against
       DES-001 at width 8 including all out-of-range amounts, randomized at
       32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, shifts, rotate]
     links:
@@ -191,7 +191,7 @@ artifacts:
       = 0 yields all-ones) merged in via a divisor-is-zero mux. The hardest
       family; verified exhaustively against DES-001 at width 8 (all 65536
       operand pairs) and randomized at 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, mul, udiv]
     links:
@@ -216,7 +216,7 @@ artifacts:
       word plumbing, no gates. Verified exhaustively against DES-001 at
       width 8 across all hi/lo and extension amounts in the 8/32/64 family,
       randomized at 32/64.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, bit-blast, structural]
     links:
@@ -241,7 +241,7 @@ artifacts:
       DES-001. A seeded random term generator produces the corpus (all ops,
       widths 8/32/64, bounded depth) so CI runs are reproducible. Excluded
       from the production path and the soundness argument (TR-007).
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, oracle, z3, differential, corpus]
     links:
@@ -266,7 +266,7 @@ artifacts:
       soundness proof (TR-013, P2) will be discharged against; mutation
       tests (corrupted certificates must be rejected) are part of the unit
       verification.
-    status: draft
+    status: implemented
     release: v0.3.0
     tags: [p2, lrat, checker, trusted-core]
     links:
@@ -294,7 +294,7 @@ artifacts:
       remain gated behind the P2 checker: until LRAT emission + the verified
       checker land, UNSAT results are reported as Unknown on the production
       path (never an unchecked Unsat), per the AGENTS.md soundness contract.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [p1, pipeline, enablement, soundness]
     links:
