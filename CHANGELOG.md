@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-02
+
+First public release: the QF_BV decision pipeline, oracle-verified and
+certificate-checked. **Falsification statement:** this release is wrong if
+any well-sorted query over the closed fragment yields a `Sat` model that
+does not re-evaluate to true, an `Unsat` whose carried LRAT certificate the
+`ordeal-lrat` checker rejects on re-check, or any verdict disagreeing with
+Z3 on the same query.
+
 ### Added
 
 - Verification evidence layer: `verification-execution` / `verification-verdict`
@@ -102,4 +111,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/commits/main
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.2.0
