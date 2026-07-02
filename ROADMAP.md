@@ -1,7 +1,10 @@
 # Ordeal Roadmap
 
-**Status:** phase-0 skeleton. The solver conservatively returns `Unknown` for
-every query; the decision engine is not yet implemented.
+**Status:** P1 engine landed. The full pipeline (bit-blast → AIG → Tseitin →
+own pure-Rust CDCL) decides the fragment; `Sat` verdicts carry self-checked
+counterexample models and agree with the Z3 differential oracle across the
+seeded corpus. Engine-UNSAT still surfaces as `Unknown` — no `Unsat` is
+returned until the P2 verified checker validates its certificate.
 
 Ordeal is built the same way loom and synth are: **step by step, proof
 alongside.** No operation is enabled until it has a proven bit-blasting rule,
@@ -17,7 +20,7 @@ copy).
 
 ---
 
-## Phase P0 — Skeleton (current)
+## Phase P0 — Skeleton (done)
 
 Establish the closed fragment and a sound-by-construction interface.
 
@@ -37,23 +40,24 @@ authorizes a transformation).
 
 ---
 
-## Phase P1 — Bit-blaster + SAT
+## Phase P1 — Bit-blaster + SAT (done)
 
 Turn terms into a boolean problem and solve it (answer only, no certificate
 yet).
 
 | Task | Status |
 |------|--------|
-| Bit-blasting rules for every fragment op (widths 8/32/64) | Planned |
-| AIG construction with structural sharing + const-folding | Planned |
-| Tseitin CNF encoding | Planned |
-| Our own pure-Rust CDCL core — **primary engine on every target** (incl. `wasm32-wasip2`) | Planned |
-| CaDiCaL FFI — **optional native accelerator/benchmark only**, `cfg`-gated off on wasm | Planned |
-| SAT → `Model` decoding (counterexamples) | Planned |
-| Differential oracle wired to real Z3 in CI | Planned |
+| Bit-blasting rules for every fragment op (widths 8/32/64) | Done — exhaustively oracle-verified at width 8, randomized at 32/64 |
+| AIG construction with structural sharing + const-folding | Done |
+| Tseitin CNF encoding | Done |
+| Our own pure-Rust CDCL core — **primary engine on every target** (incl. `wasm32-wasip2`) | Done — deterministic, RUP-chain proof trace ready for P2 LRAT |
+| CaDiCaL FFI — **optional native accelerator/benchmark only**, `cfg`-gated off on wasm | Planned (optional; not needed for P1 exit) |
+| SAT → `Model` decoding (counterexamples) | Done — models self-checked before being returned |
+| Differential oracle wired to real Z3 in CI | Done — 300-query seeded corpus, zero disagreements |
 
-**Milestone:** ordeal decides the fragment and agrees with the Z3 oracle across
-a differential corpus. UNSAT is *believed* but not yet *checked*.
+**Milestone (reached):** ordeal decides the fragment and agrees with the Z3
+oracle across a differential corpus. UNSAT is *believed* but not yet
+*checked* — the production path returns `Unknown` for engine-UNSAT until P2.
 
 **Kill criterion:** if ordeal and the Z3 oracle disagree on any query, that op
 is disabled (reverts to `Unknown`) until the bit-blasting rule is fixed.

@@ -279,7 +279,7 @@ artifacts:
       zero-external-dependency and wasip2-clean; the optional native
       accelerator shall be expressed via target.'cfg(...)'.dependencies, never
       pulling a C/FFI dep onto the wasm path.
-    status: draft
+    status: implemented
     release: v0.1.0
     tags: [wasm32-wasip2, cdcl, pure-rust, cadical, backend-split, zero-dep]
     links:
@@ -310,7 +310,7 @@ artifacts:
       be reserved (documented placeholder) for the future verified checker. The
       Bazel build shall not depend on synth-specific toolchains (Rocq, ARM,
       Renode, Zephyr).
-    status: draft
+    status: implemented
     release: v0.1.0
     tags: [bazel, rules_rust, rules_wasm_component, rules_lean, build]
     links:
