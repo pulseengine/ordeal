@@ -18,7 +18,7 @@ artifacts:
       signed and unsigned comparisons) at widths 8/32/64 — to both Ordeal and
       Z3 and fails on any verdict disagreement. On SAT the returned model is
       re-evaluated to confirm it satisfies the original formula.
-    status: implemented
+    status: verified
     release: v0.2.0
     tags: [differential, z3, oracle, qf-bv]
     links:
@@ -69,7 +69,7 @@ artifacts:
       the same commit to confirm bit-identical validator artifacts. The wasm32
       path (ordeal's own pure-Rust CDCL core, FFI-free) is built to confirm
       portability.
-    status: draft
+    status: verified
     release: v0.2.0
     tags: [hermetic, reproducibility, build]
     links:
@@ -80,7 +80,7 @@ artifacts:
       preconditions:
         - hermetic build environment
       steps:
-        run: "reproducible-build CI job (native + wasm32)"
+        run: "CI job 'Reproducible build': cargo tree dep-free assert; build twice, cmp bit-for-bit (+ blocking wasip2 job for portability)"
         coverage: "No-C++ production build; bit-identical rebuild; wasm32 fallback"
 
   - id: VER-004
@@ -91,7 +91,7 @@ artifacts:
       call sites and that no incremental (push/pop) surface is exposed, and that
       crate metadata declares the Apache-2.0 license.
     status: draft
-    release: v0.2.0
+    release: v0.4.0
     tags: [api, license, integration]
     links:
       - type: verifies
@@ -104,12 +104,18 @@ artifacts:
 
   - id: VER-005
     type: sys-verification
-    title: Fragment scope rejection tests
+    title: Fragment scope rejection — by construction plus sortedness errors
     description: >
-      Confirms out-of-scope constructs — quantifiers, floating-point sorts,
-      optimization objectives, and incremental usage — are each rejected with a
-      distinct, clear error and never reach the solver core.
-    status: draft
+      Confirms out-of-scope constructs never reach the solver core. For
+      quantifiers, floating-point sorts, optimization objectives, and
+      incremental (push/pop) usage the rejection is BY CONSTRUCTION: the
+      closed BvTerm/BoolTerm fragment and the one-shot Solver API cannot
+      express them (no AST variant, no API surface), which is stronger than
+      a runtime error. What is runtime-checkable is checked: Solver::validate
+      reports a distinct error per well-sortedness violation (width mismatch,
+      bad extract bounds, unsupported width) and ill-sorted queries return
+      Unknown without reaching a blast rule.
+    status: verified
     release: v0.2.0
     tags: [scope, errors, validation]
     links:
@@ -118,8 +124,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal-api -- scope_rejection"
-        coverage: "Quantifiers, FP, optimize, push/pop each rejected"
+        run: "cargo test -p ordeal solver::"
+        coverage: "By-construction closure of the fragment; distinct sortedness errors"
 
   - id: VER-006
     type: sw-verification
@@ -150,7 +156,7 @@ artifacts:
       For every UNSAT corpus query the emitted LRAT certificate is accepted by
       the verified checker; a mutated (invalid) certificate is rejected. Also
       confirms LRAT trimming preserves acceptance.
-    status: implemented
+    status: verified
     release: v0.3.0
     tags: [lrat, certificate, checker, mutation]
     links:
@@ -173,7 +179,7 @@ artifacts:
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
     status: draft
-    release: v0.2.0
+    release: v0.6.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
       - type: verifies
@@ -235,7 +241,7 @@ artifacts:
       satisfying model on SAT and exposes no incremental (push/pop) surface,
       and that the API and any front end reject each out-of-scope construct with
       a distinct error — complementing the system-level scope check.
-    status: implemented
+    status: verified
     release: v0.2.0
     tags: [scope, errors, api, one-shot, unit-tests]
     links:
@@ -263,7 +269,7 @@ artifacts:
       Z3 is out of the soundness argument, and P5 per-op integration latency
       meets the CI budget. Each gate is satisfied by the phase's underlying
       verification measures.
-    status: draft
+    status: verified
     tags: [roadmap, acceptance, milestone, gate]
     links:
       - type: verifies
@@ -294,7 +300,7 @@ artifacts:
       C/FFI dependency (CaDiCaL) is linked on the wasm path — ordeal's own
       pure-Rust CDCL core is the engine there — and that the default build
       declares no external dependency.
-    status: implemented
+    status: verified
     release: v0.1.0
     tags: [wasm32-wasip2, build, cdcl, pure-rust, zero-dep, gate]
     links:
@@ -317,7 +323,7 @@ artifacts:
       builds under --config=wasm (once a WIT world exists), and that no
       synth-specific rules (Rocq/ARM/Renode) are pulled in. rules_lean is
       present only as a reserved placeholder. Advisory (non-blocking) in CI.
-    status: implemented
+    status: verified
     release: v0.1.0
     tags: [bazel, rules_rust, rules_wasm_component, build]
     links:

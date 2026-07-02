@@ -67,6 +67,28 @@ jobs:
         # covered by the separate `oracle` job so the core gate stays hermetic.
         run: cargo test --all
 
+  # ── Reproducible build (VER-003 / SYS-005) ────────────────────────────
+  # Two release builds of the same commit in different target dirs must be
+  # bit-identical, and the zero-dep default build must never pull externals
+  # (cargo tree contains only the workspace crates; no build scripts, so no
+  # C/C++ toolchain is ever invoked).
+  repro:
+    name: Reproducible build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Assert dependency-free default build
+        run: |
+          cargo tree -p ordeal --edges normal
+          test "$(cargo tree -p ordeal --edges normal --prefix none | grep -vc '^\(ordeal\|ordeal-lrat\)')" -eq 0
+      - name: Build twice, compare bit-for-bit
+        run: |
+          cargo build --release --target-dir target-a
+          cargo build --release --target-dir target-b
+          sha256sum target-a/release/ordeal target-b/release/ordeal
+          cmp target-a/release/ordeal target-b/release/ordeal
+
   # ── wasm32-wasip2 buildability (BLOCKING) ─────────────────────────────
   # HARD REQUIREMENT: loom self-optimizes as a WebAssembly component and embeds
   # ordeal in-process, so ordeal MUST build as a wasm32-wasip2 component. The
