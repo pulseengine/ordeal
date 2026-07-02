@@ -1,11 +1,12 @@
-# Publishes the `ordeal` crate to crates.io on every `v*` tag push.
+# Publishes the workspace crates to crates.io on every `v*` tag push.
 #
 # Trust model: an org-wide CARGO_REGISTRY_TOKEN secret (set at the pulseengine
 # GitHub organization, inherited by this repo). Cargo reads it directly from the
 # CARGO_REGISTRY_TOKEN environment variable.
 #
-# Mirrors pulseengine/synth's publish-to-crates-io.yml, simplified for a
-# single-crate workspace (no dependency-order walker needed).
+# Mirrors pulseengine/synth's publish-to-crates-io.yml. Publish order matters:
+# ordeal-lrat (the dependency-free checker) goes first; `cargo publish` blocks
+# until the index has it, so the subsequent ordeal publish resolves it.
 
 name: Publish to crates.io
 
@@ -65,11 +66,21 @@ jobs:
           fi
           echo "::notice::tag $VERSION matches crate version $ACTUAL"
 
-      # Pre-flight fail-fast: package + verify-build the crate at the new
-      # version before any upload. Catches broken metadata, missing README /
-      # LICENSE, bad include/exclude, or code that doesn't compile.
-      - name: Verify crate packages cleanly
-        run: cargo package -p ordeal
+      # Pre-flight fail-fast for the dependency-free crate. ordeal itself
+      # CANNOT be packaged before ordeal-lrat is on the index (its version
+      # dep must resolve there), so its verify happens inside `cargo publish`
+      # after the checker lands.
+      - name: Verify ordeal-lrat packages cleanly
+        run: cargo package -p ordeal-lrat
+
+      # The checker first — it depends on nothing; ordeal depends on it.
+      # `cargo publish` waits for index propagation before returning, so the
+      # second publish (which packages + verify-builds ordeal against the
+      # index) can resolve it.
+      - name: Publish ordeal-lrat to crates.io
+        run: cargo publish -p ordeal-lrat
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Publish ordeal to crates.io
         run: cargo publish -p ordeal
