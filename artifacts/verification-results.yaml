@@ -373,7 +373,7 @@ artifacts:
       workspace crates (no externals, no build scripts, hence no C/C++ in
       the critical path) and two release builds of the same commit compare
       bit-for-bit identical. Wasm portability covered by the blocking
-      wasip2 gate (VV-018-adjacent evidence).
+      wasip2 gate, whose verdict is recorded separately in this execution.
     status: implemented
     links:
       - type: result-of
