@@ -146,7 +146,7 @@ jobs:
       # archive, signed keyless via Sigstore and recorded in Rekor. Verify
       # with `gh attestation verify <file> --repo pulseengine/ordeal`.
       - name: Generate SLSA build provenance
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: "release-assets/*.tar.gz"
 
