@@ -294,10 +294,11 @@ artifacts:
       disabled by an oracle disagreement) makes the whole query return
       Unknown rather than guess. On Sat, decodes the CNF assignment to a
       term-level Model and self-checks it with DES-001 before returning; a
-      failing self-check returns Unknown (never a wrong Sat). Unsat returns
-      remain gated behind the P2 checker: until LRAT emission + the verified
-      checker land, UNSAT results are reported as Unknown on the production
-      path (never an unchecked Unsat), per the AGENTS.md soundness contract.
+      failing self-check returns Unknown (never a wrong Sat). On engine-UNSAT
+      the LRAT certificate emitted from the proof trace (DES-013) is
+      validated by the ordeal-lrat checker (DES-011) before Unsat is
+      returned; a rejected certificate degrades to Unknown — an unchecked
+      Unsat never reaches a caller, per the AGENTS.md soundness contract.
     status: implemented
     release: v0.2.0
     tags: [p1, pipeline, enablement, soundness]
@@ -310,6 +311,10 @@ artifacts:
         target: TR-010
       - type: traces-to
         target: DES-001
+      - type: traces-to
+        target: DES-011
+      - type: traces-to
+        target: DES-013
     fields:
       unit: crates/ordeal/src/solver.rs
       function: "Solver::check() -> CheckResult"
@@ -330,7 +335,7 @@ artifacts:
       (never an unchecked Unsat). Until the Aeneas-to-Lean soundness theorem
       (TR-013) is discharged, trust rests on the small mutation-tested Rust
       checker; the discharge is what completes FEAT-002.
-    status: draft
+    status: implemented
     release: v0.3.0
     tags: [p2, lrat, emission, certificate]
     links:

@@ -25,6 +25,9 @@
 //! - [`blast`] — per-op-family bit-blasting rules (term → AIG).
 //! - [`cnf`] — CNF types and the Tseitin encoder (AIG → CNF).
 //! - [`sat`] — the pure-Rust CDCL core (primary engine on every target).
+//! - [`lrat`] — LRAT certificate emission from the CDCL proof trace; the
+//!   `ordeal-lrat` crate (the sole trusted component) validates it before
+//!   any `Unsat` is returned.
 //! - [`oracle`] — the Z3 differential oracle (behind the `oracle` feature).
 //!
 //! [PulseEngine]: https://github.com/pulseengine
@@ -33,6 +36,7 @@ pub mod aig;
 pub mod blast;
 pub mod cnf;
 pub mod eval;
+pub mod lrat;
 pub mod sat;
 pub mod solver;
 pub mod term;

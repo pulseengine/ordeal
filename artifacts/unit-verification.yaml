@@ -272,7 +272,7 @@ artifacts:
       rejected; the solver returns Unsat-with-certificate only on acceptance,
       and the certificate carried in the returned Certificate is the
       validated one.
-    status: draft
+    status: implemented
     release: v0.3.0
     tags: [p2, lrat, emission, unit-test]
     links:

@@ -96,7 +96,7 @@ artifacts:
       accelerator and benchmark yardstick — never load-bearing. Both backends
       shall emit an LRAT proof on UNSAT in the exact format the verified
       checker consumes; varisat is a reference to study, not a dependency.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [sat, cdcl, pure-rust, cadical, lrat, wasm32]
     links:
@@ -125,7 +125,7 @@ artifacts:
       The certificate shall be produced from the SAT backend's proof trace and
       threaded back through the CNF/AIG encoding so it certifies the original
       QF_BV query's unsatisfiability.
-    status: draft
+    status: implemented
     release: v0.3.0
     tags: [lrat, certificate, unsat]
     links:
