@@ -34,3 +34,6 @@ result-*
 
 # Rivet external project cache
 .rivet/
+
+# Bazel output symlinks
+bazel-*
