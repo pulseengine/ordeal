@@ -9,6 +9,12 @@ and no verdict is accepted until the verified checker validates it. When in
 doubt we return `Unknown` — which callers must treat conservatively — rather
 than guess.
 
+Each phase is tracked in rivet as `FEAT-P0`…`FEAT-P5`
+(`artifacts/features.yaml`) — **the rivet artifacts are the source of truth**.
+This document is a human-readable mirror kept in sync by hand for now; the
+plan is to generate it from rivet (and eventually retire the handcrafted
+copy).
+
 ---
 
 ## Phase P0 — Skeleton (current)
@@ -95,6 +101,7 @@ sliver from `term.rs` is implemented and certificate-checked.
 
 | Task | Status |
 |------|--------|
+| Op-by-op bit-blaster verification: each operator circuit proved equivalent to the formal BitVec semantics (closes the encoder trust gap) | Planned |
 | Retire Z3 from the soundness argument entirely | Planned |
 | Z3 retained only as an optional dev/CI differential oracle | Planned |
 | Trust rests on the verified LRAT checker alone | Planned |

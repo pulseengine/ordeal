@@ -76,14 +76,17 @@ artifacts:
 
   - id: ARC-005
     type: sw-arch-component
-    title: ordeal-sat (CaDiCaL and varisat backends)
+    title: ordeal-sat (own pure-Rust CDCL core; optional CaDiCaL accelerator)
     description: >
-      SAT solving layer with CaDiCaL as the primary backend via FFI (emitting an
-      LRAT proof on UNSAT) and pure-Rust varisat as the wasm32 fallback. Returns
-      a satisfying assignment (mapped back to a model) or an UNSAT proof trace.
-      UNTRUSTED — the SAT engine is never part of the soundness argument.
+      SAT solving layer built around ordeal's own in-tree pure-Rust CDCL core —
+      the primary engine on every target, FFI-free, emitting LRAT in the exact
+      format the verified checker consumes. CaDiCaL (C++ via FFI) is an
+      optional, cfg-gated, native-only accelerator and benchmark yardstick,
+      never load-bearing. Returns a satisfying assignment (mapped back to a
+      model) or an UNSAT proof trace. UNTRUSTED — the SAT engine is never part
+      of the soundness argument.
     status: draft
-    tags: [sat, cadical, varisat, wasm32, ffi, untrusted]
+    tags: [sat, cdcl, pure-rust, cadical, lrat, untrusted]
     links:
       - type: allocated-from
         target: TR-004
@@ -127,17 +130,18 @@ artifacts:
 
   - id: ARC-008
     type: sw-arch-component
-    title: ordeal-backend-split (varisat wasm-primary / CaDiCaL native cfg gate)
+    title: ordeal-backend-split (own core everywhere / CaDiCaL native opt-in cfg gate)
     description: >
       The cfg-driven target split that keeps ordeal buildable as wasm32-wasip2.
-      On wasm the pure-Rust varisat backend is selected as primary and native
-      CaDiCaL (C++ via FFI) is compiled out; on native, CaDiCaL is selected.
-      The default (no-backend) build stays zero-external-dependency and
-      wasip2-clean. Realized as target.'cfg(...)'.dependencies in Cargo.toml so
-      no FFI/C dependency ever reaches the wasm path. UNTRUSTED — backend choice
-      is below the trust boundary and never affects soundness.
+      Ordeal's own pure-Rust CDCL core (an in-tree crate, no dep line) is the
+      engine on every target; the optional native CaDiCaL accelerator (C++ via
+      FFI) is compiled out on wasm and opt-in on native. The default
+      (no-extras) build stays zero-external-dependency and wasip2-clean.
+      Realized as target.'cfg(...)'.dependencies in Cargo.toml so no FFI/C
+      dependency ever reaches the wasm path. UNTRUSTED — backend choice is
+      below the trust boundary and never affects soundness.
     status: draft
-    tags: [wasm32-wasip2, varisat, cadical, backend-split, cfg, untrusted]
+    tags: [wasm32-wasip2, cdcl, pure-rust, cadical, backend-split, cfg, untrusted]
     links:
       - type: allocated-from
         target: TR-011
