@@ -123,6 +123,34 @@ jobs:
       - name: Bazel build //...
         run: bazel build //... --config=dev
 
+  # ── Lean model elaboration (non-blocking while new; VER-015 precursor) ─
+  # The Aeneas-generated model of the trusted checker (lean/Kernel.lean)
+  # must elaborate: zero axioms, zero sorries in the Kernel target. This
+  # gates the MODEL, not the theorem — Sound.lean's open obligation (#12)
+  # is deliberately not a default target and is not built here.
+  lean:
+    name: Lean model (Kernel)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install elan
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+            | sh -s -- -y --default-toolchain none
+          echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
+      - uses: actions/cache@v4
+        with:
+          path: |
+            lean/.lake
+            ~/.cache/mathlib
+          key: lean-${{ hashFiles('lean/lake-manifest.json', 'lean/lean-toolchain') }}
+      - name: Fetch mathlib cache and build the model
+        working-directory: lean
+        run: |
+          lake exe cache get
+          lake build Kernel
+
   # ── Optional Z3 differential oracle (non-blocking) ────────────────────
   # `ordeal` is a self-contained QF_BV solver; the `oracle` cargo feature
   # cross-checks its answers against Z3. This job installs system Z3 and runs

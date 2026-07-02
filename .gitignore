@@ -37,3 +37,4 @@ result-*
 
 # Bazel output symlinks
 bazel-*
+lean/.lake/

@@ -45,13 +45,27 @@ loops, owned step in the main loop; see the kernel's module docs).
 Regenerate with `lean/regen.sh` (pinned Charon/Aeneas via nix) after any
 kernel change and commit the result.
 
+**The model elaborates.** This directory is a lake package (`lakefile.lean`
+pins the Aeneas Lean library to the same revision as regen.sh; the
+`lean-toolchain` matches Aeneas's). `lake build Kernel` — the CI gate — is
+green: **zero axioms** (both former externals were eliminated at the Rust
+source) and zero sorries in the model. `Sound.lean` states the CNF
+semantics and the `lrat_check_sound` theorem; it type-checks against the
+generated model and carries the one tracked `sorry` — it is deliberately
+NOT a default target, and nothing claims the theorem is discharged.
+
 Still open (issue #12):
-1. A lakefile wiring the `Aeneas` Lean support library so `Kernel.lean`
-   elaborates in CI.
-2. Discharge the two axiomatized externals the model still carries
-   (`core.num.I32.unsigned_abs`, `alloc.vec.Vec.is_empty`) — provide
-   definitions or upstream Aeneas-std coverage.
-3. State and prove `lrat_check_sound` over `kernel.check_steps`.
+1. Prove `lrat_check_sound` (proof plan documented in `Sound.lean`).
+2. Trust-audit notes for the final story: the Aeneas *support library*
+   itself currently contains 3 `sorry`s (`Aeneas/Std/Slice.lean` ×2,
+   `Aeneas/Std/StringIter.lean` ×1) — the discharge must either avoid
+   depending on those lemmas or get them fixed upstream.
+3. Upstream Aeneas extraction bug (workaround in place): assigning an enum
+   constant through an index projection (`clauses[i] = None`) extracts as a
+   unit store (`Slice.update … ()`), which does not type-check; routing the
+   write through a plain `&mut` helper (`clear_slot`) extracts correctly.
+   Minimal repro = kernel.rs at the commit before `clear_slot` + regen.sh.
+   Worth reporting to AeneasVerif/aeneas.
 
 Until the theorem is discharged, an `Unsat` from ordeal is backed by a
 certificate validated by the *mutation-tested but not formally verified*
