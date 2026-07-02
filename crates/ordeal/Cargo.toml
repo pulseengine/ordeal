@@ -17,26 +17,27 @@ path = "src/main.rs"
 
 [features]
 # The Z3 differential oracle. Off by default: the default build has ZERO
-# external dependencies and always compiles. Enabling this feature does NOT
-# (yet) pull in a z3 crate — the oracle module is a documented stub until the
-# solver produces results worth cross-checking (see ROADMAP phase P1+).
-oracle = []
+# external dependencies and always compiles. Enabling this feature pulls in
+# the `z3` crate (native targets only) so dev/CI runs can cross-check every
+# verdict against Z3. The oracle is NOT part of the trust story — soundness
+# rests on the verified LRAT checker alone (see ARCHITECTURE.md).
+oracle = ["dep:z3"]
 
-# ── Future SAT backend split (documented, NOT yet active) ────────────────────
-# ordeal MUST stay buildable as wasm32-wasip2 (loom embeds it in a wasm
-# component) AND zero-external-dependency by default. When the P1 SAT backends
-# land, the native-vs-wasm split will be expressed via cfg-scoped dependencies
-# so that no C/FFI dependency ever reaches the wasm path:
-#
-#   # Native: CaDiCaL (C++ via FFI) is the primary backend; Z3 for the oracle.
-#   [target.'cfg(not(target_family = "wasm"))'.dependencies]
-#   # cadical = { version = "...", optional = true }
-#   # z3      = { version = "...", optional = true }   # behind `oracle`
-#
-#   # wasm: varisat (pure Rust) is the PRIMARY backend — no FFI, wasip2-clean.
-#   [target.'cfg(target_family = "wasm")'.dependencies]
-#   # varisat = "..."
-#
-# Until then the default build declares no dependencies at all, which is what
-# keeps `cargo build --target wasm32-wasip2 --release` green with no toolchain
+# ── SAT backend story (decided) ──────────────────────────────────────────────
+# ordeal's own in-tree pure-Rust CDCL core (`src/sat.rs`) is the PRIMARY
+# engine on EVERY target — native and wasm alike. There is no backend split:
+# the default build declares no dependencies at all, which is what keeps
+# `cargo build --target wasm32-wasip2 --release` green with no toolchain
 # beyond rustc.
+#
+# - CaDiCaL (C++ via FFI) is at most a possible FUTURE optional, cfg-gated
+#   native accelerator — never a default dependency, never on the wasm path.
+# - varisat is a design reference only; it is never a dependency.
+# - Z3 lives below, behind the off-by-default `oracle` feature, as a
+#   differential oracle / benchmark rival only — never the engine.
+
+# Native-only: the wasm path must never see a C/FFI dependency, so the z3
+# bindings are scoped to non-wasm targets. Enabling `oracle` on a wasm target
+# is a no-op dependency-wise (and the oracle module compiles out there).
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+z3 = { version = "0.20.2", optional = true }
