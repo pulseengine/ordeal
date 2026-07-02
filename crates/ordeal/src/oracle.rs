@@ -40,7 +40,7 @@ use crate::eval::{self, Env};
 use crate::term::{BoolTerm, BvTerm, Sort};
 use std::collections::BTreeMap;
 use z3::ast::{BV, Bool};
-use z3::{SatResult, Solver};
+use z3::{Params, SatResult, Solver};
 
 // ─── Translation: closed fragment → Z3 ──────────────────────────────────────
 
@@ -210,6 +210,11 @@ pub enum OracleVerdict {
 /// at widths 8/32/64 only; widths above 64 are not supported here.
 pub fn z3_check(assertions: &[BoolTerm]) -> OracleVerdict {
     let solver = Solver::new();
+    // Bound each query: an old/slow Z3 on a CI runner must never hang the
+    // harness. A timeout surfaces as `Unknown`, which never disagrees.
+    let mut params = Params::new();
+    params.set_u32("timeout", 2_000);
+    solver.set_params(&params);
     for a in assertions {
         solver.assert(to_z3(a));
     }
