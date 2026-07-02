@@ -10,9 +10,11 @@ fn main() {
     println!("ordeal {version}");
     println!("certificate-checked QF_BV SMT solver for the PulseEngine toolchain");
     println!();
-    println!("engine: P1 pipeline (bit-blast -> AIG -> Tseitin -> own CDCL core).");
-    println!("SAT verdicts carry self-checked counterexample models; engine-UNSAT");
-    println!("is reported as Unknown until the P2 verified LRAT checker lands —");
-    println!("an Unsat this build cannot certify is never returned.");
+    println!("engine: certificate-checked pipeline (bit-blast -> AIG -> Tseitin ->");
+    println!("own CDCL core -> LRAT). SAT verdicts carry self-checked models;");
+    println!("UNSAT verdicts carry an LRAT certificate validated by the");
+    println!("ordeal-lrat checker before being returned — an Unsat the checker");
+    println!("did not accept is never reported. The checker's formal soundness");
+    println!("proof (Aeneas -> Lean 4) is the remaining P2 obligation.");
     println!("See ROADMAP.md (phases P0-P5) for status.");
 }

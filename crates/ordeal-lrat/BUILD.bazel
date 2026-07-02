@@ -1,0 +1,29 @@
+"""
+ordeal-lrat — the LRAT certificate checker, the sole TRUSTED component.
+
+Deliberately dependency-free (the trust boundary): this target must never
+grow a `deps` entry pointing at the solver (or anything else). The Aeneas →
+Lean 4 soundness proof (see lean/README.md, issue #12) is discharged against
+exactly this crate's source.
+"""
+
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+rust_library(
+    name = "ordeal-lrat",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "ordeal_lrat",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    # NO deps, ever — the trust boundary is this crate's emptiness here.
+)
+
+rust_test(
+    name = "ordeal-lrat-test",
+    crate = ":ordeal-lrat",
+    edition = "2024",
+    # The manifest-guard test reads the crate's Cargo.toml at compile time.
+    compile_data = ["Cargo.toml"],
+)

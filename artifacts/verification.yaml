@@ -150,7 +150,7 @@ artifacts:
       For every UNSAT corpus query the emitted LRAT certificate is accepted by
       the verified checker; a mutated (invalid) certificate is rejected. Also
       confirms LRAT trimming preserves acceptance.
-    status: draft
+    status: implemented
     release: v0.3.0
     tags: [lrat, certificate, checker, mutation]
     links:

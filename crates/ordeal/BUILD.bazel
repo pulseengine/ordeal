@@ -2,18 +2,19 @@
 Ordeal crate — certificate-checked QF_BV SMT solver.
 
 Two build shapes:
-  * Native (host) — rust_library + rust_binary for the production solver and CLI.
-    This is where native CaDiCaL (C++ via FFI) and the Z3 differential oracle
-    live once implemented (both cfg-gated, neither present in the P0 skeleton).
+  * Native (host) — rust_library + rust_binary for the production solver and
+    CLI. Ordeal's own in-tree pure-Rust CDCL core is the engine on EVERY
+    target; the only optional native extra is the Z3 differential oracle
+    (cfg-gated behind the `oracle` cargo feature, dev/CI only).
   * wasm32-wasip2 component — rust_wasm_component, the loom self-optimization
-    path (loom #246). On wasm the pure-Rust varisat SAT backend is primary;
-    native CaDiCaL is cfg-gated out so the wasip2 build stays FFI-free.
+    path (loom #246). The same pure-Rust core runs there; no FFI ever reaches
+    the wasm path.
 
-The default build has ZERO external dependencies, so `deps` is empty today.
-A future backend split (varisat on wasm, cadical/z3 on native) is expressed in
-Cargo.toml under [target.'cfg(...)'.dependencies]; because MODULE.bazel resolves
-crates via crate_universe from_cargo, those deps flow in as `@crates//:<name>`
-here without a manual registry edit.
+The default build has ZERO external dependencies; the only dep below is the
+in-workspace ordeal-lrat checker (the trust boundary). Optional native extras
+are expressed in Cargo.toml under [target.'cfg(...)'.dependencies]; because
+MODULE.bazel resolves crates via crate_universe from_cargo, those deps flow in
+as `@crates//:<name>` here without a manual registry edit.
 """
 
 load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
@@ -30,10 +31,13 @@ rust_library(
     crate_root = "src/lib.rs",
     edition = "2024",
     deps = [
-        # Zero external dependencies by design (wasip2-clean default build).
-        # Future native backends (cadical FFI, z3 oracle) attach here, gated by
-        # crate_features, once they exist:
+        # The in-workspace LRAT checker (the sole trusted component). The
+        # solver depends on the checker to validate certificates; the checker
+        # depends on nothing. Still zero EXTERNAL dependencies by design
+        # (wasip2-clean default build). Future native extras (cadical FFI,
+        # z3 oracle) attach here gated by crate_features:
         #   "@crates//:z3",  # behind the `oracle` cargo feature (native only)
+        "//crates/ordeal-lrat",
     ],
 )
 

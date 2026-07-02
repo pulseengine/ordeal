@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **P2 certificate path: `Unsat` is now checker-validated.**
+  - `lrat.rs` — LRAT emission from the CDCL proof trace (pure formatting of
+    the RUP-ordered antecedent chains; strictly sequential ids in exactly
+    the `ordeal-lrat` dialect).
+  - `Solver::check` returns `CheckResult::Unsat(Certificate)` **only after
+    the `ordeal-lrat` checker accepts the emitted certificate**; a rejected
+    certificate degrades to `Unknown`. The certificate bytes carried in
+    `Certificate::lrat` are the validated ones, re-checkable by callers.
+  - Emission verified on directed UNSAT cases, PHP(4,3), and a random
+    UNSAT 3-SAT corpus; mutation cases still rejected.
+  - The remaining P2 obligation — the checker's formal soundness proof
+    (Rust → Lean 4 via Aeneas, TR-013) — is scaffolded in `lean/README.md`
+    and tracked as issue #12; until it discharges, trust rests on the
+    small, dependency-free, mutation-tested Rust checker.
+
 - **P1 engine: the full QF_BV decision pipeline** (blast → AIG → Tseitin CNF
   → own pure-Rust CDCL core → self-checked models), oracle-verified:
   - `eval.rs` — total concrete evaluator (executable SMT-LIB semantics), the

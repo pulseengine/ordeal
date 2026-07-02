@@ -1,10 +1,12 @@
 # Ordeal Roadmap
 
-**Status:** P1 engine landed. The full pipeline (bit-blast → AIG → Tseitin →
-own pure-Rust CDCL) decides the fragment; `Sat` verdicts carry self-checked
-counterexample models and agree with the Z3 differential oracle across the
-seeded corpus. Engine-UNSAT still surfaces as `Unknown` — no `Unsat` is
-returned until the P2 verified checker validates its certificate.
+**Status:** P2 certificate path landed. The pipeline (bit-blast → AIG →
+Tseitin → own pure-Rust CDCL → LRAT) decides the fragment; `Sat` verdicts
+carry self-checked counterexample models, and `Unsat` verdicts carry an LRAT
+certificate that the `ordeal-lrat` checker validated before the verdict was
+returned. The remaining P2 obligation is the checker's formal soundness
+proof (Aeneas → Lean 4, issue #12) — until it discharges, trust rests on the
+small mutation-tested Rust checker.
 
 Ordeal is built the same way loom and synth are: **step by step, proof
 alongside.** No operation is enabled until it has a proven bit-blasting rule,
@@ -70,11 +72,11 @@ The core deliverable: **soundness by checking, not by trust.**
 
 | Task | Status |
 |------|--------|
-| LRAT proof emission from the SAT backend | Planned |
-| Rust LRAT checker (the sole trusted component) | Planned |
-| Verify the checker: Rust → Lean 4 via **Aeneas**, soundness theorem discharged (built with `rules_lean`) | Planned |
-| `Certificate` carries a checker-validated LRAT proof | Planned |
-| Model self-check for SAT verdicts | Planned |
+| LRAT proof emission from the SAT backend | Done — formatted from the CDCL RUP trace |
+| Rust LRAT checker (the sole trusted component) | Done — `ordeal-lrat`, zero deps, mutation-tested |
+| Verify the checker: Rust → Lean 4 via **Aeneas**, soundness theorem discharged (built with `rules_lean`) | Open — issue #12, obligation scaffolded in `lean/` |
+| `Certificate` carries a checker-validated LRAT proof | Done — `Unsat` returned only on checker acceptance |
+| Model self-check for SAT verdicts | Done (landed with P1) |
 
 **Milestone:** every `Unsat` verdict is backed by a certificate that the
 *verified* checker has validated. **Z3 is demoted** to oracle + benchmark only;

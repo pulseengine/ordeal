@@ -18,14 +18,18 @@
 //! optimization / accept the codegen when they receive `Unknown`. Only a
 //! checked `Unsat` certificate authorizes a transformation.
 //!
-//! # P1 pipeline status
+//! # Pipeline status (P2: certificate-checked)
 //!
 //! `check` runs blast → AIG → Tseitin CNF → CDCL. On SAT it returns a
-//! self-checked model. On UNSAT the engine's verdict is **believed but not
-//! yet checked** (ROADMAP P1), so the production path returns `Unknown` —
-//! never an unchecked `Unsat` (AGENTS.md rule 1). The raw engine verdict is
-//! exposed crate-internally for the differential oracle only. P2 wires LRAT
-//! emission + the verified checker, at which point `Unsat` becomes reachable.
+//! self-checked model. On UNSAT the LRAT certificate emitted from the CDCL
+//! proof trace is validated by the `ordeal-lrat` checker **before** `Unsat`
+//! is returned — an `Unsat` the checker did not accept degrades to `Unknown`
+//! (AGENTS.md rule 1: no unchecked `Unsat`, ever). The raw engine verdict is
+//! exposed crate-internally for the differential oracle only.
+//!
+//! Trust status: the checker is small, dependency-free, and mutation-tested;
+//! its formal soundness proof (Rust → Lean 4 via Aeneas, TR-013) is the
+//! remaining P2 obligation and is tracked in rivet as FEAT-002.
 //!
 //! # The op-enablement gate (P1 kill criterion)
 //!
@@ -44,12 +48,13 @@ use std::collections::HashMap;
 
 /// A machine-checkable UNSAT certificate.
 ///
-/// The solver (untrusted) emits an LRAT proof; the formally-verified checker
-/// (the only trusted component) validates it. Empty until phase P2 wires up
-/// LRAT emission — see `ROADMAP.md`.
+/// The solver (untrusted) emits an LRAT proof; the `ordeal-lrat` checker
+/// (the only trusted component) validated exactly these bytes before this
+/// value was constructed. Callers can independently re-run
+/// `ordeal_lrat::check` on them.
 #[derive(Clone, Debug, Default)]
 pub struct Certificate {
-    /// The LRAT proof bytes. Empty until P2.
+    /// The checker-validated textual LRAT proof bytes.
     pub lrat: Vec<u8>,
 }
 
@@ -66,8 +71,7 @@ pub struct Model {
 /// The verdict of a one-shot `check`.
 #[derive(Clone, Debug)]
 pub enum CheckResult {
-    /// Unsatisfiable, with a certificate the verified checker validated.
-    /// Unreachable until P2 (see module docs).
+    /// Unsatisfiable, with the LRAT certificate the checker validated.
     Unsat(Certificate),
     /// Satisfiable, with a self-checked counterexample model.
     Sat(Model),
@@ -79,8 +83,9 @@ pub enum CheckResult {
 }
 
 /// The engine's raw belief, before the soundness gate. Crate-internal: only
-/// the differential oracle may look at this (an unchecked `Unsat` must never
-/// reach a caller).
+/// the differential oracle (and tests) may look at this — an `Unsat` whose
+/// certificate was not checker-validated must never reach a caller.
+#[cfg(any(test, feature = "oracle"))]
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum RawVerdict {
     Sat(Env),
@@ -390,37 +395,52 @@ impl Solver {
     /// Decide satisfiability of the conjunction of all asserted terms.
     ///
     /// Pipeline: blast → AIG → Tseitin CNF → CDCL. `Sat` carries a model
-    /// that has been re-evaluated against every assertion (self-check);
-    /// engine-UNSAT returns `Unknown` until the P2 verified checker lands —
-    /// an `Unsat` this crate cannot certify is never reported.
+    /// that has been re-evaluated against every assertion (self-check).
+    /// On engine-UNSAT the LRAT certificate emitted from the proof trace is
+    /// validated by the `ordeal-lrat` checker before `Unsat` is returned —
+    /// an `Unsat` the checker did not accept is never reported (it degrades
+    /// to `Unknown`, which is always sound).
     pub fn check(&self) -> CheckResult {
-        match self.check_raw() {
-            RawVerdict::Sat(env) => CheckResult::Sat(Model {
+        match self.solve_pipeline() {
+            Pipeline::Sat(env) => CheckResult::Sat(Model {
                 assignments: {
                     let mut a: Vec<(String, u128)> = env.into_iter().collect();
                     a.sort();
                     a
                 },
             }),
-            // P1: believed, not checked — conservative Unknown (see docs).
-            RawVerdict::Unsat => CheckResult::Unknown,
-            RawVerdict::Unknown => CheckResult::Unknown,
+            Pipeline::Unsat {
+                certificate: Some(lrat),
+            } => CheckResult::Unsat(Certificate { lrat }),
+            // The checker rejected our own certificate: an ordeal bug, but a
+            // sound outcome — degrade to Unknown rather than assert UNSAT.
+            Pipeline::Unsat { certificate: None } | Pipeline::Unknown => CheckResult::Unknown,
         }
     }
 
     /// The engine's raw verdict — crate-internal, differential oracle only.
+    #[cfg(any(test, feature = "oracle"))]
     pub(crate) fn check_raw(&self) -> RawVerdict {
+        match self.solve_pipeline() {
+            Pipeline::Sat(env) => RawVerdict::Sat(env),
+            Pipeline::Unsat { .. } => RawVerdict::Unsat,
+            Pipeline::Unknown => RawVerdict::Unknown,
+        }
+    }
+
+    /// Run the full pipeline once, producing the internal outcome.
+    fn solve_pipeline(&self) -> Pipeline {
         if self.assertions.is_empty() {
             // An empty conjunction is trivially satisfiable by the empty model.
-            return RawVerdict::Sat(Env::new());
+            return Pipeline::Sat(Env::new());
         }
         if self.assertions.iter().any(bool_uses_disabled) {
-            return RawVerdict::Unknown;
+            return Pipeline::Unknown;
         }
         // Ill-sorted input never reaches a blast rule: conservative Unknown
         // (callers get the diagnosis from `validate`).
         if self.validate().is_err() {
-            return RawVerdict::Unknown;
+            return Pipeline::Unknown;
         }
         let mut blaster = Blaster::new();
         let mut roots = Vec::with_capacity(self.assertions.len());
@@ -428,12 +448,26 @@ impl Solver {
             match blaster.blast_bool(a) {
                 Ok(lit) => roots.push(lit),
                 // Ill-sorted input: conservative. `validate()` diagnoses.
-                Err(_) => return RawVerdict::Unknown,
+                Err(_) => return Pipeline::Unknown,
             }
         }
         let (cnf, map) = tseitin(&blaster.aig, &roots);
-        match SatSolver::new().solve(&cnf) {
-            SatResult::Unsat => RawVerdict::Unsat,
+        let mut sat_solver = SatSolver::new();
+        match sat_solver.solve(&cnf) {
+            SatResult::Unsat => {
+                // Emit the LRAT certificate from the proof trace and have the
+                // trusted checker validate it BEFORE asserting UNSAT.
+                let cert = crate::lrat::emit_lrat(cnf.clauses.len(), sat_solver.proof_trace());
+                match ordeal_lrat::check(&cnf.clauses, &cert) {
+                    Ok(()) => Pipeline::Unsat {
+                        certificate: Some(cert.into_bytes()),
+                    },
+                    Err(_) => {
+                        debug_assert!(false, "checker rejected our certificate — ordeal bug");
+                        Pipeline::Unsat { certificate: None }
+                    }
+                }
+            }
             SatResult::Sat(assignment) => {
                 // Decode: each variable's word reads its input literals'
                 // CNF variables out of the assignment.
@@ -457,14 +491,22 @@ impl Solver {
                     .iter()
                     .all(|a| eval::eval_bool(a, &env) == Ok(true));
                 if ok {
-                    RawVerdict::Sat(env)
+                    Pipeline::Sat(env)
                 } else {
                     debug_assert!(false, "SAT model failed self-check — ordeal bug");
-                    RawVerdict::Unknown
+                    Pipeline::Unknown
                 }
             }
         }
     }
+}
+
+/// Internal pipeline outcome: like [`RawVerdict`] but carrying the
+/// checker-validated certificate on UNSAT (None = checker rejected it).
+enum Pipeline {
+    Sat(Env),
+    Unsat { certificate: Option<Vec<u8>> },
+    Unknown,
 }
 
 /// Sort-check a boolean term without needing variable bindings.
@@ -529,17 +571,23 @@ mod tests {
     }
 
     #[test]
-    fn unsat_stays_unknown_until_p2_certificates() {
-        // x == x+1 is UNSAT; P1 must NOT report an unchecked Unsat.
+    fn unsat_carries_a_checker_validated_certificate() {
+        // x == x+1 is UNSAT; P2 returns Unsat only with a validated LRAT.
         let x = var("x", 32);
         let x1 = BvTerm::Add(b(x.clone()), b(c(1, 32)));
         let mut s = Solver::new();
         s.assert(BoolTerm::Eq(b(x), b(x1)));
         match s.check() {
-            CheckResult::Unknown => {}
-            other => panic!("engine-UNSAT must surface as Unknown in P1, got {other:?}"),
+            CheckResult::Unsat(cert) => {
+                assert!(!cert.lrat.is_empty(), "certificate must be present");
+                // The bytes must be a well-formed LRAT text (the checker
+                // already validated them against the CNF inside check()).
+                let text = String::from_utf8(cert.lrat).expect("LRAT is text");
+                assert!(text.lines().last().is_some_and(|l| l.contains(" 0")));
+            }
+            other => panic!("expected certificate-checked Unsat, got {other:?}"),
         }
-        // ...but the raw engine verdict (oracle-only) does see the Unsat.
+        // The raw engine verdict (oracle-only) agrees.
         assert_eq!(s.check_raw(), RawVerdict::Unsat);
     }
 
@@ -612,11 +660,13 @@ mod tests {
             b(c(0xFF, 8)),
         ));
         // Whatever the verdict, it must be sound: Sat ⇒ self-checked model
-        // (the self-check runs inside check_raw), Unsat ⇒ Unknown in P1.
+        // (the self-check runs inside the pipeline), Unsat ⇒ validated LRAT.
         match s.check() {
             CheckResult::Sat(m) => assert_eq!(m.assignments.len(), 2),
             CheckResult::Unknown => {}
-            CheckResult::Unsat(_) => panic!("no unchecked Unsat in P1"),
+            CheckResult::Unsat(cert) => {
+                assert!(!cert.lrat.is_empty(), "Unsat must carry the certificate")
+            }
         }
     }
 }

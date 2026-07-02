@@ -15,6 +15,14 @@ path = "src/lib.rs"
 name = "ordeal"
 path = "src/main.rs"
 
+[dependencies]
+# The LRAT certificate checker — the sole trusted component (in-workspace,
+# no external code; the default build stays free of third-party deps and
+# wasip2-clean). The solver depends on the checker to validate certificates;
+# the checker never depends on the solver (the trust boundary, enforced by
+# ordeal-lrat's empty dependency table).
+ordeal-lrat = { path = "../ordeal-lrat" }
+
 [features]
 # The Z3 differential oracle. Off by default: the default build has ZERO
 # external dependencies and always compiles. Enabling this feature pulls in
