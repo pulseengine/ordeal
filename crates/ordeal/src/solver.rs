@@ -382,6 +382,33 @@ impl Solver {
         self.assertions.len()
     }
 
+    /// One-shot decision for an **extended (array/UF sliver) query**.
+    ///
+    /// The sliver is eliminated into the closed QF_BV core by
+    /// [`crate::sliver::lower`] — eager read-over-write for `Array(BV32→BV8)`
+    /// select/store over concrete offsets, Ackermannization for
+    /// uninterpreted `pure_call` congruence — and the resulting pure
+    /// assertions are decided by the normal [`Solver::check`] pipeline.
+    ///
+    /// An **out-of-sliver** query (symbolic index, bad array sort, or an
+    /// inconsistent call signature — any [`crate::sliver::SliverError`])
+    /// returns [`CheckResult::Unknown`]: conservative by construction, never
+    /// a guess. Soundness is unchanged from `check` — no array/UF construct
+    /// ever reaches the bit-blaster; only the lowered core does.
+    pub fn check_sliver(assertions: &[crate::sliver::ExtBoolTerm]) -> CheckResult {
+        match crate::sliver::lower(assertions) {
+            Ok(core) => {
+                let mut solver = Solver::new();
+                for a in core {
+                    solver.assert(a);
+                }
+                solver.check()
+            }
+            // Out-of-sliver: conservative Unknown (callers must not optimize).
+            Err(_) => CheckResult::Unknown,
+        }
+    }
+
     /// Check that every assertion is well-sorted, reporting the first
     /// violation with a distinct error (TR-010). `check` treats ill-sorted
     /// input as `Unknown`; this gives callers the actionable diagnosis.
@@ -668,5 +695,63 @@ mod tests {
                 assert!(!cert.lrat.is_empty(), "Unsat must carry the certificate")
             }
         }
+    }
+
+    #[test]
+    fn check_sliver_entry_lowers_and_decides() {
+        use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm};
+        // select(store(a, 5, v), 5) == v  is valid for any v ⇒ the query
+        // asserting it *false* (via Ne) is UNSAT... but we assert the
+        // equality holds, which is SAT. Keep it simple: read back a stored
+        // concrete value must equal it.
+        let bv32 = Sort::new(32);
+        let bv8 = Sort::new(8);
+        let idx = ExtBvTerm::Core(BvTerm::Const {
+            value: 5,
+            sort: bv32,
+        });
+        let stored = ExtBvTerm::Core(BvTerm::Var {
+            name: "v".into(),
+            sort: bv8,
+        });
+        let arr = ArrayTerm::Store {
+            array: Box::new(ArrayTerm::Var { name: "a".into() }),
+            index: Box::new(idx.clone()),
+            value: Box::new(stored.clone()),
+        };
+        let read = ExtBvTerm::Select {
+            array: Box::new(arr),
+            index: Box::new(idx),
+        };
+        // read == v : satisfiable (in fact valid).
+        let q = ExtBoolTerm::Eq(read, stored);
+        match Solver::check_sliver(&[q]) {
+            CheckResult::Sat(_) | CheckResult::Unknown => {}
+            CheckResult::Unsat(_) => panic!("read-over-write of a stored value is not UNSAT"),
+        }
+    }
+
+    #[test]
+    fn check_sliver_out_of_sliver_is_unknown() {
+        use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm};
+        // Symbolic (variable) index: out of the sliver ⇒ conservative Unknown.
+        let bv32 = Sort::new(32);
+        let bv8 = Sort::new(8);
+        let sym = ExtBvTerm::Core(BvTerm::Var {
+            name: "i".into(),
+            sort: bv32,
+        });
+        let read = ExtBvTerm::Select {
+            array: Box::new(ArrayTerm::Var { name: "a".into() }),
+            index: Box::new(sym),
+        };
+        let q = ExtBoolTerm::Eq(
+            read,
+            ExtBvTerm::Core(BvTerm::Const {
+                value: 0,
+                sort: bv8,
+            }),
+        );
+        assert!(matches!(Solver::check_sliver(&[q]), CheckResult::Unknown));
     }
 }
