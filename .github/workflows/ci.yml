@@ -39,8 +39,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run clippy
         # Default feature set only — the `oracle` feature pulls in Z3 (z3-sys),
-        # which is exercised by the dedicated non-blocking `oracle` job below.
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        # which needs libz3 on the runner and is linted + tested by the
+        # dedicated non-blocking `oracle` job below.
+        run: cargo clippy --all-targets -- -D warnings
 
   build:
     name: Build (release)
@@ -69,9 +70,9 @@ jobs:
   # ── wasm32-wasip2 buildability (BLOCKING) ─────────────────────────────
   # HARD REQUIREMENT: loom self-optimizes as a WebAssembly component and embeds
   # ordeal in-process, so ordeal MUST build as a wasm32-wasip2 component. The
-  # default build is zero-external-deps and wasip2-clean; on this target the
-  # pure-Rust varisat SAT backend is primary and native CaDiCaL (C++/FFI) is
-  # cfg-gated out. This job is REQUIRED for merge.
+  # default build is zero-external-deps and wasip2-clean; ordeal's own
+  # pure-Rust CDCL core is the engine on every target, so no FFI ever reaches
+  # the wasm path. This job is REQUIRED for merge.
   wasip2:
     name: Build (wasm32-wasip2)
     runs-on: ubuntu-latest
@@ -117,5 +118,9 @@ jobs:
           key: oracle
       - name: Install Z3
         run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
+      - name: Clippy (oracle feature)
+        run: |
+          rustup component add clippy
+          cargo clippy --all-targets --features oracle -- -D warnings
       - name: Run oracle tests
         run: cargo test --all --features oracle
