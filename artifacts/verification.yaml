@@ -18,7 +18,7 @@ artifacts:
       signed and unsigned comparisons) at widths 8/32/64 — to both Ordeal and
       Z3 and fails on any verdict disagreement. On SAT the returned model is
       re-evaluated to confirm it satisfies the original formula.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [differential, z3, oracle, qf-bv]
     links:
@@ -235,7 +235,7 @@ artifacts:
       satisfying model on SAT and exposes no incremental (push/pop) surface,
       and that the API and any front end reject each out-of-scope construct with
       a distinct error — complementing the system-level scope check.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [scope, errors, api, one-shot, unit-tests]
     links:
@@ -294,7 +294,7 @@ artifacts:
       C/FFI dependency (CaDiCaL) is linked on the wasm path — ordeal's own
       pure-Rust CDCL core is the engine there — and that the default build
       declares no external dependency.
-    status: draft
+    status: implemented
     release: v0.1.0
     tags: [wasm32-wasip2, build, cdcl, pure-rust, zero-dep, gate]
     links:
@@ -317,7 +317,7 @@ artifacts:
       builds under --config=wasm (once a WIT world exists), and that no
       synth-specific rules (Rocq/ARM/Renode) are pulled in. rules_lean is
       present only as a reserved placeholder. Advisory (non-blocking) in CI.
-    status: draft
+    status: implemented
     release: v0.1.0
     tags: [bazel, rules_rust, rules_wasm_component, build]
     links:
