@@ -38,8 +38,18 @@
 //! a satisfied hint, a hint with two or more unassigned literals, running
 //! out of hints, a dead or unknown id — rejects the certificate.
 //!
-//! The whole certificate is accepted iff some verified addition step adds
-//! the **empty clause** (checking stops there; trailing lines are ignored).
+//! The whole certificate is accepted iff it parses in full AND some verified
+//! addition step adds the **empty clause** (checking stops at that step;
+//! parsed trailing steps are ignored). Parsing everything first is stricter
+//! than strictly necessary and always sound (extra rejections only).
+//!
+//! # Structure: parser vs kernel
+//!
+//! The crate is split for the formal proof (issue #12): the [`kernel`]
+//! module is the string-free checking core — the Aeneas → Lean translation
+//! target carrying the soundness theorem — and this file is the untrusted
+//! text parser feeding it. The CNF reaches the kernel directly, so parser
+//! bugs cannot manufacture an acceptance (see `kernel` docs).
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -169,124 +179,38 @@ impl core::fmt::Display for CheckError {
 
 impl std::error::Error for CheckError {}
 
-/// A partial assignment, mapping variables to `true`/`false`/unassigned.
+pub mod kernel;
+
+use kernel::{CoreError, Step};
+
+/// Map a kernel rejection back onto certificate line numbers.
 ///
-/// `values[v]` is the value of variable `v` (index 0 is unused padding so
-/// that variable numbers index directly). The vector grows on demand.
-struct Assignment {
-    values: Vec<Option<bool>>,
-}
-
-impl Assignment {
-    fn new() -> Self {
-        Assignment { values: Vec::new() }
-    }
-
-    /// The truth value of `lit` under this assignment, or `None` if the
-    /// underlying variable is unassigned. `lit` must be nonzero and not
-    /// `i32::MIN` (guaranteed by parsing / CNF validation).
-    fn value(&self, lit: i32) -> Option<bool> {
-        let var = lit.unsigned_abs() as usize;
-        let var_value = self.values.get(var).copied().flatten()?;
-        Some(if lit > 0 { var_value } else { !var_value })
-    }
-
-    /// Make `lit` true. Returns `true` iff this contradicts an existing
-    /// assignment (i.e. `lit` was already false — a conflict).
-    fn assign_true(&mut self, lit: i32) -> bool {
-        match self.value(lit) {
-            Some(true) => false, // already true: nothing to do
-            Some(false) => true, // conflict
-            None => {
-                let var = lit.unsigned_abs() as usize;
-                if var >= self.values.len() {
-                    self.values.resize(var + 1, None);
-                }
-                self.values[var] = Some(lit > 0);
-                false
-            }
+/// `lines[step]` is the 1-based certificate line the 0-based kernel step
+/// index came from.
+fn lift(err: CoreError, lines: &[usize]) -> CheckError {
+    let at = |step: usize| lines.get(step).copied().unwrap_or(0);
+    match err {
+        CoreError::InvalidCnfLiteral { clause_index } => {
+            CheckError::InvalidCnfLiteral { clause_index }
         }
+        CoreError::NonSequentialId {
+            step,
+            expected,
+            found,
+        } => CheckError::NonSequentialId {
+            line: at(step),
+            expected,
+            found,
+        },
+        CoreError::UnknownId { step, id } => CheckError::UnknownId { line: at(step), id },
+        CoreError::DeletedId { step, id } => CheckError::DeletedId { line: at(step), id },
+        CoreError::HintNotUnit { step, hint } => CheckError::HintNotUnit {
+            line: at(step),
+            hint,
+        },
+        CoreError::HintsExhausted { step } => CheckError::HintsExhausted { line: at(step) },
+        CoreError::NoEmptyClause => CheckError::NoEmptyClause,
     }
-}
-
-/// Look up a clause id, requiring it to be known and still live.
-fn get_live(clauses: &[Option<Vec<i32>>], id: usize, line: usize) -> Result<&[i32], CheckError> {
-    if id == 0 || id > clauses.len() {
-        return Err(CheckError::UnknownId { line, id });
-    }
-    match &clauses[id - 1] {
-        Some(clause) => Ok(clause),
-        None => Err(CheckError::DeletedId { line, id }),
-    }
-}
-
-/// Verify one RUP addition step (see the crate docs for the definition).
-///
-/// `Ok(())` means the hint chain derived a conflict, i.e. the clause
-/// `new_clause` is implied by the live clauses.
-fn check_rup(
-    clauses: &[Option<Vec<i32>>],
-    new_clause: &[i32],
-    hints: &[usize],
-    line: usize,
-) -> Result<(), CheckError> {
-    let mut assignment = Assignment::new();
-
-    // Assume the negation of the new clause: every literal becomes false.
-    // If the clause contains complementary literals (a tautology) this
-    // already conflicts, and the step is trivially verified.
-    for &lit in new_clause {
-        if assignment.assign_true(-lit) {
-            return Ok(());
-        }
-    }
-
-    // Propagate through the hint clauses, in order.
-    for &hint_id in hints {
-        let clause = get_live(clauses, hint_id, line)?;
-
-        // Classify the hint clause under the current assignment. Duplicate
-        // literals are collapsed so that e.g. [x, x] counts as unit on x.
-        let mut unassigned: Vec<i32> = Vec::new();
-        for &lit in clause {
-            match assignment.value(lit) {
-                // A satisfied hint can never become unit or falsified:
-                // it is useless for propagation, so the hint is invalid.
-                Some(true) => {
-                    return Err(CheckError::HintNotUnit {
-                        line,
-                        hint: hint_id,
-                    });
-                }
-                Some(false) => {}
-                None => {
-                    if !unassigned.contains(&lit) {
-                        unassigned.push(lit);
-                    }
-                }
-            }
-        }
-
-        match unassigned.as_slice() {
-            // Every literal false: conflict reached — the step is verified.
-            [] => return Ok(()),
-            // Exactly one unassigned literal: the clause is unit; assign it.
-            // (It cannot conflict: the literal was unassigned.)
-            [unit] => {
-                let conflict = assignment.assign_true(*unit);
-                debug_assert!(!conflict);
-            }
-            // Two or more unassigned literals: not a usable hint.
-            _ => {
-                return Err(CheckError::HintNotUnit {
-                    line,
-                    hint: hint_id,
-                });
-            }
-        }
-    }
-
-    Err(CheckError::HintsExhausted { line })
 }
 
 /// Parse one whitespace token as a clause id (a positive integer).
@@ -312,14 +236,11 @@ fn parse_literal(token: &str, line: usize) -> Result<i32, CheckError> {
     }
 }
 
-/// Handle a deletion line body (the tokens after `<id> d`): a list of live
-/// clause ids terminated by `0`. Each named clause is marked dead.
-fn delete(
-    clauses: &mut [Option<Vec<i32>>],
-    tokens: &[&str],
-    line: usize,
-) -> Result<(), CheckError> {
+/// Parse a deletion line body (the tokens after `<id> d`): a list of clause
+/// ids terminated by `0`. Liveness of the ids is the kernel's concern.
+fn parse_deletion(tokens: &[&str], line: usize) -> Result<Vec<usize>, CheckError> {
     let mut tokens = tokens.iter();
+    let mut ids: Vec<usize> = Vec::new();
     loop {
         let Some(token) = tokens.next() else {
             return Err(CheckError::Parse {
@@ -330,11 +251,7 @@ fn delete(
         if *token == "0" {
             break;
         }
-        let id = parse_id(token, line)?;
-        // Deleting an unknown or already-dead clause is rejected: it means
-        // the certificate and the checker disagree about the clause set.
-        get_live(clauses, id, line)?;
-        clauses[id - 1] = None;
+        ids.push(parse_id(token, line)?);
     }
     if tokens.next().is_some() {
         return Err(CheckError::Parse {
@@ -342,29 +259,14 @@ fn delete(
             message: "trailing tokens after deletion terminator".to_string(),
         });
     }
-    Ok(())
+    Ok(ids)
 }
 
-/// Handle an addition line body (the tokens after `<id>`): the new clause's
+/// Parse an addition line body (the tokens after `<id>`): the new clause's
 /// literals terminated by `0`, then the RUP hints terminated by `0`.
-///
-/// On success the verified clause has been appended; returns `true` iff the
-/// added clause is the empty clause (the certificate's goal).
-fn addition(
-    clauses: &mut Vec<Option<Vec<i32>>>,
-    id: usize,
-    tokens: &[&str],
-    line: usize,
-) -> Result<bool, CheckError> {
-    let expected = clauses.len() + 1;
-    if id != expected {
-        return Err(CheckError::NonSequentialId {
-            line,
-            expected,
-            found: id,
-        });
-    }
-
+/// Sequential-id and RUP checking are the kernel's concern; RAT detection
+/// (a negative hint id) happens here because sign lives in the text.
+fn parse_addition(tokens: &[&str], line: usize) -> Result<(Vec<i32>, Vec<usize>), CheckError> {
     let mut tokens = tokens.iter();
 
     // The new clause: literals up to the first `0`.
@@ -406,11 +308,37 @@ fn addition(
             message: "trailing tokens after hint terminator".to_string(),
         });
     }
+    Ok((new_clause, hints))
+}
 
-    check_rup(clauses, &new_clause, &hints, line)?;
-    let is_empty = new_clause.is_empty();
-    clauses.push(Some(new_clause));
-    Ok(is_empty)
+/// Parse a full certificate into kernel steps plus, per step, the 1-based
+/// certificate line it came from (for error reporting).
+fn parse_certificate(certificate: &str) -> Result<(Vec<Step>, Vec<usize>), CheckError> {
+    let mut steps: Vec<Step> = Vec::new();
+    let mut lines: Vec<usize> = Vec::new();
+    for (line_index, raw_line) in certificate.lines().enumerate() {
+        let line = line_index + 1; // 1-based, for error reporting
+        let tokens: Vec<&str> = raw_line.split_whitespace().collect();
+        match tokens.first() {
+            None => continue,                                  // blank line
+            Some(first) if first.starts_with('c') => continue, // comment
+            Some(first) => {
+                let id = parse_id(first, line)?;
+                let step = if tokens.get(1) == Some(&"d") {
+                    // The leading id of a deletion line is informational.
+                    Step::Delete {
+                        ids: parse_deletion(&tokens[2..], line)?,
+                    }
+                } else {
+                    let (clause, hints) = parse_addition(&tokens[1..], line)?;
+                    Step::Add { id, clause, hints }
+                };
+                steps.push(step);
+                lines.push(line);
+            }
+        }
+    }
+    Ok((steps, lines))
 }
 
 /// Check a textual LRAT `certificate` against the input `cnf`.
@@ -426,36 +354,14 @@ fn addition(
 /// RAT steps) — is a rejection. Rejection never means "satisfiable"; it
 /// only means "not proven unsatisfiable by this certificate".
 pub fn check(cnf: &[Vec<i32>], certificate: &str) -> Result<(), CheckError> {
-    // Load the original clauses as ids 1..=cnf.len(), validating literals
-    // so that later negation (`-lit`) is always meaningful and safe.
-    let mut clauses: Vec<Option<Vec<i32>>> = Vec::with_capacity(cnf.len());
-    for (clause_index, clause) in cnf.iter().enumerate() {
-        if clause.iter().any(|&lit| lit == 0 || lit == i32::MIN) {
-            return Err(CheckError::InvalidCnfLiteral { clause_index });
-        }
-        clauses.push(Some(clause.clone()));
-    }
-
-    for (line_index, raw_line) in certificate.lines().enumerate() {
-        let line = line_index + 1; // 1-based, for error reporting
-        let tokens: Vec<&str> = raw_line.split_whitespace().collect();
-        match tokens.first() {
-            None => continue,                                  // blank line
-            Some(first) if first.starts_with('c') => continue, // comment
-            Some(first) => {
-                let id = parse_id(first, line)?;
-                if tokens.get(1) == Some(&"d") {
-                    delete(&mut clauses, &tokens[2..], line)?;
-                } else if addition(&mut clauses, id, &tokens[1..], line)? {
-                    // A verified empty clause proves unsatisfiability;
-                    // nothing after it can change that.
-                    return Ok(());
-                }
-            }
-        }
-    }
-
-    Err(CheckError::NoEmptyClause)
+    // Parse the whole certificate first (the untrusted, string-facing half),
+    // then run the string-free kernel (the Aeneas → Lean target) over the
+    // parsed steps. Soundness never depends on the parser: the CNF reaches
+    // the kernel directly, so a parser bug can only change WHICH steps get
+    // checked — every accepted certificate was still kernel-verified against
+    // the real CNF. See `kernel` module docs and issue #12.
+    let (steps, lines) = parse_certificate(certificate)?;
+    kernel::check_steps(cnf, &steps).map_err(|e| lift(e, &lines))
 }
 
 #[cfg(test)]
