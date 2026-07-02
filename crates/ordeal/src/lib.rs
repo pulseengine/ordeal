@@ -19,10 +19,21 @@
 //!
 //! - [`term`] — the closed QF_BV fragment (the exact loom #246 op set).
 //! - [`solver`] — the one-shot `check-sat` interface and result types.
+//! - [`eval`] — the concrete evaluator (executable SMT-LIB semantics; the
+//!   test oracle for every blasting rule and the SAT-model self-check).
+//! - [`aig`] — the And-Inverter Graph arena (structural hashing, folding).
+//! - [`blast`] — per-op-family bit-blasting rules (term → AIG).
+//! - [`cnf`] — CNF types and the Tseitin encoder (AIG → CNF).
+//! - [`sat`] — the pure-Rust CDCL core (primary engine on every target).
 //! - [`oracle`] — the Z3 differential oracle (behind the `oracle` feature).
 //!
 //! [PulseEngine]: https://github.com/pulseengine
 
+pub mod aig;
+pub mod blast;
+pub mod cnf;
+pub mod eval;
+pub mod sat;
 pub mod solver;
 pub mod term;
 

@@ -1,0 +1,263 @@
+# Unit Verification Measures (ASPICE SWE.4)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# One unit-verification per sw-detail-design unit. The common oracle is
+# DES-001 (the concrete evaluator): bit-blast rules are checked exhaustively
+# at width 8 and randomized at widths 32/64 against it. All measures run as
+# `cargo test` in CI.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: UV-001
+    type: unit-verification
+    title: Evaluator semantics vs SMT-LIB corner cases
+    description: >
+      Unit tests pinning the evaluator to SMT-LIB QF_BV semantics: udiv by
+      zero yields all-ones; shl/lshr with amount >= width yield zero; ashr
+      fills with the sign bit; rotr rotates modulo width; signed comparisons
+      on boundary values (MIN/MAX/-1/0); extract/concat/ext bit positions.
+      Cross-checked against u128 reference arithmetic per case.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, eval, unit-test]
+    links:
+      - type: verifies
+        target: DES-001
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal eval::"
+        coverage: "Every op x corner-case matrix; widths 8/32/64"
+
+  - id: UV-002
+    type: unit-verification
+    title: AIG constructor laws — folding, strashing, complement
+    description: >
+      Property tests on the AIG arena: constant folding identities
+      (x&0=0, x&1=x, x&x=x, x&!x=0), structural hashing returns the same
+      literal for operand-order-swapped and repeated and() calls, complement
+      involution, and node-count bounds under repeated common subexpressions.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, aig, unit-test]
+    links:
+      - type: verifies
+        target: DES-002
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal aig::"
+        coverage: "Folding identities; strash hit behavior; involution"
+
+  - id: UV-003
+    type: unit-verification
+    title: Tseitin equisatisfiability on small circuits
+    description: >
+      For random small AIGs (<= 12 inputs), enumerate all input assignments:
+      the AIG output evaluates true iff the Tseitin CNF (with the output unit
+      clause) is satisfiable under the corresponding assignment extended by
+      gate-consistent values; clause count is linear in node count.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, cnf, tseitin, unit-test]
+    links:
+      - type: verifies
+        target: DES-003
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal cnf::"
+        coverage: "Exhaustive small-circuit equisatisfiability; linear size"
+
+  - id: UV-004
+    type: unit-verification
+    title: CDCL correctness on reference CNF suites
+    description: >
+      The CDCL core returns correct verdicts on hand-built and generated
+      suites: unit/pure/empty edge cases, pigeonhole (UNSAT), random 3-SAT at
+      both sides of the phase transition cross-checked against a brute-force
+      enumerator (<= 20 vars), and every SAT verdict's assignment re-evaluates
+      the CNF to true. Learned-clause antecedent recording is exercised.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, sat, cdcl, unit-test]
+    links:
+      - type: verifies
+        target: DES-004
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal sat::"
+        coverage: "Verdict vs brute force <= 20 vars; model re-check; PHP"
+
+  - id: UV-005
+    type: unit-verification
+    title: Bitwise/equality blast rules vs evaluator
+    description: >
+      Exhaustive width-8 equivalence of bvand/bvor/bvxor/eq/ne circuits
+      against DES-001 (all operand pairs via AIG simulation), randomized at
+      widths 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, bitwise, unit-test]
+    links:
+      - type: verifies
+        target: DES-005
+      - type: traces-to
+        target: DES-001
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal blast::bitwise"
+        coverage: "Exhaustive w8; randomized w32/w64"
+
+  - id: UV-006
+    type: unit-verification
+    title: Add/sub/comparison blast rules vs evaluator
+    description: >
+      Exhaustive width-8 equivalence of bvadd/bvsub and all eight ordered
+      comparisons against DES-001, randomized at widths 32/64, including
+      signed boundary values.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, arithmetic, unit-test]
+    links:
+      - type: verifies
+        target: DES-006
+      - type: traces-to
+        target: DES-001
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal blast::arith"
+        coverage: "Exhaustive w8; randomized w32/w64; signed boundaries"
+
+  - id: UV-007
+    type: unit-verification
+    title: Shift/rotate blast rules vs evaluator
+    description: >
+      Exhaustive width-8 equivalence of bvshl/bvlshr/bvashr/bvrotr against
+      DES-001 including every out-of-range shift amount, randomized at
+      widths 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, shifts, unit-test]
+    links:
+      - type: verifies
+        target: DES-007
+      - type: traces-to
+        target: DES-001
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal blast::shift"
+        coverage: "Exhaustive w8 incl. out-of-range amounts; randomized w32/w64"
+
+  - id: UV-008
+    type: unit-verification
+    title: Mul/udiv blast rules vs evaluator
+    description: >
+      Exhaustive width-8 equivalence of bvmul/bvudiv against DES-001 (all
+      65536 operand pairs, including all zero-divisor cases), randomized at
+      widths 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, mul, udiv, unit-test]
+    links:
+      - type: verifies
+        target: DES-008
+      - type: traces-to
+        target: DES-001
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal blast::muldiv"
+        coverage: "Exhaustive w8 incl. div-by-zero; randomized w32/w64"
+
+  - id: UV-009
+    type: unit-verification
+    title: Structural blast rules vs evaluator
+    description: >
+      Exhaustive width-8 equivalence of extract/concat/zero_ext/sign_ext
+      against DES-001 across all hi/lo positions and extension amounts within
+      the 8/32/64 width family, randomized at widths 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, structural, unit-test]
+    links:
+      - type: verifies
+        target: DES-009
+      - type: traces-to
+        target: DES-001
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal blast::structural"
+        coverage: "All hi/lo and ext amounts in-family; randomized w32/w64"
+
+  - id: UV-010
+    type: unit-verification
+    title: Differential harness — ordeal vs Z3 on the seeded corpus
+    description: >
+      With the oracle feature enabled: run the seeded random corpus (all ops,
+      widths 8/32/64, bounded depth) through both engines via the raw
+      (dev-only) verdict API and fail on any disagreement; cross-validate SAT
+      models from both engines with DES-001. Reproducible via fixed seeds.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, oracle, differential, unit-test]
+    links:
+      - type: verifies
+        target: DES-010
+      - type: traces-to
+        target: DES-001
+    fields:
+      method: automated-test
+      preconditions:
+        - Z3 available (oracle feature)
+      steps:
+        run: "cargo test -p ordeal --features oracle differential"
+        coverage: "Seeded corpus, verdict + model cross-check"
+
+  - id: UV-011
+    type: unit-verification
+    title: LRAT checker accept/reject and mutation tests
+    description: >
+      The checker accepts known-good LRAT certificates for reference UNSAT
+      CNFs and rejects mutated ones (dropped hint, wrong clause id, reordered
+      deletion, truncated proof, missing empty clause). Confirms the crate
+      graph has no dependency edge to the solver core.
+    status: implemented
+    release: v0.3.0
+    tags: [p2, lrat, checker, unit-test, mutation]
+    links:
+      - type: verifies
+        target: DES-011
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal-lrat"
+        coverage: "Accept valid; reject each mutation class; dep-graph check"
+
+  - id: UV-012
+    type: unit-verification
+    title: Pipeline dispatcher — enablement gate and model self-check
+    description: >
+      End-to-end unit tests of Solver::check: queries over enabled ops
+      return Sat with a self-checked model or Unknown (never an unchecked
+      Unsat on the production path); any query containing a disabled op
+      returns Unknown; the phase-0 soundness tests (Unknown never authorizes)
+      still pass; wasm32-wasip2 build stays green.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, pipeline, soundness, unit-test]
+    links:
+      - type: verifies
+        target: DES-012
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal solver::"
+        coverage: "Enablement gate; model self-check; no unchecked Unsat"

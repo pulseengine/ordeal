@@ -1,0 +1,21 @@
+[package]
+name = "ordeal-lrat"
+description = "Ordeal's LRAT certificate checker — the sole trusted component"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "ordeal_lrat"
+path = "src/lib.rs"
+
+# TRUST BOUNDARY — this crate MUST have no dependencies, ever.
+#
+# ordeal-lrat is the sole trusted component of the ordeal solver: the solver
+# itself is untrusted and only results validated by this checker are believed.
+# This crate will be translated to Lean 4 (via Aeneas) and formally verified,
+# so its trusted computing base must be exactly this crate plus rustc/core.
+# In particular it must NOT depend on the `ordeal` crate. A unit test asserts
+# that this manifest declares no dependencies table at all.

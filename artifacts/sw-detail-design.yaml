@@ -1,0 +1,311 @@
+# SW Detailed Design / Unit Specifications (ASPICE SWE.3)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# One sw-detail-design per implementation unit of the P1 pipeline
+# (term evaluator → bit-blast families → AIG → Tseitin CNF → CDCL SAT →
+# model decode) plus the early-start LRAT checker unit (P2). Each refines an
+# architecture component and satisfies the technical requirements it
+# implements; each is verified by a unit-verification measure (UV-*).
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: DES-001
+    type: sw-detail-design
+    title: Concrete term evaluator (eval.rs) — the executable QF_BV semantics
+    description: >
+      A total, concrete interpreter for BvTerm/BoolTerm over u128 values
+      masked to the term width, implementing SMT-LIB QF_BV semantics exactly:
+      modular add/sub/mul; bvudiv with division-by-zero yielding all-ones;
+      bvshl/bvlshr yielding zero when the shift amount is >= width; bvashr
+      filling with the sign bit (all sign bits when amount >= width); bvrotr
+      rotating by amount mod width; extract/concat/zero_ext/sign_ext by bit
+      manipulation; all ten comparisons with two's-complement signed variants.
+      This unit is the TEST ORACLE for every bit-blasting rule (exhaustive at
+      width 8, randomized at 32/64) and performs the SAT-model self-check
+      (re-evaluate the model against the assertions).
+    status: implemented
+    release: v0.2.0
+    tags: [p1, eval, oracle, semantics]
+    links:
+      - type: refines
+        target: ARC-002
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-002
+    fields:
+      unit: crates/ordeal/src/eval.rs
+      function: "eval_bv(term, env) -> u128; eval_bool(term, env) -> bool"
+
+  - id: DES-002
+    type: sw-detail-design
+    title: AIG arena (aig.rs) — And-Inverter Graph with structural hashing
+    description: >
+      Index-arena And-Inverter Graph using the AIGER literal convention: a
+      Lit is a u32 whose LSB is the complement flag; constant false is lit 0
+      (true is lit 1); inputs and AND nodes occupy consecutive indices. The
+      and() constructor applies constant folding (x&0=0, x&1=x, x&x=x,
+      x&!x=0) and structural hashing (operand-order-normalized HashMap) so
+      common subexpressions collapse before CNF. A Word is a Vec<Lit>,
+      LSB-first, the unit bit-blasting rules produce and consume.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, aig, strashing]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-003
+    fields:
+      unit: crates/ordeal/src/aig.rs
+      function: "Aig::input(), Aig::and(a,b) -> Lit, Aig::not(a) -> Lit"
+
+  - id: DES-003
+    type: sw-detail-design
+    title: Tseitin encoder (cnf.rs) — AIG to equisatisfiable CNF
+    description: >
+      Lowers the AIG to CNF in linear size via Tseitin transformation: one
+      fresh CNF variable per reachable AIG node, three clauses per AND gate
+      (o->a, o->b, a&b->o), unit clause asserting each output literal.
+      DIMACS-style i32 literals (positive = true polarity). Maintains the
+      AIG-literal -> CNF-variable map needed to decode SAT assignments back
+      to term-level models and to thread LRAT certificates back to the query.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, cnf, tseitin]
+    links:
+      - type: refines
+        target: ARC-004
+      - type: satisfies
+        target: TR-003
+    fields:
+      unit: crates/ordeal/src/cnf.rs
+      function: "tseitin(aig, outputs) -> (CnfFormula, VarMap)"
+
+  - id: DES-004
+    type: sw-detail-design
+    title: CDCL SAT core (sat.rs) — pure-Rust, all targets, proof-hook ready
+    description: >
+      Conflict-driven clause learning solver in safe pure Rust with no
+      external dependencies: two-watched-literal propagation, first-UIP
+      conflict analysis with clause learning, VSIDS-style activity decision
+      heuristic, restarts (Luby), and clause-DB reduction. Returns
+      Sat(assignment) or Unsat. Every learned clause is recorded with its
+      resolution antecedents behind a proof-trace hook so LRAT emission (P2,
+      TR-005) is a formatting step, not a redesign. This is the primary
+      engine on every target including wasm32-wasip2 (TR-004, TR-011).
+    status: implemented
+    release: v0.2.0
+    tags: [p1, sat, cdcl, pure-rust]
+    links:
+      - type: refines
+        target: ARC-005
+      - type: satisfies
+        target: TR-004
+    fields:
+      unit: crates/ordeal/src/sat.rs
+      function: "SatSolver::solve(&CnfFormula) -> SatResult"
+
+  - id: DES-005
+    type: sw-detail-design
+    title: Bit-blast family — bitwise ops and (dis)equality
+    description: >
+      Word-level blasting rules producing AIG literals: bvand/bvor/bvxor as
+      per-bit gates; eq as the conjunction of per-bit XNORs; ne as its
+      negation. Verified exhaustively against DES-001 at width 8 and
+      randomized at widths 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, bitwise]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-003
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/blast/bitwise.rs
+
+  - id: DES-006
+    type: sw-detail-design
+    title: Bit-blast family — add/sub and all comparisons
+    description: >
+      Ripple-carry adder for bvadd; bvsub as add of two's complement
+      (invert + carry-in 1); unsigned comparisons via the subtraction borrow
+      chain; signed comparisons by sign-bit-flipped unsigned comparison.
+      Produces ult/ule/ugt/uge/slt/sle/sgt/sge single-literal predicates.
+      Verified exhaustively against DES-001 at width 8, randomized at 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, arithmetic, comparisons]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-003
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/blast/arith.rs
+
+  - id: DES-007
+    type: sw-detail-design
+    title: Bit-blast family — shifts and rotate
+    description: >
+      Barrel shifter (log-depth mux stages over the shift amount's bits) for
+      bvshl/bvlshr/bvashr with SMT-LIB out-of-range semantics (>= width
+      shifts yield zero / all-sign-bits), and bvrotr rotating by amount mod
+      width (mux stages only over the low log2(width) amount bits, since
+      width is a power of two for 8/32/64). Verified exhaustively against
+      DES-001 at width 8 including all out-of-range amounts, randomized at
+      32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, shifts, rotate]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-003
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/blast/shift.rs
+
+  - id: DES-008
+    type: sw-detail-design
+    title: Bit-blast family — mul and udiv
+    description: >
+      bvmul as the shift-add partial-product sum (width x width, truncated to
+      width); bvudiv as restoring long division producing quotient bits
+      most-significant-first, with the SMT-LIB division-by-zero case (divisor
+      = 0 yields all-ones) merged in via a divisor-is-zero mux. The hardest
+      family; verified exhaustively against DES-001 at width 8 (all 65536
+      operand pairs) and randomized at 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, mul, udiv]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-003
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/blast/muldiv.rs
+
+  - id: DES-009
+    type: sw-detail-design
+    title: Bit-blast family — structural ops
+    description: >
+      extract[hi:lo] as word slicing; concat placing the second operand in
+      the low bits (SMT-LIB concat semantics); zero_ext appending false
+      literals above the MSB; sign_ext replicating the sign literal. Pure
+      word plumbing, no gates. Verified exhaustively against DES-001 at
+      width 8 across all hi/lo and extension amounts in the 8/32/64 family,
+      randomized at 32/64.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, bit-blast, structural]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-001
+      - type: satisfies
+        target: TR-003
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/blast/structural.rs
+
+  - id: DES-010
+    type: sw-detail-design
+    title: Z3 differential harness and term-corpus generator (oracle.rs)
+    description: >
+      Behind the off-by-default oracle feature: translate BvTerm/BoolTerm to
+      Z3 AST, run both engines on each corpus query, and fail on any verdict
+      disagreement; on SAT additionally cross-validate both models with
+      DES-001. A seeded random term generator produces the corpus (all ops,
+      widths 8/32/64, bounded depth) so CI runs are reproducible. Excluded
+      from the production path and the soundness argument (TR-007).
+    status: implemented
+    release: v0.2.0
+    tags: [p1, oracle, z3, differential, corpus]
+    links:
+      - type: refines
+        target: ARC-007
+      - type: satisfies
+        target: TR-007
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/oracle.rs
+
+  - id: DES-011
+    type: sw-detail-design
+    title: LRAT checker unit (ordeal-lrat crate) — Rust implementation
+    description: >
+      Standalone crate with NO build or link dependency on the solver core
+      (the trust-boundary requirement of TR-006): parses textual LRAT,
+      checks each addition step by reverse-unit-propagation using the given
+      hint chain, processes deletions, and accepts only if the empty clause
+      is derived. This is the Rust implementation that the Aeneas -> Lean
+      soundness proof (TR-013, P2) will be discharged against; mutation
+      tests (corrupted certificates must be rejected) are part of the unit
+      verification.
+    status: implemented
+    release: v0.3.0
+    tags: [p2, lrat, checker, trusted-core]
+    links:
+      - type: refines
+        target: ARC-006
+      - type: satisfies
+        target: TR-006
+      - type: traces-to
+        target: TR-013
+    fields:
+      unit: crates/ordeal-lrat/src/lib.rs
+      function: "check(cnf, lrat) -> Verdict"
+
+  - id: DES-012
+    type: sw-detail-design
+    title: check() pipeline dispatcher and op-enablement gate (solver.rs)
+    description: >
+      Wires Solver::check through blast -> AIG -> Tseitin -> CDCL -> model
+      decode. Maintains the per-operation enablement table implementing the
+      P1 kill criterion: an op whose bit-blasting rule is not enabled (or was
+      disabled by an oracle disagreement) makes the whole query return
+      Unknown rather than guess. On Sat, decodes the CNF assignment to a
+      term-level Model and self-checks it with DES-001 before returning; a
+      failing self-check returns Unknown (never a wrong Sat). Unsat returns
+      remain gated behind the P2 checker: until LRAT emission + the verified
+      checker land, UNSAT results are reported as Unknown on the production
+      path (never an unchecked Unsat), per the AGENTS.md soundness contract.
+    status: implemented
+    release: v0.2.0
+    tags: [p1, pipeline, enablement, soundness]
+    links:
+      - type: refines
+        target: ARC-001
+      - type: satisfies
+        target: TR-002
+      - type: satisfies
+        target: TR-010
+      - type: traces-to
+        target: DES-001
+    fields:
+      unit: crates/ordeal/src/solver.rs
+      function: "Solver::check() -> CheckResult"

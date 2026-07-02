@@ -55,7 +55,7 @@ artifacts:
       Z3 differential oracle wired for real in CI; out-of-scope constructs
       rejected with clear errors. Deliverable: ordeal decides the fragment and
       agrees with the Z3 oracle across a differential corpus.
-    status: draft
+    status: implemented
     release: v0.2.0
     tags: [roadmap, p1, qf-bv, bit-blaster, cdcl, oracle]
     links:

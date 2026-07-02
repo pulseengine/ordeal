@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **P1 engine: the full QF_BV decision pipeline** (blast → AIG → Tseitin CNF
+  → own pure-Rust CDCL core → self-checked models), oracle-verified:
+  - `eval.rs` — total concrete evaluator (executable SMT-LIB semantics), the
+    test oracle for every blasting rule and the SAT-model self-check.
+  - `aig.rs` — AIGER-convention And-Inverter Graph arena with constant
+    folding and structural hashing.
+  - `blast/` — per-op-family blasting rules (bitwise/eq, add/sub/comparisons,
+    barrel shifts/rotate, mul/restoring-udiv, structural), each verified
+    exhaustively at width 8 (65 536 operand pairs) and randomized at 32/64
+    against the evaluator.
+  - `cnf.rs` — Tseitin encoder (linear size), equisatisfiability-tested.
+  - `sat.rs` — dependency-free CDCL (two-watched literals, first-UIP
+    learning, VSIDS + phase saving, Luby restarts), deterministic and
+    wasm-clean, with a proof trace whose antecedents form RUP chains so P2
+    LRAT emission is a formatting step.
+  - `solver.rs` — pipeline dispatcher with the op-enablement kill-criterion
+    gate; `Sat` models are re-evaluated before being returned; engine-UNSAT
+    is reported as `Unknown` until the P2 verified checker lands (no
+    unchecked `Unsat`, ever). `Solver::validate` gives distinct
+    well-sortedness errors.
+  - `ordeal-lrat` — new zero-dependency crate: the RUP-only textual LRAT
+    checker (the future sole trusted component), mutation-tested.
+  - `oracle.rs` — real Z3 differential oracle (`z3` crate, optional,
+    native-only, behind `oracle`): fragment translation, seeded corpus
+    generator, and the differential harness. **Milestone: ordeal's raw
+    verdicts agree with Z3 across the 300-query corpus (both SAT and UNSAT
+    exercised, zero disagreements).**
+
 ### Changed
 
 - Rivet release management adopted (requires rivet ≥ 0.23):

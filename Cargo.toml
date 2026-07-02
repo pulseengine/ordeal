@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/ordeal"]
+members = ["crates/ordeal", "crates/ordeal-lrat"]
 
 [workspace.package]
 version = "0.0.0"
