@@ -193,6 +193,13 @@ fn lift(err: CoreError, lines: &[usize]) -> CheckError {
         CoreError::InvalidCnfLiteral { clause_index } => {
             CheckError::InvalidCnfLiteral { clause_index }
         }
+        // Unreachable through `check` (parse_literal rejects 0 / i32::MIN
+        // before any Step is built), but the kernel validates independently
+        // and `lift` stays total.
+        CoreError::InvalidStepLiteral { step } => CheckError::Parse {
+            line: at(step),
+            message: "step clause contains an invalid literal".to_string(),
+        },
         CoreError::NonSequentialId {
             step,
             expected,

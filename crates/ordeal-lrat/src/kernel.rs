@@ -52,6 +52,14 @@ pub enum CoreError {
         /// 0-based index of the offending clause in the input CNF.
         clause_index: usize,
     },
+    /// An addition step's clause contains the literal `0` or `i32::MIN`.
+    /// The text parser already rejects these, but the kernel validates
+    /// independently: the kernel's guarantees must not depend on the
+    /// (untrusted) parser, and rejecting more is always sound.
+    InvalidStepLiteral {
+        /// 0-based step index.
+        step: usize,
+    },
     /// An addition step did not use the next sequential clause id.
     NonSequentialId {
         /// 0-based step index.
@@ -92,6 +100,20 @@ pub enum CoreError {
     NoEmptyClause,
 }
 
+/// The variable index of a literal. `lit` must be nonzero and not
+/// `i32::MIN` — guaranteed KERNEL-SIDE for every literal that reaches an
+/// assignment: `load_cnf` validates the CNF and `apply_add` validates each
+/// certificate clause (both via `clause_has_invalid_literal`), and the
+/// property is preserved under negation. Hand-rolled so the Lean model
+/// needs no `unsigned_abs` axiom.
+fn lit_var(lit: i32) -> usize {
+    if lit >= 0 {
+        lit as usize
+    } else {
+        (-lit) as usize
+    }
+}
+
 /// A partial assignment over DIMACS variables.
 ///
 /// `values[v]` is the value of variable `v` (index 0 unused), `None` when
@@ -109,7 +131,7 @@ impl Assignment {
     /// underlying variable is unassigned. `lit` must be nonzero and not
     /// `i32::MIN` (guaranteed by CNF validation and parsing).
     fn value(&self, lit: i32) -> Option<bool> {
-        let var = lit.unsigned_abs() as usize;
+        let var = lit_var(lit);
         if var >= self.values.len() {
             return None;
         }
@@ -132,7 +154,7 @@ impl Assignment {
             Some(true) => false, // already true: nothing to do
             Some(false) => true, // conflict
             None => {
-                let var = lit.unsigned_abs() as usize;
+                let var = lit_var(lit);
                 while self.values.len() <= var {
                     self.values.push(None);
                 }
@@ -211,12 +233,10 @@ fn classify_hint(assignment: &Assignment, clause: &[i32]) -> HintClass {
         }
         i += 1;
     }
-    if unassigned.is_empty() {
-        HintClass::Falsified
-    } else if unassigned.len() == 1 {
-        HintClass::Unit(unassigned[0])
-    } else {
-        HintClass::Multi
+    match unassigned.len() {
+        0 => HintClass::Falsified,
+        1 => HintClass::Unit(unassigned[0]),
+        _ => HintClass::Multi,
     }
 }
 
@@ -298,6 +318,14 @@ fn load_cnf(cnf: &[Vec<i32>]) -> Result<Vec<Option<Vec<i32>>>, CoreError> {
     Ok(clauses)
 }
 
+/// Overwrite one slot with `None`. Split into a helper: assigning the enum
+/// constant directly through an index projection (`clauses[i] = None`)
+/// currently extracts incorrectly in Aeneas (the stored value becomes `()`);
+/// routing the write through a plain `&mut` extracts correctly.
+fn clear_slot(slot: &mut Option<Vec<i32>>) {
+    *slot = None;
+}
+
 /// Mark every id in `ids` dead. Deleting an unknown or already-dead clause
 /// is rejected: the certificate and checker disagree about the clause set.
 fn apply_delete(
@@ -309,7 +337,7 @@ fn apply_delete(
     while i < ids.len() {
         let id = ids[i];
         get_live(clauses, id, step)?;
-        clauses[id - 1] = None;
+        clear_slot(&mut clauses[id - 1]);
         i += 1;
     }
     Ok(())
@@ -324,6 +352,14 @@ fn apply_add(
     hints: &[usize],
     step: usize,
 ) -> Result<bool, CoreError> {
+    // Independent kernel-side validation of the certificate clause: the
+    // untrusted parser also rejects 0 / i32::MIN, but the soundness
+    // invariant ("every live clause is implied under EVERY assignment")
+    // must not lean on the parser, and negating i32::MIN must be
+    // impossible in the kernel regardless of who produced the steps.
+    if clause_has_invalid_literal(clause) {
+        return Err(CoreError::InvalidStepLiteral { step });
+    }
     let expected = clauses.len() + 1;
     if id != expected {
         return Err(CoreError::NonSequentialId {
@@ -333,7 +369,10 @@ fn apply_add(
         });
     }
     check_rup(clauses, clause, hints, step)?;
-    let is_empty = clause.is_empty();
+    // `len() == 0` instead of `is_empty()`: keeps the Lean model free of a
+    // `Vec::is_empty` axiom.
+    #[allow(clippy::len_zero)]
+    let is_empty = clause.len() == 0;
     clauses.push(Some(clause.to_vec()));
     Ok(is_empty)
 }
@@ -422,6 +461,17 @@ mod tests {
             check_steps(&cnf, &steps),
             Err(CoreError::DeletedId { step: 1, id: 1 })
         ));
+    }
+
+    #[test]
+    fn rejects_invalid_step_literals() {
+        let cnf = vec![vec![1], vec![-1]];
+        for bad in [0i32, i32::MIN] {
+            assert!(matches!(
+                check_steps(&cnf, &[add(3, &[bad], &[1, 2])]),
+                Err(CoreError::InvalidStepLiteral { step: 0 })
+            ));
+        }
     }
 
     #[test]
