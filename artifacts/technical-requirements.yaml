@@ -26,6 +26,8 @@ artifacts:
         target: SYS-001
       - type: derives-from
         target: SYS-007
+      - type: allocated-to
+        target: ARC-002
     fields:
       req-type: functional
       priority: must
@@ -48,6 +50,8 @@ artifacts:
         target: SYS-001
       - type: derives-from
         target: SYS-006
+      - type: allocated-to
+        target: ARC-001
     fields:
       req-type: interface
       priority: must
@@ -68,6 +72,10 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-001
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-004
     fields:
       req-type: functional
       priority: must
@@ -77,26 +85,32 @@ artifacts:
 
   - id: TR-004
     type: sw-req
-    title: SAT backends — CaDiCaL primary, varisat wasm32 fallback
+    title: SAT backend — own pure-Rust CDCL core primary, CaDiCaL optional accelerator
     description: >
-      Ordeal shall solve the CNF using CaDiCaL as the primary backend via FFI,
-      and a pure-Rust varisat backend as the wasm32 fallback where FFI/native
-      CaDiCaL is unavailable. Both backends shall produce results consumable by
-      the certificate pipeline; the primary backend shall emit an LRAT proof on
-      UNSAT.
+      Ordeal shall solve the CNF using its own in-tree pure-Rust CDCL core as
+      the primary backend on every target, including wasm32-wasip2. CaDiCaL
+      (C++ via FFI) may be enabled as an optional, cfg-gated, native-only
+      accelerator and benchmark yardstick — never load-bearing. Both backends
+      shall emit an LRAT proof on UNSAT in the exact format the verified
+      checker consumes; varisat is a reference to study, not a dependency.
     status: draft
-    tags: [sat, cadical, varisat, wasm32, ffi]
+    tags: [sat, cdcl, pure-rust, cadical, lrat, wasm32]
     links:
       - type: derives-from
         target: SYS-001
       - type: derives-from
         target: SYS-005
+      - type: allocated-to
+        target: ARC-005
+      - type: allocated-to
+        target: ARC-008
     fields:
       req-type: functional
       priority: must
       verification-criteria: >
-        Both backends agree with Z3 on the corpus; CaDiCaL emits an LRAT proof
-        on UNSAT; the varisat path builds and runs on a wasm32 target.
+        Both backends agree with Z3 on the corpus; each emits an LRAT proof on
+        UNSAT accepted by the checker; the own core builds and runs on
+        wasm32-wasip2.
 
   - id: TR-005
     type: sw-req
@@ -112,6 +126,10 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-002
+      - type: allocated-to
+        target: ARC-005
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: functional
       priority: must
@@ -134,6 +152,8 @@ artifacts:
         target: SYS-002
       - type: derives-from
         target: SYS-003
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: functional
       priority: must
@@ -154,6 +174,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-004
+      - type: allocated-to
+        target: ARC-007
     fields:
       req-type: functional
       priority: must
@@ -177,6 +199,8 @@ artifacts:
         target: SYS-007
       - type: derives-from
         target: SYS-001
+      - type: allocated-to
+        target: ARC-002
     fields:
       req-type: functional
       priority: should
@@ -198,6 +222,10 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: performance
       priority: should
@@ -220,6 +248,8 @@ artifacts:
         target: SYS-007
       - type: derives-from
         target: SYS-006
+      - type: allocated-to
+        target: ARC-001
     fields:
       req-type: constraint
       priority: must
@@ -229,23 +259,27 @@ artifacts:
 
   - id: TR-011
     type: sw-req
-    title: wasm32-wasip2 buildability with varisat-primary backend split
+    title: wasm32-wasip2 buildability with FFI-free backend split
     description: >
       Ordeal shall build as a wasm32-wasip2 target so it can run in-process
       inside a WebAssembly component (loom self-optimizes as a wasip2 component
-      and embeds ordeal). On the wasm path the pure-Rust varisat backend is the
-      primary SAT engine and native CaDiCaL (C++ via FFI) shall be cfg-gated
-      out. The default build shall remain zero-external-dependency and
-      wasip2-clean; the native-vs-wasm backend split shall be expressed via
-      target.'cfg(...)'.dependencies, never pulling a C/FFI dep onto the wasm
-      path.
+      and embeds ordeal). Ordeal's own pure-Rust CDCL core is the SAT engine on
+      the wasm path (as on every target) and native CaDiCaL (C++ via FFI)
+      shall be cfg-gated out there. The default build shall remain
+      zero-external-dependency and wasip2-clean; the optional native
+      accelerator shall be expressed via target.'cfg(...)'.dependencies, never
+      pulling a C/FFI dep onto the wasm path.
     status: draft
-    tags: [wasm32-wasip2, varisat, cadical, backend-split, zero-dep]
+    tags: [wasm32-wasip2, cdcl, pure-rust, cadical, backend-split, zero-dep]
     links:
       - type: derives-from
         target: SYS-005
       - type: derives-from
         target: SYS-001
+      - type: allocated-to
+        target: ARC-008
+      - type: allocated-to
+        target: ARC-009
     fields:
       req-type: constraint
       priority: must
@@ -270,6 +304,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+      - type: allocated-to
+        target: ARC-009
     fields:
       req-type: constraint
       priority: should
@@ -298,6 +334,8 @@ artifacts:
         target: SYS-003
       - type: derives-from
         target: SYS-002
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: functional
       priority: should

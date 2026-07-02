@@ -65,7 +65,8 @@ artifacts:
       CI builds the production validator with no C++ toolchain present to
       confirm no from-source C++ is in the critical path, and builds twice from
       the same commit to confirm bit-identical validator artifacts. The wasm32
-      fallback (varisat) path is built to confirm portability.
+      path (ordeal's own pure-Rust CDCL core, FFI-free) is built to confirm
+      portability.
     status: draft
     tags: [hermetic, reproducibility, build]
     links:
@@ -158,13 +159,14 @@ artifacts:
 
   - id: VER-008
     type: sw-verification
-    title: SAT backend parity (CaDiCaL vs varisat vs Z3)
+    title: SAT backend parity (own CDCL core vs CaDiCaL vs Z3)
     description: >
-      Confirms both SAT backends (CaDiCaL primary, varisat wasm32 fallback)
-      agree with Z3 on the corpus, that CaDiCaL emits a valid LRAT proof on
-      UNSAT, and that the varisat path builds and runs on wasm32.
+      Confirms both SAT backends (ordeal's own pure-Rust CDCL core primary,
+      CaDiCaL optional native accelerator) agree with Z3 on the corpus, that
+      each emits a valid LRAT proof on UNSAT, and that the own core builds and
+      runs on wasm32-wasip2.
     status: draft
-    tags: [sat, cadical, varisat, wasm32, parity]
+    tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
       - type: verifies
         target: TR-004
@@ -241,12 +243,15 @@ artifacts:
     title: Roadmap phase acceptance gates (P0–P5)
     description: >
       Per-phase acceptance gate that confirms each roadmap phase's deliverable
-      is complete before the phase is considered done: P0 the differential
-      harness is operational, P1 the QF_BV core returns oracle-checked models,
-      P2 UNSAT is backed by a checker-accepted LRAT certificate, P3 the array/UF
-      sliver reduces and agrees with Z3, P4 op-by-op bit-blaster proofs
-      discharge, and P5 per-op integration latency meets the CI budget. Each
-      gate is satisfied by the phase's underlying verification measures.
+      is complete before the phase is considered done: P0 the skeleton compiles
+      with and without the oracle feature and check returns only Unknown, P1
+      the QF_BV core returns oracle-checked models via the wired differential
+      harness, P2 UNSAT is backed by a checker-accepted LRAT certificate, P3
+      the array/UF sliver reduces and agrees with Z3 and loom/synth verify
+      against ordeal by default, P4 op-by-op bit-blaster proofs discharge and
+      Z3 is out of the soundness argument, and P5 per-op integration latency
+      meets the CI budget. Each gate is satisfied by the phase's underlying
+      verification measures.
     status: draft
     tags: [roadmap, acceptance, milestone, gate]
     links:
@@ -275,11 +280,11 @@ artifacts:
       A blocking CI job builds ordeal for wasm32-wasip2 on the default
       (zero-dependency) build and fails if it does not compile, confirming
       ordeal can run in-process inside a WebAssembly component. Also confirms no
-      C/FFI dependency (CaDiCaL) is linked on the wasm path — varisat is the
-      primary backend there — and that the default build declares no external
-      dependency.
+      C/FFI dependency (CaDiCaL) is linked on the wasm path — ordeal's own
+      pure-Rust CDCL core is the engine there — and that the default build
+      declares no external dependency.
     status: draft
-    tags: [wasm32-wasip2, build, varisat, zero-dep, gate]
+    tags: [wasm32-wasip2, build, cdcl, pure-rust, zero-dep, gate]
     links:
       - type: verifies
         target: TR-011
