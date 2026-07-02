@@ -522,6 +522,47 @@ theorem pure_check_sound (cnf : List (List Std.I32)) (steps : List PStep)
 
 /- ═════════════════════ THE BRIDGE TO THE AENEAS MODEL ═══════════════════ -/
 
+/- The simulation is proved bottom-up over the generated monadic code with
+   the Aeneas WP idiom, established and verified here on the first leaf:
+
+     apply loop.spec_decr_nat (measure := …) (inv := …)
+     · intro <state> <hinv>; unfold <body>; dsimp only
+       step / step as ⟨…⟩ / split      -- one per monadic op / branch
+       … <;> scalar_tac                 -- discharge Usize/index side-goals
+     · <initial invariant>
+
+   `chil_total` below is the first `sorry`-free building block — the
+   totality of the certificate/CNF literal check, needed by both the
+   `load_cnf` and `apply_add` refinements. The remaining functions
+   (`load_cnf`, `apply_delete`, `check_rup` [with the `Vec`-Assignment ↔
+   `PAsn` relation], `apply_add`, `check_steps_loop`) follow the same
+   template and compose into `kernel_refines_pure`; see issue #12 for the
+   decomposition. -/
+
+/-- First verified simulation leaf: `clause_has_invalid_literal` always
+    returns (never fails / diverges). Used to `step` past the literal check
+    in `load_cnf` / `apply_add` on the accepting path. -/
+theorem chil_total (clause : Slice Std.I32) :
+    kernel.clause_has_invalid_literal clause ⦃ _ => True ⦄ := by
+  unfold kernel.clause_has_invalid_literal kernel.clause_has_invalid_literal_loop
+  apply loop.spec_decr_nat
+    (measure := fun i => clause.length - i.val)
+    (inv := fun i => i.val ≤ clause.length)
+  · intro i hi
+    unfold kernel.clause_has_invalid_literal_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      step as ⟨lit, hlit⟩
+      split
+      · simp
+      · split
+        · simp
+        · step as ⟨i3, hi3⟩
+          refine ⟨?_, ?_⟩ <;> scalar_tac
+    · simp
+  · simp
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
