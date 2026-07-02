@@ -358,3 +358,74 @@ artifacts:
     fields:
       unit: crates/ordeal/src/lrat.rs
       function: "emit_lrat(n_orig, trace) -> String"
+
+  - id: DES-014
+    type: sw-detail-design
+    title: Sliver extended-term layer + preprocessing entry (sliver.rs)
+    description: >
+      The array/UF sliver (P3) as a SEPARATE extended term language
+      (ArrayTerm / ExtBvTerm / ExtBoolTerm) that is preprocessed away into
+      the closed QF_BV core before bit-blasting — the core term.rs fragment
+      stays closed (every op keeps a proven bit-blasting rule; loom #246).
+      Design decision: an Ext* layer rather than widening BvTerm, so the
+      sliver is sound BY CONSTRUCTION (it never reaches the blaster; only
+      the lowered core does). lower() is the entry point returning pure
+      BoolTerm assertions or a SliverError for out-of-sliver queries
+      (non-concrete index, bad array sort, inconsistent call).
+    status: draft
+    release: v0.4.0
+    tags: [p3, sliver, array, uf, closed-fragment]
+    links:
+      - type: refines
+        target: ARC-002
+      - type: satisfies
+        target: TR-008
+    fields:
+      unit: crates/ordeal/src/sliver.rs
+      function: "lower(assertions) -> Result<Vec<BoolTerm>, SliverError>"
+
+  - id: DES-015
+    type: sw-detail-design
+    title: Eager read-over-write elimination for Array(BV32->BV8)
+    description: >
+      Eliminate non-extensional array select/store over concrete consecutive
+      offsets: a select on a store chain reduces to nested if-then-else over
+      concrete index equalities down to fresh per-index BV8 variables of the
+      base array. No whole-array equality; symbolic indices are rejected
+      (SliverError::NonConcreteIndex). Produces pure-core BvTerm/BoolTerm.
+      Verified against Z3's array theory on the differential corpus.
+    status: draft
+    release: v0.4.0
+    tags: [p3, sliver, array, read-over-write]
+    links:
+      - type: refines
+        target: ARC-002
+      - type: satisfies
+        target: TR-008
+      - type: traces-to
+        target: DES-014
+    fields:
+      unit: crates/ordeal/src/sliver.rs
+
+  - id: DES-016
+    type: sw-detail-design
+    title: Ackermannization of uninterpreted pure_call congruence
+    description: >
+      Eliminate uninterpreted pure_call by replacing each distinct call site
+      with a fresh result variable and asserting congruence across sites of
+      the same function: for call sites i, j, (args_i = args_j) implies
+      (result_i = result_j). Arg arity/sorts must be consistent per function
+      name (else SliverError::InconsistentCall). Produces pure-core
+      assertions; verified against Z3's UF theory.
+    status: draft
+    release: v0.4.0
+    tags: [p3, sliver, uf, ackermannization, congruence]
+    links:
+      - type: refines
+        target: ARC-002
+      - type: satisfies
+        target: TR-008
+      - type: traces-to
+        target: DES-014
+    fields:
+      unit: crates/ordeal/src/sliver.rs

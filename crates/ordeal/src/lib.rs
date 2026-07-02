@@ -38,6 +38,7 @@ pub mod cnf;
 pub mod eval;
 pub mod lrat;
 pub mod sat;
+pub mod sliver;
 pub mod solver;
 pub mod term;
 
