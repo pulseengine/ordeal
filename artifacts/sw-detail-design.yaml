@@ -372,7 +372,7 @@ artifacts:
       the lowered core does). lower() is the entry point returning pure
       BoolTerm assertions or a SliverError for out-of-sliver queries
       (non-concrete index, bad array sort, inconsistent call).
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [p3, sliver, array, uf, closed-fragment]
     links:
@@ -394,7 +394,7 @@ artifacts:
       base array. No whole-array equality; symbolic indices are rejected
       (SliverError::NonConcreteIndex). Produces pure-core BvTerm/BoolTerm.
       Verified against Z3's array theory on the differential corpus.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [p3, sliver, array, read-over-write]
     links:
@@ -417,7 +417,7 @@ artifacts:
       (result_i = result_j). Arg arity/sorts must be consistent per function
       name (else SliverError::InconsistentCall). Produces pure-core
       assertions; verified against Z3's UF theory.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [p3, sliver, uf, ackermannization, congruence]
     links:
