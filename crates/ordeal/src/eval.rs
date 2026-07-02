@@ -103,7 +103,7 @@ pub fn eval_bv(term: &BvTerm, env: &Env) -> Result<u128, EvalError> {
         BvTerm::Udiv(a, b) => {
             let (x, y) = (eval_bv(a, env)?, eval_bv(b, env)?);
             // SMT-LIB: bvudiv by zero yields all-ones.
-            if y == 0 { m } else { x / y }
+            x.checked_div(y).unwrap_or(m)
         }
         BvTerm::And(a, b) => eval_bv(a, env)? & eval_bv(b, env)?,
         BvTerm::Or(a, b) => eval_bv(a, env)? | eval_bv(b, env)?,
@@ -351,7 +351,7 @@ mod tests {
                 ev(&BvTerm::Mul(b(tx.clone()), b(ty.clone()))),
                 x.wrapping_mul(y) as u128
             );
-            let d = if y == 0 { u64::MAX } else { x / y };
+            let d = x.checked_div(y).unwrap_or(u64::MAX);
             assert_eq!(ev(&BvTerm::Udiv(b(tx.clone()), b(ty.clone()))), d as u128);
             let sh = y % 67; // exercise out-of-range too
             let shl = if sh >= 64 { 0 } else { x << sh };
