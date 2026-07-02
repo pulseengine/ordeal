@@ -9,7 +9,7 @@ and no verdict is accepted until the verified checker validates it. When in
 doubt we return `Unknown` — which callers must treat conservatively — rather
 than guess.
 
-Each phase is tracked in rivet as `FEAT-P0`…`FEAT-P5`
+Each phase is tracked in rivet as `FEAT-000`…`FEAT-005`
 (`artifacts/features.yaml`) — **the rivet artifacts are the source of truth**.
 This document is a human-readable mirror kept in sync by hand for now; the
 plan is to generate it from rivet (and eventually retire the handcrafted

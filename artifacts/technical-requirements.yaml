@@ -20,6 +20,7 @@ artifacts:
       bvuge, bvslt, bvsle, bvsgt, bvsge). This is exactly the set loom and synth
       use — no more.
     status: draft
+    release: v0.2.0
     tags: [qf-bv, operators, widths]
     links:
       - type: derives-from
@@ -44,6 +45,7 @@ artifacts:
       be no assertion stack, push/pop, or incremental reuse. On SAT the model
       shall assign a concrete bit-vector value to each free variable.
     status: draft
+    release: v0.2.0
     tags: [api, check-sat, model, one-shot]
     links:
       - type: derives-from
@@ -68,6 +70,7 @@ artifacts:
       emit, per operator, a circuit whose semantics match the formal BitVec
       semantics of that operator.
     status: draft
+    release: v0.2.0
     tags: [bit-blasting, aig, cnf, tseitin]
     links:
       - type: derives-from
@@ -94,6 +97,7 @@ artifacts:
       shall emit an LRAT proof on UNSAT in the exact format the verified
       checker consumes; varisat is a reference to study, not a dependency.
     status: draft
+    release: v0.2.0
     tags: [sat, cdcl, pure-rust, cadical, lrat, wasm32]
     links:
       - type: derives-from
@@ -122,6 +126,7 @@ artifacts:
       threaded back through the CNF/AIG encoding so it certifies the original
       QF_BV query's unsatisfiability.
     status: draft
+    release: v0.3.0
     tags: [lrat, certificate, unsat]
     links:
       - type: derives-from
@@ -146,6 +151,7 @@ artifacts:
       CNF is unsatisfiable. The checker is the sole trusted component and must
       be independent of the solver's internal data structures.
     status: draft
+    release: v0.3.0
     tags: [lrat, checker, verified, trusted-core]
     links:
       - type: derives-from
@@ -170,6 +176,7 @@ artifacts:
       harness is a development/CI dependency only and shall be excluded from the
       production critical path and the soundness argument.
     status: draft
+    release: v0.2.0
     tags: [z3, differential, oracle, harness]
     links:
       - type: derives-from
@@ -193,6 +200,7 @@ artifacts:
       congruence (pure_call) via Ackermannization. This sliver shall be handled
       by preprocessing into the QF_BV core — no DPLL(T) theory solver.
     status: draft
+    release: v0.4.0
     tags: [array, uf, ackermannization, read-over-write, loom]
     links:
       - type: derives-from
@@ -218,6 +226,7 @@ artifacts:
       per-operation integration latency (in-process, no SMT-LIB parsing, no
       theory combination), not out-solving Z3's SAT engine.
     status: draft
+    release: v0.6.0
     tags: [performance, structural-hashing, rewrites, trimming, benchmark]
     links:
       - type: derives-from
@@ -242,6 +251,7 @@ artifacts:
       and incremental (push/pop) usage — with clear, actionable error messages,
       rather than silently mis-handling them.
     status: draft
+    release: v0.2.0
     tags: [scope, errors, validation]
     links:
       - type: derives-from
@@ -270,6 +280,7 @@ artifacts:
       accelerator shall be expressed via target.'cfg(...)'.dependencies, never
       pulling a C/FFI dep onto the wasm path.
     status: draft
+    release: v0.1.0
     tags: [wasm32-wasip2, cdcl, pure-rust, cadical, backend-split, zero-dep]
     links:
       - type: derives-from
@@ -300,6 +311,7 @@ artifacts:
       Bazel build shall not depend on synth-specific toolchains (Rocq, ARM,
       Renode, Zephyr).
     status: draft
+    release: v0.1.0
     tags: [bazel, rules_rust, rules_wasm_component, rules_lean, build]
     links:
       - type: derives-from
@@ -328,6 +340,7 @@ artifacts:
       how the verified-checker soundness obligation is met; the checker remains
       the sole trusted component with no link dependency on the solver core.
     status: draft
+    release: v0.3.0
     tags: [lrat, checker, aeneas, lean, rules_lean, verified, trusted-core]
     links:
       - type: derives-from

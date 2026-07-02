@@ -19,6 +19,7 @@ artifacts:
       Z3 and fails on any verdict disagreement. On SAT the returned model is
       re-evaluated to confirm it satisfies the original formula.
     status: draft
+    release: v0.2.0
     tags: [differential, z3, oracle, qf-bv]
     links:
       - type: verifies
@@ -44,6 +45,7 @@ artifacts:
       solver internals, establishing that the trusted computing base is exactly
       the checker.
     status: draft
+    release: v0.3.0
     tags: [soundness, lrat, checker, formal-verification, trusted-core]
     links:
       - type: verifies
@@ -68,6 +70,7 @@ artifacts:
       path (ordeal's own pure-Rust CDCL core, FFI-free) is built to confirm
       portability.
     status: draft
+    release: v0.2.0
     tags: [hermetic, reproducibility, build]
     links:
       - type: verifies
@@ -88,6 +91,7 @@ artifacts:
       call sites and that no incremental (push/pop) surface is exposed, and that
       crate metadata declares the Apache-2.0 license.
     status: draft
+    release: v0.2.0
     tags: [api, license, integration]
     links:
       - type: verifies
@@ -106,6 +110,7 @@ artifacts:
       optimization objectives, and incremental usage — are each rejected with a
       distinct, clear error and never reach the solver core.
     status: draft
+    release: v0.2.0
     tags: [scope, errors, validation]
     links:
       - type: verifies
@@ -125,6 +130,7 @@ artifacts:
       that Z3 can eventually be dropped from the soundness argument entirely.
       Covers every operator in the fragment at widths 8/32/64.
     status: draft
+    release: v0.5.0
     tags: [bit-blaster, formal-verification, bitvec, p4]
     links:
       - type: verifies
@@ -145,6 +151,7 @@ artifacts:
       the verified checker; a mutated (invalid) certificate is rejected. Also
       confirms LRAT trimming preserves acceptance.
     status: draft
+    release: v0.3.0
     tags: [lrat, certificate, checker, mutation]
     links:
       - type: verifies
@@ -166,6 +173,7 @@ artifacts:
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
     status: draft
+    release: v0.2.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
       - type: verifies
@@ -186,6 +194,7 @@ artifacts:
       agree with Z3, and that whole-array equality and non-concrete offsets are
       rejected.
     status: draft
+    release: v0.4.0
     tags: [array, uf, read-over-write, ackermannization, differential]
     links:
       - type: verifies
@@ -205,6 +214,7 @@ artifacts:
       theory combination) against the CI budget. Confirms AIG structural hashing
       and LRAT trimming measurably reduce work.
     status: draft
+    release: v0.6.0
     tags: [benchmark, performance, latency, z3-rival]
     links:
       - type: verifies
@@ -226,6 +236,7 @@ artifacts:
       and that the API and any front end reject each out-of-scope construct with
       a distinct error — complementing the system-level scope check.
     status: draft
+    release: v0.2.0
     tags: [scope, errors, api, one-shot, unit-tests]
     links:
       - type: verifies
@@ -256,17 +267,17 @@ artifacts:
     tags: [roadmap, acceptance, milestone, gate]
     links:
       - type: verifies
-        target: FEAT-P0
+        target: FEAT-000
       - type: verifies
-        target: FEAT-P1
+        target: FEAT-001
       - type: verifies
-        target: FEAT-P2
+        target: FEAT-002
       - type: verifies
-        target: FEAT-P3
+        target: FEAT-003
       - type: verifies
-        target: FEAT-P4
+        target: FEAT-004
       - type: verifies
-        target: FEAT-P5
+        target: FEAT-005
     fields:
       method: review
       steps:
@@ -284,6 +295,7 @@ artifacts:
       pure-Rust CDCL core is the engine there — and that the default build
       declares no external dependency.
     status: draft
+    release: v0.1.0
     tags: [wasm32-wasip2, build, cdcl, pure-rust, zero-dep, gate]
     links:
       - type: verifies
@@ -306,6 +318,7 @@ artifacts:
       synth-specific rules (Rocq/ARM/Renode) are pulled in. rules_lean is
       present only as a reserved placeholder. Advisory (non-blocking) in CI.
     status: draft
+    release: v0.1.0
     tags: [bazel, rules_rust, rules_wasm_component, build]
     links:
       - type: verifies
@@ -328,6 +341,7 @@ artifacts:
       Also confirms the checker has no build or link dependency on the solver
       core, so the trusted computing base is exactly the checker.
     status: draft
+    release: v0.3.0
     tags: [aeneas, lean, lrat, checker, soundness, rules_lean, trusted-core]
     links:
       - type: verifies
