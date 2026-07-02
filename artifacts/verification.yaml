@@ -45,7 +45,7 @@ artifacts:
       solver internals, establishing that the trusted computing base is exactly
       the checker.
     status: draft
-    release: v0.3.0
+    release: v0.5.0
     tags: [soundness, lrat, checker, formal-verification, trusted-core]
     links:
       - type: verifies
@@ -199,8 +199,8 @@ artifacts:
       function congruence (Ackermannized pure_call) queries reduce to QF_BV and
       agree with Z3, and that whole-array equality and non-concrete offsets are
       rejected.
-    status: draft
-    release: v0.4.0
+    status: verified
+    release: v0.3.0
     tags: [array, uf, read-over-write, ackermannization, differential]
     links:
       - type: verifies
@@ -347,7 +347,7 @@ artifacts:
       Also confirms the checker has no build or link dependency on the solver
       core, so the trusted computing base is exactly the checker.
     status: draft
-    release: v0.3.0
+    release: v0.5.0
     tags: [aeneas, lean, lrat, checker, soundness, rules_lean, trusted-core]
     links:
       - type: verifies

@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-02
+
+The array/UF sliver — loom/synth can now try ordeal on their full query
+mix, not just pure QF_BV. **Falsification statement:** this release is
+wrong if any in-sliver query (array select/store over concrete offsets, or
+uninterpreted `pure_call`) lowered by `Solver::check_sliver` yields a
+verdict that disagrees with Z3's array/UF theories on the same query, or a
+`Sat` model that does not re-evaluate to true.
+
+### Added
+
+- **`Solver::check_sliver`** — one-shot decision for extended (array/UF)
+  queries. The sliver is eliminated into the closed QF_BV core and decided
+  by the normal certificate-checked pipeline; out-of-sliver queries return
+  `Unknown` (conservative). Soundness is unchanged — no array/UF construct
+  reaches the bit-blaster; only the lowered core does.
+- **`sliver` module** — the extended term language (`ArrayTerm`,
+  `ExtBvTerm`, `ExtBoolTerm`) and `lower()`: eager read-over-write for
+  `Array(BV32→BV8)` select/store over concrete offsets, and Ackermannization
+  for uninterpreted `pure_call` congruence. Verified against Z3's array and
+  UF theories across a 550-query differential corpus (zero disagreements).
+
+### Notes for consumers (loom / synth)
+
+- Depend on `ordeal = "0.3.0"`; `ordeal-lrat` is pulled transitively.
+- Requires a Rust toolchain supporting **edition 2024** (rustc ≥ 1.85).
+- Treat `Unknown` conservatively (never optimize / accept on it). Only a
+  `CheckResult::Unsat` (which carries a checker-validated LRAT certificate)
+  authorizes a transformation.
+- Please file trials as issues on `pulseengine/ordeal` — see
+  `docs/consuming-ordeal.md`.
+
 ## [0.2.0] - 2026-07-02
 
 First public release: the QF_BV decision pipeline, oracle-verified and
@@ -111,5 +143,6 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.2.0

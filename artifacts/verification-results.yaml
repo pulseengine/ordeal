@@ -383,3 +383,40 @@ artifacts:
     fields:
       verdict: pass
       evidence: "https://github.com/pulseengine/ordeal/actions/runs/28584050411/job/84751085538 (Reproducible build job, first run, 23s)"
+
+  - id: VE-003
+    type: verification-execution
+    title: P3 sliver execution — main @ P3 merges (#24, #25)
+    description: >
+      The sliver lowering + public entry merges: read-over-write and
+      Ackermannization unit tests plus the Z3 differential (550 corpus
+      queries, zero disagreements) and Solver::check_sliver tests, all green
+      on the Test and Z3 Oracle CI jobs.
+    status: implemented
+    fields:
+      version: main-p3
+      commit: "5f907fc"
+      timestamp: "2026-07-02T18:30:00Z"
+      executor: github-actions
+      environment:
+        pr-lowering: "https://github.com/pulseengine/ordeal/pull/24"
+        pr-entry: "https://github.com/pulseengine/ordeal/pull/25"
+
+  - id: VV-023
+    type: verification-verdict
+    title: "VER-009 pass — array/UF sliver reduction correctness"
+    description: >
+      Executed pass. Read-over-write and Ackermannization lower to pure
+      QF_BV agreeing with a concrete sliver evaluator and with Z3's array/UF
+      theories across 550 differential corpus queries (zero disagreements);
+      out-of-sliver constructs (symbolic index, bad sort, inconsistent call)
+      rejected with the documented SliverError.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-009
+      - type: part-of-execution
+        target: VE-003
+    fields:
+      verdict: pass
+      evidence: "PR #24 Z3 Oracle job (550-query differential) + PR #25 check_sliver tests; both merged green to main"
