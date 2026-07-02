@@ -12,6 +12,9 @@ package «ordeal-lrat-proof» {}
 -- The generated model (regen.sh) — this is the CI gate: it must elaborate.
 @[default_target] lean_lib «Kernel» {}
 
--- The spec + soundness proof (issue #12). NOT a default target until the
--- proof is sorry-free: building it is opt-in via `lake build Sound`.
+-- The spec + soundness proof (issue #12). Builds today with ONE remaining
+-- `sorry` (`kernel_refines_pure`, the model↔pure simulation); the pure
+-- soundness result `pure_check_sound` and everything it uses is complete
+-- and `sorry`-free (verified via `#print axioms`). Not a default target
+-- until the last `sorry` is gone; build with `lake build Sound`.
 lean_lib «Sound» {}

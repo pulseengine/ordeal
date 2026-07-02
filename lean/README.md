@@ -54,12 +54,29 @@ semantics and the `lrat_check_sound` theorem; it type-checks against the
 generated model and carries the one tracked `sorry` — it is deliberately
 NOT a default target, and nothing claims the theorem is discharged.
 
+**The mathematics is proved.** `Sound.lean` now contains a PURE, monad-free
+restatement of the checker (`pCheckSteps`) and a COMPLETE, `sorry`-free
+proof that it is sound — `pure_check_sound : pCheckSteps cnf steps = true →
+unsat cnf`, depending only on the three standard Lean axioms (`propext`,
+`Classical.choice`, `Quot.sound`; verified with `#print axioms`). This is
+the whole mathematical content of #12: RUP-step soundness, the
+"every live clause is implied by the CNF" invariant carried through the
+deletion/addition loop, and empty-clause ⇒ UNSAT.
+
+`lrat_check_sound` (the theorem about the actual Aeneas model) follows from
+`pure_check_sound` plus ONE remaining obligation, `kernel_refines_pure`:
+that an accepting run of the generated monadic model is an accepting run of
+the pure checker on the same data. That is a mechanical simulation over the
+generated code (Aeneas `progress` + loop lemmas) with no further
+mathematical content — the single tracked `sorry`.
+
 Still open (issue #12):
-1. Prove `lrat_check_sound` (proof plan documented in `Sound.lean`).
-2. Trust-audit notes for the final story: the Aeneas *support library*
+1. Discharge `kernel_refines_pure` (the model↔pure simulation).
+2. Trust-audit note for the final story: the Aeneas *support library*
    itself currently contains 3 `sorry`s (`Aeneas/Std/Slice.lean` ×2,
-   `Aeneas/Std/StringIter.lean` ×1) — the discharge must either avoid
-   depending on those lemmas or get them fixed upstream.
+   `Aeneas/Std/StringIter.lean` ×1). `pure_check_sound` does not touch
+   them; the simulation step must avoid depending on them or get them
+   fixed upstream.
 3. Upstream Aeneas extraction bug (workaround in place): assigning an enum
    constant through an index projection (`clauses[i] = None`) extracts as a
    unit store (`Slice.update … ()`), which does not type-check; routing the

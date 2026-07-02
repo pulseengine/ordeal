@@ -150,6 +150,9 @@ jobs:
         run: |
           lake exe cache get
           lake build Kernel
+      - name: Build the soundness proof (carries one tracked sorry, #12)
+        working-directory: lean
+        run: lake build Sound
 
   # ── Optional Z3 differential oracle (non-blocking) ────────────────────
   # `ordeal` is a self-contained QF_BV solver; the `oracle` cargo feature
