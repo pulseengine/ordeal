@@ -12,6 +12,15 @@
 //! through the parser), so a buggy parser can only produce a *different*
 //! step list — which still has to check against the real CNF — or reject.
 //! It can never manufacture an acceptance the core would not itself verify.
+//!
+//! # Style constraints (Aeneas)
+//!
+//! This module is written in the fragment Aeneas translates cleanly today:
+//! index-based `while` loops instead of iterators/closures, no early
+//! `return` inside nested loops (every inner loop is its own function), no
+//! slice patterns, and no std methods beyond `Vec::{new, push, len}` and
+//! indexing. Keep it that way — a "cleanup" that reintroduces iterator
+//! sugar breaks the translation.
 
 /// One already-parsed certificate step.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,7 +95,7 @@ pub enum CoreError {
 /// A partial assignment over DIMACS variables.
 ///
 /// `values[v]` is the value of variable `v` (index 0 unused), `None` when
-/// unassigned.
+/// unassigned. The vector grows on demand (by pushes; see `assign_true`).
 struct Assignment {
     values: Vec<Option<bool>>,
 }
@@ -101,8 +110,19 @@ impl Assignment {
     /// `i32::MIN` (guaranteed by CNF validation and parsing).
     fn value(&self, lit: i32) -> Option<bool> {
         let var = lit.unsigned_abs() as usize;
-        let var_value = self.values.get(var).copied().flatten()?;
-        Some(if lit > 0 { var_value } else { !var_value })
+        if var >= self.values.len() {
+            return None;
+        }
+        match self.values[var] {
+            None => None,
+            Some(var_value) => {
+                if lit > 0 {
+                    Some(var_value)
+                } else {
+                    Some(!var_value)
+                }
+            }
+        }
     }
 
     /// Make `lit` true. Returns `true` iff this contradicts an existing
@@ -113,8 +133,8 @@ impl Assignment {
             Some(false) => true, // conflict
             None => {
                 let var = lit.unsigned_abs() as usize;
-                if var >= self.values.len() {
-                    self.values.resize(var + 1, None);
+                while self.values.len() <= var {
+                    self.values.push(None);
                 }
                 self.values[var] = Some(lit > 0);
                 false
@@ -134,6 +154,72 @@ fn get_live(clauses: &[Option<Vec<i32>>], id: usize, step: usize) -> Result<&[i3
     }
 }
 
+/// Assume the negation of every literal of `clause` (make each false).
+/// Returns `true` iff a conflict arose — i.e. the clause is a tautology,
+/// which verifies the step trivially.
+fn assume_negation(assignment: &mut Assignment, clause: &[i32]) -> bool {
+    let mut i = 0;
+    while i < clause.len() {
+        if assignment.assign_true(-clause[i]) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Does `lits[0..len]` contain `lit`? (Hand-rolled: keeps the Aeneas
+/// translation free of slice-method externals.)
+fn contains_lit(lits: &[i32], lit: i32) -> bool {
+    let mut i = 0;
+    while i < lits.len() {
+        if lits[i] == lit {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// How a hint clause looks under the current assignment.
+enum HintClass {
+    /// Some literal is already true: useless for propagation.
+    Satisfied,
+    /// Every literal is false: conflict — the step is verified.
+    Falsified,
+    /// Exactly one unassigned literal (duplicates collapsed): propagate it.
+    Unit(i32),
+    /// Two or more distinct unassigned literals: not a usable hint.
+    Multi,
+}
+
+/// Classify one hint clause under the current assignment. Duplicate
+/// literals are collapsed so that e.g. `[x, x]` counts as unit on `x`.
+fn classify_hint(assignment: &Assignment, clause: &[i32]) -> HintClass {
+    let mut unassigned: Vec<i32> = Vec::new();
+    let mut i = 0;
+    while i < clause.len() {
+        let lit = clause[i];
+        match assignment.value(lit) {
+            Some(true) => return HintClass::Satisfied,
+            Some(false) => {}
+            None => {
+                if !contains_lit(&unassigned, lit) {
+                    unassigned.push(lit);
+                }
+            }
+        }
+        i += 1;
+    }
+    if unassigned.is_empty() {
+        HintClass::Falsified
+    } else if unassigned.len() == 1 {
+        HintClass::Unit(unassigned[0])
+    } else {
+        HintClass::Multi
+    }
+}
+
 /// Verify one RUP addition step: assume the negation of `new_clause`, then
 /// unit-propagate through the hint clauses in order; each hint must be unit
 /// (assign its literal) or falsified (conflict — verified).
@@ -148,61 +234,108 @@ fn check_rup(
 ) -> Result<(), CoreError> {
     let mut assignment = Assignment::new();
 
-    // Assume the negation of the new clause: every literal becomes false.
-    // If the clause contains complementary literals (a tautology) this
-    // already conflicts, and the step is trivially verified.
-    for &lit in new_clause {
-        if assignment.assign_true(-lit) {
-            return Ok(());
-        }
+    if assume_negation(&mut assignment, new_clause) {
+        return Ok(());
     }
 
-    // Propagate through the hint clauses, in order.
-    for &hint_id in hints {
-        let clause = get_live(clauses, hint_id, step)?;
-
-        // Classify the hint clause under the current assignment. Duplicate
-        // literals are collapsed so that e.g. [x, x] counts as unit on x.
-        let mut unassigned: Vec<i32> = Vec::new();
-        for &lit in clause {
-            match assignment.value(lit) {
-                // A satisfied hint can never become unit or falsified:
-                // it is useless for propagation, so the hint is invalid.
-                Some(true) => {
-                    return Err(CoreError::HintNotUnit {
+    // Propagate through the hint clauses, in order. The loop carries its
+    // outcome in `outcome` instead of returning early (Aeneas constraint).
+    let mut outcome: Option<Result<(), CoreError>> = None;
+    let mut i = 0;
+    while outcome.is_none() && i < hints.len() {
+        let hint_id = hints[i];
+        match get_live(clauses, hint_id, step) {
+            Err(e) => outcome = Some(Err(e)),
+            Ok(clause) => match classify_hint(&assignment, clause) {
+                HintClass::Falsified => outcome = Some(Ok(())),
+                HintClass::Unit(unit) => {
+                    // It cannot conflict: the literal was unassigned.
+                    let conflict = assignment.assign_true(unit);
+                    debug_assert!(!conflict);
+                }
+                HintClass::Satisfied | HintClass::Multi => {
+                    outcome = Some(Err(CoreError::HintNotUnit {
                         step,
                         hint: hint_id,
-                    });
+                    }));
                 }
-                Some(false) => {}
-                None => {
-                    if !unassigned.contains(&lit) {
-                        unassigned.push(lit);
-                    }
-                }
-            }
+            },
         }
-
-        match unassigned.as_slice() {
-            // Every literal false: conflict reached — the step is verified.
-            [] => return Ok(()),
-            // Exactly one unassigned literal: the clause is unit; assign it.
-            // (It cannot conflict: the literal was unassigned.)
-            [unit] => {
-                let conflict = assignment.assign_true(*unit);
-                debug_assert!(!conflict);
-            }
-            // Two or more unassigned literals: not a usable hint.
-            _ => {
-                return Err(CoreError::HintNotUnit {
-                    step,
-                    hint: hint_id,
-                });
-            }
-        }
+        i += 1;
     }
 
-    Err(CoreError::HintsExhausted { step })
+    match outcome {
+        Some(result) => result,
+        None => Err(CoreError::HintsExhausted { step }),
+    }
+}
+
+/// Does a clause contain an invalid literal (`0`, or `i32::MIN` whose
+/// negation would overflow)?
+fn clause_has_invalid_literal(clause: &[i32]) -> bool {
+    let mut i = 0;
+    while i < clause.len() {
+        if clause[i] == 0 || clause[i] == i32::MIN {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
+/// Load the input CNF as live clauses with ids `1..=cnf.len()`, validating
+/// every literal so later negation is always meaningful and safe.
+fn load_cnf(cnf: &[Vec<i32>]) -> Result<Vec<Option<Vec<i32>>>, CoreError> {
+    let mut clauses: Vec<Option<Vec<i32>>> = Vec::new();
+    let mut i = 0;
+    while i < cnf.len() {
+        if clause_has_invalid_literal(&cnf[i]) {
+            return Err(CoreError::InvalidCnfLiteral { clause_index: i });
+        }
+        clauses.push(Some(cnf[i].clone()));
+        i += 1;
+    }
+    Ok(clauses)
+}
+
+/// Mark every id in `ids` dead. Deleting an unknown or already-dead clause
+/// is rejected: the certificate and checker disagree about the clause set.
+fn apply_delete(
+    clauses: &mut [Option<Vec<i32>>],
+    ids: &[usize],
+    step: usize,
+) -> Result<(), CoreError> {
+    let mut i = 0;
+    while i < ids.len() {
+        let id = ids[i];
+        get_live(clauses, id, step)?;
+        clauses[id - 1] = None;
+        i += 1;
+    }
+    Ok(())
+}
+
+/// Verify one addition step and append its clause. Returns `true` iff the
+/// added (verified) clause is the empty clause — the certificate's goal.
+fn apply_add(
+    clauses: &mut Vec<Option<Vec<i32>>>,
+    id: usize,
+    clause: &[i32],
+    hints: &[usize],
+    step: usize,
+) -> Result<bool, CoreError> {
+    let expected = clauses.len() + 1;
+    if id != expected {
+        return Err(CoreError::NonSequentialId {
+            step,
+            expected,
+            found: id,
+        });
+    }
+    check_rup(clauses, clause, hints, step)?;
+    let is_empty = clause.is_empty();
+    clauses.push(Some(clause.to_vec()));
+    Ok(is_empty)
 }
 
 /// Check a parsed step list against the input CNF.
@@ -212,48 +345,40 @@ fn check_rup(
 /// trailing steps are ignored). See the module docs for the soundness
 /// theorem this function carries.
 pub fn check_steps(cnf: &[Vec<i32>], steps: &[Step]) -> Result<(), CoreError> {
-    // Load the original clauses as ids 1..=cnf.len(), validating literals
-    // so that later negation (`-lit`) is always meaningful and safe.
-    let mut clauses: Vec<Option<Vec<i32>>> = Vec::with_capacity(cnf.len());
-    for (clause_index, clause) in cnf.iter().enumerate() {
-        if clause.iter().any(|&lit| lit == 0 || lit == i32::MIN) {
-            return Err(CoreError::InvalidCnfLiteral { clause_index });
-        }
-        clauses.push(Some(clause.clone()));
-    }
+    let mut clauses = load_cnf(cnf)?;
 
-    for (step_index, step) in steps.iter().enumerate() {
-        match step {
+    // The loop carries its outcome in `outcome` instead of returning early
+    // (Aeneas constraint): `Some(Ok(()))` the moment a verified empty
+    // clause lands — nothing after it can change unsatisfiability — and
+    // `Some(Err(..))` on the first rejection.
+    let mut outcome: Option<Result<(), CoreError>> = None;
+    let mut step_index = 0;
+    while outcome.is_none() && step_index < steps.len() {
+        // Owned copy: keeps the loop free of a shared borrow of `steps`
+        // alongside the mutable borrow of `clauses` (Aeneas join limits).
+        // This kernel optimizes for provability, not allocation counts.
+        let current = steps[step_index].clone();
+        match current {
             Step::Delete { ids } => {
-                for &id in ids {
-                    // Deleting an unknown or already-dead clause is rejected:
-                    // the certificate and checker disagree about the clause set.
-                    get_live(&clauses, id, step_index)?;
-                    clauses[id - 1] = None;
+                if let Err(e) = apply_delete(&mut clauses, &ids, step_index) {
+                    outcome = Some(Err(e));
                 }
             }
             Step::Add { id, clause, hints } => {
-                let expected = clauses.len() + 1;
-                if *id != expected {
-                    return Err(CoreError::NonSequentialId {
-                        step: step_index,
-                        expected,
-                        found: *id,
-                    });
-                }
-                check_rup(&clauses, clause, hints, step_index)?;
-                let is_empty = clause.is_empty();
-                clauses.push(Some(clause.clone()));
-                if is_empty {
-                    // A verified empty clause proves unsatisfiability;
-                    // nothing after it can change that.
-                    return Ok(());
+                match apply_add(&mut clauses, id, &clause, &hints, step_index) {
+                    Err(e) => outcome = Some(Err(e)),
+                    Ok(true) => outcome = Some(Ok(())),
+                    Ok(false) => {}
                 }
             }
         }
+        step_index += 1;
     }
 
-    Err(CoreError::NoEmptyClause)
+    match outcome {
+        Some(result) => result,
+        None => Err(CoreError::NoEmptyClause),
+    }
 }
 
 #[cfg(test)]

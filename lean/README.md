@@ -37,6 +37,22 @@ awkward.
 
 ## Status
 
+**The Lean model exists and is complete.** `Kernel.lean` is the Aeneas
+translation of `crates/ordeal-lrat/src/kernel.rs` (the string-free checking
+core) — generated with ZERO translation errors after the kernel was written
+in the Aeneas-friendly fragment (index loops, no early returns inside
+loops, owned step in the main loop; see the kernel's module docs).
+Regenerate with `lean/regen.sh` (pinned Charon/Aeneas via nix) after any
+kernel change and commit the result.
+
+Still open (issue #12):
+1. A lakefile wiring the `Aeneas` Lean support library so `Kernel.lean`
+   elaborates in CI.
+2. Discharge the two axiomatized externals the model still carries
+   (`core.num.I32.unsigned_abs`, `alloc.vec.Vec.is_empty`) — provide
+   definitions or upstream Aeneas-std coverage.
+3. State and prove `lrat_check_sound` over `kernel.check_steps`.
+
 Until the theorem is discharged, an `Unsat` from ordeal is backed by a
 certificate validated by the *mutation-tested but not formally verified*
 Rust checker. That is strictly stronger than trusting the solver — the
