@@ -1,8 +1,8 @@
 # Publishes the workspace crates to crates.io on every `v*` tag push.
 #
-# Trust model: an org-wide CARGO_REGISTRY_TOKEN secret (set at the pulseengine
-# GitHub organization, inherited by this repo). Cargo reads it directly from the
-# CARGO_REGISTRY_TOKEN environment variable.
+# Trust model: the org-wide CRATES_IO_TOKEN secret (set at the pulseengine
+# GitHub organization, inherited by this repo — the same secret synth
+# publishes with). Cargo reads it from the CARGO_REGISTRY_TOKEN env var.
 #
 # Mirrors pulseengine/synth's publish-to-crates-io.yml. Publish order matters:
 # ordeal-lrat (the dependency-free checker) goes first; `cargo publish` blocks
@@ -80,9 +80,9 @@ jobs:
       - name: Publish ordeal-lrat to crates.io
         run: cargo publish -p ordeal-lrat
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
 
       - name: Publish ordeal to crates.io
         run: cargo publish -p ordeal
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
