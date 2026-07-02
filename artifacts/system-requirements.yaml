@@ -102,7 +102,7 @@ artifacts:
       platforms loom and synth target (Linux, macOS, and wasm32 for the
       fallback backend). The Z3 oracle, being development/CI-only, is exempt
       from the production critical-path constraint.
-    status: draft
+    status: verified
     tags: [hermetic, build, reproducibility]
     links:
       - type: derives-from

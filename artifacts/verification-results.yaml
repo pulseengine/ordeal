@@ -364,3 +364,22 @@ artifacts:
     fields:
       verdict: pass
       evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job: solver:: suite incl. ill_sorted + validate diagnostics)"
+
+  - id: VV-022
+    type: verification-verdict
+    title: "VER-003 pass — reproducible, dependency-free build"
+    description: >
+      Executed pass on the job's first run: cargo tree shows only the two
+      workspace crates (no externals, no build scripts, hence no C/C++ in
+      the critical path) and two release builds of the same commit compare
+      bit-for-bit identical. Wasm portability covered by the blocking
+      wasip2 gate (VV-018-adjacent evidence).
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-003
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28584050411/job/84751085538 (Reproducible build job, first run, 23s)"

@@ -69,7 +69,7 @@ artifacts:
       the same commit to confirm bit-identical validator artifacts. The wasm32
       path (ordeal's own pure-Rust CDCL core, FFI-free) is built to confirm
       portability.
-    status: draft
+    status: verified
     release: v0.2.0
     tags: [hermetic, reproducibility, build]
     links:
