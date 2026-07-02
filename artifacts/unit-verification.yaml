@@ -292,12 +292,14 @@ artifacts:
       that agrees with a concrete array evaluator and with Z3's array theory
       on the seeded corpus; symbolic indices and whole-array equality are
       rejected with the documented SliverError.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [p3, sliver, array, unit-test]
     links:
       - type: verifies
         target: DES-015
+      - type: verifies
+        target: DES-014
     fields:
       method: automated-test
       steps:
@@ -312,7 +314,7 @@ artifacts:
       theory on the seeded corpus, including the congruence property
       (equal args force equal results) and cross-site interactions;
       inconsistent call arities/sorts are rejected.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [p3, sliver, uf, unit-test]
     links:

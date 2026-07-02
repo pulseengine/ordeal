@@ -37,10 +37,11 @@
 #![cfg(not(target_family = "wasm"))]
 
 use crate::eval::{self, Env};
+use crate::sliver::{self, ArrayTerm, ExtBoolTerm, ExtBvTerm, ExtOp};
 use crate::term::{BoolTerm, BvTerm, Sort};
 use std::collections::BTreeMap;
-use z3::ast::{BV, Bool};
-use z3::{Params, SatResult, Solver};
+use z3::ast::{Array, Ast, BV, Bool};
+use z3::{FuncDecl, Params, SatResult, Solver, Sort as Z3Sort};
 
 // ─── Translation: closed fragment → Z3 ──────────────────────────────────────
 
@@ -125,6 +126,276 @@ pub fn to_z3(term: &BoolTerm) -> Bool {
         BoolTerm::And(a, b) => Bool::and(&[to_z3(a), to_z3(b)]),
         BoolTerm::Or(a, b) => Bool::or(&[to_z3(a), to_z3(b)]),
     }
+}
+
+// ─── Translation: the sliver → Z3's array / UF theories ──────────────────────
+//
+// The differential check for the sliver (DES-015/016) needs a *reference*
+// semantics for `select`/`store`/`pure_call` that is independent of ordeal's
+// elimination. Z3's native (extensional) array theory and uninterpreted
+// functions provide it: the non-extensional fragment ordeal supports is a
+// subset, so on every in-sliver query Z3's verdict must match ordeal's on
+// the lowered core.
+
+/// Translate an [`ArrayTerm`] into a Z3 `Array(BV32 → BV8)` AST.
+fn array_to_z3(array: &ArrayTerm) -> Array {
+    match array {
+        ArrayTerm::Var { name } => {
+            Array::new_const(name.as_str(), &Z3Sort::bitvector(32), &Z3Sort::bitvector(8))
+        }
+        ArrayTerm::Store {
+            array,
+            index,
+            value,
+        } => array_to_z3(array).store(&ext_bv_to_z3(index), &ext_bv_to_z3(value)),
+    }
+}
+
+/// Translate an [`ExtBvTerm`] into a Z3 bitvector AST, using Z3's array
+/// `select` and an uninterpreted [`FuncDecl`] for each `pure_call`.
+fn ext_bv_to_z3(term: &ExtBvTerm) -> BV {
+    match term {
+        ExtBvTerm::Core(bv) => bv_to_z3(bv),
+        ExtBvTerm::Op(op) => ext_op_to_z3(op),
+        ExtBvTerm::Select { array, index } => array_to_z3(array)
+            .select(&ext_bv_to_z3(index))
+            .as_bv()
+            .expect("array range is a bitvector sort"),
+        ExtBvTerm::PureCall { name, args, sort } => {
+            let zargs: Vec<BV> = args.iter().map(ext_bv_to_z3).collect();
+            let domain: Vec<Z3Sort> = zargs
+                .iter()
+                .map(|a| Z3Sort::bitvector(a.get_size()))
+                .collect();
+            let domain_refs: Vec<&Z3Sort> = domain.iter().collect();
+            let f = FuncDecl::new(name.as_str(), &domain_refs, &Z3Sort::bitvector(sort.width));
+            let arg_refs: Vec<&dyn Ast> = zargs.iter().map(|b| b as &dyn Ast).collect();
+            f.apply(&arg_refs)
+                .as_bv()
+                .expect("pure_call result is a bitvector sort")
+        }
+    }
+}
+
+/// Translate a lifted core operation (children may be extended) into Z3.
+fn ext_op_to_z3(op: &ExtOp) -> BV {
+    match op {
+        ExtOp::Add(a, b) => ext_bv_to_z3(a).bvadd(ext_bv_to_z3(b)),
+        ExtOp::Sub(a, b) => ext_bv_to_z3(a).bvsub(ext_bv_to_z3(b)),
+        ExtOp::Mul(a, b) => ext_bv_to_z3(a).bvmul(ext_bv_to_z3(b)),
+        ExtOp::Udiv(a, b) => ext_bv_to_z3(a).bvudiv(ext_bv_to_z3(b)),
+        ExtOp::And(a, b) => ext_bv_to_z3(a).bvand(ext_bv_to_z3(b)),
+        ExtOp::Or(a, b) => ext_bv_to_z3(a).bvor(ext_bv_to_z3(b)),
+        ExtOp::Xor(a, b) => ext_bv_to_z3(a).bvxor(ext_bv_to_z3(b)),
+        ExtOp::Shl(a, b) => ext_bv_to_z3(a).bvshl(ext_bv_to_z3(b)),
+        ExtOp::Lshr(a, b) => ext_bv_to_z3(a).bvlshr(ext_bv_to_z3(b)),
+        ExtOp::Ashr(a, b) => ext_bv_to_z3(a).bvashr(ext_bv_to_z3(b)),
+        ExtOp::Rotr(a, b) => ext_bv_to_z3(a).bvrotr(ext_bv_to_z3(b)),
+        ExtOp::Extract { hi, lo, arg } => ext_bv_to_z3(arg).extract(*hi, *lo),
+        ExtOp::Concat(a, b) => ext_bv_to_z3(a).concat(ext_bv_to_z3(b)),
+        ExtOp::ZeroExt { by, arg } => ext_bv_to_z3(arg).zero_ext(*by),
+        ExtOp::SignExt { by, arg } => ext_bv_to_z3(arg).sign_ext(*by),
+    }
+}
+
+/// Translate an [`ExtBoolTerm`] into a Z3 boolean AST.
+fn ext_bool_to_z3(term: &ExtBoolTerm) -> Bool {
+    match term {
+        ExtBoolTerm::Eq(a, b) => ext_bv_to_z3(a).eq(ext_bv_to_z3(b)),
+        ExtBoolTerm::Ne(a, b) => ext_bv_to_z3(a).eq(ext_bv_to_z3(b)).not(),
+        ExtBoolTerm::Ult(a, b) => ext_bv_to_z3(a).bvult(ext_bv_to_z3(b)),
+        ExtBoolTerm::Ule(a, b) => ext_bv_to_z3(a).bvule(ext_bv_to_z3(b)),
+        ExtBoolTerm::Ugt(a, b) => ext_bv_to_z3(a).bvugt(ext_bv_to_z3(b)),
+        ExtBoolTerm::Uge(a, b) => ext_bv_to_z3(a).bvuge(ext_bv_to_z3(b)),
+        ExtBoolTerm::Slt(a, b) => ext_bv_to_z3(a).bvslt(ext_bv_to_z3(b)),
+        ExtBoolTerm::Sle(a, b) => ext_bv_to_z3(a).bvsle(ext_bv_to_z3(b)),
+        ExtBoolTerm::Sgt(a, b) => ext_bv_to_z3(a).bvsgt(ext_bv_to_z3(b)),
+        ExtBoolTerm::Sge(a, b) => ext_bv_to_z3(a).bvsge(ext_bv_to_z3(b)),
+        ExtBoolTerm::Not(t) => ext_bool_to_z3(t).not(),
+        ExtBoolTerm::And(a, b) => Bool::and(&[ext_bool_to_z3(a), ext_bool_to_z3(b)]),
+        ExtBoolTerm::Or(a, b) => Bool::or(&[ext_bool_to_z3(a), ext_bool_to_z3(b)]),
+    }
+}
+
+/// Run Z3's array/UF theories on a conjunction of [`ExtBoolTerm`]s and
+/// return only the three-valued verdict (no model — verdict agreement is
+/// all the sliver differential needs).
+pub fn sliver_z3_check(assertions: &[ExtBoolTerm]) -> OracleVerdict {
+    let solver = Solver::new();
+    let mut params = Params::new();
+    params.set_u32("timeout", 5_000);
+    solver.set_params(&params);
+    for a in assertions {
+        solver.assert(ext_bool_to_z3(a));
+    }
+    match solver.check() {
+        SatResult::Unsat => OracleVerdict::Unsat,
+        SatResult::Unknown => OracleVerdict::Unknown,
+        // The model is irrelevant to verdict agreement; report an empty env.
+        SatResult::Sat => OracleVerdict::Sat(Env::new()),
+    }
+}
+
+/// A sliver differential disagreement: ordeal-on-lowered-core vs Z3-on-ext.
+#[derive(Clone, Debug)]
+pub struct SliverDisagreement {
+    /// ordeal's verdict on the lowered core.
+    pub engine: EngineVerdict,
+    /// Z3's verdict on the extended query.
+    pub oracle: OracleVerdict,
+    /// The extended query both were asked.
+    pub assertions: Vec<ExtBoolTerm>,
+}
+
+/// Run a sliver query through BOTH paths and compare verdicts:
+/// (a) [`sliver::lower`] then the ordeal engine on the resulting core, and
+/// (b) Z3 on the [`ExtBoolTerm`] directly via its array/UF theories.
+///
+/// Out-of-sliver queries (a [`sliver::SliverError`]) are skipped (`None`) —
+/// rejection is verified separately. As in [`differential_check`], an
+/// `Unknown` from either side never counts as a disagreement.
+pub fn sliver_differential(assertions: &[ExtBoolTerm]) -> Option<SliverDisagreement> {
+    let core = match sliver::lower(assertions) {
+        Ok(c) => c,
+        Err(_) => return None,
+    };
+    let engine = ordeal_engine(&core);
+    if engine == EngineVerdict::Unknown {
+        return None;
+    }
+    let oracle = sliver_z3_check(assertions);
+    let disagrees = match (&engine, &oracle) {
+        (EngineVerdict::Unknown, _) | (_, OracleVerdict::Unknown) => false,
+        (EngineVerdict::Sat(_), OracleVerdict::Unsat)
+        | (EngineVerdict::Unsat, OracleVerdict::Sat(_)) => true,
+        (EngineVerdict::Sat(_), OracleVerdict::Sat(_))
+        | (EngineVerdict::Unsat, OracleVerdict::Unsat) => false,
+    };
+    disagrees.then(|| SliverDisagreement {
+        engine,
+        oracle,
+        assertions: assertions.to_vec(),
+    })
+}
+
+// ─── Seeded sliver corpus generation ─────────────────────────────────────────
+
+/// Base-array names the sliver corpus reads/writes.
+const ARRAYS: [&str; 2] = ["a", "b"];
+/// Core BV8 variable names shared across generated terms.
+const SLIVER_VARS: [&str; 2] = ["x", "y"];
+
+/// Generate a BV8 extended term. `f` is arity 1 and `g` is arity 2 — the
+/// only two uninterpreted functions, kept at fixed arity so every site is
+/// consistent (the differential exercises verdicts, not rejection).
+fn gen_ext_bv(rng: &mut XorShift64, depth: u32) -> ExtBvTerm {
+    if depth == 0 || rng.below(2) == 0 {
+        return match rng.below(4) {
+            0 => ExtBvTerm::Core(BvTerm::Const {
+                value: rng.below(256) as u128,
+                sort: Sort::new(8),
+            }),
+            1 => ExtBvTerm::Core(BvTerm::Var {
+                name: SLIVER_VARS[rng.below(2) as usize].into(),
+                sort: Sort::new(8),
+            }),
+            2 => {
+                let d = rng.below(3) as u32;
+                let arr = gen_ext_array(rng, d);
+                ExtBvTerm::Select {
+                    array: Box::new(arr),
+                    index: Box::new(concrete_index(rng)),
+                }
+            }
+            _ => {
+                if rng.below(2) == 0 {
+                    ExtBvTerm::PureCall {
+                        name: "f".into(),
+                        args: vec![gen_ext_bv(rng, depth.saturating_sub(1))],
+                        sort: Sort::new(8),
+                    }
+                } else {
+                    ExtBvTerm::PureCall {
+                        name: "g".into(),
+                        args: vec![
+                            gen_ext_bv(rng, depth.saturating_sub(1)),
+                            gen_ext_bv(rng, depth.saturating_sub(1)),
+                        ],
+                        sort: Sort::new(8),
+                    }
+                }
+            }
+        };
+    }
+    let a = gen_ext_bv(rng, depth - 1);
+    let b = gen_ext_bv(rng, depth - 1);
+    ExtBvTerm::Op(Box::new(match rng.below(4) {
+        0 => ExtOp::Add(a, b),
+        1 => ExtOp::Sub(a, b),
+        2 => ExtOp::Xor(a, b),
+        _ => ExtOp::And(a, b),
+    }))
+}
+
+/// A concrete BV32 index in a small range, to force collisions on the
+/// store chain (so read-over-write's hit/miss branches both get exercised).
+fn concrete_index(rng: &mut XorShift64) -> ExtBvTerm {
+    ExtBvTerm::Core(BvTerm::Const {
+        value: rng.below(4) as u128,
+        sort: Sort::new(32),
+    })
+}
+
+/// Build a store chain of the given depth over a random base array.
+fn gen_ext_array(rng: &mut XorShift64, depth: u32) -> ArrayTerm {
+    let base = ArrayTerm::Var {
+        name: ARRAYS[rng.below(2) as usize].into(),
+    };
+    (0..depth).fold(base, |acc, _| ArrayTerm::Store {
+        array: Box::new(acc),
+        index: Box::new(concrete_index(rng)),
+        value: Box::new(gen_ext_bv(rng, 1)),
+    })
+}
+
+/// Generate a BV8 comparison / connective extended boolean term.
+fn gen_ext_bool(rng: &mut XorShift64, depth: u32) -> ExtBoolTerm {
+    if depth == 0 {
+        let (a, b) = (gen_ext_bv(rng, 2), gen_ext_bv(rng, 2));
+        return match rng.below(6) {
+            0 => ExtBoolTerm::Eq(a, b),
+            1 => ExtBoolTerm::Ne(a, b),
+            2 => ExtBoolTerm::Ult(a, b),
+            3 => ExtBoolTerm::Ule(a, b),
+            4 => ExtBoolTerm::Slt(a, b),
+            _ => ExtBoolTerm::Sle(a, b),
+        };
+    }
+    match rng.below(3) {
+        0 => ExtBoolTerm::Not(Box::new(gen_ext_bool(rng, depth - 1))),
+        1 => ExtBoolTerm::And(
+            Box::new(gen_ext_bool(rng, depth - 1)),
+            Box::new(gen_ext_bool(rng, depth - 1)),
+        ),
+        _ => ExtBoolTerm::Or(
+            Box::new(gen_ext_bool(rng, depth - 1)),
+            Box::new(gen_ext_bool(rng, depth - 1)),
+        ),
+    }
+}
+
+/// Generate `n` seeded, reproducible sliver queries (stores/selects over
+/// concrete offsets and shared-name `pure_call`s), each a conjunction of
+/// 1–3 extended assertions. The same `(seed, n)` always yields the same
+/// corpus, so a differential disagreement found in CI replays locally.
+pub fn gen_sliver_corpus(seed: u64, n: usize) -> Vec<Vec<ExtBoolTerm>> {
+    let mut rng = XorShift64::new(seed);
+    (0..n)
+        .map(|_| {
+            let k = 1 + rng.below(3) as usize;
+            (0..k).map(|_| gen_ext_bool(&mut rng, 2)).collect()
+        })
+        .collect()
 }
 
 // ─── Free-variable collection ────────────────────────────────────────────────
@@ -804,5 +1075,203 @@ mod tests {
         assert!(unsats > 0, "corpus produced no engine-UNSAT verdicts");
         // No P1 op is disabled, so nothing should be Unknown.
         assert_eq!(unknowns, 0, "unexpected Unknown verdicts: {unknowns}");
+    }
+}
+
+// ─── Sliver differential tests (UV-014 / UV-015) ─────────────────────────────
+
+#[cfg(test)]
+mod sliver_oracle_tests {
+    use super::*;
+    use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm, SliverError};
+
+    fn c8(v: u128) -> ExtBvTerm {
+        ExtBvTerm::Core(BvTerm::Const {
+            value: v,
+            sort: Sort::new(8),
+        })
+    }
+    fn v8(name: &str) -> ExtBvTerm {
+        ExtBvTerm::Core(BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(8),
+        })
+    }
+    fn call(name: &str, args: Vec<ExtBvTerm>) -> ExtBvTerm {
+        ExtBvTerm::PureCall {
+            name: name.into(),
+            args,
+            sort: Sort::new(8),
+        }
+    }
+
+    /// UV-014: read-over-write lowered core vs Z3's array theory over the
+    /// seeded corpus. Every in-sliver query's ordeal verdict must match Z3.
+    #[test]
+    fn sliver_diff() {
+        let corpus = gen_sliver_corpus(0x5111_5EED_A55A_0001, 300);
+        let (mut sats, mut unsats) = (0u32, 0u32);
+        for (i, query) in corpus.iter().enumerate() {
+            match ordeal_engine(&crate::sliver::lower(query).expect("in-sliver")) {
+                EngineVerdict::Sat(_) => sats += 1,
+                EngineVerdict::Unsat => unsats += 1,
+                EngineVerdict::Unknown => {}
+            }
+            if let Some(d) = sliver_differential(query) {
+                panic!("sliver corpus query {i}: ordeal-vs-Z3 disagreement — {d:?}");
+            }
+        }
+        assert!(sats > 0, "corpus produced no SAT verdicts");
+        assert!(unsats > 0, "corpus produced no UNSAT verdicts");
+    }
+
+    /// UV-014: symbolic index and bad sorts are rejected out of the sliver.
+    #[test]
+    fn sliver_diff_rejects_out_of_sliver() {
+        let sym = ExtBoolTerm::Eq(
+            ExtBvTerm::Select {
+                array: Box::new(ArrayTerm::Var { name: "a".into() }),
+                index: Box::new(v8("i_is_bv8")), // not BV32 and non-constant
+            },
+            c8(0),
+        );
+        // BV8 index is caught as a bad sort first.
+        assert_eq!(
+            crate::sliver::lower(&[sym]).err(),
+            Some(SliverError::BadArraySort)
+        );
+        let sym32 = ExtBoolTerm::Eq(
+            ExtBvTerm::Select {
+                array: Box::new(ArrayTerm::Var { name: "a".into() }),
+                index: Box::new(ExtBvTerm::Core(BvTerm::Var {
+                    name: "i".into(),
+                    sort: Sort::new(32),
+                })),
+            },
+            c8(0),
+        );
+        assert_eq!(
+            crate::sliver::lower(&[sym32]).err(),
+            Some(SliverError::NonConcreteIndex)
+        );
+        // Skipped by the differential (returns None, not a disagreement).
+        assert!(sliver_differential(&[sym32_query()]).is_none());
+    }
+
+    fn sym32_query() -> ExtBoolTerm {
+        ExtBoolTerm::Eq(
+            ExtBvTerm::Select {
+                array: Box::new(ArrayTerm::Var { name: "a".into() }),
+                index: Box::new(ExtBvTerm::Core(BvTerm::Var {
+                    name: "i".into(),
+                    sort: Sort::new(32),
+                })),
+            },
+            c8(0),
+        )
+    }
+
+    /// UV-015: uninterpreted-call lowered core vs Z3's UF theory, including
+    /// hand-built congruence cases, over the seeded corpus.
+    #[test]
+    fn sliver_uf() {
+        // Congruence: f(x)=5, f(y)=7, x=y is UNSAT on BOTH paths.
+        let unsat = vec![
+            ExtBoolTerm::Eq(call("f", vec![v8("x")]), c8(5)),
+            ExtBoolTerm::Eq(call("f", vec![v8("y")]), c8(7)),
+            ExtBoolTerm::Eq(v8("x"), v8("y")),
+        ];
+        assert!(sliver_differential(&unsat).is_none());
+        assert_eq!(
+            ordeal_engine(&crate::sliver::lower(&unsat).unwrap()),
+            EngineVerdict::Unsat
+        );
+        assert_eq!(sliver_z3_check(&unsat), OracleVerdict::Unsat);
+
+        // Distinct args leave results free: SAT on both.
+        let sat = vec![
+            ExtBoolTerm::Eq(call("f", vec![v8("x")]), c8(5)),
+            ExtBoolTerm::Eq(call("f", vec![v8("y")]), c8(7)),
+            ExtBoolTerm::Ne(v8("x"), v8("y")),
+        ];
+        assert!(sliver_differential(&sat).is_none());
+        assert!(matches!(
+            ordeal_engine(&crate::sliver::lower(&sat).unwrap()),
+            EngineVerdict::Sat(_)
+        ));
+
+        // Corpus (which mixes f/g calls and array reads) must agree throughout.
+        let corpus = gen_sliver_corpus(0x5111_0DFF_1CE0_0002, 250);
+        let mut uf_seen = 0u32;
+        for (i, query) in corpus.iter().enumerate() {
+            if mentions_call(query) {
+                uf_seen += 1;
+            }
+            if let Some(d) = sliver_differential(query) {
+                panic!("sliver_uf corpus query {i}: disagreement — {d:?}");
+            }
+        }
+        assert!(uf_seen > 0, "corpus exercised no pure_call sites");
+    }
+
+    /// UV-015: inconsistent call arity/sorts are rejected.
+    #[test]
+    fn sliver_uf_rejects_inconsistent_call() {
+        let q = vec![
+            ExtBoolTerm::Eq(call("f", vec![v8("x")]), c8(1)),
+            ExtBoolTerm::Eq(call("f", vec![v8("x"), v8("y")]), c8(2)),
+        ];
+        assert_eq!(
+            crate::sliver::lower(&q).err(),
+            Some(SliverError::InconsistentCall { name: "f".into() })
+        );
+        assert!(sliver_differential(&q).is_none());
+    }
+
+    fn mentions_call(query: &[ExtBoolTerm]) -> bool {
+        fn in_bv(t: &ExtBvTerm) -> bool {
+            match t {
+                ExtBvTerm::PureCall { .. } => true,
+                ExtBvTerm::Core(_) => false,
+                ExtBvTerm::Select { index, .. } => in_bv(index),
+                ExtBvTerm::Op(op) => in_op(op),
+            }
+        }
+        fn in_op(op: &crate::sliver::ExtOp) -> bool {
+            use crate::sliver::ExtOp::*;
+            match op {
+                Add(a, b)
+                | Sub(a, b)
+                | Mul(a, b)
+                | Udiv(a, b)
+                | And(a, b)
+                | Or(a, b)
+                | Xor(a, b)
+                | Shl(a, b)
+                | Lshr(a, b)
+                | Ashr(a, b)
+                | Rotr(a, b)
+                | Concat(a, b) => in_bv(a) || in_bv(b),
+                Extract { arg, .. } | ZeroExt { arg, .. } | SignExt { arg, .. } => in_bv(arg),
+            }
+        }
+        fn in_bool(t: &ExtBoolTerm) -> bool {
+            use ExtBoolTerm::*;
+            match t {
+                Eq(a, b)
+                | Ne(a, b)
+                | Ult(a, b)
+                | Ule(a, b)
+                | Ugt(a, b)
+                | Uge(a, b)
+                | Slt(a, b)
+                | Sle(a, b)
+                | Sgt(a, b)
+                | Sge(a, b) => in_bv(a) || in_bv(b),
+                Not(x) => in_bool(x),
+                And(a, b) | Or(a, b) => in_bool(a) || in_bool(b),
+            }
+        }
+        query.iter().any(in_bool)
     }
 }
