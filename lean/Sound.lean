@@ -10,9 +10,14 @@
      booleans — no finiteness assumption, no dependence on the kernel's own
      `Assignment` type.
    * Literal semantics follow DIMACS: literal `l` with variable `|l|` holds
-     under σ iff σ(|l|) equals the sign of `l`. Literal 0 cannot reach the
-     semantics of an ACCEPTED run (`load_cnf` rejects it), so the `if` branch
-     it takes is irrelevant to the theorem.
+     under σ iff σ(|l|) equals the sign of `l`. Literals 0 and i32::MIN are
+     rejected KERNEL-SIDE for both the CNF (`load_cnf`) and every
+     certificate clause (`apply_add`), so no assignment ever touches them
+     in an accepted run — the `if` branch literal 0 takes is irrelevant to
+     the theorem. (Spec review 2026-07-02: before `apply_add` validated,
+     certificate clauses could smuggle literal 0 into the live set and the
+     invariant below was false as stated; hardening the kernel — rejecting
+     more is always sound — restored it.)
    * The theorem's CNF is the ACTUAL argument to `check_steps` (`cnf.val`,
      the mathematical list underlying the slice) — not anything derived from
      the certificate. This is what makes the parser untrusted.
@@ -58,7 +63,9 @@ def implies (cnf : List (List Std.I32)) (c : List Std.I32) : Prop :=
    `clauses` is implied (in the sense above) by the original CNF.
    * `load_cnf` establishes it (the live clauses ARE the CNF's clauses).
    * `apply_delete` preserves it (deleting only shrinks the live set).
-   * `apply_add` preserves it: `check_rup = ok` means assuming ¬C and unit-
+   * `apply_add` first validates the clause (no literal 0 / i32::MIN — this
+     is what makes the invariant true under EVERY σ; see the note above),
+     then preserves it: `check_rup = ok` means assuming ¬C and unit-
      propagating through implied live clauses reaches a conflict, so C is
      implied (the classical RUP-soundness lemma, proved by induction over
      the hint chain with an `Assignment`-models-only-consequences invariant).

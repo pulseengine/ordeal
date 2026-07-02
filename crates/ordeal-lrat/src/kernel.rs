@@ -52,6 +52,14 @@ pub enum CoreError {
         /// 0-based index of the offending clause in the input CNF.
         clause_index: usize,
     },
+    /// An addition step's clause contains the literal `0` or `i32::MIN`.
+    /// The text parser already rejects these, but the kernel validates
+    /// independently: the kernel's guarantees must not depend on the
+    /// (untrusted) parser, and rejecting more is always sound.
+    InvalidStepLiteral {
+        /// 0-based step index.
+        step: usize,
+    },
     /// An addition step did not use the next sequential clause id.
     NonSequentialId {
         /// 0-based step index.
@@ -93,9 +101,11 @@ pub enum CoreError {
 }
 
 /// The variable index of a literal. `lit` must be nonzero and not
-/// `i32::MIN` (guaranteed by CNF validation and parsing, and preserved
-/// under negation) — hand-rolled so the Lean model needs no
-/// `unsigned_abs` axiom.
+/// `i32::MIN` — guaranteed KERNEL-SIDE for every literal that reaches an
+/// assignment: `load_cnf` validates the CNF and `apply_add` validates each
+/// certificate clause (both via `clause_has_invalid_literal`), and the
+/// property is preserved under negation. Hand-rolled so the Lean model
+/// needs no `unsigned_abs` axiom.
 fn lit_var(lit: i32) -> usize {
     if lit >= 0 {
         lit as usize
@@ -342,6 +352,14 @@ fn apply_add(
     hints: &[usize],
     step: usize,
 ) -> Result<bool, CoreError> {
+    // Independent kernel-side validation of the certificate clause: the
+    // untrusted parser also rejects 0 / i32::MIN, but the soundness
+    // invariant ("every live clause is implied under EVERY assignment")
+    // must not lean on the parser, and negating i32::MIN must be
+    // impossible in the kernel regardless of who produced the steps.
+    if clause_has_invalid_literal(clause) {
+        return Err(CoreError::InvalidStepLiteral { step });
+    }
     let expected = clauses.len() + 1;
     if id != expected {
         return Err(CoreError::NonSequentialId {
@@ -443,6 +461,17 @@ mod tests {
             check_steps(&cnf, &steps),
             Err(CoreError::DeletedId { step: 1, id: 1 })
         ));
+    }
+
+    #[test]
+    fn rejects_invalid_step_literals() {
+        let cnf = vec![vec![1], vec![-1]];
+        for bad in [0i32, i32::MIN] {
+            assert!(matches!(
+                check_steps(&cnf, &[add(3, &[bad], &[1, 2])]),
+                Err(CoreError::InvalidStepLiteral { step: 0 })
+            ));
+        }
     }
 
     #[test]

@@ -140,11 +140,12 @@ def Step.Insts.CoreCmpEq : core.cmp.Eq Step := {
 }
 
 /-- [kernel::CoreError]
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 49:0-93:1
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 49:0-101:1
     Visibility: public -/
 @[discriminant isize]
 inductive CoreError where
 | InvalidCnfLiteral : Std.Usize → CoreError
+| InvalidStepLiteral : Std.Usize → CoreError
 | NonSequentialId : Std.Usize → Std.Usize → Std.Usize → CoreError
 | UnknownId : Std.Usize → Std.Usize → CoreError
 | DeletedId : Std.Usize → Std.Usize → CoreError
@@ -161,6 +162,9 @@ def CoreError.Insts.CoreCloneClone.clone
   | CoreError.InvalidCnfLiteral __self_0 =>
     let i ← lift (core.clone.impls.CloneUsize.clone __self_0)
     ok (CoreError.InvalidCnfLiteral i)
+  | CoreError.InvalidStepLiteral __self_0 =>
+    let i ← lift (core.clone.impls.CloneUsize.clone __self_0)
+    ok (CoreError.InvalidStepLiteral i)
   | CoreError.NonSequentialId __self_0 __self_1 __self_2 =>
     let i ← lift (core.clone.impls.CloneUsize.clone __self_0)
     let i1 ← lift (core.clone.impls.CloneUsize.clone __self_1)
@@ -203,6 +207,11 @@ def CoreError.Insts.CoreFmtDebug.fmt
       Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugUsize) __self_0
     core.fmt.Formatter.debug_struct_field1_finish f (toStr "InvalidCnfLiteral")
       (toStr "clause_index") __self_01
+  | CoreError.InvalidStepLiteral __self_0 =>
+    let __self_01 :=
+      Dyn.mk _ (core.fmt.DebugShared core.fmt.DebugUsize) __self_0
+    core.fmt.Formatter.debug_struct_field1_finish f (toStr
+      "InvalidStepLiteral") (toStr "step") __self_01
   | CoreError.NonSequentialId __self_0 __self_1 __self_2 =>
     let __self_01 := Dyn.mk _ core.fmt.DebugUsize __self_0
     let __self_11 := Dyn.mk _ core.fmt.DebugUsize __self_1
@@ -265,6 +274,18 @@ def CoreError.Insts.CoreCmpPartialEqCoreError.eq
       match other with
       | CoreError.InvalidCnfLiteral __arg1_0 =>
         lift (core.cmp.impls.PartialEqUsize.eq __self_0 __arg1_0)
+      | CoreError.InvalidStepLiteral _ => ok true
+      | CoreError.NonSequentialId _ _ _ => ok true
+      | CoreError.UnknownId _ _ => ok true
+      | CoreError.DeletedId _ _ => ok true
+      | CoreError.HintNotUnit _ _ => ok true
+      | CoreError.HintsExhausted _ => ok true
+      | CoreError.NoEmptyClause => ok true
+    | CoreError.InvalidStepLiteral __self_0 =>
+      match other with
+      | CoreError.InvalidCnfLiteral _ => ok true
+      | CoreError.InvalidStepLiteral __arg1_0 =>
+        lift (core.cmp.impls.PartialEqUsize.eq __self_0 __arg1_0)
       | CoreError.NonSequentialId _ _ _ => ok true
       | CoreError.UnknownId _ _ => ok true
       | CoreError.DeletedId _ _ => ok true
@@ -274,6 +295,7 @@ def CoreError.Insts.CoreCmpPartialEqCoreError.eq
     | CoreError.NonSequentialId __self_0 __self_1 __self_2 =>
       match other with
       | CoreError.InvalidCnfLiteral _ => ok true
+      | CoreError.InvalidStepLiteral _ => ok true
       | CoreError.NonSequentialId __arg1_0 __arg1_1 __arg1_2 =>
         let b ← lift (core.cmp.impls.PartialEqUsize.eq __self_0 __arg1_0)
         if b
@@ -291,6 +313,7 @@ def CoreError.Insts.CoreCmpPartialEqCoreError.eq
     | CoreError.UnknownId __self_0 __self_1 =>
       match other with
       | CoreError.InvalidCnfLiteral _ => ok true
+      | CoreError.InvalidStepLiteral _ => ok true
       | CoreError.NonSequentialId _ _ _ => ok true
       | CoreError.UnknownId __arg1_0 __arg1_1 =>
         let b ← lift (core.cmp.impls.PartialEqUsize.eq __self_0 __arg1_0)
@@ -304,6 +327,7 @@ def CoreError.Insts.CoreCmpPartialEqCoreError.eq
     | CoreError.DeletedId __self_0 __self_1 =>
       match other with
       | CoreError.InvalidCnfLiteral _ => ok true
+      | CoreError.InvalidStepLiteral _ => ok true
       | CoreError.NonSequentialId _ _ _ => ok true
       | CoreError.UnknownId _ _ => ok true
       | CoreError.DeletedId __arg1_0 __arg1_1 =>
@@ -317,6 +341,7 @@ def CoreError.Insts.CoreCmpPartialEqCoreError.eq
     | CoreError.HintNotUnit __self_0 __self_1 =>
       match other with
       | CoreError.InvalidCnfLiteral _ => ok true
+      | CoreError.InvalidStepLiteral _ => ok true
       | CoreError.NonSequentialId _ _ _ => ok true
       | CoreError.UnknownId _ _ => ok true
       | CoreError.DeletedId _ _ => ok true
@@ -330,6 +355,7 @@ def CoreError.Insts.CoreCmpPartialEqCoreError.eq
     | CoreError.HintsExhausted __self_0 =>
       match other with
       | CoreError.InvalidCnfLiteral _ => ok true
+      | CoreError.InvalidStepLiteral _ => ok true
       | CoreError.NonSequentialId _ _ _ => ok true
       | CoreError.UnknownId _ _ => ok true
       | CoreError.DeletedId _ _ => ok true
@@ -364,7 +390,7 @@ def CoreError.Insts.CoreCmpEq : core.cmp.Eq CoreError := {
 }
 
 /-- [kernel::lit_var]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 99:0-101:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 109:0-115:1 -/
 def lit_var (lit : Std.I32) : Result Std.Usize := do
   if lit >= 0#i32
   then ok (IScalar.hcast .Usize lit)
@@ -372,17 +398,17 @@ def lit_var (lit : Std.I32) : Result Std.Usize := do
        ok (IScalar.hcast .Usize i)
 
 /-- [kernel::Assignment]
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 107:0-109:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 121:0-123:1 -/
 structure Assignment where
   values : alloc.vec.Vec (Option Bool)
 
 /-- [kernel::{kernel::Assignment}::new]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 112:4-114:5 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 126:4-128:5 -/
 def Assignment.new : Result Assignment := do
   ok { values := (alloc.vec.Vec.new (Option Bool)) }
 
 /-- [kernel::{kernel::Assignment}::value]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 119:4-134:5 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 133:4-148:5 -/
 def Assignment.value
   (self : Assignment) (lit : Std.I32) : Result (Option Bool) := do
   let var ← lit_var lit
@@ -400,7 +426,7 @@ def Assignment.value
                         else ok (some (¬ var_value))
 
 /-- [kernel::{kernel::Assignment}::assign_true]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 144:16-146:17 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 158:16-160:17 -/
 @[rust_loop_body]
 def Assignment.assign_true_loop.body
   (var : Std.Usize) (self : Assignment) :
@@ -413,7 +439,7 @@ def Assignment.assign_true_loop.body
   else ok (done self.values)
 
 /-- [kernel::{kernel::Assignment}::assign_true]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 144:16-146:17 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 158:16-160:17 -/
 @[rust_loop]
 def Assignment.assign_true_loop
   (self : Assignment) (var : Std.Usize) :
@@ -424,7 +450,7 @@ def Assignment.assign_true_loop
     self
 
 /-- [kernel::{kernel::Assignment}::assign_true]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 138:4-151:5 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 152:4-165:5 -/
 def Assignment.assign_true
   (self : Assignment) (lit : Std.I32) : Result (Bool × Assignment) := do
   let o ← Assignment.value self lit
@@ -442,7 +468,7 @@ def Assignment.assign_true
               else ok (true, self)
 
 /-- [kernel::get_live]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 155:0-163:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 169:0-177:1 -/
 def get_live
   (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (id : Std.Usize)
   (step : Std.Usize) :
@@ -464,7 +490,7 @@ def get_live
         ok (core.result.Result.Ok s)
 
 /-- [kernel::assume_negation]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 170:4-177:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 184:4-191:1 -/
 @[rust_loop_body]
 def assume_negation_loop.body
   (clause : Slice Std.I32) (assignment : Assignment) (i : Std.Usize) :
@@ -483,7 +509,7 @@ def assume_negation_loop.body
   else ok (done (false, assignment))
 
 /-- [kernel::assume_negation]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 170:4-177:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 184:4-191:1 -/
 @[rust_loop]
 def assume_negation_loop
   (assignment : Assignment) (clause : Slice Std.I32) (i : Std.Usize) :
@@ -494,7 +520,7 @@ def assume_negation_loop
     (assignment, i)
 
 /-- [kernel::assume_negation]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 168:0-177:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 182:0-191:1 -/
 @[reducible]
 def assume_negation
   (assignment : Assignment) (clause : Slice Std.I32) :
@@ -503,7 +529,7 @@ def assume_negation
   assume_negation_loop assignment clause 0#usize
 
 /-- [kernel::contains_lit]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 183:4-190:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 197:4-204:1 -/
 @[rust_loop_body]
 def contains_lit_loop.body
   (lits : Slice Std.I32) (lit : Std.I32) (i : Std.Usize) :
@@ -520,7 +546,7 @@ def contains_lit_loop.body
   else ok (done false)
 
 /-- [kernel::contains_lit]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 183:4-190:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 197:4-204:1 -/
 @[rust_loop]
 def contains_lit_loop
   (lits : Slice Std.I32) (lit : Std.I32) (i : Std.Usize) : Result Bool := do
@@ -529,13 +555,13 @@ def contains_lit_loop
     i
 
 /-- [kernel::contains_lit]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 181:0-190:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 195:0-204:1 -/
 @[reducible]
 def contains_lit (lits : Slice Std.I32) (lit : Std.I32) : Result Bool := do
   contains_lit_loop lits lit 0#usize
 
 /-- [kernel::HintClass]
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 193:0-202:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 207:0-216:1 -/
 @[discriminant isize]
 inductive HintClass where
 | Satisfied : HintClass
@@ -544,7 +570,7 @@ inductive HintClass where
 | Multi : HintClass
 
 /-- [kernel::classify_hint]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 209:4-227:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 223:4-241:1 -/
 @[rust_loop_body]
 def classify_hint_loop.body
   (assignment : Assignment) (clause : Slice Std.I32)
@@ -583,7 +609,7 @@ def classify_hint_loop.body
     | _ => ok (done HintClass.Multi)
 
 /-- [kernel::classify_hint]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 209:4-227:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 223:4-241:1 -/
 @[rust_loop]
 def classify_hint_loop
   (assignment : Assignment) (clause : Slice Std.I32)
@@ -596,14 +622,14 @@ def classify_hint_loop
     (unassigned, i)
 
 /-- [kernel::classify_hint]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 206:0-227:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 220:0-241:1 -/
 @[reducible]
 def classify_hint
   (assignment : Assignment) (clause : Slice Std.I32) : Result HintClass := do
   classify_hint_loop assignment clause (alloc.vec.Vec.new Std.I32) 0#usize
 
 /-- [kernel::check_rup]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-271:5 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-285:5 -/
 @[rust_loop_body]
 def check_rup_loop.body
   (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (hints : Slice Std.Usize)
@@ -647,7 +673,7 @@ def check_rup_loop.body
   else ok (done outcome)
 
 /-- [kernel::check_rup]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-271:5 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-285:5 -/
 @[rust_loop]
 def check_rup_loop
   (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (hints : Slice Std.Usize)
@@ -661,7 +687,7 @@ def check_rup_loop
     (assignment, outcome, i)
 
 /-- [kernel::check_rup]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 235:0-277:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 249:0-291:1 -/
 def check_rup
   (clauses : Slice (Option (alloc.vec.Vec Std.I32)))
   (new_clause : Slice Std.I32) (hints : Slice Std.Usize) (step : Std.Usize) :
@@ -678,7 +704,7 @@ def check_rup
     | some result => ok result
 
 /-- [kernel::clause_has_invalid_literal]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 283:4-290:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 297:4-304:1 -/
 @[rust_loop_body]
 def clause_has_invalid_literal_loop.body
   (clause : Slice Std.I32) (i : Std.Usize) :
@@ -698,7 +724,7 @@ def clause_has_invalid_literal_loop.body
   else ok (done false)
 
 /-- [kernel::clause_has_invalid_literal]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 283:4-290:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 297:4-304:1 -/
 @[rust_loop]
 def clause_has_invalid_literal_loop
   (clause : Slice Std.I32) (i : Std.Usize) : Result Bool := do
@@ -707,13 +733,13 @@ def clause_has_invalid_literal_loop
     i
 
 /-- [kernel::clause_has_invalid_literal]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 281:0-290:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 295:0-304:1 -/
 @[reducible]
 def clause_has_invalid_literal (clause : Slice Std.I32) : Result Bool := do
   clause_has_invalid_literal_loop clause 0#usize
 
 /-- [kernel::load_cnf]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 297:4-305:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 311:4-319:1 -/
 @[rust_loop_body]
 def load_cnf_loop.body
   (cnf : Slice (alloc.vec.Vec Std.I32))
@@ -738,7 +764,7 @@ def load_cnf_loop.body
   else ok (done (core.result.Result.Ok clauses))
 
 /-- [kernel::load_cnf]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 297:4-305:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 311:4-319:1 -/
 @[rust_loop]
 def load_cnf_loop
   (cnf : Slice (alloc.vec.Vec Std.I32))
@@ -751,7 +777,7 @@ def load_cnf_loop
     (clauses, i)
 
 /-- [kernel::load_cnf]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 294:0-305:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 308:0-319:1 -/
 @[reducible]
 def load_cnf
   (cnf : Slice (alloc.vec.Vec Std.I32)) :
@@ -762,7 +788,7 @@ def load_cnf
     0#usize
 
 /-- [kernel::clear_slot]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 311:0-313:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 325:0-327:1 -/
 def clear_slot
   (slot : Option (alloc.vec.Vec Std.I32)) :
   Result (Option (alloc.vec.Vec Std.I32))
@@ -770,7 +796,7 @@ def clear_slot
   ok none
 
 /-- [kernel::apply_delete]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 323:4-330:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 337:4-344:1 -/
 @[rust_loop_body]
 def apply_delete_loop.body
   (ids : Slice Std.Usize) (step : Std.Usize)
@@ -801,7 +827,7 @@ def apply_delete_loop.body
   else ok (done (core.result.Result.Ok (), clauses))
 
 /-- [kernel::apply_delete]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 323:4-330:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 337:4-344:1 -/
 @[rust_loop]
 def apply_delete_loop
   (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (ids : Slice Std.Usize)
@@ -814,7 +840,7 @@ def apply_delete_loop
     (clauses, i)
 
 /-- [kernel::apply_delete]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 317:0-330:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 331:0-344:1 -/
 @[reducible]
 def apply_delete
   (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (ids : Slice Std.Usize)
@@ -825,37 +851,41 @@ def apply_delete
   apply_delete_loop clauses ids step 0#usize
 
 /-- [kernel::apply_add]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 334:0-356:1 -/
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 348:0-378:1 -/
 def apply_add
   (clauses : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32))) (id : Std.Usize)
   (clause : Slice Std.I32) (hints : Slice Std.Usize) (step : Std.Usize) :
   Result ((core.result.Result Bool CoreError) × (alloc.vec.Vec (Option
     (alloc.vec.Vec Std.I32))))
   := do
-  let i := alloc.vec.Vec.len clauses
-  let expected ← i + 1#usize
-  if id != expected
-  then
-    ok (core.result.Result.Err (CoreError.NonSequentialId step expected id),
-      clauses)
+  let b ← clause_has_invalid_literal clause
+  if b
+  then ok (core.result.Result.Err (CoreError.InvalidStepLiteral step), clauses)
   else
-    let s := alloc.vec.Vec.deref clauses
-    let r ← check_rup s clause hints step
-    let cf ← core.result.Result.Insts.CoreOpsTry.branch r
-    match cf with
-    | core.ops.control_flow.ControlFlow.Continue _ =>
-      let i1 := Slice.len clause
-      let v ← alloc.slice.Slice.to_vec core.clone.CloneI32 clause
-      let clauses1 ← alloc.vec.Vec.push clauses (some v)
-      ok (core.result.Result.Ok (i1 = 0#usize), clauses1)
-    | core.ops.control_flow.ControlFlow.Break residual =>
-      let r1 ←
-        core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual
-          Bool (core.convert.FromSame CoreError) residual
-      ok (r1, clauses)
+    let i := alloc.vec.Vec.len clauses
+    let expected ← i + 1#usize
+    if id != expected
+    then
+      ok (core.result.Result.Err (CoreError.NonSequentialId step expected id),
+        clauses)
+    else
+      let s := alloc.vec.Vec.deref clauses
+      let r ← check_rup s clause hints step
+      let cf ← core.result.Result.Insts.CoreOpsTry.branch r
+      match cf with
+      | core.ops.control_flow.ControlFlow.Continue _ =>
+        let i1 := Slice.len clause
+        let v ← alloc.slice.Slice.to_vec core.clone.CloneI32 clause
+        let clauses1 ← alloc.vec.Vec.push clauses (some v)
+        ok (core.result.Result.Ok (i1 = 0#usize), clauses1)
+      | core.ops.control_flow.ControlFlow.Break residual =>
+        let r1 ←
+          core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual
+            Bool (core.convert.FromSame CoreError) residual
+        ok (r1, clauses)
 
 /-- [kernel::check_steps]: loop body 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-393:5
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-415:5
     Visibility: public -/
 @[rust_loop_body]
 def check_steps_loop.body
@@ -909,7 +939,7 @@ def check_steps_loop.body
   else ok (done outcome)
 
 /-- [kernel::check_steps]: loop 0:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-393:5
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 1:0-415:5
     Visibility: public -/
 @[rust_loop]
 def check_steps_loop
@@ -925,7 +955,7 @@ def check_steps_loop
     (clauses, outcome, step_index)
 
 /-- [kernel::check_steps]:
-    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 364:0-399:1
+    Source: 'crates/ordeal-lrat/src/kernel.rs', lines 386:0-421:1
     Visibility: public -/
 def check_steps
   (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step) :
