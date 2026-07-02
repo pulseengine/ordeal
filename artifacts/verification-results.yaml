@@ -1,0 +1,366 @@
+# Verification Executions and Verdicts (evidence)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# Each verification-execution pins a run of the measures against a specific
+# commit; each verification-verdict records one measure's executed result
+# with a link to the CI evidence. These are what make a `verifies` link an
+# EXECUTED verification rather than a plan (the right side of the V).
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: VE-001
+    type: verification-execution
+    title: P1 milestone execution — main @ 695e2c9
+    description: >
+      The P1 merge (PR #10): full test suite, wasip2 gate, Bazel build, and
+      the 300-query differential-vs-Z3 corpus (PR-level oracle job, 2m54s).
+    status: implemented
+    fields:
+      version: main-p1
+      commit: 695e2c9
+      timestamp: "2026-07-02T06:34:06Z"
+      executor: github-actions
+      environment:
+        ci-run: https://github.com/pulseengine/ordeal/actions/runs/28570461881
+        oracle-job: https://github.com/pulseengine/ordeal/actions/runs/28570281197/job/84706328010
+
+  - id: VE-002
+    type: verification-execution
+    title: P2 certificate-path execution — main @ cc96094
+    description: >
+      The P2 merge (PR #13): every CI job individually green on main —
+      Test (all suites incl. LRAT emission acceptance), Clippy, Format,
+      release build, wasm32-wasip2, Bazel graph, and the Z3 Oracle job
+      (differential corpus through the certificate-checked pipeline).
+    status: implemented
+    fields:
+      version: main-p2
+      commit: cc96094
+      timestamp: "2026-07-02T10:44:00Z"
+      executor: github-actions
+      environment:
+        ci-run: https://github.com/pulseengine/ordeal/actions/runs/28583703141
+
+  - id: VV-001
+    type: verification-verdict
+    title: "UV-001 pass — Evaluator corner cases"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-001
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-002
+    type: verification-verdict
+    title: "UV-002 pass — AIG constructor laws"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-002
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-003
+    type: verification-verdict
+    title: "UV-003 pass — Tseitin equisatisfiability"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-003
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-004
+    type: verification-verdict
+    title: "UV-004 pass — CDCL vs brute force"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-004
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-005
+    type: verification-verdict
+    title: "UV-005 pass — Bitwise blast vs oracle"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-005
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-006
+    type: verification-verdict
+    title: "UV-006 pass — Arith blast vs oracle"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-006
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-007
+    type: verification-verdict
+    title: "UV-007 pass — Shift blast vs oracle"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-007
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-008
+    type: verification-verdict
+    title: "UV-008 pass — Muldiv blast vs oracle"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-008
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-009
+    type: verification-verdict
+    title: "UV-009 pass — Structural blast vs oracle"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-009
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-010
+    type: verification-verdict
+    title: "UV-010 pass — Differential harness"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-010
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-011
+    type: verification-verdict
+    title: "UV-011 pass — LRAT checker mutation suite"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-011
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-012
+    type: verification-verdict
+    title: "UV-012 pass — Pipeline dispatcher gate"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-012
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-013
+    type: verification-verdict
+    title: "UV-013 pass — LRAT emission acceptance"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-013
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job, main @ cc96094)"
+
+  - id: VV-014
+    type: verification-verdict
+    title: "VER-001 pass — differential-vs-Z3 verdict agreement"
+    description: >
+      Executed pass. 300-query seeded corpus, zero disagreements, SAT and UNSAT exercised.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-001
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Z3 Oracle job success) and https://github.com/pulseengine/ordeal/actions/runs/28570281197/job/84706328010 (P1 milestone run)"
+
+  - id: VV-015
+    type: verification-verdict
+    title: "VER-007 pass — LRAT emission + checker accept/reject"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-007
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job: lrat:: acceptance incl. PHP(4,3) and random UNSAT corpus; ordeal-lrat mutation suite 13/13)"
+
+  - id: VV-016
+    type: verification-verdict
+    title: "VER-011 pass — API scope and one-shot unit tests"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-011
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job: solver:: suite)"
+
+  - id: VV-017
+    type: verification-verdict
+    title: "VER-012 pass — P0 and P1 phase acceptance gates"
+    description: >
+      Executed pass. Scope: the P0 and P1 gates only. P2 gate partially met (certificate path landed; Lean discharge open, issue #12); P3-P5 not yet due.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-012
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "P0: compiles with/without oracle, check sound (https://github.com/pulseengine/ordeal/actions/runs/28570461881); P1: differential milestone (https://github.com/pulseengine/ordeal/actions/runs/28570281197/job/84706328010)"
+
+  - id: VV-018
+    type: verification-verdict
+    title: "VER-013 pass — wasm32-wasip2 blocking gate"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-013
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Build (wasm32-wasip2) job success)"
+
+  - id: VV-019
+    type: verification-verdict
+    title: "VER-014 pass — Bazel build via org rules"
+    description: >
+      Executed pass.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-014
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Bazel build job success; local bazel build //... 112 actions)"
+
+  - id: VV-020
+    type: verification-verdict
+    title: "VER-001 pass at the P1 milestone execution"
+    description: >
+      The original P1-exit run of the differential measure: ordeal's raw
+      verdicts vs Z3 across the 300-query seeded corpus, zero disagreements
+      (pre-certificate pipeline). Superseded-but-corroborated by VV-014 on
+      the P2 execution.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-001
+      - type: part-of-execution
+        target: VE-001
+      - type: traces-to
+        target: VV-014
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28570281197/job/84706328010 (Z3 Oracle job, 2m54s, pass)"
+
+  - id: VV-021
+    type: verification-verdict
+    title: "VER-005 pass — scope rejection by construction + sortedness errors"
+    description: >
+      Executed pass. The closed fragment/API cannot express quantifiers, FP,
+      optimization, or push/pop (rejection by construction); distinct
+      sortedness errors and the ill-sorted-to-Unknown path are tested.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-005
+      - type: part-of-execution
+        target: VE-002
+    fields:
+      verdict: pass
+      evidence: "https://github.com/pulseengine/ordeal/actions/runs/28583703141 (Test job: solver:: suite incl. ill_sorted + validate diagnostics)"

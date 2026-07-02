@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Verification evidence layer: `verification-execution` / `verification-verdict`
+  artifacts pin each measure's executed result to CI runs (the right side of
+  the V is now evidence, not plan). 47 artifacts advanced to `verified`;
+  `rivet release status v0.1.0` reports **cuttable**. New CI job
+  `Reproducible build` (VER-003): dependency-free assert + bit-identical
+  double build. VER-004 (loom/synth call-site conformance) moved to v0.4.0
+  and VER-008 (CaDiCaL parity) to v0.6.0 as logged scope decisions.
+
 - **P2 certificate path: `Unsat` is now checker-validated.**
   - `lrat.rs` — LRAT emission from the CDCL proof trace (pure formatting of
     the RUP-ordered antecedent chains; strictly sequential ids in exactly

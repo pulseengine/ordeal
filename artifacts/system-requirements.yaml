@@ -15,7 +15,7 @@ artifacts:
       formulas over the fragment used by loom and synth, and on SAT return a
       concrete counterexample model assigning a value to every free bit-vector
       variable. The interface is one-shot check-sat (no incremental solving).
-    status: draft
+    status: verified
     tags: [qf-bv, check-sat, model]
     links:
       - type: derives-from
@@ -79,7 +79,7 @@ artifacts:
       every query during development and CI, and as a benchmark rival for
       performance comparison. Z3 shall not be part of the production solving path
       nor part of the soundness argument.
-    status: draft
+    status: verified
     tags: [z3, oracle, differential, benchmark]
     links:
       - type: derives-from
@@ -142,7 +142,7 @@ artifacts:
       uninterpreted-function congruence sliver. Quantifiers, floating-point,
       optimization objectives, and incremental solving are explicitly out of
       scope.
-    status: draft
+    status: verified
     tags: [scope, fragment]
     links:
       - type: derives-from
