@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rivet release management adopted (requires rivet ≥ 0.23):
+  - Phase artifacts renamed `FEAT-P0`…`FEAT-P5` → `FEAT-000`…`FEAT-005` so
+    they are valid commit-trailer references (`Implements: FEAT-001`).
+  - 33 artifacts scoped to releases via the `release:` field — v0.1.0 = P0
+    (skeleton), v0.2.0 = P1, v0.3.0 = P2, v0.4.0 = P3, v0.5.0 = P4,
+    v0.6.0 = P5. `rivet release status <version>` is the cuttability
+    burn-down.
+
 - Rivet artifact graph reconciled with the architecture decisions:
   - `FEAT-P0`…`FEAT-P5` now mirror ROADMAP.md's phase breakdown one-to-one
     (P0 skeleton, P1 bit-blaster + own SAT core, P2 LRAT + verified checker,

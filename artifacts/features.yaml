@@ -13,7 +13,7 @@
 # Format: rivet generic-yaml
 
 artifacts:
-  - id: FEAT-P0
+  - id: FEAT-000
     type: sw-req
     title: "P0 — Skeleton: closed fragment, sound-by-construction interface"
     description: >
@@ -24,6 +24,7 @@ artifacts:
       CI-gated, Bazel build mirroring org conventions. Deliverable: the crate
       compiles with and without the oracle feature and check is provably sound.
     status: implemented
+    release: v0.1.0
     tags: [roadmap, p0, skeleton, closed-fragment, wasip2]
     links:
       - type: derives-from
@@ -41,7 +42,7 @@ artifacts:
         Crate compiles with and without the oracle feature; check returns only
         Unknown (never authorizes a transformation); wasip2 build gate green.
 
-  - id: FEAT-P1
+  - id: FEAT-001
     type: sw-req
     title: "P1 — Bit-blaster + own pure-Rust CDCL SAT core + oracle wired"
     description: >
@@ -55,6 +56,7 @@ artifacts:
       rejected with clear errors. Deliverable: ordeal decides the fragment and
       agrees with the Z3 oracle across a differential corpus.
     status: draft
+    release: v0.2.0
     tags: [roadmap, p1, qf-bv, bit-blaster, cdcl, oracle]
     links:
       - type: derives-from
@@ -81,7 +83,7 @@ artifacts:
         to true; any ordeal-vs-oracle disagreement disables the op (reverts to
         Unknown) until its bit-blasting rule is fixed.
 
-  - id: FEAT-P2
+  - id: FEAT-002
     type: sw-req
     title: "P2 — LRAT emission + verified checker (Z3 demoted)"
     description: >
@@ -93,6 +95,7 @@ artifacts:
       model. Milestone: every Unsat verdict is backed by a certificate the
       verified checker validated; Z3 is demoted to oracle and benchmark rival.
     status: draft
+    release: v0.3.0
     tags: [roadmap, p2, lrat, checker, aeneas, lean, milestone]
     links:
       - type: derives-from
@@ -113,7 +116,7 @@ artifacts:
         theorem discharged; an Unsat is never returned unless the verified
         checker accepted its LRAT proof.
 
-  - id: FEAT-P3
+  - id: FEAT-003
     type: sw-req
     title: "P3 — loom array/UF sliver + loom/synth integration"
     description: >
@@ -126,6 +129,7 @@ artifacts:
       (translation-validation queries). Deliverable: loom and synth verify
       against ordeal by default.
     status: draft
+    release: v0.4.0
     tags: [roadmap, p3, array, uf, loom, synth, integration]
     links:
       - type: derives-from
@@ -141,7 +145,7 @@ artifacts:
         Array/UF queries reduce to QF_BV and agree with Z3; out-of-sliver
         constructs rejected; loom and synth verify against ordeal by default.
 
-  - id: FEAT-P4
+  - id: FEAT-004
     type: sw-req
     title: "P4 — drop Z3 from soundness; op-by-op bit-blaster proofs"
     description: >
@@ -154,6 +158,7 @@ artifacts:
       oracle feature removes Z3 completely with no effect on correctness
       guarantees.
     status: draft
+    release: v0.5.0
     tags: [roadmap, p4, soundness, bit-blaster, formal-verification]
     links:
       - type: derives-from
@@ -170,7 +175,7 @@ artifacts:
         semantics; removing the oracle feature removes Z3 with no effect on
         correctness guarantees.
 
-  - id: FEAT-P5
+  - id: FEAT-005
     type: sw-req
     title: "P5 — performance (hashing, rewrites, trimming, benchmarks)"
     description: >
@@ -181,6 +186,7 @@ artifacts:
       engine. Deliverable: performance within the CI budget with measured
       benchmarks.
     status: draft
+    release: v0.6.0
     tags: [roadmap, p5, performance, benchmark]
     links:
       - type: derives-from
