@@ -266,7 +266,11 @@ artifacts:
       (the trust-boundary requirement of TR-006): parses textual LRAT,
       checks each addition step by reverse-unit-propagation using the given
       hint chain, processes deletions, and accepts only if the empty clause
-      is derived. This is the Rust implementation that the Aeneas -> Lean
+      is derived. Split for the proof: the string-free kernel module
+      (Step / check_steps) is the translation target carrying the soundness
+      theorem, and the text parser stays outside it — soundly, since the CNF
+      reaches the kernel directly and a parser bug cannot manufacture an
+      acceptance. This is the Rust implementation that the Aeneas -> Lean
       soundness proof (TR-013, P2) will be discharged against; mutation
       tests (corrupted certificates must be rejected) are part of the unit
       verification.

@@ -33,16 +33,18 @@ Key decisions (don't relitigate):
 - Statuses: artifacts go `implemented` when code+measure exist and pass;
   `verified` needs executed-result evidence (release-execution work).
 
-In flight / next:
-- v0.2.0 burn-down: 30 implemented / 5 draft (TR-004 LRAT emission, VER-003
-  reproducible-build job, VER-004 license check, VER-005 rejection suite,
-  VER-008 CaDiCaL parity). Not cuttable until statuses reach `verified` —
-  needs `rivet import-results` wiring of CI evidence.
-- P2 next: LRAT emission from the CDCL trace + wire ordeal-lrat into
-  `check` + Aeneas→Lean verification (TR-005/006/013, FEAT-002, v0.3.0).
-- 3 dependabot PRs open (#4 attest-build-provenance 1→4, #6
-  download-artifact 4→8, #7 checkout 4→7) — #4/#6 touch the tag-only
-  release path; handle in a release-pipeline pass.
-- Upstream rivet defects: #648 (non-authorable inverses; 82+ bidirectional
-  findings permanently open), #649 (transitive externals fail validate; use
-  `--skip-external-validation`). Both re-confirmed on rivet 0.23.0.
+**Pass 2 (same day): P2 + closure DONE** — certificate path merged (PR #13):
+Unsat carries ordeal-lrat-validated LRAT; evidence layer merged (PR #14):
+VE/VV artifacts with CI URLs, ~49 verified, v0.1.0+v0.2.0 CUTTABLE; repro
+CI job; VER-004→v0.4.0, VER-008→v0.6.0 moved; dependabot #4/#6/#7 merged;
+Lean obligation scaffolded (lean/README.md, issue #12) — TR-006/TR-013/
+FEAT-002/VER-002/VER-015 block v0.3.0 until the proof discharges.
+
+**Pass 3 (in flight): cutting v0.2.0 then starting v0.3.0** —
+- Branch protection NOW ENFORCED on main (7 required checks, admins too).
+- PR #16 = release prep (version 0.2.0, two-crate publish order: ordeal-lrat
+  first; ordeal cannot `cargo package` before the checker is on the index).
+- After merge: tag v0.2.0 → release.yml + crates.io publish; verify assets.
+- Then v0.3.0: plan is to split ordeal-lrat into parser + string-free core
+  so the Aeneas target is small; Aeneas NOT installed (OCaml toolchain).
+- Upstream rivet defects: #648/#649 unchanged (--skip-external-validation).
