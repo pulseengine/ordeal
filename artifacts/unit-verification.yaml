@@ -283,3 +283,43 @@ artifacts:
       steps:
         run: "cargo test -p ordeal lrat:: solver::"
         coverage: "UNSAT corpus acceptance; mutation rejection; cert threading"
+
+  - id: UV-014
+    type: unit-verification
+    title: Read-over-write elimination vs evaluator and Z3
+    description: >
+      Array select/store queries over concrete offsets lower to pure QF_BV
+      that agrees with a concrete array evaluator and with Z3's array theory
+      on the seeded corpus; symbolic indices and whole-array equality are
+      rejected with the documented SliverError.
+    status: draft
+    release: v0.4.0
+    tags: [p3, sliver, array, unit-test]
+    links:
+      - type: verifies
+        target: DES-015
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal sliver::array && cargo test -p ordeal --features oracle sliver_diff"
+        coverage: "read-over-write vs eval + Z3; out-of-sliver rejection"
+
+  - id: UV-015
+    type: unit-verification
+    title: Ackermannization vs Z3 UF theory
+    description: >
+      pure_call queries lower to pure QF_BV whose verdict matches Z3's UF
+      theory on the seeded corpus, including the congruence property
+      (equal args force equal results) and cross-site interactions;
+      inconsistent call arities/sorts are rejected.
+    status: draft
+    release: v0.4.0
+    tags: [p3, sliver, uf, unit-test]
+    links:
+      - type: verifies
+        target: DES-016
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --features oracle sliver_uf"
+        coverage: "Ackermannization vs Z3 UF; congruence; inconsistent-call rejection"
