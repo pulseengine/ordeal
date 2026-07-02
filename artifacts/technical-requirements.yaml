@@ -155,7 +155,7 @@ artifacts:
       CNF is unsatisfiable. The checker is the sole trusted component and must
       be independent of the solver's internal data structures.
     status: draft
-    release: v0.3.0
+    release: v0.5.0
     tags: [lrat, checker, verified, trusted-core]
     links:
       - type: derives-from
@@ -203,8 +203,8 @@ artifacts:
       equality) via eager read-over-write rewriting, and uninterpreted-function
       congruence (pure_call) via Ackermannization. This sliver shall be handled
       by preprocessing into the QF_BV core — no DPLL(T) theory solver.
-    status: draft
-    release: v0.4.0
+    status: verified
+    release: v0.3.0
     tags: [array, uf, ackermannization, read-over-write, loom]
     links:
       - type: derives-from
@@ -344,7 +344,7 @@ artifacts:
       how the verified-checker soundness obligation is met; the checker remains
       the sole trusted component with no link dependency on the solver core.
     status: draft
-    release: v0.3.0
+    release: v0.5.0
     tags: [lrat, checker, aeneas, lean, rules_lean, verified, trusted-core]
     links:
       - type: derives-from

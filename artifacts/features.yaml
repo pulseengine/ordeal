@@ -95,7 +95,7 @@ artifacts:
       model. Milestone: every Unsat verdict is backed by a certificate the
       verified checker validated; Z3 is demoted to oracle and benchmark rival.
     status: draft
-    release: v0.3.0
+    release: v0.5.0
     tags: [roadmap, p2, lrat, checker, aeneas, lean, milestone]
     links:
       - type: derives-from
