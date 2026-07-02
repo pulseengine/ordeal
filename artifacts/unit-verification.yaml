@@ -261,3 +261,25 @@ artifacts:
       steps:
         run: "cargo test -p ordeal solver::"
         coverage: "Enablement gate; model self-check; no unchecked Unsat"
+
+  - id: UV-013
+    type: unit-verification
+    title: LRAT emission — checker acceptance across the UNSAT corpus
+    description: >
+      For engine-UNSAT queries (directed cases plus every UNSAT the seeded
+      corpus produces), the emitted LRAT certificate is accepted by
+      ordeal-lrat; a mutated certificate (dropped line, reordered hints) is
+      rejected; the solver returns Unsat-with-certificate only on acceptance,
+      and the certificate carried in the returned Certificate is the
+      validated one.
+    status: draft
+    release: v0.3.0
+    tags: [p2, lrat, emission, unit-test]
+    links:
+      - type: verifies
+        target: DES-013
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal lrat:: solver::"
+        coverage: "UNSAT corpus acceptance; mutation rejection; cert threading"

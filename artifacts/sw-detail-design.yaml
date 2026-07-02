@@ -104,6 +104,10 @@ artifacts:
         target: ARC-005
       - type: satisfies
         target: TR-004
+      - type: traces-to
+        target: TR-005
+      - type: traces-to
+        target: TR-011
     fields:
       unit: crates/ordeal/src/sat.rs
       function: "SatSolver::solve(&CnfFormula) -> SatResult"
@@ -309,3 +313,39 @@ artifacts:
     fields:
       unit: crates/ordeal/src/solver.rs
       function: "Solver::check() -> CheckResult"
+
+  - id: DES-013
+    type: sw-detail-design
+    title: LRAT emission from the CDCL proof trace (lrat.rs)
+    description: >
+      Formats the CDCL proof trace (DES-004's RUP-ordered LearnedSteps) as a
+      textual LRAT certificate in exactly the dialect ordeal-lrat (DES-011)
+      consumes: addition line id n+k+1 for the k-th learned step over n input
+      clauses (strictly sequential ids), hints as 1-based antecedent clause
+      ids in the recorded RUP order, terminated by the empty-clause step. No
+      deletion lines are emitted (the CDCL keeps learned clauses). Solver
+      pipeline wiring: on engine-UNSAT, emit the certificate, run the
+      ordeal-lrat checker on it, and return Unsat carrying the certificate
+      ONLY if the checker accepts — a rejected certificate returns Unknown
+      (never an unchecked Unsat). Until the Aeneas-to-Lean soundness theorem
+      (TR-013) is discharged, trust rests on the small mutation-tested Rust
+      checker; the discharge is what completes FEAT-002.
+    status: draft
+    release: v0.3.0
+    tags: [p2, lrat, emission, certificate]
+    links:
+      - type: refines
+        target: ARC-005
+      - type: satisfies
+        target: TR-005
+      - type: traces-to
+        target: DES-011
+      - type: traces-to
+        target: DES-004
+      - type: traces-to
+        target: TR-013
+      - type: traces-to
+        target: FEAT-002
+    fields:
+      unit: crates/ordeal/src/lrat.rs
+      function: "emit_lrat(n_orig, trace) -> String"
