@@ -136,7 +136,7 @@ artifacts:
       derived terms over the closed core (+ ite where a sign-mask needs a
       select). Pure term constructors, no new blast rules. Documented as the
       blessed forms so consumers don't re-derive them.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [field, lowering, derived-ops]
     links:
@@ -195,7 +195,7 @@ artifacts:
       Each lowering helper (not/neg/rotl/urem/sdiv/srem) agrees with Z3's
       native operator across widths 8/32/64, including division-by-zero and
       signed-boundary (INT_MIN, -1) edges from #29's battery.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [field, lowering, unit-test]
     links:
