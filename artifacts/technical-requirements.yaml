@@ -155,7 +155,7 @@ artifacts:
       CNF is unsatisfiable. The checker is the sole trusted component and must
       be independent of the solver's internal data structures.
     status: draft
-    release: v0.5.0
+    release: v0.4.0
     tags: [lrat, checker, verified, trusted-core]
     links:
       - type: derives-from
@@ -230,7 +230,7 @@ artifacts:
       per-operation integration latency (in-process, no SMT-LIB parsing, no
       theory combination), not out-solving Z3's SAT engine.
     status: draft
-    release: v0.6.0
+    release: v0.7.0
     tags: [performance, structural-hashing, rewrites, trimming, benchmark]
     links:
       - type: derives-from
@@ -344,7 +344,7 @@ artifacts:
       how the verified-checker soundness obligation is met; the checker remains
       the sole trusted component with no link dependency on the solver core.
     status: draft
-    release: v0.5.0
+    release: v0.4.0
     tags: [lrat, checker, aeneas, lean, rules_lean, verified, trusted-core]
     links:
       - type: derives-from

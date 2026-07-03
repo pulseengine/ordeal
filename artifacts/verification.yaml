@@ -45,7 +45,7 @@ artifacts:
       solver internals, establishing that the trusted computing base is exactly
       the checker.
     status: draft
-    release: v0.5.0
+    release: v0.4.0
     tags: [soundness, lrat, checker, formal-verification, trusted-core]
     links:
       - type: verifies
@@ -91,7 +91,7 @@ artifacts:
       call sites and that no incremental (push/pop) surface is exposed, and that
       crate metadata declares the Apache-2.0 license.
     status: draft
-    release: v0.4.0
+    release: v0.6.0
     tags: [api, license, integration]
     links:
       - type: verifies
@@ -179,7 +179,7 @@ artifacts:
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
     status: draft
-    release: v0.6.0
+    release: v0.7.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
       - type: verifies
@@ -220,7 +220,7 @@ artifacts:
       theory combination) against the CI budget. Confirms AIG structural hashing
       and LRAT trimming measurably reduce work.
     status: draft
-    release: v0.6.0
+    release: v0.7.0
     tags: [benchmark, performance, latency, z3-rival]
     links:
       - type: verifies
@@ -347,7 +347,7 @@ artifacts:
       Also confirms the checker has no build or link dependency on the solver
       core, so the trusted computing base is exactly the checker.
     status: draft
-    release: v0.5.0
+    release: v0.4.0
     tags: [aeneas, lean, lrat, checker, soundness, rules_lean, trusted-core]
     links:
       - type: verifies
