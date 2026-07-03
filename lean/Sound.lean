@@ -905,6 +905,78 @@ theorem pAssignLit_neg (A : PAsn) (lit neg : Std.I32) (h0 : lit.val ≠ 0)
   unfold pAssignLit pAssumeFalse
   rw [hlv, hpol]
 
+/-- `pAssumeNeg` folds left-to-right with short-circuit, so it splits over
+    concatenation. -/
+theorem pAssumeNeg_append (A : PAsn) (xs ys : List Std.I32) :
+    pAssumeNeg A (xs ++ ys) = (pAssumeNeg A xs).bind (fun A' => pAssumeNeg A' ys) := by
+  induction xs generalizing A with
+  | nil => simp [pAssumeNeg]
+  | cons h t ih =>
+    simp only [List.cons_append, pAssumeNeg]
+    cases pAssumeFalse A h with
+    | none => rfl
+    | some A' => exact ih A'
+
+/-- Fourth simulation leaf: `assume_negation` refines `pAssumeNeg`. It assumes
+    every clause literal false (assigns its negation true); the returned flag
+    is the tautology/conflict signal. -/
+theorem assume_negation_refines (Ak : kernel.Assignment) (Ap : PAsn)
+    (clause : Slice Std.I32) (hrel : RelAsn Ak Ap)
+    (hvalid : ∀ lit ∈ clause.val, ValidLit lit) :
+    kernel.assume_negation Ak clause ⦃ (p : Bool × kernel.Assignment) =>
+      match pAssumeNeg Ap clause.val with
+      | none => p.1 = true
+      | some Ap' => p.1 = false ∧ RelAsn p.2 Ap' ⦄ := by
+  unfold kernel.assume_negation kernel.assume_negation_loop
+  apply loop.spec_decr_nat
+    (measure := fun (s : kernel.Assignment × Std.Usize) =>
+      clause.val.length - s.2.val)
+    (inv := fun (s : kernel.Assignment × Std.Usize) =>
+      s.2.val ≤ clause.val.length ∧
+      ∃ Api, pAssumeNeg Ap (clause.val.take s.2.val) = some Api ∧ RelAsn s.1 Api)
+  · rintro ⟨asg, i⟩ ⟨hle, Api, hpn, hrelI⟩
+    unfold kernel.assume_negation_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      step as ⟨lit, hlit⟩
+      have hmem : lit ∈ clause.val := by rw [hlit]; exact List.getElem_mem _
+      have hvlit : ValidLit lit := hvalid lit hmem
+      step as ⟨negl, hnegl⟩
+      have hvneg : ValidLit negl := valid_neg lit negl hvlit hnegl
+      have htake : clause.val.take (i.val + 1) = clause.val.take i.val ++ [lit] := by
+        rw [List.take_add_one, List.getElem?_eq_getElem (by scalar_tac), ← hlit]
+        simp
+      have hkey : (some Api).bind (fun A' => pAssumeNeg A' [lit]) = pAssumeFalse Api lit := by
+        show pAssumeNeg Api [lit] = pAssumeFalse Api lit
+        simp only [pAssumeNeg]; cases pAssumeFalse Api lit <;> rfl
+      have hpsplit : pAssumeNeg Ap clause.val
+          = (pAssumeFalse Api lit).bind (fun A' => pAssumeNeg A' (clause.val.drop (i.val + 1))) := by
+        conv_lhs => rw [← List.take_append_drop (i.val + 1) clause.val, pAssumeNeg_append,
+          htake, pAssumeNeg_append, hpn, hkey]
+      step with (assign_true_refines asg Api negl hrelI hvneg) as ⟨b2, asg2, hp2⟩
+      rw [pAssignLit_neg Api lit negl hvlit.1 hnegl] at hp2
+      split
+      · rename_i hb
+        cases hpf : pAssumeFalse Api lit with
+        | none => simp [hpsplit, hpf]
+        | some Ap' => rw [hpf] at hp2; simp_all
+      · rename_i hb
+        cases hpf : pAssumeFalse Api lit with
+        | none => rw [hpf] at hp2; simp_all
+        | some Ap' =>
+          rw [hpf] at hp2
+          obtain ⟨_, hrel'⟩ := hp2
+          step as ⟨i4, hi4⟩
+          refine ⟨by scalar_tac, ⟨Ap', ?_, hrel'⟩, by scalar_tac⟩
+          rw [hi4, htake, pAssumeNeg_append, hpn]
+          simp [pAssumeNeg, hpf]
+    · rename_i hge
+      have hik : i.val = clause.val.length := by scalar_tac
+      rw [hik, List.take_length] at hpn
+      rw [hpn]; exact ⟨rfl, hrelI⟩
+  · exact ⟨by simp, Ap, by simp [pAssumeNeg], hrel⟩
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
