@@ -90,6 +90,20 @@ pub enum BvTerm {
     ZeroExt { by: u32, arg: Box<BvTerm> },
     /// Sign-extension by `by` bits (`sign_ext`).
     SignExt { by: u32, arg: Box<BvTerm> },
+
+    // --- bool→BV bridge (loom #246 / synth #29) ---
+    /// If-then-else: `cond ? then_ : else_`. Bridges the boolean and
+    /// bitvector sorts. Both branches must share the result width. It has a
+    /// proven bit-blasting rule — a per-bit AIG mux on the condition literal
+    /// — so it belongs in the closed fragment.
+    Ite {
+        /// The boolean condition.
+        cond: Box<BoolTerm>,
+        /// Value when `cond` holds.
+        then_: Box<BvTerm>,
+        /// Value when `cond` does not hold.
+        else_: Box<BvTerm>,
+    },
     // --- loom's later sliver (NOT yet implemented; see ROADMAP) ---
     //
     // The following belong to the fragment loom will eventually emit but are

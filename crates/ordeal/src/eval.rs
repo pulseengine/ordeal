@@ -82,6 +82,9 @@ pub fn bv_sort(term: &BvTerm) -> Result<Sort, EvalError> {
         BvTerm::ZeroExt { by, arg } | BvTerm::SignExt { by, arg } => {
             check_width(bv_sort(arg)?.width + by)?
         }
+        BvTerm::Ite { then_, else_, .. } => {
+            same_width(bv_sort(then_)?.width, bv_sort(else_)?.width)?
+        }
     };
     Ok(Sort::new(w))
 }
@@ -141,6 +144,13 @@ pub fn eval_bv(term: &BvTerm, env: &Env) -> Result<u128, EvalError> {
         BvTerm::Concat(a, b) => {
             let wb = bv_sort(b)?.width;
             ((eval_bv(a, env)? << wb) | eval_bv(b, env)?) & m
+        }
+        BvTerm::Ite { cond, then_, else_ } => {
+            if eval_bool(cond, env)? {
+                eval_bv(then_, env)?
+            } else {
+                eval_bv(else_, env)?
+            }
         }
         BvTerm::ZeroExt { arg, .. } => eval_bv(arg, env)?,
         BvTerm::SignExt { arg, .. } => {

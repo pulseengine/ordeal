@@ -95,7 +95,7 @@ artifacts:
       model. Milestone: every Unsat verdict is backed by a certificate the
       verified checker validated; Z3 is demoted to oracle and benchmark rival.
     status: draft
-    release: v0.4.0
+    release: v0.5.0
     tags: [roadmap, p2, lrat, checker, aeneas, lean, milestone]
     links:
       - type: derives-from
@@ -129,7 +129,7 @@ artifacts:
       (translation-validation queries). Deliverable: loom and synth verify
       against ordeal by default.
     status: draft
-    release: v0.6.0
+    release: v0.7.0
     tags: [roadmap, p3, array, uf, loom, synth, integration]
     links:
       - type: derives-from
@@ -158,7 +158,7 @@ artifacts:
       oracle feature removes Z3 completely with no effect on correctness
       guarantees.
     status: draft
-    release: v0.5.0
+    release: v0.6.0
     tags: [roadmap, p4, soundness, bit-blaster, formal-verification]
     links:
       - type: derives-from
@@ -186,7 +186,7 @@ artifacts:
       engine. Deliverable: performance within the CI budget with measured
       benchmarks.
     status: draft
-    release: v0.7.0
+    release: v0.8.0
     tags: [roadmap, p5, performance, benchmark]
     links:
       - type: derives-from

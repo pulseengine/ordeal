@@ -39,6 +39,17 @@ pub fn blast_ne(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
     blast_eq(aig, a, b).not()
 }
 
+/// `ite` (bool→BV bridge, DES-017) — per-bit mux on the condition literal:
+/// `cond ? then_ : else_`. Both words must share the width.
+pub fn blast_ite(aig: &mut Aig, cond: Lit, then_: &Word, else_: &Word) -> Word {
+    debug_assert_eq!(then_.len(), else_.len(), "blast_ite: branch width mismatch");
+    then_
+        .iter()
+        .zip(else_)
+        .map(|(&t, &e)| aig.mux(cond, t, e))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -205,6 +216,30 @@ mod tests {
                 let vals = aig.simulate(&inputs);
                 assert!(aig.lit_value(&vals, eq), "eq(w,w) at {v:#x} width {width}");
                 assert!(!aig.lit_value(&vals, ne), "ne(w,w) at {v:#x} width {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn ite_selects_the_right_branch() {
+        // One AIG: a condition input + two 8-bit branch words. Exhaustive over
+        // (cond, then, else) low bytes at width 8 via simulation.
+        let mut aig = Aig::new();
+        let cond = aig.input();
+        let then_ = word_input(&mut aig, 8);
+        let else_ = word_input(&mut aig, 8);
+        let out = blast_ite(&mut aig, cond, &then_, &else_);
+        for c in [false, true] {
+            for t in 0u128..=0xFF {
+                for e in [0u128, 1, 0x80, 0xFF, 0x5A] {
+                    let inputs: Vec<bool> = std::iter::once(c)
+                        .chain((0..8).map(|i| (t >> i) & 1 == 1))
+                        .chain((0..8).map(|i| (e >> i) & 1 == 1))
+                        .collect();
+                    let vals = aig.simulate(&inputs);
+                    let want = if c { t } else { e };
+                    assert_eq!(word_value(&aig, &vals, &out), want, "ite {c} {t:#x} {e:#x}");
+                }
             }
         }
     }

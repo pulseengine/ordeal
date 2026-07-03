@@ -1,0 +1,228 @@
+# Field asks from consumer burn-in (ASPICE SWE.1/SWE.3/SWE.4)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# Requirements driven by synth's v0.3.0 burn-in report (ordeal issue #29):
+# synth-verify audited 34 real wasm≡arm equivalence queries — 0 wrong
+# verdicts, faster than Z3 on 33/34 — and identified the exact gaps blocking
+# adoption behind its solver interface. These become the next feature release.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+  - id: FEAT-006
+    type: sw-req
+    title: "Field asks: bool→BV bridge, derived-op lowering, bounded check"
+    description: >
+      The consumer-facing feature set unblocking synth-verify adoption
+      (issue #29): a native ite / bool→BV bridge, a blessed lowering helper
+      module for the derived ops synth emits, and a resource-bounded check.
+      Deliverable: synth-verify's real query mix is expressible and CI-safe
+      against ordeal, with Z3 retained only as a differential oracle.
+    status: draft
+    release: v0.4.0
+    tags: [field, synth, roadmap]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: satisfies
+        target: TR-014
+      - type: satisfies
+        target: TR-015
+      - type: satisfies
+        target: TR-016
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        synth's 34-query battery is expressible; the previously-missing
+        constructs decide and agree with Z3; check_with_limit bounds the
+        A5 cliff to Unknown.
+
+  - id: TR-014
+    type: sw-req
+    title: bool→BV bridge (ite) with a proven blast rule
+    description: >
+      Ordeal shall provide a native if-then-else bridging BoolTerm and
+      BvTerm — Ite(cond: BoolTerm, then: BvTerm, else: BvTerm) — bit-blasted
+      as a per-bit AIG mux on the condition literal. This legitimately
+      widens the closed fragment because it carries a proven bit-blasting
+      rule (loom #246 discipline). synth-verify uses ite 49x (bool_to_bv for
+      all comparisons, select, flag modeling).
+    status: implemented
+    release: v0.4.0
+    tags: [field, ite, bool-bridge, bit-blast]
+    links:
+      - type: derives-from
+        target: SYS-001
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Ite blasts to a per-bit mux equivalent to the concrete evaluator at
+        widths 8/32/64 and agrees with Z3's ite on the differential corpus.
+
+  - id: TR-015
+    type: sw-req
+    title: Derived-op lowering helpers (Not/Neg/Rotl/Urem/Sdiv/Srem)
+    description: >
+      Ordeal shall provide an `ordeal::lowering` helper module that
+      constructs the ops synth-verify emits but the closed core omits, using
+      exactly the derived forms validated in issue #29: bvnot = Xor(x,-1);
+      bvneg = Sub(0,x); bvrotl(a,b) = Rotr(a, 0-b); bvurem = a-(a udiv b)*b;
+      bvsdiv/bvsrem via sign-mask. The core fragment stays closed (these are
+      derived terms, not new blast rules); the verified checker still gates
+      every Unsat, so the derived forms remain untrusted.
+    status: draft
+    release: v0.4.0
+    tags: [field, lowering, derived-ops]
+    links:
+      - type: derives-from
+        target: SYS-007
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Each derived form agrees with Z3's native op (incl. div-by-zero and
+        signed-boundary edges) at widths 8/32/64.
+
+  - id: TR-016
+    type: sw-req
+    title: Resource-bounded check (conflict budget)
+    description: >
+      Ordeal shall expose a bounded one-shot check —
+      Solver::check_with_limit — that returns Unknown when a conflict (or
+      equivalent work) budget is exhausted, preserving the conservative
+      soundness contract. This makes hard shapes (e.g. #29's A5 mul
+      commutativity, DNF > 590s) survivable in a CI budget.
+    status: draft
+    release: v0.4.0
+    tags: [field, budget, cdcl]
+    links:
+      - type: derives-from
+        target: SYS-002
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        A query exceeding the budget returns Unknown (never a wrong or
+        unchecked answer); within budget the verdict matches check().
+
+  - id: DES-017
+    type: sw-detail-design
+    title: Ite blast rule (BvTerm::Ite → per-bit mux)
+    description: >
+      Add BvTerm::Ite(Box<BoolTerm>, Box<BvTerm>, Box<BvTerm>) to term.rs;
+      evaluator picks the branch by the concrete condition; blaster lowers
+      to `mux(cond_lit, then_bit, else_bit)` per bit (Aig::mux already
+      exists and is verified). Both branches must share the result width.
+      Oracle translates to Z3 ite.
+    status: implemented
+    release: v0.4.0
+    tags: [field, ite, bit-blast]
+    links:
+      - type: refines
+        target: ARC-003
+      - type: satisfies
+        target: TR-014
+    fields:
+      unit: crates/ordeal/src/blast/bitwise.rs
+
+  - id: DES-018
+    type: sw-detail-design
+    title: ordeal::lowering derived-op module
+    description: >
+      New module `lowering.rs` with pub fns building the #29-validated
+      derived terms over the closed core (+ ite where a sign-mask needs a
+      select). Pure term constructors, no new blast rules. Documented as the
+      blessed forms so consumers don't re-derive them.
+    status: draft
+    release: v0.4.0
+    tags: [field, lowering, derived-ops]
+    links:
+      - type: refines
+        target: ARC-002
+      - type: satisfies
+        target: TR-015
+      - type: traces-to
+        target: DES-017
+    fields:
+      unit: crates/ordeal/src/lowering.rs
+
+  - id: DES-019
+    type: sw-detail-design
+    title: Bounded CDCL check (conflict budget → Unknown)
+    description: >
+      Thread an optional conflict budget through the CDCL core; on
+      exhaustion the solver returns without a verdict and Solver::
+      check_with_limit maps that to Unknown. No effect on soundness — the
+      certificate gate and model self-check are unchanged; only completeness
+      is bounded.
+    status: draft
+    release: v0.4.0
+    tags: [field, budget, cdcl]
+    links:
+      - type: refines
+        target: ARC-005
+      - type: satisfies
+        target: TR-016
+    fields:
+      unit: crates/ordeal/src/solver.rs
+
+  - id: UV-016
+    type: unit-verification
+    title: Ite blast vs evaluator and Z3
+    description: >
+      Ite lowers to a per-bit mux agreeing with the concrete evaluator
+      exhaustively at width 8 and randomized at 32/64, and matches Z3's ite
+      on the differential corpus (both boolean-condition branches).
+    status: implemented
+    release: v0.4.0
+    tags: [field, ite, unit-test]
+    links:
+      - type: verifies
+        target: DES-017
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal blast::ite && cargo test -p ordeal --features oracle ite_diff"
+        coverage: "Exhaustive w8; randomized w32/64; Z3 differential"
+
+  - id: UV-017
+    type: unit-verification
+    title: Derived-op lowering vs Z3 native ops
+    description: >
+      Each lowering helper (not/neg/rotl/urem/sdiv/srem) agrees with Z3's
+      native operator across widths 8/32/64, including division-by-zero and
+      signed-boundary (INT_MIN, -1) edges from #29's battery.
+    status: draft
+    release: v0.4.0
+    tags: [field, lowering, unit-test]
+    links:
+      - type: verifies
+        target: DES-018
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --features oracle lowering_diff"
+        coverage: "6 derived ops vs Z3; div-by-zero + signed boundaries"
+
+  - id: UV-018
+    type: unit-verification
+    title: Bounded check returns Unknown on budget exhaustion
+    description: >
+      A query exceeding the conflict budget returns Unknown (never a wrong
+      or unchecked verdict); a within-budget query matches check(). The
+      #29 A5 mul-commutativity shape is bounded to Unknown under a small
+      budget.
+    status: draft
+    release: v0.4.0
+    tags: [field, budget, unit-test]
+    links:
+      - type: verifies
+        target: DES-019
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal solver::check_with_limit"
+        coverage: "Exhaustion → Unknown; within-budget = check(); A5 bounded"
