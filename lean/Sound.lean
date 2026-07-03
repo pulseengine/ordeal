@@ -880,6 +880,31 @@ theorem assign_true_refines (Ak : kernel.Assignment) (Ap : PAsn) (lit : Std.I32)
     · simp only [hb]; exact ⟨rfl, hrel⟩
     · simp only [Bool.not_eq_true] at hb; simp [hb]
 
+/-- Negating a valid literal keeps it valid (`-lit` cannot be `0` or overflow
+    to `INT_MIN`). -/
+theorem valid_neg (lit neg : Std.I32) (h : ValidLit lit) (hn : neg.val = -lit.val) :
+    ValidLit neg := by
+  obtain ⟨h0, hmin⟩ := h
+  refine ⟨by rw [hn]; omega, ?_⟩
+  have hb : lit.val ≤ Std.I32.max := by scalar_tac
+  have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by native_decide
+  rw [hn]; omega
+
+/-- Assigning the negation of a literal true is the pure "assume false". -/
+theorem pAssignLit_neg (A : PAsn) (lit neg : Std.I32) (h0 : lit.val ≠ 0)
+    (hn : neg.val = -lit.val) : pAssignLit A neg = pAssumeFalse A lit := by
+  have hlv : litVar neg = litVar lit := by
+    unfold litVar; rw [hn, Int.natAbs_neg]
+  have hpol : polarity neg = !polarity lit := by
+    unfold polarity; rw [hn]
+    rcases lt_or_gt_of_ne h0 with h | h
+    · rw [decide_eq_true (show (0:Int) < -lit.val by omega),
+          decide_eq_false (show ¬(0:Int) < lit.val by omega)]; rfl
+    · rw [decide_eq_false (show ¬(0:Int) < -lit.val by omega),
+          decide_eq_true (show (0:Int) < lit.val by omega)]; rfl
+  unfold pAssignLit pAssumeFalse
+  rw [hlv, hpol]
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
