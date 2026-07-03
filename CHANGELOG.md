@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-07-03
+
+loom's v0.4.0 smoke-test (issue #34). loom asked for a text front-end so it
+can drive ordeal without hand-building `BvTerm`s, and flagged that the README
+still described a phase-0 skeleton. This patch ships both. **Falsification
+statement:** this release is wrong if `ordeal check` returns a verdict for an
+SMT-LIB2 query that disagrees with the equivalent `Solver` API call on the
+same query, or if any construct inside the documented QF_BV subset is rejected
+as `unsupported`.
+
+### Added
+
+- **SMT-LIB2 front-end — `ordeal check <file.smt2>`** (or `-`/stdin). A small
+  hand-written s-expression reader (`ordeal::smtlib`, pure `std`, no new deps)
+  over the QF_BV subset loom/synth emit: `declare-const`/`declare-fun`,
+  `assert`, `check-sat`, `get-model`/`get-value`. Prints `sat` (+ SMT-LIB
+  model), `unsat` (+ checker-validated LRAT byte count), or `unknown`. Every
+  op routes through the existing closed core or `ordeal::lowering`; nothing new
+  enters the fragment. Any out-of-subset construct → `unsupported: <what>`,
+  exit 2. The reader lives in the library (unit-testable, wasip2-clean); the
+  binary owns I/O, model formatting, and exit codes.
+
+### Fixed
+
+- **README staleness (loom #34)** — the status line described a "phase-0
+  skeleton" returning `Unknown` for every query; corrected to the live v0.4.x
+  engine and the new `check` subcommand documented in the quickstart.
+
 ## [0.4.0] - 2026-07-03
 
 synth's burn-in asks (issue #29). Their v0.3.0 report — 34 real wasm≡arm
@@ -177,7 +205,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.1
 [0.4.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.2.0
