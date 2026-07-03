@@ -438,7 +438,30 @@ impl Solver {
     /// an `Unsat` the checker did not accept is never reported (it degrades
     /// to `Unknown`, which is always sound).
     pub fn check(&self) -> CheckResult {
-        match self.solve_pipeline() {
+        Self::verdict(self.solve_pipeline(None))
+    }
+
+    /// Decide satisfiability under a conflict budget (DES-019 / TR-016).
+    ///
+    /// Runs the identical pipeline as [`Solver::check`] — blast → AIG →
+    /// Tseitin CNF → bounded CDCL — but caps the SAT core at `max_conflicts`
+    /// search conflicts. On budget exhaustion the core reaches no verdict and
+    /// this returns [`CheckResult::Unknown`]; on any decided verdict it
+    /// behaves exactly like `check` (self-checked model on SAT, and on
+    /// engine-UNSAT the LRAT certificate is validated by `ordeal-lrat` before
+    /// `Unsat` is returned, degrading to `Unknown` on rejection).
+    ///
+    /// The budget bounds only completeness: the certificate gate and the
+    /// model self-check are untouched, so an exhausted budget yields `Unknown`
+    /// and never a wrong or unchecked verdict.
+    pub fn check_with_limit(&self, max_conflicts: u64) -> CheckResult {
+        Self::verdict(self.solve_pipeline(Some(max_conflicts)))
+    }
+
+    /// Map an internal pipeline outcome to the caller-facing verdict, applying
+    /// the soundness gate uniformly for `check` and `check_with_limit`.
+    fn verdict(outcome: Pipeline) -> CheckResult {
+        match outcome {
             Pipeline::Sat(env) => CheckResult::Sat(Model {
                 assignments: {
                     let mut a: Vec<(String, u128)> = env.into_iter().collect();
@@ -458,15 +481,17 @@ impl Solver {
     /// The engine's raw verdict — crate-internal, differential oracle only.
     #[cfg(any(test, feature = "oracle"))]
     pub(crate) fn check_raw(&self) -> RawVerdict {
-        match self.solve_pipeline() {
+        match self.solve_pipeline(None) {
             Pipeline::Sat(env) => RawVerdict::Sat(env),
             Pipeline::Unsat { .. } => RawVerdict::Unsat,
             Pipeline::Unknown => RawVerdict::Unknown,
         }
     }
 
-    /// Run the full pipeline once, producing the internal outcome.
-    fn solve_pipeline(&self) -> Pipeline {
+    /// Run the full pipeline once, producing the internal outcome. `budget`
+    /// bounds the CDCL core's search conflicts (`None` is unbounded); an
+    /// exhausted budget surfaces as [`Pipeline::Unknown`].
+    fn solve_pipeline(&self, budget: Option<u64>) -> Pipeline {
         if self.assertions.is_empty() {
             // An empty conjunction is trivially satisfiable by the empty model.
             return Pipeline::Sat(Env::new());
@@ -490,7 +515,16 @@ impl Solver {
         }
         let (cnf, map) = tseitin(&blaster.aig, &roots);
         let mut sat_solver = SatSolver::new();
-        match sat_solver.solve(&cnf) {
+        let verdict = match budget {
+            // Bounded solve: budget exhaustion ⇒ no verdict ⇒ conservative
+            // Unknown (soundness contract preserved).
+            Some(max) => match sat_solver.solve_with_budget(&cnf, max) {
+                Some(v) => v,
+                None => return Pipeline::Unknown,
+            },
+            None => sat_solver.solve(&cnf),
+        };
+        match verdict {
             SatResult::Unsat => {
                 // Emit the LRAT certificate from the proof trace and have the
                 // trusted checker validate it BEFORE asserting UNSAT.
@@ -704,6 +738,97 @@ mod tests {
             CheckResult::Unsat(cert) => {
                 assert!(!cert.lrat.is_empty(), "Unsat must carry the certificate")
             }
+        }
+    }
+
+    // --- UV-018: resource-bounded check (conflict budget → Unknown) ---
+
+    #[test]
+    fn bounded_check_matches_check_within_budget() {
+        // A trivially-decidable SAT query with a generous budget matches
+        // check() bit-for-bit.
+        let x = var("x", 8);
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(b(BvTerm::Add(b(x), b(c(1, 8)))), b(c(5, 8))));
+        match s.check_with_limit(1_000_000) {
+            CheckResult::Sat(m) => assert_eq!(m.assignments, vec![("x".into(), 4u128)]),
+            other => panic!("expected Sat with x=4 within budget, got {other:?}"),
+        }
+        assert!(matches!(s.check(), CheckResult::Sat(_)));
+
+        // A trivially-decidable UNSAT query still yields a checked certificate
+        // under a generous budget (x == x+1 needs only a few conflicts).
+        let y = var("y", 32);
+        let y1 = BvTerm::Add(b(y.clone()), b(c(1, 32)));
+        let mut u = Solver::new();
+        u.assert(BoolTerm::Eq(b(y), b(y1)));
+        match u.check_with_limit(1_000_000) {
+            CheckResult::Unsat(cert) => assert!(!cert.lrat.is_empty()),
+            other => panic!("expected certificate-checked Unsat, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zero_budget_forces_unknown() {
+        // The A5 mul-commutativity shape is UNSAT but reaching that verdict
+        // needs search conflicts (it is not refuted by root propagation), so a
+        // zero budget must yield Unknown — never Unsat, never a hang. Budget 0
+        // abandons at the first search conflict, so this returns immediately.
+        let s = a5_mul_commutativity();
+        assert!(matches!(s.check_with_limit(0), CheckResult::Unknown));
+    }
+
+    /// The #29 A5 shape: mul is commutative, so `a*b != b*a` is UNSAT — but at
+    /// width 32 refuting it is expensive (synth's DNF blew past 590s).
+    fn a5_mul_commutativity() -> Solver {
+        let (a, b_) = (var("a", 32), var("b", 32));
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(
+            b(BvTerm::Mul(b(a.clone()), b(b_.clone()))),
+            b(BvTerm::Mul(b(b_), b(a))),
+        ));
+        s
+    }
+
+    #[test]
+    fn a5_mul_commutativity_is_bounded_to_unknown() {
+        // The point is that a SMALL budget makes the hard shape *survivable*:
+        // check_with_limit returns (Unknown) fast instead of hanging. We do
+        // NOT assert Unsat under this budget.
+        let s = a5_mul_commutativity();
+        let start = std::time::Instant::now();
+        let verdict = s.check_with_limit(100);
+        let elapsed = start.elapsed();
+        assert!(
+            matches!(verdict, CheckResult::Unknown),
+            "small budget must bound the A5 cliff to Unknown, got {verdict:?}"
+        );
+        // Generous ceiling: the real point is it terminates rather than hangs.
+        assert!(
+            elapsed < std::time::Duration::from_secs(60),
+            "bounded A5 query should return quickly, took {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn bounded_check_is_deterministic() {
+        // Same query + same budget ⇒ same verdict (the CDCL core is
+        // deterministic on the decided path and at the budget boundary).
+        let a = a5_mul_commutativity().check_with_limit(100);
+        let b_ = a5_mul_commutativity().check_with_limit(100);
+        assert!(matches!(a, CheckResult::Unknown));
+        assert!(matches!(b_, CheckResult::Unknown));
+
+        // And a within-budget verdict is stable too.
+        let x = var("x", 8);
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(b(BvTerm::Add(b(x), b(c(1, 8)))), b(c(5, 8))));
+        let (m1, m2) = (s.check_with_limit(10_000), s.check_with_limit(10_000));
+        match (m1, m2) {
+            (CheckResult::Sat(a), CheckResult::Sat(b)) => {
+                assert_eq!(a.assignments, b.assignments);
+            }
+            other => panic!("expected stable Sat, got {other:?}"),
         }
     }
 
