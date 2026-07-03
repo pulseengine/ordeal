@@ -18,6 +18,9 @@
 //! ## Modules
 //!
 //! - [`term`] — the closed QF_BV fragment (the exact loom #246 op set).
+//! - [`lowering`] — blessed derived-op constructors (`bvnot`, `bvneg`,
+//!   `bvrotl`, `bvurem`, `bvsdiv`, `bvsrem`) built over the closed core, for
+//!   the ops synth-verify emits but the fragment omits (DES-018).
 //! - [`solver`] — the one-shot `check-sat` interface and result types.
 //! - [`eval`] — the concrete evaluator (executable SMT-LIB semantics; the
 //!   test oracle for every blasting rule and the SAT-model self-check).
@@ -36,6 +39,7 @@ pub mod aig;
 pub mod blast;
 pub mod cnf;
 pub mod eval;
+pub mod lowering;
 pub mod lrat;
 pub mod sat;
 pub mod sliver;
