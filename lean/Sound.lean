@@ -733,6 +733,69 @@ theorem apply_delete_refines
       simp [hdel]
   · exact ⟨by simp, by rfl, by simp [pDelete]⟩
 
+/- ═══════════════ THE check_rup STACK: Assignment ↔ PAsn ══════════════ -/
+
+/-- The pure image of a kernel `Assignment`: a variable's partial value is its
+    in-range slot, `none` past the end of the value vector. -/
+def RelAsn (Ak : kernel.Assignment) (Ap : PAsn) : Prop :=
+  ∀ v : Nat, Ap v = (Ak.values.val[v]?).join
+
+/-- A literal the kernel accepts: nonzero and not `INT_MIN`, so `-lit` is safe
+    and `natAbs` round-trips. Guaranteed by `clause_has_invalid_literal`. -/
+def ValidLit (lit : Std.I32) : Prop :=
+  lit.val ≠ 0 ∧ core.num.I32.MIN.val < lit.val
+
+/-- `lit_var` computes the DIMACS variable `|lit|` for a valid literal. -/
+theorem lit_var_spec (lit : Std.I32) (h : ValidLit lit) :
+    kernel.lit_var lit ⦃ (var : Std.Usize) => var.val = lit.val.natAbs ⦄ := by
+  unfold kernel.lit_var
+  split
+  · rename_i hpos
+    have hb : 0 ≤ lit.val ∧ lit.val ≤ UScalar.max .Usize := ⟨by scalar_tac, by scalar_tac⟩
+    have hc := IScalar.hcast_inBounds_spec .Usize lit hb
+    simp only [lift, WP.spec_ok] at hc ⊢
+    scalar_tac
+  · rename_i hneg
+    step as ⟨i, hi⟩
+    have hb : 0 ≤ i.val ∧ i.val ≤ UScalar.max .Usize := ⟨by scalar_tac, by scalar_tac⟩
+    have hc := IScalar.hcast_inBounds_spec .Usize i hb
+    simp only [lift, WP.spec_ok] at hc ⊢
+    scalar_tac
+
+/-- `Assignment.value` computes the partial truth value of a literal, matching
+    the pure `pvalue`. -/
+theorem value_refines (Ak : kernel.Assignment) (Ap : PAsn) (lit : Std.I32)
+    (hrel : RelAsn Ak Ap) (hvalid : ValidLit lit) :
+    Ak.value lit ⦃ (o : Option Bool) => o = pvalue Ap lit ⦄ := by
+  unfold kernel.Assignment.value
+  step with (lit_var_spec lit hvalid) as ⟨var, hvar⟩
+  have hvv : litVar lit = var.val := hvar.symm
+  have hr := hrel (litVar lit)
+  split
+  · rename_i hge
+    have hn : Ap (litVar lit) = none := by
+      rw [hr, List.getElem?_eq_none (by rw [hvv]; scalar_tac)]; rfl
+    simp [pvalue, hn]
+  · rename_i hlt
+    step as ⟨o, ho⟩
+    have hidx : Ak.values.val[var.val]? = some o := by
+      rw [List.getElem?_eq_getElem (show var.val < Ak.values.val.length by scalar_tac)]
+      exact congrArg some ho.symm
+    have hs : Ap (litVar lit) = o := by rw [hr, hvv, hidx]; rfl
+    cases o with
+    | none => simp [pvalue, hs]
+    | some b =>
+      dsimp only
+      by_cases hp : lit > 0#i32
+      · rw [if_pos hp]
+        have hpol : polarity lit = true := by
+          simp only [polarity, decide_eq_true_eq]; scalar_tac
+        simp [pvalue, hs, hpol]
+      · rw [if_neg hp]
+        have hpol : polarity lit = false := by
+          simp only [polarity, decide_eq_false_iff_not]; scalar_tac
+        simp [pvalue, hs, hpol]
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
