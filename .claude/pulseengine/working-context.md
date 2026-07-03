@@ -47,4 +47,23 @@ FEAT-002/VER-002/VER-015 block v0.3.0 until the proof discharges.
 - After merge: tag v0.2.0 → release.yml + crates.io publish; verify assets.
 - Then v0.3.0: plan is to split ordeal-lrat into parser + string-free core
   so the Aeneas target is small; Aeneas NOT installed (OCaml toolchain).
+
+**Pass 9: campaign to v0.6.0 — v0.3.0 CUT** —
+- v0.3.0 tagged + release/publish triggered (be9b67e). Re-scoped: sliver
+  artifacts → v0.3.0 (verified), Lean items → v0.5.0. docs/consuming-ordeal.md
+  + issue labels (field-report/missing-capability/soundness) for the trial
+  model. This is the release loom/synth try.
+- v0.4.0 = field-hardening: BLOCKED until real loom/synth issues arrive
+  (external repos try v0.3.0 and report). Nothing to do proactively beyond
+  intake readiness (done).
+- v0.5.0 (Lean proof) load_cnf leaf: de-risked to precise plumbing —
+  clonei32_id (`simp [core.clone.CloneI32]`) and clonevec_id
+  (`Slice.clone_spec (fun x _ => clonei32_id x)`, post `v = v'`) BOTH PROVEN.
+  Remaining for load_cnf: `step*` walks the body but defers push's
+  precondition `clauses.length < Usize.max` as a side goal → STRENGTHEN the
+  loop invariant to also carry `clauses.val.length = i.val` (makes both the
+  push precondition and the take_succ map-close provable). Then apply_delete,
+  check_rup, check_steps_loop. Single `step` on push errors "goal is not
+  spec"; use `step*` (defers preconditions as ordered side goals).
+- v0.6.0 (P4) not yet started — next fresh track (Kani per-width op proofs).
 - Upstream rivet defects: #648/#649 unchanged (--skip-external-validation).

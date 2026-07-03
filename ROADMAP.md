@@ -14,6 +14,14 @@ and no verdict is accepted until the verified checker validates it. When in
 doubt we return `Unknown` — which callers must treat conservatively — rather
 than guess.
 
+**Release sequencing** (decoupled from phase numbers, since the P3 sliver
+code shipped ahead of the P2 Lean proof and integration depends on external
+consumers): v0.3.0 shipped the array/UF sliver (done); **v0.4.0** = the P2
+Lean soundness discharge; **v0.5.0** = P4 (drop Z3 from soundness); **v0.6.0**
+= loom/synth integration + field-hardening (fed by consumer trial reports);
+**v0.7.0** = P5 performance. The `release:` field on each rivet artifact is
+the source of truth.
+
 Each phase is tracked in rivet as `FEAT-000`…`FEAT-005`
 (`artifacts/features.yaml`) — **the rivet artifacts are the source of truth**.
 This document is a human-readable mirror kept in sync by hand for now; the
