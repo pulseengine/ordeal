@@ -616,6 +616,123 @@ theorem load_cnf_refines (cnf : Slice (alloc.vec.Vec Std.I32)) :
       simp [hmap, hik]
   · exact ⟨by simp, by simp, by simp⟩
 
+/-- Project the Aeneas clause store (a slice/vector of optional clause
+    vectors) to the pure checker's clause list (optional literal lists). A
+    deleted slot (`none`) maps to `none`; a live clause maps to its literals. -/
+def projClauses (s : List (Option (alloc.vec.Vec Std.I32))) :
+    List (Option (List Std.I32)) :=
+  s.map (Option.map (·.val))
+
+/-- `get_live` accepts exactly the live-slot condition the pure guard uses:
+    on `.Ok`, `id` is a valid 1-based index whose slot is a present clause,
+    i.e. `projClauses`'s `(if id=0 …)[id-1]?.join` is `some`. -/
+theorem get_live_spec
+    (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (id step : Std.Usize) :
+    kernel.get_live clauses id step ⦃ r => match r with
+      | .Ok _ => 0 < id.val ∧ id.val ≤ clauses.val.length ∧
+          (projClauses clauses.val)[id.val - 1]?.join.isSome
+      | .Err _ => True ⦄ := by
+  unfold kernel.get_live
+  split
+  · simp
+  · rename_i hid0
+    dsimp only
+    split
+    · simp
+    · rename_i hle
+      step as ⟨i1, hi1⟩
+      step as ⟨o, ho⟩
+      cases o with
+      | none => simp
+      | some clause =>
+        have hid : 0 < id.val := by scalar_tac
+        have hlen : id.val ≤ clauses.val.length := by scalar_tac
+        refine ⟨hid, hlen, ?_⟩
+        rw [show id.val - 1 = i1.val from hi1.symm]
+        have hbi : i1.val < (projClauses clauses.val).length := by
+          simp only [projClauses, List.length_map]; scalar_tac
+        rw [List.getElem?_eq_getElem hbi]
+        simp [Option.join, projClauses, List.getElem_map, ← ho]
+
+/-- `pDelete` over a list ending in one more id folds through the prefix. -/
+theorem pDelete_append (l : List (Option (List Std.I32))) (xs : List Nat)
+    (x : Nat) :
+    pDelete l (xs ++ [x]) = (pDelete l xs).bind (fun l' => pDelete l' [x]) := by
+  induction xs generalizing l with
+  | nil => simp [pDelete]
+  | cons h t ih =>
+    rw [List.cons_append]
+    simp only [pDelete]
+    split
+    · rfl
+    · exact ih _
+
+/-- Projecting after a slot deletion commutes with deleting in the projection
+    (a deleted slot maps to `none` either way). -/
+theorem projClauses_set (l : List (Option (alloc.vec.Vec Std.I32))) (n : Nat) :
+    projClauses (l.set n none) = (projClauses l).set n none := by
+  simp only [projClauses, List.map_set, Option.map_none]
+
+/-- Third simulation leaf: `apply_delete` refines `pDelete`. On the accepting
+    path (inner `Ok ()`), the returned store's projection is exactly what
+    `pDelete` computes from the original store and the id list. -/
+theorem apply_delete_refines
+    (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (ids : Slice Std.Usize)
+    (step : Std.Usize) :
+    kernel.apply_delete clauses ids step ⦃ r => match r.1 with
+      | .Ok () =>
+          pDelete (projClauses clauses.val) (ids.val.map (·.val))
+            = some (projClauses r.2.val)
+      | .Err _ => True ⦄ := by
+  unfold kernel.apply_delete kernel.apply_delete_loop
+  apply loop.spec_decr_nat
+    (measure := fun (p : Slice (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
+      ids.length - p.2.val)
+    (inv := fun (p : Slice (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
+      p.2.val ≤ ids.length ∧ p.1.val.length = clauses.val.length ∧
+      pDelete (projClauses clauses.val) ((ids.val.take p.2.val).map (·.val))
+        = some (projClauses p.1.val))
+  · rintro ⟨cls, i⟩ ⟨hle, hlen, hdel⟩
+    unfold kernel.apply_delete_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      step as ⟨id, hid⟩
+      step with get_live_spec as ⟨r, hr⟩
+      cases r with
+      | Ok s =>
+        obtain ⟨hpos, hidlen, hjoin⟩ := hr
+        step as ⟨cf, hcf⟩
+        simp only [hcf]
+        step as ⟨i2, hi2⟩
+        step as ⟨o, back, hback, hbk⟩
+        simp only [kernel.clear_slot]
+        step as ⟨i3, hi3⟩
+        have hil : i.val < ids.val.length := by scalar_tac
+        refine ⟨by scalar_tac, ?_, ?_⟩
+        · rw [hbk, Slice.set_val_eq, List.length_set]; exact hlen
+        · have htake : (ids.val.take i3.val).map (fun x => x.val)
+              = (ids.val.take i.val).map (fun x => x.val) ++ [id.val] := by
+            rw [show i3.val = i.val + 1 by scalar_tac, List.take_add_one,
+              List.getElem?_eq_getElem hil]
+            simp [← hid]
+          rw [htake, pDelete_append, hdel]
+          obtain ⟨cl, hcl⟩ := Option.isSome_iff_exists.mp hjoin
+          rw [hbk]
+          simp only [Option.bind, pDelete, if_neg (show ¬ id.val = 0 by omega),
+            hcl, Slice.set_val_eq, projClauses_set, hi2]
+          exact ⟨trivial, by scalar_tac⟩
+      | Err e =>
+        step as ⟨cf, hcf⟩
+        simp [hcf,
+          core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual,
+          core.convert.FromSame]
+    · rename_i hge
+      have hik : i.val = ids.val.length := by scalar_tac
+      simp only [hik, List.take_length] at hdel
+      simp [hdel]
+  · exact ⟨by simp, by rfl, by simp [pDelete]⟩
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
