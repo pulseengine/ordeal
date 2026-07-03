@@ -123,15 +123,20 @@ jobs:
       - name: Bazel build //...
         run: bazel build //... --config=dev
 
-  # ── Lean model elaboration (non-blocking while new; VER-015 precursor) ─
-  # The Aeneas-generated model of the trusted checker (lean/Kernel.lean)
-  # must elaborate: zero axioms, zero sorries in the Kernel target. This
-  # gates the MODEL, not the theorem — Sound.lean's open obligation (#12)
-  # is deliberately not a default target and is not built here.
+  # ── Lean model + soundness proof (VER-015) ────────────────────────────
+  # Two obligations, both gated here:
+  #   1. The Aeneas-generated model of the trusted checker (lean/Kernel.lean)
+  #      elaborates with zero axioms, zero sorries.
+  #   2. The hand-written soundness proof (lean/Sound.lean) elaborates, and
+  #      its `sorry` budget holds: exactly ONE open obligation
+  #      (`kernel_refines_pure`, #12) — no proven leaf may silently regress
+  #      to `sorry`, and no new gap may be introduced. When #12 discharges,
+  #      drop the expected count to 0.
+  # This is a real gate (no continue-on-error): a broken proof or a widened
+  # sorry budget fails CI.
   lean:
-    name: Lean model (Kernel)
+    name: Lean model + soundness proof
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
       - name: Install elan
@@ -150,9 +155,19 @@ jobs:
         run: |
           lake exe cache get
           lake build Kernel
-      - name: Build the soundness proof (carries one tracked sorry, #12)
+      - name: Build the soundness proof (elaborates; carries #12's one sorry)
         working-directory: lean
         run: lake build Sound
+      - name: Guard the sorry budget (only kernel_refines_pure may be open)
+        working-directory: lean
+        run: |
+          expected=1
+          count=$(grep -cE '^[[:space:]]*sorry[[:space:]]*$' Sound.lean || true)
+          echo "open sorry count in Sound.lean: $count (expected $expected)"
+          if [ "$count" -ne "$expected" ]; then
+            echo "::error file=lean/Sound.lean::Expected exactly $expected open sorry (kernel_refines_pure, #12), found $count — a proven leaf regressed, a new gap was added, or #12 closed (drop the expected count)."
+            exit 1
+          fi
 
   # ── Optional Z3 differential oracle (non-blocking) ────────────────────
   # `ordeal` is a self-contained QF_BV solver; the `oracle` cargo feature
