@@ -458,6 +458,33 @@ impl Solver {
         Self::verdict(self.solve_pipeline(Some(max_conflicts)))
     }
 
+    /// Prove two same-width bitvector terms **equivalent** — the standard
+    /// equivalence-as-UNSAT encoding, for callers (e.g. spar layout codegen,
+    /// issue #38) that want a one-call `a ≡ b` oracle rather than assembling
+    /// the `Ne` goal by hand.
+    ///
+    /// It asserts the terms *differ* and decides the result:
+    ///
+    /// - [`CheckResult::Unsat`] ⟹ `a` and `b` are **equal for every input**;
+    ///   the carried LRAT certificate was validated by `ordeal-lrat` before
+    ///   return, so this is a *checked* proof, not solver faith.
+    /// - [`CheckResult::Sat`] ⟹ the terms are **not** equivalent, and the
+    ///   model is a counterexample: an assignment to the free variables on
+    ///   which the two terms evaluate differently.
+    /// - [`CheckResult::Unknown`] ⟹ conservative — **no** equivalence claim.
+    ///   A width mismatch (ill-sorted `Ne`) also lands here, exactly as
+    ///   [`Solver::check`] treats ill-sorted input; call [`Solver::validate`]
+    ///   first if you want the width error surfaced explicitly.
+    ///
+    /// Only a `Unsat` authorizes treating the layouts as interchangeable;
+    /// `Unknown`/`Sat` do not. Build the `BvTerm` graph programmatically for
+    /// machine-generated queries — no SMT-LIB2 text round-trip on the hot path.
+    pub fn prove_equiv(a: BvTerm, b: BvTerm) -> CheckResult {
+        let mut solver = Solver::new();
+        solver.assert(BoolTerm::Ne(Box::new(a), Box::new(b)));
+        solver.check()
+    }
+
     /// Map an internal pipeline outcome to the caller-facing verdict, applying
     /// the soundness gate uniformly for `check` and `check_with_limit`.
     fn verdict(outcome: Pipeline) -> CheckResult {
@@ -671,6 +698,45 @@ mod tests {
         match s.check() {
             CheckResult::Sat(m) => assert_eq!(m.assignments, vec![("x".into(), 4u128)]),
             other => panic!("expected Sat with x=4, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prove_equiv_layout_field_extract_roundtrips() {
+        // spar #38 layout oracle: a packed record's low field survives
+        // pack+extract. Extracting the low 8 bits of concat(hi32, flags8)
+        // recovers flags8 — a bit-exact layout equivalence, proven UNSAT.
+        let flags = var("flags", 8);
+        let hi = var("hi", 32);
+        // concat puts `hi` in the high bits, `flags` in the low 8 (40-bit).
+        let packed = BvTerm::Concat(b(hi), b(flags.clone()));
+        let low8 = BvTerm::Extract {
+            hi: 7,
+            lo: 0,
+            arg: b(packed),
+        };
+        match Solver::prove_equiv(low8, flags) {
+            CheckResult::Unsat(cert) => assert!(!cert.lrat.is_empty()),
+            other => panic!("layouts must be proven equivalent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prove_equiv_distinct_layouts_give_counterexample() {
+        // Two distinct 32-bit terms are not equivalent: Sat with a witness.
+        match Solver::prove_equiv(var("a", 32), var("b", 32)) {
+            CheckResult::Sat(_) => {}
+            other => panic!("distinct terms are not equivalent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prove_equiv_width_mismatch_is_conservative_unknown() {
+        // A width mismatch is ill-sorted (`Ne` of 32 vs 8 bits); like `check`,
+        // it degrades to a conservative `Unknown` — never a false equivalence.
+        match Solver::prove_equiv(var("a", 32), var("b", 8)) {
+            CheckResult::Unknown => {}
+            other => panic!("width mismatch must be Unknown, got {other:?}"),
         }
     }
 
