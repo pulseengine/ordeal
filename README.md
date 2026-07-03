@@ -31,7 +31,7 @@
 
 Ordeal (meaning "verdict / judgment") is a specialized, **certificate-checked** QF_BV SMT solver. It decides bitvector equivalence and satisfiability queries for the [PulseEngine](https://github.com/pulseengine) toolchain — specifically the queries that [loom](https://github.com/pulseengine/loom) (verified WASM optimizer) and [synth](https://github.com/pulseengine/synth) (verified WASM→ARM codegen) actually emit.
 
-**This is pre-release software.** The current tree is a phase-0 skeleton: the solver conservatively returns `Unknown` for every query (sound by construction — see below). The decision engine is not yet implemented.
+**Status (v0.4.1, on [crates.io](https://crates.io/crates/ordeal)).** The engine is live: the full bit-blast → AIG → Tseitin CNF → pure-Rust CDCL → LRAT pipeline decides the closed QF_BV fragment. `Sat` verdicts carry a self-checked counterexample model; `Unsat` verdicts carry an LRAT certificate that the `ordeal-lrat` checker validated before the verdict was returned; `Unknown` stays conservative (never optimize on it). The array/UF sliver (`Solver::check_sliver`), a bool→BV `ite` bridge, derived-op lowering helpers, and a resource-bounded `check_with_limit` are all available. A minimal SMT-LIB2 front-end (`ordeal check foo.smt2`) reads the QF_BV subset loom/synth emit. The one remaining soundness obligation is the checker's formal proof (Rust → Lean 4 via Aeneas, issue #12); until it discharges, trust rests on the small, dependency-free, mutation-tested Rust checker — still strictly stronger than trusting the solver.
 
 Part of PulseEngine — a WebAssembly toolchain for safety-critical embedded systems:
 
@@ -103,9 +103,21 @@ cargo test
 # Development-only: enable the Z3 differential oracle feature
 cargo build --features oracle
 
-# Run the CLI (phase-0: prints status)
+# Run the CLI banner (documents the check subcommand)
 cargo run --bin ordeal
+
+# Decide an SMT-LIB2 file (QF_BV subset), or read from stdin with `-`
+cargo run --bin ordeal -- check query.smt2
+echo '(declare-const x (_ BitVec 32))(assert (= x #x0000002a))(check-sat)(get-model)' \
+  | cargo run --bin ordeal -- check -
+# → sat
+#   ((x #x0000002a))
 ```
+
+The primary production interface remains the Rust API; the `check` subcommand is
+a convenience/front-end for SMT-LIB2 text. Any construct outside the closed
+QF_BV subset is reported as `unsupported: <what>` and exits non-zero — the
+certificate-checked solver never guesses.
 
 ### wasm32-wasip2 (first-class target)
 

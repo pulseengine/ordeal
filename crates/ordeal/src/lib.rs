@@ -32,6 +32,8 @@
 //!   `ordeal-lrat` crate (the sole trusted component) validates it before
 //!   any `Unsat` is returned.
 //! - [`oracle`] — the Z3 differential oracle (behind the `oracle` feature).
+//! - [`smtlib`] — a minimal QF_BV SMT-LIB2 reader for the standalone CLI /
+//!   differential harness (not the production interface; that stays the API).
 //!
 //! [PulseEngine]: https://github.com/pulseengine
 
@@ -43,6 +45,7 @@ pub mod lowering;
 pub mod lrat;
 pub mod sat;
 pub mod sliver;
+pub mod smtlib;
 pub mod solver;
 pub mod term;
 
