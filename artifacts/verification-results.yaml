@@ -420,3 +420,69 @@ artifacts:
     fields:
       verdict: pass
       evidence: "PR #24 Z3 Oracle job (550-query differential) + PR #25 check_sliver tests; both merged green to main"
+
+  - id: VE-004
+    type: verification-execution
+    title: v0.4.0 synth field asks execution — main @ c2d12ae
+    description: >
+      The three synth #29 asks merged (PRs #30/#31/#32): ite blast +
+      differential, lowering derived ops vs Z3 (incl. div-by-zero and
+      INT_MIN/-1 edges), and bounded check → Unknown. All green on the Test
+      and Z3 Oracle CI jobs.
+    status: implemented
+    fields:
+      version: main-v0.4.0
+      commit: "c2d12ae"
+      timestamp: "2026-07-03T00:00:00Z"
+      executor: github-actions
+      environment:
+        prs: "#30 ite, #31 budget, #32 lowering"
+
+  - id: VV-024
+    type: verification-verdict
+    title: "UV-016 pass — ite blast vs evaluator and Z3"
+    description: >
+      Executed pass. Exhaustive width-8 ite blast vs evaluator; the 300-query
+      differential corpus generates ite and agrees with Z3.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-016
+      - type: part-of-execution
+        target: VE-004
+    fields:
+      verdict: pass
+      evidence: "PR #30 (Test + Z3 Oracle jobs), merged green to main"
+
+  - id: VV-025
+    type: verification-verdict
+    title: "UV-017 pass — derived-op lowering vs Z3"
+    description: >
+      Executed pass. not/neg/rotl/urem/sdiv/srem agree with Z3 across widths
+      8/32/64 incl. div-by-zero and INT_MIN/-1 boundaries.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-017
+      - type: part-of-execution
+        target: VE-004
+    fields:
+      verdict: pass
+      evidence: "PR #32 (Z3 Oracle job: boundary + randomized corpora), merged green"
+
+  - id: VV-026
+    type: verification-verdict
+    title: "UV-018 pass — bounded check returns Unknown on exhaustion"
+    description: >
+      Executed pass. Budget exhaustion → Unknown (never wrong/unchecked);
+      within-budget matches check(); the A5 mul-commutativity shape bounds to
+      Unknown in ~0.04s.
+    status: implemented
+    links:
+      - type: result-of
+        target: UV-018
+      - type: part-of-execution
+        target: VE-004
+    fields:
+      verdict: pass
+      evidence: "PR #31 (Test job), merged green to main"

@@ -19,7 +19,7 @@ artifacts:
       module for the derived ops synth emits, and a resource-bounded check.
       Deliverable: synth-verify's real query mix is expressible and CI-safe
       against ordeal, with Z3 retained only as a differential oracle.
-    status: draft
+    status: verified
     release: v0.4.0
     tags: [field, synth, roadmap]
     links:
@@ -49,7 +49,7 @@ artifacts:
       widens the closed fragment because it carries a proven bit-blasting
       rule (loom #246 discipline). synth-verify uses ite 49x (bool_to_bv for
       all comparisons, select, flag modeling).
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, ite, bool-bridge, bit-blast]
     links:
@@ -73,7 +73,7 @@ artifacts:
       bvsdiv/bvsrem via sign-mask. The core fragment stays closed (these are
       derived terms, not new blast rules); the verified checker still gates
       every Unsat, so the derived forms remain untrusted.
-    status: draft
+    status: verified
     release: v0.4.0
     tags: [field, lowering, derived-ops]
     links:
@@ -95,7 +95,7 @@ artifacts:
       equivalent work) budget is exhausted, preserving the conservative
       soundness contract. This makes hard shapes (e.g. #29's A5 mul
       commutativity, DNF > 590s) survivable in a CI budget.
-    status: draft
+    status: verified
     release: v0.4.0
     tags: [field, budget, cdcl]
     links:
@@ -117,7 +117,7 @@ artifacts:
       to `mux(cond_lit, then_bit, else_bit)` per bit (Aig::mux already
       exists and is verified). Both branches must share the result width.
       Oracle translates to Z3 ite.
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, ite, bit-blast]
     links:
@@ -136,7 +136,7 @@ artifacts:
       derived terms over the closed core (+ ite where a sign-mask needs a
       select). Pure term constructors, no new blast rules. Documented as the
       blessed forms so consumers don't re-derive them.
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, lowering, derived-ops]
     links:
@@ -158,7 +158,7 @@ artifacts:
       check_with_limit maps that to Unknown. No effect on soundness — the
       certificate gate and model self-check are unchanged; only completeness
       is bounded.
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, budget, cdcl]
     links:
@@ -176,7 +176,7 @@ artifacts:
       Ite lowers to a per-bit mux agreeing with the concrete evaluator
       exhaustively at width 8 and randomized at 32/64, and matches Z3's ite
       on the differential corpus (both boolean-condition branches).
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, ite, unit-test]
     links:
@@ -195,7 +195,7 @@ artifacts:
       Each lowering helper (not/neg/rotl/urem/sdiv/srem) agrees with Z3's
       native operator across widths 8/32/64, including division-by-zero and
       signed-boundary (INT_MIN, -1) edges from #29's battery.
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, lowering, unit-test]
     links:
@@ -215,7 +215,7 @@ artifacts:
       or unchecked verdict); a within-budget query matches check(). The
       #29 A5 mul-commutativity shape is bounded to Unknown under a small
       budget.
-    status: implemented
+    status: verified
     release: v0.4.0
     tags: [field, budget, unit-test]
     links:

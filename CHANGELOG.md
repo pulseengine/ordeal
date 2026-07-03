@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-03
+
+synth's burn-in asks (issue #29). Their v0.3.0 report — 34 real wasm≡arm
+equivalence queries, **0 wrong verdicts, faster than Z3 on 33/34** —
+identified the exact gaps blocking adoption behind synth-verify's solver
+interface. This release closes asks 1–3. **Falsification statement:** this
+release is wrong if `BvTerm::Ite`, any `ordeal::lowering` derived op, or any
+`check_with_limit`-decided verdict disagrees with Z3 on the same query, or
+if `check_with_limit` ever returns a verdict other than `Unknown` on budget
+exhaustion.
+
+### Added
+
+- **`BvTerm::Ite(cond, then, else)`** — the bool→BV bridge (synth used `ite`
+  49×). A native op with a proven bit-blasting rule (per-bit AIG mux on the
+  condition literal), so it joins the closed fragment legitimately. Verified
+  exhaustively at width 8 and across the Z3 differential corpus.
+- **`ordeal::lowering`** — blessed derived-op constructors over the closed
+  core for the ops synth emits but the fragment omits: `bvnot`, `bvneg`,
+  `bvrotl`, `bvurem`, `bvsdiv`, `bvsrem`. No new blast rules (the checker
+  still gates every `Unsat`); each form verified against Z3 including
+  division-by-zero and `INT_MIN`/`-1` edges.
+- **`Solver::check_with_limit(max_conflicts)`** — a resource-bounded check
+  returning `Unknown` on budget exhaustion, preserving the conservative
+  soundness contract. Makes hard shapes (synth's A5 mul-commutativity,
+  previously DNF > 590 s) CI-survivable.
+
+### Notes for consumers
+
+- Depend on `ordeal = "0.4.0"`. `Unknown` stays conservative; only a
+  certificate-checked `Unsat` authorizes a transformation.
+- synth-verify's full query mix is now expressible with Z3 retained only as
+  a differential oracle.
+
 ## [0.3.0] - 2026-07-02
 
 The array/UF sliver — loom/synth can now try ordeal on their full query
@@ -143,6 +177,7 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.3.0
 [0.2.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.2.0
