@@ -127,6 +127,7 @@ pub enum OpKind {
     Sle,
     Sgt,
     Sge,
+    Ite,
     BoolNot,
     BoolAnd,
     BoolOr,
@@ -150,6 +151,7 @@ fn bv_op(term: &BvTerm) -> Option<OpKind> {
         BvTerm::Concat(..) => OpKind::Concat,
         BvTerm::ZeroExt { .. } => OpKind::ZeroExt,
         BvTerm::SignExt { .. } => OpKind::SignExt,
+        BvTerm::Ite { .. } => OpKind::Ite,
     })
 }
 
@@ -173,6 +175,9 @@ fn bv_uses_disabled(term: &BvTerm) -> bool {
         | BvTerm::Concat(a, b) => bv_uses_disabled(a) || bv_uses_disabled(b),
         BvTerm::Extract { arg, .. } | BvTerm::ZeroExt { arg, .. } | BvTerm::SignExt { arg, .. } => {
             bv_uses_disabled(arg)
+        }
+        BvTerm::Ite { cond, then_, else_ } => {
+            bool_uses_disabled(cond) || bv_uses_disabled(then_) || bv_uses_disabled(else_)
         }
     }
 }
@@ -295,6 +300,11 @@ impl Blaster {
             BvTerm::SignExt { by, arg } => {
                 let w = self.blast_bv(arg)?;
                 structural::blast_sign_ext(&w, *by)
+            }
+            BvTerm::Ite { cond, then_, else_ } => {
+                let c = self.blast_bool(cond)?;
+                let (wt, we) = (self.blast_bv(then_)?, self.blast_bv(else_)?);
+                bitwise::blast_ite(&mut self.aig, c, &wt, &we)
             }
         })
     }
