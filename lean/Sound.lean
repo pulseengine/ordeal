@@ -563,6 +563,59 @@ theorem chil_total (clause : Slice Std.I32) :
     · simp
   · simp
 
+/-- The scalar clone of an `I32` is the identity. -/
+theorem clonei32_id (x : Std.I32) : core.clone.CloneI32.clone x = ok x := by
+  simp [core.clone.CloneI32]
+
+/-- Cloning a `Vec I32` returns an equal vector. -/
+theorem clonevec_id (v : alloc.vec.Vec Std.I32) :
+    alloc.vec.CloneVec.clone core.clone.CloneI32 v ⦃ v' => v = v' ⦄ := by
+  unfold alloc.vec.CloneVec.clone
+  exact Slice.clone_spec (fun x _ => clonei32_id x)
+
+/-- Second full simulation leaf: `load_cnf` produces the CNF mapped to
+    `some` (Vec vs List bridged by mapping `.val`). The loop invariant
+    carries `clauses.length = i` so the `push` bound and the take-prefix
+    map-close are both immediate. -/
+theorem load_cnf_refines (cnf : Slice (alloc.vec.Vec Std.I32)) :
+    kernel.load_cnf cnf ⦃ r => match r with
+      | .Ok cls => cls.val.map (Option.map (·.val)) = (cnf.val.map (·.val)).map some
+      | .Err _ => True ⦄ := by
+  unfold kernel.load_cnf kernel.load_cnf_loop
+  apply loop.spec_decr_nat
+    (measure := fun (p : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
+      cnf.length - p.2.val)
+    (inv := fun (p : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
+      p.2.val ≤ cnf.length ∧ p.1.val.length = p.2.val ∧
+      p.1.val.map (Option.map (·.val)) = ((cnf.val.take p.2.val).map (·.val)).map some)
+  · rintro ⟨clauses, i⟩ ⟨hle, hlen, hmap⟩
+    unfold kernel.load_cnf_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      step as ⟨v, hv⟩
+      step with chil_total
+      split
+      · simp
+      · step with clonevec_id as ⟨vc, hvc⟩
+        step as ⟨cls1, hcls1⟩
+        step as ⟨i3, hi3⟩
+        refine ⟨by scalar_tac, ?_, ?_, by scalar_tac⟩
+        · rw [hcls1]; simp only [List.length_append, List.length_singleton, hlen]
+          scalar_tac
+        · rw [show i3.val = i.val + 1 by scalar_tac, hcls1]
+          simp only [List.map_append, hmap, ← hvc, hv]
+          simp_lists [List.take_add_one]
+          have hb : i.val < cnf.val.length := by scalar_tac
+          rw [List.getElem?_eq_getElem hb]
+          simp only [Option.toList_some, List.map_cons, List.map_nil,
+            List.map_append, Option.map_some, Function.comp_apply]
+    · rename_i hge
+      have hik : i.val = cnf.val.length := by
+        simp only [Slice.length] at *; scalar_tac
+      simp [hmap, hik]
+  · exact ⟨by simp, by simp, by simp⟩
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
