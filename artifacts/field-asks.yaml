@@ -158,7 +158,7 @@ artifacts:
       check_with_limit maps that to Unknown. No effect on soundness — the
       certificate gate and model self-check are unchanged; only completeness
       is bounded.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [field, budget, cdcl]
     links:
@@ -215,7 +215,7 @@ artifacts:
       or unchecked verdict); a within-budget query matches check(). The
       #29 A5 mul-commutativity shape is bounded to Unknown under a small
       budget.
-    status: draft
+    status: implemented
     release: v0.4.0
     tags: [field, budget, unit-test]
     links:

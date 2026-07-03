@@ -220,8 +220,35 @@ impl SatSolver {
         Self::default()
     }
 
-    /// Decide satisfiability of the formula.
+    /// Decide satisfiability of the formula (unbounded — always a verdict).
     pub fn solve(&mut self, formula: &CnfFormula) -> SatResult {
+        self.run(formula, None)
+            .expect("an unbounded solve always reaches a verdict")
+    }
+
+    /// Decide satisfiability under a conflict budget (DES-019).
+    ///
+    /// Runs the same deterministic CDCL search as [`SatSolver::solve`] but
+    /// abandons it once search conflicts exceed `max_conflicts`, returning
+    /// `None` — no verdict reached within budget. Any decided verdict (SAT,
+    /// or an UNSAT refuted by propagation/root conflict without exceeding the
+    /// budget) is returned as `Some`, identical to `solve`, with the proof
+    /// trace intact. A `max_conflicts` of 0 admits only queries decided
+    /// before the first search conflict.
+    pub fn solve_with_budget(
+        &mut self,
+        formula: &CnfFormula,
+        max_conflicts: u64,
+    ) -> Option<SatResult> {
+        self.run(formula, Some(max_conflicts))
+    }
+
+    /// Shared solve entry: `budget` of `None` is unbounded (never `None`
+    /// return), `Some(max)` bounds search conflicts and returns `None` on
+    /// exhaustion. On any decided path the behaviour is bit-for-bit that of
+    /// the original `solve`, so determinism and the proof-trace hook are
+    /// unaffected.
+    fn run(&mut self, formula: &CnfFormula, budget: Option<u64>) -> Option<SatResult> {
         // Tolerate literals above `num_vars` by sizing to whichever is larger.
         let n = formula
             .clauses
@@ -233,13 +260,13 @@ impl SatSolver {
             .max(formula.num_vars) as usize;
         self.reset(n);
         if !self.load(formula) {
-            return SatResult::Unsat;
+            return Some(SatResult::Unsat);
         }
         if let Some(confl) = self.propagate() {
             self.record_root_conflict(confl);
-            return SatResult::Unsat;
+            return Some(SatResult::Unsat);
         }
-        self.search()
+        self.search(budget)
     }
 
     /// The resolution proof recorded so far: one step per learned clause,
@@ -319,14 +346,24 @@ impl SatSolver {
         true
     }
 
-    fn search(&mut self) -> SatResult {
+    /// The CDCL search loop. `budget` bounds the number of search conflicts:
+    /// once it is exceeded the search yields `None` (no verdict), otherwise a
+    /// verdict is always returned as `Some`. `None` budget is unbounded.
+    fn search(&mut self, budget: Option<u64>) -> Option<SatResult> {
+        let mut conflicts = 0u64;
         loop {
             if let Some(confl) = self.propagate() {
                 if self.trail_lim.is_empty() {
                     self.record_root_conflict(confl);
-                    return SatResult::Unsat;
+                    return Some(SatResult::Unsat);
                 }
                 self.conflicts_since_restart += 1;
+                conflicts += 1;
+                // Budget check before conflict analysis: on exhaustion we
+                // abandon search without touching the proof trace.
+                if budget.is_some_and(|max| conflicts > max) {
+                    return None;
+                }
                 let (learnt, bt_level, antecedents) = self.analyze(confl);
                 self.trace.push(LearnedStep {
                     clause: learnt.iter().map(|&l| dimacs(l)).collect(),
@@ -349,7 +386,7 @@ impl SatSolver {
                 self.backtrack(0);
             } else {
                 match self.pick_branch() {
-                    None => return SatResult::Sat(self.model()),
+                    None => return Some(SatResult::Sat(self.model())),
                     Some(l) => {
                         self.trail_lim.push(self.trail.len());
                         self.enqueue(l, NO_REASON);
@@ -769,6 +806,47 @@ mod tests {
         assert_eq!(SatSolver::new().solve(&f), SatResult::Unsat);
         // Sanity: PHP(3,3) is satisfiable.
         assert_sat_with_model(&pigeonhole(3, 3));
+    }
+
+    #[test]
+    fn budget_matches_unbounded_on_trivially_decidable() {
+        // A generous budget must not change a verdict decided within it.
+        let sat = formula(3, &[&[1], &[-1, 2], &[-2, 3]]);
+        assert_eq!(
+            SatSolver::new().solve_with_budget(&sat, 1_000_000),
+            Some(SatSolver::new().solve(&sat)),
+        );
+        let unsat = pigeonhole(4, 3);
+        assert_eq!(
+            SatSolver::new().solve_with_budget(&unsat, 1_000_000),
+            Some(SatResult::Unsat),
+        );
+    }
+
+    #[test]
+    fn budget_exhaustion_returns_none() {
+        // PHP(4,3) is UNSAT and needs conflicts; budget 0 admits nothing that
+        // requires a search conflict, so it yields None (no verdict).
+        let f = pigeonhole(4, 3);
+        assert_eq!(SatSolver::new().solve_with_budget(&f, 0), None);
+    }
+
+    #[test]
+    fn budget_zero_still_decides_pure_propagation() {
+        // Decided entirely by unit propagation — no search conflict — so even
+        // a zero budget returns a verdict.
+        let mut clauses: Vec<Vec<i32>> = vec![vec![1]];
+        for v in 1..10 {
+            clauses.push(vec![-v, v + 1]);
+        }
+        let f = CnfFormula {
+            num_vars: 10,
+            clauses,
+        };
+        match SatSolver::new().solve_with_budget(&f, 0) {
+            Some(SatResult::Sat(model)) => assert!(model.iter().all(|&b| b)),
+            other => panic!("expected Sat within a zero budget, got {other:?}"),
+        }
     }
 
     #[test]
