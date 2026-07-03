@@ -796,6 +796,90 @@ theorem value_refines (Ak : kernel.Assignment) (Ap : PAsn) (lit : Std.I32)
           simp only [polarity, decide_eq_false_iff_not]; scalar_tac
         simp [pvalue, hs, hpol]
 
+/-- `assign_true_loop` pads the value vector with `none` until `var` is in
+    range, preserving every existing slot and leaving the padding empty. -/
+theorem assign_true_loop_spec (self : kernel.Assignment) (var : Std.Usize)
+    (hvb : var.val + 1 ≤ Std.Usize.max) :
+    kernel.Assignment.assign_true_loop self var ⦃
+      (v : alloc.vec.Vec (Option Bool)) =>
+        var.val < v.val.length ∧
+        ∀ w, (v.val[w]?).join
+          = if w < self.values.val.length then (self.values.val[w]?).join
+            else none ⦄ := by
+  unfold kernel.Assignment.assign_true_loop
+  apply loop.spec_decr_nat
+    (measure := fun (s : kernel.Assignment) => var.val + 1 - s.values.val.length)
+    (inv := fun (s : kernel.Assignment) =>
+      self.values.val.length ≤ s.values.val.length ∧
+      ∀ w, (s.values.val[w]?).join
+        = if w < self.values.val.length then (self.values.val[w]?).join
+          else none)
+  · rintro s ⟨hmono, hinv⟩
+    unfold kernel.Assignment.assign_true_loop.body
+    dsimp only
+    split
+    · rename_i hle
+      step as ⟨v, hv⟩
+      have hvlen : v.val.length = s.values.val.length + 1 := by simp [hv]
+      refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+      intro w
+      rw [hv]
+      by_cases hw : w < s.values.val.length
+      · rw [List.getElem?_append_left hw]; exact hinv w
+      · rw [List.getElem?_append_right (by omega),
+          if_neg (show ¬ w < self.values.val.length by omega)]
+        rcases (w - s.values.val.length) with _ | n <;> simp
+    · rename_i hgt
+      exact ⟨by scalar_tac, hinv⟩
+  · refine ⟨le_refl _, fun w => ?_⟩
+    split
+    · rfl
+    · rename_i hge; rw [List.getElem?_eq_none (by omega)]; rfl
+
+/-- `assign_true` refines `pAssignLit`: the returned conflict flag and updated
+    assignment track the pure partial-assignment update. -/
+theorem assign_true_refines (Ak : kernel.Assignment) (Ap : PAsn) (lit : Std.I32)
+    (hrel : RelAsn Ak Ap) (hvalid : ValidLit lit) :
+    Ak.assign_true lit ⦃ (p : Bool × kernel.Assignment) =>
+      match pAssignLit Ap lit with
+      | none => p.1 = true
+      | some Ap' => p.1 = false ∧ RelAsn p.2 Ap' ⦄ := by
+  unfold kernel.Assignment.assign_true
+  step with (value_refines Ak Ap lit hrel hvalid) as ⟨o, ho⟩
+  have hpv : o = (Ap (litVar lit)).map (fun b => b == polarity lit) := ho
+  cases hA : Ap (litVar lit) with
+  | none =>
+    rw [hA] at hpv; simp only [Option.map_none] at hpv
+    subst hpv
+    dsimp only
+    simp only [pAssignLit, hA]
+    step with (lit_var_spec lit hvalid) as ⟨var, hvar⟩
+    have hvb : var.val + 1 ≤ Std.Usize.max := by rw [hvar]; scalar_tac
+    step with (assign_true_loop_spec Ak var hvb) as ⟨v, hvlt, hvr⟩
+    step as ⟨pr, imb, hpr, himb⟩
+    intro w
+    rw [himb]
+    have hlv : litVar lit = var.val := hvar.symm
+    simp only [alloc.vec.Vec.set_val_eq]
+    by_cases hwv : w = var.val
+    · subst hwv
+      rw [if_pos hlv.symm, List.getElem?_set_self (by scalar_tac), Option.join_some]
+      simp only [polarity]
+      congr 1
+    · rw [if_neg (by rw [hlv]; exact hwv), List.getElem?_set_ne (Ne.symm hwv),
+        hvr w, hrel w]
+      split
+      · rfl
+      · rename_i hge; rw [List.getElem?_eq_none (by omega)]; rfl
+  | some b' =>
+    rw [hA] at hpv; simp only [Option.map_some] at hpv
+    subst hpv
+    dsimp only
+    simp only [pAssignLit, hA]
+    by_cases hb : (b' == polarity lit) = true
+    · simp only [hb]; exact ⟨rfl, hrel⟩
+    · simp only [Bool.not_eq_true] at hb; simp [hb]
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
