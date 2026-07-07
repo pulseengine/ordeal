@@ -995,6 +995,26 @@ theorem pUnassigned_append (A : PAsn) (acc xs ys : List Std.I32) :
       | true => rfl
       | false => exact ih acc
 
+/-- `pUnassigned` collects at most `|acc| + |input|` literals (it only ever
+    appends, one per input element). Bounds the kernel's `unassigned` vector so
+    its `push` stays within `Usize`. -/
+theorem pUnassigned_length (A : PAsn) (acc l r : List Std.I32)
+    (h : pUnassigned A acc l = some r) : r.length ≤ acc.length + l.length := by
+  induction l generalizing acc with
+  | nil =>
+    simp only [pUnassigned, Option.some.injEq] at h; subst h; simp
+  | cons x t ih =>
+    simp only [pUnassigned] at h
+    split at h
+    · simp at h
+    · have := ih acc h; simp only [List.length_cons]; omega
+    · split at h
+      · have := ih acc h; simp only [List.length_cons]; omega
+      · have := ih (acc ++ [x]) h
+        simp only [List.length_append, List.length_cons, List.length_singleton,
+          List.length_nil] at this ⊢
+        omega
+
 /-- `contains_lit` decides membership by underlying value. -/
 theorem contains_lit_spec (lits : Slice Std.I32) (lit : Std.I32) :
     kernel.contains_lit lits lit ⦃ (b : Bool) =>
@@ -1031,13 +1051,6 @@ theorem contains_lit_spec (lits : Slice Std.I32) (lit : Std.I32) :
       rw [hik, List.take_length] at hnone
       simp [hnone]
   · exact ⟨by simp, by simp⟩
-
-/- WIP — `classify_hint_refines` is ~90% proven (its helpers `contains_lit_spec`
-   and `pUnassigned_append` are discharged above). The value-match, exit 4-way
-   classification, and false/dup arms close; the `none` dedup-branch's dup/push
-   arms need a WP-reduction fix (the loop-body goal isn't reducing to the
-   invariant components there). Kept commented so the file stays sorry-clean
-   (only `kernel_refines_pure` remains); finish next session.
 
 /-- Fifth simulation leaf: `classify_hint` refines `pUnassigned` + the length
     classification (Satisfied/Falsified/Unit/Multi ↔ none/[]/[u]/2+). -/
@@ -1096,17 +1109,17 @@ theorem classify_hint_refines (Ak : kernel.Assignment) (Ap : PAsn)
         simp only [alloc.vec.Vec.deref] at hbc
         split
         · rename_i hd
-          simp only [bind_ok]
           step as ⟨i4, hi4⟩
           refine ⟨by scalar_tac, ?_, by scalar_tac⟩
           rw [hi4, hstep]
           rw [hbc] at hd
-          trace_state
           simp only [pUnassigned, hpv, hd, if_true]
         · rename_i hd
-          trace_state
-          dsimp only
-          step as ⟨un1, hun1⟩
+          have hbound : unas.val.length < Usize.max := by
+            have hl := pUnassigned_length Ap [] (clause.val.take i.val) unas.val hpu
+            simp only [List.length_nil, List.length_take, Nat.zero_add] at hl
+            scalar_tac
+          step with (alloc.vec.Vec.push_spec unas lit hbound) as ⟨un1, hun1⟩
           step as ⟨i4, hi4⟩
           refine ⟨by scalar_tac, ?_, by scalar_tac⟩
           rw [hi4, hstep, hun1]
@@ -1132,7 +1145,6 @@ theorem classify_hint_refines (Ak : kernel.Assignment) (Ap : PAsn)
           | a :: b :: rest, _ => exact ⟨a, b, rest, rfl⟩
         simp [hpu, hab]
   · exact ⟨by simp, by simp [pUnassigned]⟩
--/
 
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
