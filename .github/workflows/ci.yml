@@ -162,10 +162,16 @@ jobs:
         working-directory: lean
         run: |
           expected=1
-          count=$(grep -cE '^[[:space:]]*sorry[[:space:]]*$' Sound.lean || true)
-          echo "open sorry count in Sound.lean: $count (expected $expected)"
+          # Count LEAN's OWN `declaration uses \`sorry\`` warnings, not a source
+          # grep. `lake env lean` re-elaborates Sound.lean from source (so it is
+          # cache-independent) and reports exactly what the elaborator treats as
+          # a sorry — every form: standalone, `exact sorry`, `:= sorry`, inline,
+          # or `admit`. A source-pattern grep would miss non-standalone sorries
+          # (a parser/validator differential) and could be silently evaded.
+          count=$(lake env lean Sound.lean 2>&1 | grep -cE 'declaration uses .sorry.' || true)
+          echo "sorry-bearing declarations in Sound.lean: $count (expected $expected)"
           if [ "$count" -ne "$expected" ]; then
-            echo "::error file=lean/Sound.lean::Expected exactly $expected open sorry (kernel_refines_pure, #12), found $count — a proven leaf regressed, a new gap was added, or #12 closed (drop the expected count)."
+            echo "::error file=lean/Sound.lean::Expected exactly $expected sorry-bearing declaration (kernel_refines_pure, #12), found $count — a proven leaf regressed, a new gap was added, or #12 closed (drop the expected count)."
             exit 1
           fi
 
