@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-07-03
+
+spar's integration question (issue #38): a semantic oracle for its generated
+WIT record data-type layouts — small, closed QF_BV equivalence queries, in
+ordeal's existing fragment. This adds a one-call equivalence helper and a
+worked example; no new fragment op, no optimization/LP surface. **Falsification
+statement:** this release is wrong if `Solver::prove_equiv(a, b)` returns a
+verdict that disagrees with asserting `BoolTerm::Ne(a, b)` and calling
+`Solver::check` on the same terms.
+
+### Added
+
+- **`Solver::prove_equiv(a, b)`** — prove two same-width bitvector terms
+  equivalent via the standard equivalence-as-UNSAT encoding. `Unsat` (with a
+  checker-validated LRAT certificate) ⟹ equal for all inputs; `Sat` ⟹ a
+  counterexample; `Unknown` (including a width mismatch) ⟹ conservative, no
+  claim. Decision-only — it does not grow an optimization/LP arm.
+- **`docs/consuming-ordeal.md`** — a layout/data-type equivalence section
+  (pack+extract round-trip) showing the programmatic `BvTerm` graph + verdict.
+
 ## [0.4.1] - 2026-07-03
 
 loom's v0.4.0 smoke-test (issue #34). loom asked for a text front-end so it
@@ -205,7 +225,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.2
 [0.4.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.1
 [0.4.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.0
 [0.3.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.3.0
