@@ -654,6 +654,33 @@ theorem get_live_spec
         rw [List.getElem?_eq_getElem hbi]
         simp [Option.join, projClauses, List.getElem_map, ← ho]
 
+/-- Like `get_live_spec`, but exposes the returned clause's value: on `.Ok s`,
+    the projected slot at `id` is exactly `some s.val`. Needed by `check_rup`,
+    which feeds that clause to `classify_hint`/`pUnassigned`. -/
+theorem get_live_clause_spec
+    (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (id step : Std.Usize) :
+    kernel.get_live clauses id step ⦃ r => match r with
+      | .Ok s => (projClauses clauses.val)[id.val - 1]? = some (some s.val)
+      | .Err _ => True ⦄ := by
+  unfold kernel.get_live
+  split
+  · simp
+  · rename_i hid0
+    dsimp only
+    split
+    · simp
+    · rename_i hle
+      step as ⟨i1, hi1⟩
+      step as ⟨o, ho⟩
+      cases o with
+      | none => simp
+      | some clause =>
+        rw [show id.val - 1 = i1.val from hi1.symm]
+        have hbi : i1.val < (projClauses clauses.val).length := by
+          simp only [projClauses, List.length_map]; scalar_tac
+        rw [List.getElem?_eq_getElem hbi]
+        simp [projClauses, List.getElem_map, ← ho, alloc.vec.Vec.deref]
+
 /-- `pDelete` over a list ending in one more id folds through the prefix. -/
 theorem pDelete_append (l : List (Option (List Std.I32))) (xs : List Nat)
     (x : Nat) :
