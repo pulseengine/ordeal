@@ -53,7 +53,7 @@ jobs:
       # confirm the Charon/Aeneas nix build completes within the runner budget
       # (add a nix cache if it is too slow). Until then it is advisory only.
       - name: Install Nix (flakes)
-        uses: DeterminateSystems/nix-installer-action@v14
+        uses: DeterminateSystems/nix-installer-action@v22
 
       # Regenerate the model in place with the pinned Charon/Aeneas revisions.
       # regen.sh writes lean/Kernel.lean; we then diff it against the commit.
