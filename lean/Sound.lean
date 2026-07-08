@@ -1501,6 +1501,28 @@ theorem apply_add_refines
           simp only [projClauses, List.map_append, List.map_cons, List.map_nil,
             Option.map_some]
 
+/-- Cloning a `Usize` is the identity. -/
+theorem cloneusize_id (x : Std.Usize) : core.clone.CloneUsize.clone x = ok x := by
+  simp [core.clone.CloneUsize]
+
+/-- Cloning a `Vec Usize` returns an equal vector. -/
+theorem clonevec_usize_id (v : alloc.vec.Vec Std.Usize) :
+    alloc.vec.CloneVec.clone core.clone.CloneUsize v ⦃ v' => v = v' ⦄ := by
+  unfold alloc.vec.CloneVec.clone
+  exact Slice.clone_spec (fun x _ => cloneusize_id x)
+
+/-- Cloning a `Step` returns an equal step (all fields clone by identity). -/
+theorem step_clone_spec (s : kernel.Step) :
+    kernel.Step.Insts.CoreCloneClone.clone s ⦃ (cur : kernel.Step) => cur = s ⦄ := by
+  unfold kernel.Step.Insts.CoreCloneClone.clone
+  rcases s with ⟨id, clause, hints⟩ | ⟨ids⟩
+  · simp only [core.clone.impls.CloneUsize.clone, lift, bind_tc_ok]
+    step with (clonevec_id clause) as ⟨v, hv⟩
+    step with (clonevec_usize_id hints) as ⟨v1, hv1⟩
+    simp [← hv, ← hv1]
+  · step with (clonevec_usize_id ids) as ⟨v, hv⟩
+    simp [← hv]
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
