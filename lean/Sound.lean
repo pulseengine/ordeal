@@ -1465,7 +1465,8 @@ theorem apply_add_refines
           id.val = clauses.val.length + 1 ∧
           pCheckRup (projClauses clauses.val) clause.val (hints.val.map (·.val)) = true ∧
           b1 = clause.val.isEmpty ∧
-          projClauses p.2.val = projClauses clauses.val ++ [some clause.val]
+          projClauses p.2.val = projClauses clauses.val ++ [some clause.val] ∧
+          (∀ lit ∈ clause.val, ValidLit lit)
       | .Err _ => True ⦄ := by
   unfold kernel.apply_add
   step with (clause_has_invalid_literal_spec clause) as ⟨b, hb⟩
@@ -1492,7 +1493,7 @@ theorem apply_add_refines
         simp only [hcf]
         step as ⟨v, hv⟩
         step as ⟨clauses1, hc1⟩
-        refine ⟨hideq, hr rfl, ?_, ?_⟩
+        refine ⟨hideq, hr rfl, ?_, ?_, hcvalid⟩
         · rw [Bool.eq_iff_iff, decide_eq_true_eq, List.isEmpty_iff,
             List.eq_nil_iff_length_eq_zero]
           constructor <;> intro h <;> scalar_tac
