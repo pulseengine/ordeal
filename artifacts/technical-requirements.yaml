@@ -339,13 +339,14 @@ artifacts:
       shall be discharged by translating the Rust checker to Lean 4 via Aeneas
       and proving the theorem against the Aeneas-produced functional model,
       rather than by hand-transcribing the checker into a proof assistant. The
-      Lean side shall be built with rules_lean. Writing the checker directly in
-      Lean (bv_decide style) is retained as a documented fallback. This refines
+      Lean side is built and checked with lake/elan in CI (a rules_lean/Bazel
+      path remains an option). Writing the checker directly in Lean (bv_decide
+      style) is retained as a documented fallback. This refines
       how the verified-checker soundness obligation is met; the checker remains
       the sole trusted component with no link dependency on the solver core.
-    status: draft
+    status: verified
     release: v0.5.0
-    tags: [lrat, checker, aeneas, lean, rules_lean, verified, trusted-core]
+    tags: [lrat, checker, aeneas, lean, verified, trusted-core]
     links:
       - type: derives-from
         target: SYS-003

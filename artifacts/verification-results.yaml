@@ -486,3 +486,37 @@ artifacts:
     fields:
       verdict: pass
       evidence: "PR #31 (Test job), merged green to main"
+
+  - id: VE-005
+    type: verification-execution
+    title: Lean soundness proof discharge — main @ 22d3bb0
+    description: >
+      PR #39 (soundness proof complete): the blocking Lean CI job elaborated
+      lean/Kernel.lean and lean/Sound.lean and the sorry-budget guard confirmed
+      zero sorries — lrat_check_sound (accept implies UNSAT) discharged, axioms
+      = {propext, Classical.choice, Quot.sound}, no sorryAx / native_decide.
+    status: implemented
+    fields:
+      version: main-v0.5.0
+      commit: 22d3bb0
+      timestamp: "2026-07-08T17:07:08Z"
+      executor: github-actions
+      environment:
+        ci-run: https://github.com/pulseengine/ordeal/actions/runs/28936743066
+        lean-job: https://github.com/pulseengine/ordeal/actions/runs/28936743066/job/85848859727
+
+  - id: VV-027
+    type: verification-verdict
+    title: "VER-015 pass — Aeneas->Lean checker soundness discharges (0 sorry)"
+    description: >
+      Executed pass. lrat_check_sound proved end to end over the Aeneas model,
+      zero sorry, no sorryAx / native_decide; CI Lean sorry-budget gate = 0.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-015
+      - type: part-of-execution
+        target: VE-005
+    fields:
+      verdict: pass
+      evidence: "PR #39 (Lean model + soundness proof job), merged green to main"

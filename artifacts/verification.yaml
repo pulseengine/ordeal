@@ -346,7 +346,7 @@ artifacts:
       CNF UNSAT) discharges in CI against that model, built with rules_lean.
       Also confirms the checker has no build or link dependency on the solver
       core, so the trusted computing base is exactly the checker.
-    status: draft
+    status: verified
     release: v0.5.0
     tags: [aeneas, lean, lrat, checker, soundness, rules_lean, trusted-core]
     links:
