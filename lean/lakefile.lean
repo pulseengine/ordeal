@@ -14,8 +14,8 @@ package «ordeal-lrat-proof» {}
 
 -- The spec + soundness proof (issue #12), `sorry`-free. `lrat_check_sound`
 -- (accept ⟹ `unsat`) is discharged end to end over the Aeneas model;
--- `#print axioms kernel.spec.lrat_check_sound` shows only propext /
--- Classical.choice / Quot.sound plus two `native_decide` `i32::MIN` facts —
--- no `sorryAx`. `pure_check_sound` (the mathematical core) is axiom-clean.
+-- `#print axioms kernel.spec.lrat_check_sound` shows ONLY propext /
+-- Classical.choice / Quot.sound — no `sorryAx`, no `native_decide`. Axiom-clean,
+-- like the mathematical core `pure_check_sound`.
 -- Scope + trust boundary: docs/formal-verification.md. Build: `lake build Sound`.
 lean_lib «Sound» {}

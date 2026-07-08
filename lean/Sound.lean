@@ -610,7 +610,8 @@ theorem clause_has_invalid_literal_spec (clause : Slice Std.I32) :
           · exact hinv l hl
           · rw [hl]
             refine ⟨fun h => hneM (by grind), ?_⟩
-            have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by native_decide
+            have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by
+              simp [core.num.I32.MIN, I32.rMin, I32.max_eq]
             have hb : core.num.I32.MIN.val ≤ lit.val := by rw [hmm]; scalar_tac
             rcases lt_or_eq_of_le hb with h | h
             · exact h
@@ -982,7 +983,8 @@ theorem valid_neg (lit neg : Std.I32) (h : ValidLit lit) (hn : neg.val = -lit.va
   obtain ⟨h0, hmin⟩ := h
   refine ⟨by rw [hn]; omega, ?_⟩
   have hb : lit.val ≤ Std.I32.max := by scalar_tac
-  have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by native_decide
+  have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by
+              simp [core.num.I32.MIN, I32.rMin, I32.max_eq]
   rw [hn]; omega
 
 /-- Assigning the negation of a literal true is the pure "assume false". -/

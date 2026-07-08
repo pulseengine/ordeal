@@ -67,13 +67,14 @@ these would have to fail:
    (`kernel.rs` is one file), the model is regenerated rather than hand-written,
    and Aeneas models Rust scalar (`i32`/`usize`) semantics including bounds.
 2. **Lean's kernel is sound**, and the axioms the proof uses are consistent.
-   `#print axioms kernel.spec.lrat_check_sound` reports **only**:
-   `propext`, `Classical.choice`, `Quot.sound` (the standard Mathlib base) plus
-   **two `native_decide` facts** about `i32::MIN`
-   (`core.num.I32.MIN.val = -Std.I32.max - 1`). **No `sorryAx`.** The
-   `native_decide` uses extend trust to Lean's compiler / `Lean.ofReduceBool`;
-   they are decidable arithmetic facts and are candidates for removal (a pure
-   `decide` did not reduce them; a hand lemma would eliminate the two axioms).
+   `#print axioms kernel.spec.lrat_check_sound` reports **only** the three
+   standard Mathlib axioms — `propext`, `Classical.choice`, `Quot.sound`.
+   **No `sorryAx`, no `native_decide`.** (An earlier version leaned on two
+   `native_decide` facts about `i32::MIN`, which pulled the Lean compiler /
+   `Lean.ofReduceBool` into the trusted base; those are now proved
+   kernel-checked via `simp [core.num.I32.MIN, I32.rMin, I32.max_eq]`, so the
+   top-level theorem is as axiom-clean as the mathematical core
+   `pure_check_sound`.)
 3. **The side condition `hfit` holds.** `|cnf| + |steps| ≤ usize::MAX`. Because
    Lean's `⦃ ⦄` spec is *total* (`spec (fail) = False`), the proof must show the
    run never fails; deletes set store slots to `none` without shrinking, so this

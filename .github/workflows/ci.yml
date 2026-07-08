@@ -135,9 +135,9 @@ jobs:
   # sorry budget fails CI.
   # NOTE: this does NOT re-run Aeneas (regen.sh) to check that Kernel.lean is
   # the current translation of kernel.rs — that drift guard is a known gap
-  # (see docs/formal-verification.md). The proof's trusted axioms are propext /
-  # Classical.choice / Quot.sound + two native_decide i32::MIN facts (no
-  # sorryAx); `#print axioms kernel.spec.lrat_check_sound` is the check.
+  # (see docs/formal-verification.md, issue #44). The proof's trusted axioms are
+  # ONLY propext / Classical.choice / Quot.sound (no sorryAx, no native_decide);
+  # `#print axioms kernel.spec.lrat_check_sound` is the check.
   lean:
     name: Lean model + soundness proof
     runs-on: ubuntu-latest
