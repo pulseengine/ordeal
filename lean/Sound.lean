@@ -573,13 +573,63 @@ theorem clonevec_id (v : alloc.vec.Vec Std.I32) :
   unfold alloc.vec.CloneVec.clone
   exact Slice.clone_spec (fun x _ => clonei32_id x)
 
+/-- A literal the kernel accepts: nonzero and not `INT_MIN`, so `-lit` is safe
+    and `natAbs` round-trips. Guaranteed by `clause_has_invalid_literal`. -/
+def ValidLit (lit : Std.I32) : Prop :=
+  lit.val ≠ 0 ∧ core.num.I32.MIN.val < lit.val
+
+/-- `clause_has_invalid_literal` returning `false` certifies every literal is
+    valid (nonzero, non-`INT_MIN`) — the source of clause validity that
+    `check_rup`/`assume_negation` rely on. -/
+theorem clause_has_invalid_literal_spec (clause : Slice Std.I32) :
+    kernel.clause_has_invalid_literal clause ⦃ (b : Bool) =>
+      b = false → ∀ lit ∈ clause.val, ValidLit lit ⦄ := by
+  unfold kernel.clause_has_invalid_literal kernel.clause_has_invalid_literal_loop
+  apply loop.spec_decr_nat
+    (measure := fun (i : Std.Usize) => clause.val.length - i.val)
+    (inv := fun (i : Std.Usize) => i.val ≤ clause.val.length ∧
+      ∀ lit ∈ clause.val.take i.val, ValidLit lit)
+  · rintro i ⟨hle, hinv⟩
+    unfold kernel.clause_has_invalid_literal_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      step as ⟨lit, hlit⟩
+      split
+      · intro h; simp at h
+      · split
+        · intro h; simp at h
+        · rename_i hneM hne0
+          step as ⟨i3, hi3⟩
+          refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+          rw [show i3.val = i.val + 1 by scalar_tac, List.take_add_one,
+            List.getElem?_eq_getElem (by scalar_tac), ← hlit]
+          intro l hl
+          simp only [Option.toList_some, List.mem_append, List.mem_singleton] at hl
+          rcases hl with hl | hl
+          · exact hinv l hl
+          · rw [hl]
+            refine ⟨fun h => hneM (by grind), ?_⟩
+            have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by native_decide
+            have hb : core.num.I32.MIN.val ≤ lit.val := by rw [hmm]; scalar_tac
+            rcases lt_or_eq_of_le hb with h | h
+            · exact h
+            · exact absurd (show lit = core.num.I32.MIN by grind) hne0
+    · rename_i hge
+      intro _
+      have hik : i.val = clause.val.length := by scalar_tac
+      rw [hik, List.take_length] at hinv
+      exact hinv
+  · exact ⟨by simp, by simp⟩
+
 /-- Second full simulation leaf: `load_cnf` produces the CNF mapped to
     `some` (Vec vs List bridged by mapping `.val`). The loop invariant
     carries `clauses.length = i` so the `push` bound and the take-prefix
     map-close are both immediate. -/
 theorem load_cnf_refines (cnf : Slice (alloc.vec.Vec Std.I32)) :
     kernel.load_cnf cnf ⦃ r => match r with
-      | .Ok cls => cls.val.map (Option.map (·.val)) = (cnf.val.map (·.val)).map some
+      | .Ok cls => cls.val.map (Option.map (·.val)) = (cnf.val.map (·.val)).map some ∧
+          (∀ c ∈ cls.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit)
       | .Err _ => True ⦄ := by
   unfold kernel.load_cnf kernel.load_cnf_loop
   apply loop.spec_decr_nat
@@ -587,34 +637,43 @@ theorem load_cnf_refines (cnf : Slice (alloc.vec.Vec Std.I32)) :
       cnf.length - p.2.val)
     (inv := fun (p : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
       p.2.val ≤ cnf.length ∧ p.1.val.length = p.2.val ∧
-      p.1.val.map (Option.map (·.val)) = ((cnf.val.take p.2.val).map (·.val)).map some)
-  · rintro ⟨clauses, i⟩ ⟨hle, hlen, hmap⟩
+      p.1.val.map (Option.map (·.val)) = ((cnf.val.take p.2.val).map (·.val)).map some ∧
+      (∀ c ∈ p.1.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit))
+  · rintro ⟨clauses, i⟩ ⟨hle, hlen, hmap, hvld⟩
     unfold kernel.load_cnf_loop.body
     dsimp only
     split
     · rename_i hlt
       step as ⟨v, hv⟩
-      step with chil_total
+      step with (clause_has_invalid_literal_spec (alloc.vec.Vec.deref v)) as ⟨b, hb⟩
       split
       · simp
-      · step with clonevec_id as ⟨vc, hvc⟩
+      · rename_i hbf
+        have hcvalid : ∀ lit ∈ v.val, ValidLit lit := hb (by simpa using hbf)
+        step with clonevec_id as ⟨vc, hvc⟩
         step as ⟨cls1, hcls1⟩
         step as ⟨i3, hi3⟩
-        refine ⟨by scalar_tac, ?_, ?_, by scalar_tac⟩
+        refine ⟨by scalar_tac, ?_, ?_, ?_, by scalar_tac⟩
         · rw [hcls1]; simp only [List.length_append, List.length_singleton, hlen]
           scalar_tac
         · rw [show i3.val = i.val + 1 by scalar_tac, hcls1]
           simp only [List.map_append, hmap, ← hvc, hv]
           simp_lists [List.take_add_one]
-          have hb : i.val < cnf.val.length := by scalar_tac
-          rw [List.getElem?_eq_getElem hb]
+          have hb2 : i.val < cnf.val.length := by scalar_tac
+          rw [List.getElem?_eq_getElem hb2]
           simp only [Option.toList_some, List.map_cons, List.map_nil,
             List.map_append, Option.map_some, Function.comp_apply]
+        · rw [hcls1]
+          intro c hc cc hcc
+          rcases List.mem_append.mp hc with h | h
+          · exact hvld c h cc hcc
+          · simp only [List.mem_singleton] at h; subst h
+            rw [show cc = vc from (Option.some.inj hcc).symm, ← hvc]; exact hcvalid
     · rename_i hge
       have hik : i.val = cnf.val.length := by
         simp only [Slice.length] at *; scalar_tac
-      simp [hmap, hik]
-  · exact ⟨by simp, by simp, by simp⟩
+      exact ⟨by simp [hmap, hik], hvld⟩
+  · exact ⟨by simp, by simp, by simp, by simp⟩
 
 /-- Project the Aeneas clause store (a slice/vector of optional clause
     vectors) to the pure checker's clause list (optional literal lists). A
@@ -707,12 +766,17 @@ theorem projClauses_set (l : List (Option (alloc.vec.Vec Std.I32))) (n : Nat) :
     `pDelete` computes from the original store and the id list. -/
 theorem apply_delete_refines
     (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (ids : Slice Std.Usize)
-    (step : Std.Usize) :
+    (step : Std.Usize)
+    (hvalid : ∀ c ∈ clauses.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) :
     kernel.apply_delete clauses ids step ⦃ r => match r.1 with
       | .Ok () =>
           pDelete (projClauses clauses.val) (ids.val.map (·.val))
-            = some (projClauses r.2.val)
-      | .Err _ => True ⦄ := by
+            = some (projClauses r.2.val) ∧
+          r.2.val.length = clauses.val.length ∧
+          (∀ c ∈ r.2.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit)
+      | .Err _ =>
+          r.2.val.length = clauses.val.length ∧
+          (∀ c ∈ r.2.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) ⦄ := by
   unfold kernel.apply_delete kernel.apply_delete_loop
   apply loop.spec_decr_nat
     (measure := fun (p : Slice (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
@@ -720,8 +784,9 @@ theorem apply_delete_refines
     (inv := fun (p : Slice (Option (alloc.vec.Vec Std.I32)) × Std.Usize) =>
       p.2.val ≤ ids.length ∧ p.1.val.length = clauses.val.length ∧
       pDelete (projClauses clauses.val) ((ids.val.take p.2.val).map (·.val))
-        = some (projClauses p.1.val))
-  · rintro ⟨cls, i⟩ ⟨hle, hlen, hdel⟩
+        = some (projClauses p.1.val) ∧
+      (∀ c ∈ p.1.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit))
+  · rintro ⟨cls, i⟩ ⟨hle, hlen, hdel, hvld⟩
     unfold kernel.apply_delete_loop.body
     dsimp only
     split
@@ -738,7 +803,7 @@ theorem apply_delete_refines
         simp only [kernel.clear_slot]
         step as ⟨i3, hi3⟩
         have hil : i.val < ids.val.length := by scalar_tac
-        refine ⟨by scalar_tac, ?_, ?_⟩
+        refine ⟨by scalar_tac, ?_, ?_, ?_⟩
         · rw [hbk, Slice.set_val_eq, List.length_set]; exact hlen
         · have htake : (ids.val.take i3.val).map (fun x => x.val)
               = (ids.val.take i.val).map (fun x => x.val) ++ [id.val] := by
@@ -750,17 +815,23 @@ theorem apply_delete_refines
           rw [hbk]
           simp only [Option.bind, pDelete, if_neg (show ¬ id.val = 0 by omega),
             hcl, Slice.set_val_eq, projClauses_set, hi2]
-          exact ⟨trivial, by scalar_tac⟩
+        · refine ⟨?_, by scalar_tac⟩
+          rw [hbk, Slice.set_val_eq]
+          intro c hc cc hcc
+          rcases List.mem_or_eq_of_mem_set hc with h | h
+          · exact hvld c h cc hcc
+          · rw [h] at hcc; simp at hcc
       | Err e =>
         step as ⟨cf, hcf⟩
-        simp [hcf,
+        simp only [hcf,
           core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual,
           core.convert.FromSame]
+        exact ⟨hlen, hvld⟩
     · rename_i hge
       have hik : i.val = ids.val.length := by scalar_tac
       simp only [hik, List.take_length] at hdel
-      simp [hdel]
-  · exact ⟨by simp, by rfl, by simp [pDelete]⟩
+      exact ⟨hdel, hlen, hvld⟩
+  · exact ⟨by simp, by rfl, by simp [pDelete], hvalid⟩
 
 /- ═══════════════ THE check_rup STACK: Assignment ↔ PAsn ══════════════ -/
 
@@ -768,11 +839,6 @@ theorem apply_delete_refines
     in-range slot, `none` past the end of the value vector. -/
 def RelAsn (Ak : kernel.Assignment) (Ap : PAsn) : Prop :=
   ∀ v : Nat, Ap v = (Ak.values.val[v]?).join
-
-/-- A literal the kernel accepts: nonzero and not `INT_MIN`, so `-lit` is safe
-    and `natAbs` round-trips. Guaranteed by `clause_has_invalid_literal`. -/
-def ValidLit (lit : Std.I32) : Prop :=
-  lit.val ≠ 0 ∧ core.num.I32.MIN.val < lit.val
 
 /-- `lit_var` computes the DIMACS variable `|lit|` for a valid literal. -/
 theorem lit_var_spec (lit : Std.I32) (h : ValidLit lit) :
@@ -1404,50 +1470,6 @@ theorem check_rup_refines
         have := hout (by rw [heq])
         simpa using this
 
-/-- `clause_has_invalid_literal` returning `false` certifies every literal is
-    valid (nonzero, non-`INT_MIN`) — the source of clause validity that
-    `check_rup`/`assume_negation` rely on. -/
-theorem clause_has_invalid_literal_spec (clause : Slice Std.I32) :
-    kernel.clause_has_invalid_literal clause ⦃ (b : Bool) =>
-      b = false → ∀ lit ∈ clause.val, ValidLit lit ⦄ := by
-  unfold kernel.clause_has_invalid_literal kernel.clause_has_invalid_literal_loop
-  apply loop.spec_decr_nat
-    (measure := fun (i : Std.Usize) => clause.val.length - i.val)
-    (inv := fun (i : Std.Usize) => i.val ≤ clause.val.length ∧
-      ∀ lit ∈ clause.val.take i.val, ValidLit lit)
-  · rintro i ⟨hle, hinv⟩
-    unfold kernel.clause_has_invalid_literal_loop.body
-    dsimp only
-    split
-    · rename_i hlt
-      step as ⟨lit, hlit⟩
-      split
-      · intro h; simp at h
-      · split
-        · intro h; simp at h
-        · rename_i hneM hne0
-          step as ⟨i3, hi3⟩
-          refine ⟨by scalar_tac, ?_, by scalar_tac⟩
-          rw [show i3.val = i.val + 1 by scalar_tac, List.take_add_one,
-            List.getElem?_eq_getElem (by scalar_tac), ← hlit]
-          intro l hl
-          simp only [Option.toList_some, List.mem_append, List.mem_singleton] at hl
-          rcases hl with hl | hl
-          · exact hinv l hl
-          · rw [hl]
-            refine ⟨fun h => hneM (by grind), ?_⟩
-            have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by native_decide
-            have hb : core.num.I32.MIN.val ≤ lit.val := by rw [hmm]; scalar_tac
-            rcases lt_or_eq_of_le hb with h | h
-            · exact h
-            · exact absurd (show lit = core.num.I32.MIN by grind) hne0
-    · rename_i hge
-      intro _
-      have hik : i.val = clause.val.length := by scalar_tac
-      rw [hik, List.take_length] at hinv
-      exact hinv
-  · exact ⟨by simp, by simp⟩
-
 /-- Eighth simulation leaf: `apply_add` refines `pChecks`'s add-branch. On the
     accepting path it certifies the sequential-id and RUP conditions the pure
     checker requires, reports whether the empty clause was reached, and its
@@ -1466,8 +1488,9 @@ theorem apply_add_refines
           pCheckRup (projClauses clauses.val) clause.val (hints.val.map (·.val)) = true ∧
           b1 = clause.val.isEmpty ∧
           projClauses p.2.val = projClauses clauses.val ++ [some clause.val] ∧
-          (∀ lit ∈ clause.val, ValidLit lit)
-      | .Err _ => True ⦄ := by
+          (∀ lit ∈ clause.val, ValidLit lit) ∧
+          (∀ c ∈ p.2.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit)
+      | .Err _ => p.2.val = clauses.val ⦄ := by
   unfold kernel.apply_add
   step with (clause_has_invalid_literal_spec clause) as ⟨b, hb⟩
   split
@@ -1493,13 +1516,19 @@ theorem apply_add_refines
         simp only [hcf]
         step as ⟨v, hv⟩
         step as ⟨clauses1, hc1⟩
-        refine ⟨hideq, hr rfl, ?_, ?_, hcvalid⟩
+        refine ⟨hideq, hr rfl, ?_, ?_, hcvalid, ?_⟩
         · rw [Bool.eq_iff_iff, decide_eq_true_eq, List.isEmpty_iff,
             List.eq_nil_iff_length_eq_zero]
           constructor <;> intro h <;> scalar_tac
         · rw [hc1, hv]
           simp only [projClauses, List.map_append, List.map_cons, List.map_nil,
             Option.map_some]
+        · intro c hc cc hcc
+          rw [hc1] at hc
+          rcases List.mem_append.mp hc with h | h
+          · exact hvalid c h cc hcc
+          · simp only [List.mem_singleton] at h; subst h
+            rw [show cc = v from (Option.some.inj hcc).symm, ← hv]; exact hcvalid
 
 /-- Cloning a `Usize` is the identity. -/
 theorem cloneusize_id (x : Std.Usize) : core.clone.CloneUsize.clone x = ok x := by
@@ -1528,21 +1557,178 @@ def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
   | .Delete ids => .del (ids.val.map (·.val))
 
-/-- THE remaining obligation of issue #12: an accepting run of the Aeneas
-    model is an accepting run of the pure checker on the same data. This
-    is a simulation argument over the generated monadic code (Aeneas
-    `progress` tactic + its loop lemmas) — mechanical in character, with
-    no further mathematical content.
+/-- Ninth simulation leaf: `check_steps_loop` refines `pChecks`. An `Ok ()`
+    outcome (the empty clause was RUP-derived) implies the pure checker accepts
+    the remaining steps. Dispatches Add via `apply_add`, Delete via
+    `apply_delete`. -/
+theorem check_steps_loop_refines
+    (steps : Slice kernel.Step)
+    (cl : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32))) (si : Std.Usize)
+    (hsi : si.val ≤ steps.val.length)
+    (hbound : cl.val.length + (steps.val.length - si.val) ≤ Std.Usize.max)
+    (hvalid : ∀ c ∈ cl.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) :
+    kernel.check_steps_loop steps cl none si ⦃
+        (outcome : Option (core.result.Result Unit kernel.CoreError)) =>
+      outcome = some (.Ok ()) →
+        pChecks (projClauses cl.val)
+          ((steps.val.map stepToPure).drop si.val) = true ⦄ := by
+  unfold kernel.check_steps_loop
+  apply loop.spec_decr_nat
+    (measure := fun (s : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32))
+        × Option (core.result.Result Unit kernel.CoreError) × Std.Usize) =>
+      steps.val.length - s.2.2.val)
+    (inv := fun (s : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32))
+        × Option (core.result.Result Unit kernel.CoreError) × Std.Usize) =>
+      s.2.2.val ≤ steps.val.length ∧
+      s.1.val.length + (steps.val.length - s.2.2.val) ≤ Std.Usize.max ∧
+      (∀ c ∈ s.1.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) ∧
+      (match s.2.1 with
+       | none => pChecks (projClauses cl.val) ((steps.val.map stepToPure).drop si.val)
+           = pChecks (projClauses s.1.val) ((steps.val.map stepToPure).drop s.2.2.val)
+       | some v => v = .Ok () →
+           pChecks (projClauses cl.val)
+             ((steps.val.map stepToPure).drop si.val) = true))
+  · rintro ⟨cl', outcome', si'⟩ ⟨hle', hbnd', hvld', hmatch⟩
+    unfold kernel.check_steps_loop.body
+    dsimp only
+    cases outcome' with
+    | some v =>
+      simp only [core.option.Option.is_none, Option.isNone_some, Bool.false_eq_true,
+        if_false, WP.spec_ok]
+      intro heq
+      exact hmatch (Option.some.inj heq)
+    | none =>
+      simp only [core.option.Option.is_none, Option.isNone_none, if_true]
+      split
+      · rename_i hlt
+        have hil : si'.val < steps.val.length := by scalar_tac
+        step as ⟨s, hs⟩
+        step with (step_clone_spec s) as ⟨current, hcur⟩
+        subst hcur
+        have hdrop : (steps.val.map stepToPure).drop si'.val
+            = stepToPure current :: (steps.val.map stepToPure).drop (si'.val + 1) := by
+          rw [List.drop_eq_getElem_cons (by simpa using hil), List.getElem_map, ← hs]
+        rcases current with ⟨id, clause, hints⟩ | ⟨ids⟩
+        · have hlenbnd : cl'.val.length < Std.Usize.max := by scalar_tac
+          step with (apply_add_refines cl' id (alloc.vec.Vec.deref clause)
+            (alloc.vec.Vec.deref hints) si' hlenbnd hvld') as ⟨p, hp⟩
+          obtain ⟨rr, clauses2⟩ := p
+          cases rr with
+          | Err e =>
+            step as ⟨si2, hsi2⟩
+            refine ⟨by scalar_tac, ?_, ?_, ?_, by scalar_tac⟩
+            · rw [hp]; scalar_tac
+            · rw [hp]; exact hvld'
+            · exact fun h => absurd h (by simp)
+          | Ok b1 =>
+            obtain ⟨hidlen, hpcr, hb1, hgrow0, _, hcv2⟩ := hp
+            have hb1' : b1 = clause.val.isEmpty := hb1
+            have hgrow : projClauses clauses2.val
+                = projClauses cl'.val ++ [some clause.val] := hgrow0
+            have hpcr' : pCheckRup (projClauses cl'.val) clause.val
+                (hints.val.map (·.val)) = true := hpcr
+            have hlen2 : clauses2.val.length = cl'.val.length + 1 := by
+              have := congrArg List.length hgrow
+              simp only [projClauses, List.length_map, List.length_append,
+                List.length_cons, List.length_nil] at this
+              omega
+            have hpc : pChecks (projClauses cl'.val)
+                  ((steps.val.map stepToPure).drop si'.val)
+                = (if clause.val.isEmpty then true
+                   else pChecks (projClauses clauses2.val)
+                     ((steps.val.map stepToPure).drop (si'.val + 1))) := by
+              rw [hdrop]
+              simp only [stepToPure, pChecks]
+              rw [if_pos ⟨by simp only [projClauses, List.length_map]; exact hidlen, hpcr'⟩,
+                ← hgrow]
+            rw [hb1']
+            step*
+            split
+            · rename_i hemp
+              step as ⟨si2, hsi2⟩
+              refine ⟨by scalar_tac, by scalar_tac, hcv2, ?_, by scalar_tac⟩
+              intro _; rw [hmatch, hpc, if_pos hemp]
+            · rename_i hemp
+              step as ⟨si2, hsi2⟩
+              refine ⟨by scalar_tac, by scalar_tac, hcv2, ?_, by scalar_tac⟩
+              rw [hmatch, hpc, if_neg hemp, hsi2]
+        · have hpc : pChecks (projClauses cl'.val)
+                ((steps.val.map stepToPure).drop si'.val)
+              = (match pDelete (projClauses cl'.val) (ids.val.map (·.val)) with
+                 | none => false
+                 | some clauses' => pChecks clauses'
+                     ((steps.val.map stepToPure).drop (si'.val + 1))) := by
+            rw [hdrop]; simp only [stepToPure, pChecks]
+          simp only [lift, alloc.vec.Vec.deref_mut, bind_tc_ok]
+          step with (apply_delete_refines ⟨cl'.val, cl'.property⟩
+            (alloc.vec.Vec.deref ids) si' hvld') as ⟨p, hp⟩
+          obtain ⟨rr, s3⟩ := p
+          cases rr with
+          | Ok u =>
+            obtain ⟨hpdel, hlen3, hs3v⟩ := hp
+            have hpdel' : pDelete (projClauses cl'.val) (ids.val.map (·.val))
+                = some (projClauses s3.val) := hpdel
+            step*
+            refine ⟨by scalar_tac, by scalar_tac, hs3v, ?_, by scalar_tac⟩
+            rw [hmatch, hpc]
+            simp only [hpdel']
+            rw [show step_index1.val = si'.val + 1 from by scalar_tac]
+          | Err e =>
+            obtain ⟨hlen3, hs3v⟩ := hp
+            step*
+            refine ⟨by scalar_tac, by scalar_tac, hs3v, ?_, by scalar_tac⟩
+            exact fun h => absurd h (by simp)
+      · rename_i hge
+        simp
+  · exact ⟨hsi, hbound, hvalid, rfl⟩
 
-    OPEN OBLIGATION: the `sorry` below is the tracked, deliberate gap —
-    this library is NOT a default build target, and nothing in CI claims
-    the theorem is discharged while it remains. -/
+/-- Issue #12, DISCHARGED: an accepting run of the Aeneas model is an
+    accepting run of the pure checker on the same data. Composes the
+    `load_cnf` and `check_steps_loop` simulation leaves — `load_cnf`
+    projects the CNF (and certifies literal validity, so the loop's RUP
+    reads are sound), and `check_steps_loop` (at `si = 0`) turns an
+    `Ok ()` outcome into `pChecks = true`.
+
+    Side condition `hfit`: the input fits in the address space
+    (`|cnf| + |steps| ≤ usize::MAX`). This is what bounds the clause
+    store below `usize::MAX` so every `apply_add` push succeeds — the
+    total-correctness (`⦃ ⦄`) spec of `check_steps_loop` requires the run
+    not to fail. It is physically always true (the slices already reside
+    in memory) and does not weaken the guarantee in practice. -/
 theorem kernel_refines_pure
     (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step)
+    (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
     (h : kernel.check_steps cnf steps = ok (core.result.Result.Ok ())) :
     pCheckSteps (cnf.val.map (fun c => c.val))
       (steps.val.map stepToPure) = true := by
-  sorry
+  have hspec : kernel.check_steps cnf steps ⦃ r => match r with
+      | .Ok () => pCheckSteps (cnf.val.map (·.val)) (steps.val.map stepToPure) = true
+      | .Err _ => True ⦄ := by
+    unfold kernel.check_steps
+    step with (load_cnf_refines cnf) as ⟨r, hr⟩
+    cases r with
+    | Ok cls =>
+      obtain ⟨hmap, hvld⟩ := hr
+      have hlencls : cls.val.length = cnf.val.length := by
+        have := congrArg List.length hmap; simpa using this
+      simp only [core.result.Result.Insts.CoreOpsTry.branch]
+      step with (check_steps_loop_refines steps cls 0#usize (by simp)
+        (by rw [hlencls]; simpa using hfit) hvld) as ⟨outcome, ho⟩
+      cases outcome with
+      | none => simp
+      | some result =>
+        cases result with
+        | Ok u =>
+          have hpc := ho rfl
+          simp only [pCheckSteps, projClauses, List.drop_zero] at hpc ⊢
+          rw [← hmap]; exact hpc
+        | Err e => simp
+    | Err e =>
+      simp [core.result.Result.Insts.CoreOpsTry.branch,
+        core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual,
+        core.convert.FromSame]
+  rw [h] at hspec
+  simpa using hspec
 
 /-- **The soundness theorem** (issue #12, TR-013/FEAT-002): if the kernel
     accepts a step list against `cnf`, then `cnf` is unsatisfiable.
@@ -1550,8 +1736,9 @@ theorem kernel_refines_pure
     obligation above. -/
 theorem lrat_check_sound
     (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step)
+    (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
     (h : kernel.check_steps cnf steps = ok (core.result.Result.Ok ())) :
     unsat (cnf.val.map (fun c => c.val)) :=
-  pure_check_sound _ _ (kernel_refines_pure cnf steps h)
+  pure_check_sound _ _ (kernel_refines_pure cnf steps hfit h)
 
 end kernel.spec
