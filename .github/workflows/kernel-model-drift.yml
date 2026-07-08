@@ -1,0 +1,71 @@
+# ── Kernel model drift guard (issue #44) ──────────────────────────────────
+# The Lean soundness proof reasons about lean/Kernel.lean, which is the
+# Aeneas-generated translation of crates/ordeal-lrat/src/kernel.rs. The regular
+# `lean` CI job proves the theorem against the COMMITTED model but does not
+# check that the model is the CURRENT translation of the Rust. Without this
+# guard, editing kernel.rs without re-running lean/regen.sh would ship new Rust
+# while the proof keeps certifying the stale model — a green build that no
+# longer describes the code that runs. See docs/formal-verification.md.
+#
+# This job re-runs regen.sh (the SAME pinned Charon/Aeneas revisions) and fails
+# if the regenerated lean/Kernel.lean differs from what is committed.
+#
+# Path-filtered so the (slow, nix + OCaml) toolchain only runs when the model,
+# the Rust source, or the regen script actually change. It is intentionally NOT
+# in the required-status-checks set yet (advisory-first, per issue #44): nix in
+# CI can be flaky, and a required check that skips on unrelated PRs wedges the
+# merge queue. Promote to required once it has proven stable.
+
+name: Kernel model drift
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/ordeal-lrat/src/kernel.rs"
+      - "lean/Kernel.lean"
+      - "lean/regen.sh"
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/ordeal-lrat/src/kernel.rs"
+      - "lean/Kernel.lean"
+      - "lean/regen.sh"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-drift-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  drift:
+    name: Kernel.lean matches kernel.rs (regen.sh)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Nix with flakes enabled — regen.sh uses `nix run github:AeneasVerif/...`.
+      # NOTE (unverified): this job has not yet run in CI (drafted while the
+      # runner queue was blocked). Before promoting it to a required check,
+      # confirm this action ref resolves and pin it to a commit SHA, and
+      # confirm the Charon/Aeneas nix build completes within the runner budget
+      # (add a nix cache if it is too slow). Until then it is advisory only.
+      - name: Install Nix (flakes)
+        uses: DeterminateSystems/nix-installer-action@v14
+
+      # Regenerate the model in place with the pinned Charon/Aeneas revisions.
+      # regen.sh writes lean/Kernel.lean; we then diff it against the commit.
+      - name: Regenerate lean/Kernel.lean
+        run: bash lean/regen.sh
+
+      - name: Fail on model drift
+        run: |
+          if ! git diff --quiet -- lean/Kernel.lean; then
+            echo "::error file=lean/Kernel.lean::lean/Kernel.lean is stale — it is NOT the current Aeneas translation of crates/ordeal-lrat/src/kernel.rs. Run \`lean/regen.sh\` locally and commit the result. The soundness proof must reason about the model that matches the shipped Rust."
+            echo "----- diff (committed vs regenerated) -----"
+            git --no-pager diff -- lean/Kernel.lean | head -200
+            exit 1
+          fi
+          echo "lean/Kernel.lean is the current translation of kernel.rs. ✓"

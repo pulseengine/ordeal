@@ -126,14 +126,18 @@ jobs:
   # ── Lean model + soundness proof (VER-015) ────────────────────────────
   # Two obligations, both gated here:
   #   1. The Aeneas-generated model of the trusted checker (lean/Kernel.lean)
-  #      elaborates with zero axioms, zero sorries.
-  #   2. The hand-written soundness proof (lean/Sound.lean) elaborates, and
-  #      its `sorry` budget holds: exactly ONE open obligation
-  #      (`kernel_refines_pure`, #12) — no proven leaf may silently regress
-  #      to `sorry`, and no new gap may be introduced. When #12 discharges,
-  #      drop the expected count to 0.
+  #      elaborates.
+  #   2. The hand-written soundness proof (lean/Sound.lean) elaborates
+  #      fully — ZERO sorries. Issue #12 (`kernel_refines_pure`) is
+  #      discharged, so `lrat_check_sound` is proved end to end; no proven
+  #      leaf may silently regress to `sorry` and no new gap may appear.
   # This is a real gate (no continue-on-error): a broken proof or a widened
   # sorry budget fails CI.
+  # NOTE: this does NOT re-run Aeneas (regen.sh) to check that Kernel.lean is
+  # the current translation of kernel.rs — that drift guard is a known gap
+  # (see docs/formal-verification.md, issue #44). The proof's trusted axioms are
+  # ONLY propext / Classical.choice / Quot.sound (no sorryAx, no native_decide);
+  # `#print axioms kernel.spec.lrat_check_sound` is the check.
   lean:
     name: Lean model + soundness proof
     runs-on: ubuntu-latest
@@ -155,13 +159,13 @@ jobs:
         run: |
           lake exe cache get
           lake build Kernel
-      - name: Build the soundness proof (elaborates; carries #12's one sorry)
+      - name: Build the soundness proof (elaborates, fully; zero sorries)
         working-directory: lean
         run: lake build Sound
-      - name: Guard the sorry budget (only kernel_refines_pure may be open)
+      - name: Guard the sorry budget (the soundness proof must stay complete)
         working-directory: lean
         run: |
-          expected=1
+          expected=0
           # Count LEAN's OWN `declaration uses \`sorry\`` warnings, not a source
           # grep. `lake env lean` re-elaborates Sound.lean from source (so it is
           # cache-independent) and reports exactly what the elaborator treats as
@@ -171,7 +175,7 @@ jobs:
           count=$(lake env lean Sound.lean 2>&1 | grep -cE 'declaration uses .sorry.' || true)
           echo "sorry-bearing declarations in Sound.lean: $count (expected $expected)"
           if [ "$count" -ne "$expected" ]; then
-            echo "::error file=lean/Sound.lean::Expected exactly $expected sorry-bearing declaration (kernel_refines_pure, #12), found $count — a proven leaf regressed, a new gap was added, or #12 closed (drop the expected count)."
+            echo "::error file=lean/Sound.lean::Expected the soundness proof to be sorry-free (kernel_refines_pure, #12, is discharged), found $count sorry-bearing declaration(s) — a proven leaf regressed or a new gap was introduced."
             exit 1
           fi
 

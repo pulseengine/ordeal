@@ -12,9 +12,10 @@ package «ordeal-lrat-proof» {}
 -- The generated model (regen.sh) — this is the CI gate: it must elaborate.
 @[default_target] lean_lib «Kernel» {}
 
--- The spec + soundness proof (issue #12). Builds today with ONE remaining
--- `sorry` (`kernel_refines_pure`, the model↔pure simulation); the pure
--- soundness result `pure_check_sound` and everything it uses is complete
--- and `sorry`-free (verified via `#print axioms`). Not a default target
--- until the last `sorry` is gone; build with `lake build Sound`.
+-- The spec + soundness proof (issue #12), `sorry`-free. `lrat_check_sound`
+-- (accept ⟹ `unsat`) is discharged end to end over the Aeneas model;
+-- `#print axioms kernel.spec.lrat_check_sound` shows ONLY propext /
+-- Classical.choice / Quot.sound — no `sorryAx`, no `native_decide`. Axiom-clean,
+-- like the mathematical core `pure_check_sound`.
+-- Scope + trust boundary: docs/formal-verification.md. Build: `lake build Sound`.
 lean_lib «Sound» {}
