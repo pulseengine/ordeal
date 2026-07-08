@@ -1364,6 +1364,46 @@ theorem check_rup_loop_refines
         simp
   · exact ⟨hi, Ap, hrel, rfl⟩
 
+/-- Seventh simulation leaf: `check_rup` refines `pCheckRup`. A kernel `Ok ()`
+    verdict (tautology, or all hints RUP-verified to conflict) implies the pure
+    RUP check accepts. Assembles `assume_negation` + `check_rup_loop`. -/
+theorem check_rup_refines
+    (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (new_clause : Slice Std.I32)
+    (hints : Slice Std.Usize) (step : Std.Usize)
+    (hncvalid : ∀ lit ∈ new_clause.val, ValidLit lit)
+    (hvalid : ∀ c ∈ clauses.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) :
+    kernel.check_rup clauses new_clause hints step ⦃
+        (r : core.result.Result Unit kernel.CoreError) =>
+      r = .Ok () → pCheckRup (projClauses clauses.val) new_clause.val
+        (hints.val.map (·.val)) = true ⦄ := by
+  unfold kernel.check_rup kernel.Assignment.new
+  simp only [bind_tc_ok]
+  have hrel0 : RelAsn { values := alloc.vec.Vec.new (Option Bool) } pEmpty := by
+    intro v; simp [pEmpty, alloc.vec.Vec.new]
+  step with (assume_negation_refines { values := alloc.vec.Vec.new (Option Bool) }
+    pEmpty new_clause hrel0 hncvalid) as ⟨b, asg1, hb⟩
+  split
+  · rename_i hbt
+    intro _
+    cases hpan : pAssumeNeg pEmpty new_clause.val with
+    | none => simp [pCheckRup, hpan]
+    | some A => rw [hpan] at hb; simp_all
+  · rename_i hbf
+    cases hpan : pAssumeNeg pEmpty new_clause.val with
+    | none => rw [hpan] at hb; simp_all
+    | some A =>
+      rw [hpan] at hb; obtain ⟨_, hrelA⟩ := hb
+      step with (check_rup_loop_refines clauses hints step asg1 A 0#usize hrelA
+        (by simp) hvalid) as ⟨outcome, hout⟩
+      cases outcome with
+      | none => simp
+      | some result =>
+        simp only [WP.spec_ok]
+        intro heq
+        simp only [pCheckRup, hpan]
+        have := hout (by rw [heq])
+        simpa using this
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
