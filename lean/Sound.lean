@@ -1448,6 +1448,58 @@ theorem clause_has_invalid_literal_spec (clause : Slice Std.I32) :
       exact hinv
   · exact ⟨by simp, by simp⟩
 
+/-- Eighth simulation leaf: `apply_add` refines `pChecks`'s add-branch. On the
+    accepting path it certifies the sequential-id and RUP conditions the pure
+    checker requires, reports whether the empty clause was reached, and its
+    store grows exactly as the pure clause list does. -/
+theorem apply_add_refines
+    (clauses : alloc.vec.Vec (Option (alloc.vec.Vec Std.I32))) (id : Std.Usize)
+    (clause : Slice Std.I32) (hints : Slice Std.Usize) (step : Std.Usize)
+    (hlen : clauses.val.length < Std.Usize.max)
+    (hvalid : ∀ c ∈ clauses.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) :
+    kernel.apply_add clauses id clause hints step ⦃
+        (p : core.result.Result Bool kernel.CoreError
+          × alloc.vec.Vec (Option (alloc.vec.Vec Std.I32))) =>
+      match p.1 with
+      | .Ok b1 =>
+          id.val = clauses.val.length + 1 ∧
+          pCheckRup (projClauses clauses.val) clause.val (hints.val.map (·.val)) = true ∧
+          b1 = clause.val.isEmpty ∧
+          projClauses p.2.val = projClauses clauses.val ++ [some clause.val]
+      | .Err _ => True ⦄ := by
+  unfold kernel.apply_add
+  step with (clause_has_invalid_literal_spec clause) as ⟨b, hb⟩
+  split
+  · simp
+  · rename_i hbf
+    have hcvalid : ∀ lit ∈ clause.val, ValidLit lit := hb (by simpa using hbf)
+    step as ⟨expected, hexp⟩
+    split
+    · simp
+    · rename_i hid
+      have hideq : id.val = clauses.val.length + 1 := by
+        simp only [bne_iff_ne, ne_eq, Decidable.not_not] at hid
+        rw [hid]; scalar_tac
+      step with (check_rup_refines (alloc.vec.Vec.deref clauses) clause hints step
+        hcvalid hvalid) as ⟨r, hr⟩
+      step as ⟨cf, hcf⟩
+      cases r with
+      | Err e =>
+        simp [hcf,
+          core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual,
+          core.convert.FromSame]
+      | Ok _ =>
+        simp only [hcf]
+        step as ⟨v, hv⟩
+        step as ⟨clauses1, hc1⟩
+        refine ⟨hideq, hr rfl, ?_, ?_⟩
+        · rw [Bool.eq_iff_iff, decide_eq_true_eq, List.isEmpty_iff,
+            List.eq_nil_iff_length_eq_zero]
+          constructor <;> intro h <;> scalar_tac
+        · rw [hc1, hv]
+          simp only [projClauses, List.map_append, List.map_cons, List.map_nil,
+            Option.map_some]
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
