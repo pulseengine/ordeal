@@ -1404,6 +1404,50 @@ theorem check_rup_refines
         have := hout (by rw [heq])
         simpa using this
 
+/-- `clause_has_invalid_literal` returning `false` certifies every literal is
+    valid (nonzero, non-`INT_MIN`) — the source of clause validity that
+    `check_rup`/`assume_negation` rely on. -/
+theorem clause_has_invalid_literal_spec (clause : Slice Std.I32) :
+    kernel.clause_has_invalid_literal clause ⦃ (b : Bool) =>
+      b = false → ∀ lit ∈ clause.val, ValidLit lit ⦄ := by
+  unfold kernel.clause_has_invalid_literal kernel.clause_has_invalid_literal_loop
+  apply loop.spec_decr_nat
+    (measure := fun (i : Std.Usize) => clause.val.length - i.val)
+    (inv := fun (i : Std.Usize) => i.val ≤ clause.val.length ∧
+      ∀ lit ∈ clause.val.take i.val, ValidLit lit)
+  · rintro i ⟨hle, hinv⟩
+    unfold kernel.clause_has_invalid_literal_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      step as ⟨lit, hlit⟩
+      split
+      · intro h; simp at h
+      · split
+        · intro h; simp at h
+        · rename_i hneM hne0
+          step as ⟨i3, hi3⟩
+          refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+          rw [show i3.val = i.val + 1 by scalar_tac, List.take_add_one,
+            List.getElem?_eq_getElem (by scalar_tac), ← hlit]
+          intro l hl
+          simp only [Option.toList_some, List.mem_append, List.mem_singleton] at hl
+          rcases hl with hl | hl
+          · exact hinv l hl
+          · rw [hl]
+            refine ⟨fun h => hneM (by grind), ?_⟩
+            have hmm : core.num.I32.MIN.val = -Std.I32.max - 1 := by native_decide
+            have hb : core.num.I32.MIN.val ≤ lit.val := by rw [hmm]; scalar_tac
+            rcases lt_or_eq_of_le hb with h | h
+            · exact h
+            · exact absurd (show lit = core.num.I32.MIN by grind) hne0
+    · rename_i hge
+      intro _
+      have hik : i.val = clause.val.length := by scalar_tac
+      rw [hik, List.take_length] at hinv
+      exact hinv
+  · exact ⟨by simp, by simp⟩
+
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
   | .Add id clause hints => .add id.val clause.val (hints.val.map (·.val))
