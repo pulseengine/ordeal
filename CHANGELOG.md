@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-08
+
+The LRAT/RUP **checking algorithm** `kernel::check_steps` is now machine-checked
+**sound** in Lean 4: if it accepts a certificate's steps against a CNF, that CNF
+is unsatisfiable (`∀ σ, ¬ cnfHolds σ cnf`), proved with **zero `sorry`** over the
+**Aeneas-generated** model of the Rust source (`crates/ordeal-lrat/src/kernel.rs`).
+This closes issue #12 (TR-013). `#print axioms kernel.spec.lrat_check_sound`
+reports **only** `propext` / `Classical.choice` / `Quot.sound` — no `sorryAx`,
+no `native_decide` (axiom-clean, like the core `pure_check_sound`).
+
+Scope and trust are stated precisely in
+[docs/formal-verification.md](docs/formal-verification.md): the proof is over the
+Aeneas translation (Charon+Aeneas trusted), soundness only (not completeness),
+under the benign side condition `|cnf| + |steps| ≤ usize::MAX`. Certificate/DIMACS
+parsing, I/O, the wasm harness and the (untrusted) solver are out of scope. No
+Rust code changed; this release marks the trust-boundary milestone: the solver
+stays untrusted, and the now-proven checker is trusted.
+
+**Falsification statement:** this release is wrong if
+`kernel.spec.lrat_check_sound` is found to depend on `sorryAx` (or any axiom
+beyond `propext` / `Classical.choice` / `Quot.sound`), if `unsat` is not the
+standard "no assignment satisfies", or if the committed `lean/Kernel.lean` does
+not match `regen.sh`'s output on the shipped `kernel.rs`.
+
+### Added
+- `docs/formal-verification.md` — the precise "what is proven / what is trusted"
+  trust-boundary statement.
+- `kernel-model-drift` CI workflow (advisory) — re-runs `regen.sh` and fails on
+  `lean/Kernel.lean` drift from the shipped `kernel.rs` (issue #44).
+
+### Changed
+- `ordeal-lrat`'s `check_steps` soundness is now machine-checked (Lean 4 /
+  Aeneas); the Lean CI job is blocking and asserts a zero-`sorry` budget.
+
 ## [0.4.2] - 2026-07-03
 
 spar's integration question (issue #38): a semantic oracle for its generated
