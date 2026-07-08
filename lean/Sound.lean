@@ -660,7 +660,8 @@ theorem get_live_spec
 theorem get_live_clause_spec
     (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (id step : Std.Usize) :
     kernel.get_live clauses id step ⦃ r => match r with
-      | .Ok s => (projClauses clauses.val)[id.val - 1]? = some (some s.val)
+      | .Ok s => 0 < id.val ∧
+          (projClauses clauses.val)[id.val - 1]? = some (some s.val)
       | .Err _ => True ⦄ := by
   unfold kernel.get_live
   split
@@ -675,6 +676,7 @@ theorem get_live_clause_spec
       cases o with
       | none => simp
       | some clause =>
+        refine ⟨by scalar_tac, ?_⟩
         rw [show id.val - 1 = i1.val from hi1.symm]
         have hbi : i1.val < (projClauses clauses.val).length := by
           simp only [projClauses, List.length_map]; scalar_tac
@@ -1042,6 +1044,50 @@ theorem pUnassigned_length (A : PAsn) (acc l r : List Std.I32)
           List.length_nil] at this ⊢
         omega
 
+/-- Every literal `pUnassigned` collects comes from the accumulator or the
+    input clause — so a `Unit` hint literal is a clause literal (hence valid). -/
+theorem pUnassigned_mem (A : PAsn) (acc l r : List Std.I32)
+    (h : pUnassigned A acc l = some r) (x : Std.I32) (hx : x ∈ r) :
+    x ∈ acc ∨ x ∈ l := by
+  induction l generalizing acc with
+  | nil =>
+    simp only [pUnassigned, Option.some.injEq] at h; subst h; exact Or.inl hx
+  | cons y t ih =>
+    simp only [pUnassigned] at h
+    split at h
+    · simp at h
+    · exact (ih acc h).imp id (List.mem_cons_of_mem y)
+    · split at h
+      · exact (ih acc h).imp id (List.mem_cons_of_mem y)
+      · rcases ih (acc ++ [y]) h with h1 | h1
+        · rcases List.mem_append.mp h1 with h2 | h2
+          · exact Or.inl h2
+          · simp only [List.mem_singleton] at h2; subst h2
+            exact Or.inr (List.mem_cons_self ..)
+        · exact Or.inr (List.mem_cons_of_mem _ h1)
+
+/-- Every literal `pUnassigned` newly collects is unassigned (`pvalue = none`);
+    that is why a `Unit` hint can be safely assigned without conflict. -/
+theorem pUnassigned_unassigned (A : PAsn) (acc l r : List Std.I32)
+    (h : pUnassigned A acc l = some r) (x : Std.I32) (hx : x ∈ r) :
+    x ∈ acc ∨ pvalue A x = none := by
+  induction l generalizing acc with
+  | nil =>
+    simp only [pUnassigned, Option.some.injEq] at h; subst h; exact Or.inl hx
+  | cons y t ih =>
+    simp only [pUnassigned] at h
+    split at h
+    · simp at h
+    · exact ih acc h
+    · rename_i hpv
+      split at h
+      · exact ih acc h
+      · rcases ih (acc ++ [y]) h with h1 | h1
+        · rcases List.mem_append.mp h1 with h2 | h2
+          · exact Or.inl h2
+          · simp only [List.mem_singleton] at h2; subst h2; exact Or.inr hpv
+        · exact Or.inr h1
+
 /-- `contains_lit` decides membership by underlying value. -/
 theorem contains_lit_spec (lits : Slice Std.I32) (lit : Std.I32) :
     kernel.contains_lit lits lit ⦃ (b : Bool) =>
@@ -1172,6 +1218,151 @@ theorem classify_hint_refines (Ak : kernel.Assignment) (Ap : PAsn)
           | a :: b :: rest, _ => exact ⟨a, b, rest, rfl⟩
         simp [hpu, hab]
   · exact ⟨by simp, by simp [pUnassigned]⟩
+
+/-- `pRupGo` on a live hint (`h ≠ 0`, slot present) reduces to the
+    `pUnassigned` classification — the exact branch structure `classify_hint`
+    mirrors. -/
+theorem pRupGo_step (clauses : List (Option (List Std.I32))) (A : PAsn)
+    (h : Nat) (rest : List Nat) (cl : List Std.I32)
+    (hh : 0 < h) (hg : clauses[h - 1]? = some (some cl)) :
+    pRupGo clauses A (h :: rest) =
+      (match pUnassigned A [] cl with
+       | none => false
+       | some [] => true
+       | some [u] => (match pAssignLit A u with
+                      | some A' => pRupGo clauses A' rest
+                      | none => false)
+       | some _ => false) := by
+  conv_lhs => rw [pRupGo]
+  rw [if_neg (by omega), hg]
+  rfl
+
+/-- Sixth simulation leaf: `check_rup_loop` refines `pRupGo`. If the kernel
+    loop ends with `some (Ok ())` (a hint falsified ⇒ conflict), the pure RUP
+    pass over the remaining hints returns `true`. One direction suffices for
+    soundness (kernel accepts ⇒ pure accepts). -/
+theorem check_rup_loop_refines
+    (clauses : Slice (Option (alloc.vec.Vec Std.I32))) (hints : Slice Std.Usize)
+    (step : Std.Usize) (asg : kernel.Assignment) (Ap : PAsn) (i : Std.Usize)
+    (hrel : RelAsn asg Ap) (hi : i.val ≤ hints.val.length)
+    (hvalid : ∀ c ∈ clauses.val, ∀ cc, c = some cc → ∀ lit ∈ cc.val, ValidLit lit) :
+    kernel.check_rup_loop clauses hints step asg none i ⦃ (outcome :
+        Option (core.result.Result Unit kernel.CoreError)) =>
+      outcome = some (.Ok ()) →
+        pRupGo (projClauses clauses.val) Ap
+          ((hints.val.map (·.val)).drop i.val) = true ⦄ := by
+  unfold kernel.check_rup_loop
+  apply loop.spec_decr_nat
+    (measure := fun (s : kernel.Assignment
+        × Option (core.result.Result Unit kernel.CoreError) × Std.Usize) =>
+      hints.val.length - s.2.2.val)
+    (inv := fun (s : kernel.Assignment
+        × Option (core.result.Result Unit kernel.CoreError) × Std.Usize) =>
+      s.2.2.val ≤ hints.val.length ∧
+      (match s.2.1 with
+       | none => ∃ Ap', RelAsn s.1 Ap' ∧
+           pRupGo (projClauses clauses.val) Ap ((hints.val.map (·.val)).drop i.val)
+             = pRupGo (projClauses clauses.val) Ap'
+                 ((hints.val.map (·.val)).drop s.2.2.val)
+       | some v => v = .Ok () →
+           pRupGo (projClauses clauses.val) Ap
+             ((hints.val.map (·.val)).drop i.val) = true))
+  · rintro ⟨asg', outcome', i'⟩ ⟨hle', hinv⟩
+    unfold kernel.check_rup_loop.body
+    dsimp only
+    cases outcome' with
+    | some v =>
+      simp only [core.option.Option.is_none, Option.isNone_some, Bool.false_eq_true,
+        if_false, WP.spec_ok]
+      intro heq
+      exact hinv (Option.some.inj heq)
+    | none =>
+      simp only [core.option.Option.is_none, Option.isNone_none, if_true]
+      split
+      · rename_i hlt
+        obtain ⟨Ap', hrel', heqp⟩ := hinv
+        have hil : i'.val < hints.val.length := by scalar_tac
+        step as ⟨hint_id, hhid⟩
+        step with (get_live_clause_spec clauses hint_id step) as ⟨r, hr⟩
+        have hdrop : (hints.val.map (·.val)).drop i'.val
+            = hint_id.val :: (hints.val.map (·.val)).drop (i'.val + 1) := by
+          rw [List.drop_eq_getElem_cons (by simpa using hil), List.getElem_map, ← hhid]
+        cases r with
+        | Err e =>
+          step as ⟨i2, hi2⟩
+          refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+          intro heq; exact absurd heq (by simp)
+        | Ok clause =>
+          obtain ⟨hh0, hslot⟩ := hr
+          have hcc : ∃ cc, clauses.val[hint_id.val - 1]? = some (some cc)
+              ∧ cc.val = clause.val := by
+            simp only [projClauses, List.getElem?_map] at hslot
+            rcases h1 : clauses.val[hint_id.val - 1]? with _ | oc
+            · rw [h1] at hslot; simp at hslot
+            · rw [h1] at hslot
+              rcases oc with _ | cc
+              · simp at hslot
+              · exact ⟨cc, rfl, by simpa using hslot⟩
+          obtain ⟨cc, hcc1, hccv⟩ := hcc
+          have hcvalid : ∀ lit ∈ clause.val, ValidLit lit := by
+            rw [← hccv]; intro lit hlit
+            exact hvalid (some cc) (List.mem_of_getElem? hcc1) cc rfl lit hlit
+          have hrupstep : pRupGo (projClauses clauses.val) Ap'
+              ((hints.val.map (·.val)).drop i'.val)
+              = (match pUnassigned Ap' [] clause.val with
+                 | none => false | some [] => true
+                 | some [u] => (match pAssignLit Ap' u with
+                                | some A' => pRupGo (projClauses clauses.val) A'
+                                    ((hints.val.map (·.val)).drop (i'.val + 1))
+                                | none => false)
+                 | some _ => false) := by
+            rw [hdrop]; exact pRupGo_step _ Ap' _ _ clause.val hh0 hslot
+          step with (classify_hint_refines asg' Ap' clause hrel' hcvalid) as ⟨hc, hhc⟩
+          cases hpu : pUnassigned Ap' [] clause.val with
+          | none =>
+            rw [hpu] at hhc; simp only [hhc]
+            step as ⟨i2, hi2⟩
+            refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+            intro heq; exact absurd heq (by simp)
+          | some l => cases l with
+            | nil =>
+              rw [hpu] at hhc; simp only [hhc]
+              step as ⟨i2, hi2⟩
+              refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+              intro _
+              rw [heqp, hrupstep, hpu]
+            | cons u t => cases t with
+              | nil =>
+                rw [hpu] at hhc; simp only [hhc]
+                have humem : u ∈ clause.val := by
+                  rcases pUnassigned_mem Ap' [] clause.val [u] hpu u (by simp) with h | h
+                  · simp at h
+                  · exact h
+                have huvalid : ValidLit u := hcvalid u humem
+                have hAu : Ap' (litVar u) = none := by
+                  have hpvu : pvalue Ap' u = none := by
+                    rcases pUnassigned_unassigned Ap' [] clause.val [u] hpu u (by simp)
+                      with h | h
+                    · simp at h
+                    · exact h
+                  simpa [pvalue, Option.map_eq_none_iff] using hpvu
+                step with (assign_true_refines asg' Ap' u hrel' huvalid) as ⟨p2, hp2⟩
+                obtain ⟨cf, asg2⟩ := p2
+                simp only [pAssignLit, hAu] at hp2
+                obtain ⟨hcf0, hrel''⟩ := hp2
+                step with (massert_spec _ (show ¬ (cf = true) by simp [hcf0]))
+                step as ⟨i2, hi2⟩
+                refine ⟨by scalar_tac, ⟨_, hrel'', ?_⟩, by scalar_tac⟩
+                rw [heqp, hrupstep, hpu, hi2]
+                simp only [pAssignLit, hAu]
+              | cons _ _ =>
+                rw [hpu] at hhc; simp only [hhc]
+                step as ⟨i2, hi2⟩
+                refine ⟨by scalar_tac, ?_, by scalar_tac⟩
+                intro heq; exact absurd heq (by simp)
+      · rename_i hge
+        simp
+  · exact ⟨hi, Ap, hrel, rfl⟩
 
 /-- The pure image of a kernel step. -/
 def stepToPure : Step → PStep
