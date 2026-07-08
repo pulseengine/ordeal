@@ -126,13 +126,18 @@ jobs:
   # ── Lean model + soundness proof (VER-015) ────────────────────────────
   # Two obligations, both gated here:
   #   1. The Aeneas-generated model of the trusted checker (lean/Kernel.lean)
-  #      elaborates with zero axioms, zero sorries.
+  #      elaborates.
   #   2. The hand-written soundness proof (lean/Sound.lean) elaborates
   #      fully — ZERO sorries. Issue #12 (`kernel_refines_pure`) is
   #      discharged, so `lrat_check_sound` is proved end to end; no proven
   #      leaf may silently regress to `sorry` and no new gap may appear.
   # This is a real gate (no continue-on-error): a broken proof or a widened
   # sorry budget fails CI.
+  # NOTE: this does NOT re-run Aeneas (regen.sh) to check that Kernel.lean is
+  # the current translation of kernel.rs — that drift guard is a known gap
+  # (see docs/formal-verification.md). The proof's trusted axioms are propext /
+  # Classical.choice / Quot.sound + two native_decide i32::MIN facts (no
+  # sorryAx); `#print axioms kernel.spec.lrat_check_sound` is the check.
   lean:
     name: Lean model + soundness proof
     runs-on: ubuntu-latest
