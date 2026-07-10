@@ -94,7 +94,7 @@ artifacts:
       carries a checker-validated LRAT proof; SAT verdicts self-check their
       model. Milestone: every Unsat verdict is backed by a certificate the
       verified checker validated; Z3 is demoted to oracle and benchmark rival.
-    status: draft
+    status: verified
     release: v0.5.0
     tags: [roadmap, p2, lrat, checker, aeneas, lean, milestone]
     links:

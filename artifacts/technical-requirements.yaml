@@ -154,7 +154,7 @@ artifacts:
       formally verified: if the checker accepts a certificate for a CNF, that
       CNF is unsatisfiable. The checker is the sole trusted component and must
       be independent of the solver's internal data structures.
-    status: draft
+    status: verified
     release: v0.5.0
     tags: [lrat, checker, verified, trusted-core]
     links:
