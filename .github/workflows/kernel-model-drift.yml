@@ -59,6 +59,16 @@ jobs:
       - name: Install Nix (flakes)
         uses: DeterminateSystems/nix-installer-action@v22
 
+      # Cache the /nix/store so the cold Charon(OCaml)+Aeneas build (~15+ min)
+      # only happens when the pinned toolchain revisions in regen.sh change.
+      # Keyed on regen.sh (which pins CHARON_REV/AENEAS_REV) → warm runs are ~2s.
+      - name: Cache nix store (Charon/Aeneas)
+        uses: nix-community/cache-nix-action@v6
+        with:
+          primary-key: nix-charon-aeneas-${{ runner.os }}-${{ hashFiles('lean/regen.sh') }}
+          restore-prefixes-first-match: nix-charon-aeneas-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+
       # Regenerate the model in place with the pinned Charon/Aeneas revisions.
       # regen.sh writes lean/Kernel.lean; we then diff it against the commit.
       - name: Regenerate lean/Kernel.lean (timed — watch the cold-build cost)
