@@ -137,7 +137,7 @@ mod tests {
                 assert_eq!(
                     word_value(&aig, &vals, &cat),
                     want,
-                    "concat {x:#04x} {y:#03x}"
+                    "concat {x:#04x} {y:#x}"
                 );
             }
         }
