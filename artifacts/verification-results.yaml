@@ -520,3 +520,39 @@ artifacts:
     fields:
       verdict: pass
       evidence: "PR #39 (Lean model + soundness proof job), merged green to main"
+
+  - id: VE-006
+    type: verification-execution
+    title: Kernel model drift check — no drift @ v0.5.1
+    description: >
+      Ran lean/regen.sh (real Charon+Aeneas toolchain) and diffed against the
+      committed lean/Kernel.lean: BYTE-IDENTICAL — the committed Aeneas model is
+      the current translation of crates/ordeal-lrat/src/kernel.rs, so
+      lrat_check_sound is verified against the actual shipped code. The
+      kernel-model-drift CI workflow (#44) now enforces this (required-safe,
+      cached; advisory pending a warm-cache run before promotion to required).
+    status: implemented
+    fields:
+      version: v0.5.1
+      commit: 0a2c366
+      timestamp: "2026-07-10T18:45:00Z"
+      executor: github-actions
+      environment:
+        ci-run: https://github.com/pulseengine/ordeal/actions/runs/29114160445
+        note: "regen.sh cold build ~24min; nix store cached so warm runs ~2s"
+
+  - id: VV-028
+    type: verification-verdict
+    title: "TR-013 freshness — committed Kernel.lean matches shipped kernel.rs"
+    description: >
+      Executed pass. Regenerated model == committed model (no drift), closing the
+      model-drift gap in the v0.5.0 trust boundary.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-015
+      - type: part-of-execution
+        target: VE-006
+    fields:
+      verdict: pass
+      evidence: "lean/regen.sh no-drift; kernel-model-drift workflow (#44)"

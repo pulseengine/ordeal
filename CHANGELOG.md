@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-07-10
+
+Soundness **drift-hardening**. No runtime code or API change — this release
+strengthens the link between the v0.5.0 Lean proof and the shipped Rust.
+
+- **Drift gap closed (verified).** Confirmed with the real Charon+Aeneas toolchain
+  that the committed `lean/Kernel.lean` is **byte-identical** to the current Aeneas
+  translation of `crates/ordeal-lrat/src/kernel.rs`. So `lrat_check_sound` is
+  verified against the *actual shipped code*, not a stale model — closing the one
+  residual gap called out in `docs/formal-verification.md`.
+- **Model-drift guard operational** (#44). The `kernel-model-drift` CI workflow now
+  runs on every PR (required-safe), passes in seconds when the model/kernel/regen
+  script are unchanged, and on relevant changes regenerates via a cached
+  Charon+Aeneas toolchain and fails on any diff. Advisory pending a warm-cache run
+  before promotion to a required branch-protection check.
+- Fixed a Rust 1.97 `clippy::unused_format_specs` lint (test-message format width)
+  that was failing CI on the new stable toolchain.
+
+**Falsification statement:** this release is wrong if a change to `kernel.rs` can
+land on `main` with a stale `lean/Kernel.lean` and a green build once the drift
+guard is a required check.
+
 ## [0.5.0] - 2026-07-08
 
 The LRAT/RUP **checking algorithm** `kernel::check_steps` is now machine-checked
