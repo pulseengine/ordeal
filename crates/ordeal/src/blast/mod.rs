@@ -11,3 +11,7 @@ pub mod bitwise;
 pub mod muldiv;
 pub mod shift;
 pub mod structural;
+
+/// Kani proofs of blaster ⇄ evaluator equivalence (FEAT-004 / P4).
+#[cfg(kani)]
+mod proofs;

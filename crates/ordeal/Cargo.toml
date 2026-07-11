@@ -21,7 +21,7 @@ path = "src/main.rs"
 # wasip2-clean). The solver depends on the checker to validate certificates;
 # the checker never depends on the solver (the trust boundary, enforced by
 # ordeal-lrat's empty dependency table).
-ordeal-lrat = { path = "../ordeal-lrat", version = "0.5.0" }
+ordeal-lrat = { path = "../ordeal-lrat", version = "0.6.0" }
 
 [features]
 # The Z3 differential oracle. Off by default: the default build has ZERO
@@ -49,3 +49,9 @@ oracle = ["dep:z3"]
 # is a no-op dependency-wise (and the oracle module compiles out there).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 z3 = { version = "0.20.2", optional = true }
+
+# `kani` is a cfg set only under `cargo kani` (the bit-blaster proof harnesses in
+# src/blast/proofs.rs, and the no-op strash in src/aig.rs). Declare it so normal
+# builds/clippy don't flag it as an unknown cfg.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }

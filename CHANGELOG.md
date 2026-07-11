@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-11
+
+**P4 — Kani proofs of bit-blaster correctness** (FEAT-004). Machine-checked
+proofs that each bit-blasting rule equals the concrete reference semantics
+(SMT-LIB QF_BV, mirroring `eval::eval_bv`/`eval_bool`) for **all** inputs — the
+Z3-independent soundness evidence for the blaster.
+
+### Added
+- `crates/ordeal/src/blast/proofs.rs`: **79 Kani harnesses** — every operation
+  (`add`/`sub`/`mul`/`udiv`/`and`/`or`/`xor`/`shl`/`lshr`/`ashr`/`rotr`, all 10
+  comparisons, `concat`/`extract`/`zext`/`sext`/`ite`) at widths 8/32/64. Each
+  asserts `word_value(blast) == r_op(inputs)` over symbolic input bits; Kani
+  proves it for every assignment. Validated: every op family verifies
+  `SUCCESSFUL` at width 8 (incl. the signed comparisons, sign-extend, extract).
+- `.github/workflows/kani.yml`: nightly / on-demand Kani job (non-blocking)
+  running the fast tier (every rule at width 8 + the structural rules).
+
+### Changed
+- `Aig`'s structural-hash cache is a **no-op under `cfg(kani)`** — the default
+  `RandomState` hasher seeds from the OS RNG, which Kani cannot model. The
+  un-deduped AIG simulates identically, so the proof covers the deduped
+  production AIG. Production build is byte-for-byte unchanged (101 lib tests
+  pass).
+
+### Scope (honest)
+The light ops (arithmetic, bitwise, shift, rotate, comparison, structural) are
+Kani-tractable at 8/32/64. **64-bit `mul`/`udiv` are a compute frontier** — a
+bit-blasted 64-bit multiplier is a huge SAT instance — and retain the
+exhaustive-width-8 test + the Z3 differential oracle. So this release adds
+proof-based soundness for the tractable majority of the op set; fully removing
+Z3 awaits a tractable proof strategy for wide multiply/divide.
+
+**Falsification statement:** this release is wrong if any enabled Kani harness
+fails, or if a `r_*` reference diverges from `eval::eval_bv`/`eval_bool`.
+
 ## [0.5.1] - 2026-07-10
 
 Soundness **drift-hardening**. No runtime code or API change — this release
