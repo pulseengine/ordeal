@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-11
+
+**P6 (Phase A) — WASM trap/partiality semantics** (FEAT-007 / TR-019, issue #59).
+A shared library that expresses each partial WASM op's **trap condition** as a
+QF_BV predicate over its operand bits, so a verifier can prove **trap**-equivalence
+— not just value-equivalence — and catch a transformation that *drops a trap*
+(the root cause of loom#273/#274/#278 and synth#633/#666/#665/#642). Both
+consumers adopt it: loom (loom#279) and synth's `translation_validator`
+(VCR-VER-002).
+
+### Added — `crates/ordeal/src/trap.rs`
+- **Trap-condition builders** (each a `BoolTerm` over operand bits):
+  - `trap_div` — ÷0 (all four div/rem) + `INT_MIN/-1` signed overflow.
+  - `trap_always` — `unreachable`.
+  - `trap_mem_oob(addr, size, mem_bound)` — OOB with a **caller-supplied symbolic
+    `mem_bound`**, wraparound-safe.
+  - `trap_call_indirect` — `bounds ∨ null-slot ∨ type`, where the type clause is
+    `TypeTrap::Runtime` (runtime `Ne`) or `StaticallyDischarged` (closed-world
+    tables, contributes `false`).
+  - `trap_any` — Or-fold for block-local composition.
+- **`DefineOrTrap`** `(value, may_trap)` wrapper and two VC helpers:
+  - `trap_equivalence_vc` / `prove_trap_equivalence` — full
+    `(trap ⇔ trap) ∧ (¬trap ⇒ value_eq)`.
+  - `trap_condition_equivalence` / `prove_trap_condition_equivalence` — the
+    **trap clause alone**, for consumers (synth memory ops) that model no op
+    value; still catches a dropped bounds/null check.
+
+### Boundary (held)
+ordeal **classifies bits** — it adds **no operations** and does **no
+floating-point arithmetic**. Trap-equivalence VCs are decided by the normal
+certificate-checked pipeline, so `Unsat` is LRAT-validated and `recheck()`-able.
+Phase B (float→int `trunc` classifier, proven against synth's #709 IEEE table)
+and FP-value equivalence (QF_FP, out of the QF_BV fragment by design) are
+separate.
+
+### Falsification
+Wrong if: a `trap_condition` builder ever disagrees with the WASM trap predicate
+for some input (`eval` mismatch), or the VC reports a trap-dropping lowering as
+`Unsat` (or a trap-preserving one as `Sat`).
+
 ## [0.8.0] - 2026-07-11
 
 **P5 (core) — canonicalization + const-folding above the AIG** (FEAT-005 /

@@ -628,3 +628,40 @@ artifacts:
     fields:
       verdict: pass
       evidence: "canon:: eval-equivalence sweeps + a5_mul_commutativity_decides_unsat_after_canonicalization"
+
+  - id: VE-009
+    type: verification-execution
+    title: Trap-semantics library (Phase A) @ v0.9.0
+    description: >
+      Ran the trap:: suite. 9 tests pass: trap_div matches WASM ÷0 + INT_MIN/-1
+      overflow exhaustively at width 8 (all four ops); trap_mem_oob matches a
+      wide-arithmetic reference and is wraparound-safe; trap_call_indirect covers
+      bounds/null-slot/runtime-type and the statically-discharged mode; trap_any
+      is the Or-fold; the full VC proves a preserved div lowering (re-checkable
+      Unsat) and catches a dropped ÷0 with a divisor-0 counterexample; the
+      conjunct-1 gate catches a dropped OOB bounds-check. clippy 0, fmt clean,
+      full suite 117 lib + 18 doc.
+    status: implemented
+    fields:
+      version: v0.9.0
+      timestamp: "2026-07-11T13:10:00Z"
+      executor: local
+      environment:
+        note: "cargo test -p ordeal trap:: (9 pass); no new ops; no FP; boundary held"
+
+  - id: VV-031
+    type: verification-verdict
+    title: "TR-019 — trap_condition library matches WASM semantics and gates dropped traps"
+    description: >
+      Executed pass. Trap conditions are semantics-correct per eval; the
+      trap-preservation VC (full and conjunct-1) catches dropped traps with
+      counterexamples and proves preserved lowerings with re-checkable Unsat.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-018
+      - type: part-of-execution
+        target: VE-009
+    fields:
+      verdict: pass
+      evidence: "trap:: 9 tests (per-builder eval-equivalence + VC drop/preserve)"

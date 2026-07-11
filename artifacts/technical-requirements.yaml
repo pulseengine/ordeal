@@ -309,6 +309,42 @@ artifacts:
         t over a random-assignment sweep (semantics preservation); the Z3
         differential still agrees on the corpus.
 
+  - id: TR-019
+    type: sw-req
+    title: WASM trap/partiality semantics — trap_condition library
+    description: >
+      Ordeal shall provide a shared library that expresses the TRAP CONDITION of
+      each partial WASM op as a QF_BV BoolTerm over its operand/pointer bits, and
+      composes trap-preservation verification conditions. Phase A: div/rem
+      (zero + signed INT_MIN/-1 overflow), unreachable (unconditional),
+      load/store OOB (addr+size >u caller-supplied symbolic mem_bound,
+      wraparound-safe), and call_indirect (bounds ∨ null-slot ∨ type, where type
+      is runtime Ne or statically discharged). Plus a (value, may_trap) wrapper,
+      an Or-fold composer, and two VC helpers: the full
+      (trap ⇔ trap) ∧ (¬trap ⇒ value_eq) and a decoupled trap-clause-only
+      variant for consumers without an op-value model (synth memory ops).
+      Boundary: ordeal classifies bits only — no new operations, and NO
+      floating-point arithmetic or theory (FP-value equivalence is out of the
+      QF_BV fragment by design). Soundness unchanged: a trap-equivalence VC is
+      decided by the certificate-checked pipeline, so Unsat is LRAT-validated and
+      re-checkable. Phase B (float→int trunc classifier) is tracked separately.
+    status: verified
+    release: v0.9.0
+    tags: [trap, partiality, wasm, div, memory, call-indirect, synth, loom]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: allocated-to
+        target: ARC-002
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Each trap_condition builder evaluates identically to the WASM trap
+        predicate over an input sweep; a dropped trap (div ÷0, OOB bounds) yields
+        a SAT counterexample from the VC; a preserved lowering yields a
+        re-checkable Unsat. No new BvTerm/BoolTerm op is added; no FP.
+
   - id: TR-010
     type: sw-req
     title: Scope enforcement and error reporting
