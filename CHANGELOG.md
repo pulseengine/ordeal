@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-11
+
+**P3 (ordeal side) — portable, independently re-checkable certificate + consumer
+integration surface** (FEAT-003 / TR-017). Turns an UNSAT verdict from something
+a consumer *trusts ordeal about* into a proof object a consumer *re-checks
+itself* — the primitive a certifying translation validator (synth) needs, and
+an adoption path for a solver-trusting rule verifier (loom).
+
+### Added
+- `Certificate` now carries the refuted DIMACS CNF (`cert.cnf`) alongside the
+  LRAT proof (`cert.lrat`), and exposes **`Certificate::recheck()`** — re-runs
+  the formally-verified `ordeal-lrat` checker over the `(cnf, lrat)` pair, so a
+  consumer re-establishes UNSAT with **zero trust in the untrusted solver**.
+  `lrat_text()` and the `CertificateError` type are public and re-exported.
+- `crates/ordeal/examples/translation_validation.rs`: a runnable worked example
+  mirroring synth's WASM→ARM translation-validation use case — proves correct
+  lowerings (each certificate re-checked) and catches a buggy
+  `i32.mul(x,3) ⇒ LSL x,#1` with a counterexample.
+- `docs/consuming-ordeal.md`: new "Translation validation (synth)" section; the
+  soundness contract now documents the actionable `cert.recheck()` path.
+
+### Changed
+- The `Certificate` doc's promise — "callers can independently re-check" — is
+  now **true through the public API** (previously the CNF was discarded, so
+  `ordeal_lrat::check` was uncallable by a consumer). No behavioural change to
+  verdicts; the pipeline threads the already-computed CNF out to the caller.
+
+### Falsification
+This release is wrong if: a consumer holding an `Unsat(cert)` finds
+`cert.recheck()` returns `Ok(())` for a `(cnf, lrat)` pair the standalone
+`ordeal-lrat` checker rejects (or vice-versa) — i.e. the in-crate re-check and
+an external LRAT checker ever disagree on the carried certificate.
+
+### Scope (honest)
+Cross-repo *adoption* is not claimed here and is owned by the consumers:
+synth-verify already runs on ordeal with Z3 as a differential oracle
+(synth#553); the portable-certificate upgrade is proposed on synth#667; loom
+still verifies rules directly with Z3 and is invited to adopt on loom#277.
+
 ## [0.6.0] - 2026-07-11
 
 **P4 — Kani proofs of bit-blaster correctness** (FEAT-004). Machine-checked

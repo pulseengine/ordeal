@@ -146,6 +146,36 @@ artifacts:
         Emitted LRAT certificate is accepted by the verified checker for every
         UNSAT corpus query.
 
+  - id: TR-017
+    type: sw-req
+    title: Portable, independently re-checkable UNSAT certificate
+    description: >
+      TR-005 makes the LRAT proof "suitable for independent checking", but a
+      consumer can only exercise that if the public API hands back BOTH halves
+      of the checkable pair. On UNSAT, the `Certificate` returned to callers
+      shall therefore carry the refuted DIMACS CNF (`cert.cnf`) alongside the
+      LRAT proof (`cert.lrat`), and expose `Certificate::recheck()` which re-runs
+      the verified `ordeal-lrat` checker over the pair. A consumer (e.g. synth's
+      translation validator) can thus re-establish an UNSAT with zero trust in
+      the untrusted solver, turning a proof-less verdict into checkable evidence.
+    status: verified
+    release: v0.7.0
+    tags: [lrat, certificate, unsat, portable, integration, synth]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: refines
+        target: TR-005
+      - type: allocated-to
+        target: ARC-005
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        For an UNSAT query, cert.cnf is non-empty, cert.recheck() returns Ok,
+        and recheck() fails when the carried CNF is altered — proving the
+        re-check genuinely consumes the certificate and is not a no-op.
+
   - id: TR-006
     type: sw-req
     title: Formally-verified LRAT checker
