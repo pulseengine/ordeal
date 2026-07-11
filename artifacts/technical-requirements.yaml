@@ -543,13 +543,18 @@ artifacts:
 
   - id: TR-023
     type: sw-req
-    title: SMT-LIB2 QF_BV front-end (Verus VC ingestion)
+    title: Verus-VC bridge over the SMT-LIB2 QF_BV front-end
     description: >
-      Ordeal shall read the QF_BV subset of SMT-LIB2 that Verus emits to Z3,
-      decide it, and return a portable LRAT certificate. Lets a Verus consumer
-      re-discharge its bitvector proof obligations with an independently
-      re-checkable certificate instead of trusting Z3 — the CompCert-style
-      argument for ASIL-D / DO-178C.
+      A minimal SMT-LIB2 QF_BV reader already ships (v0.9.1, `ordeal check
+      foo.smt2`) — validated end-to-end by the gale cpu_mask pilot (gale#173),
+      which hand-encoded a real ASIL-D by(bit_vector) obligation and got a
+      28 KB checker-validated LRAT certificate. The remaining work is the
+      AUTOMATED bridge: ingest the exact VC dialect Verus emits to Z3 (let-
+      bindings and the bitvector idioms Verus uses) and harden the reader to the
+      full obligation set, plus a file/stream certificate-out path, so a Verus
+      consumer re-discharges its obligations automatically with a re-checkable
+      certificate instead of hand-encoding each — the CompCert-style argument for
+      ASIL-D / DO-178C.
     status: draft
     release: v0.11.0
     tags: [smtlib, front-end, verus, gale, relay, certificate]

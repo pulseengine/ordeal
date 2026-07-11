@@ -300,15 +300,18 @@ artifacts:
 
   - id: FEAT-009
     type: sw-req
-    title: "P8 — SMT-LIB2 QF_BV front-end / Verus bridge (v0.11.0)"
+    title: "P8 — Verus-VC bridge (automated QF_BV obligation ingestion) (v0.11.0)"
     description: >
-      Ingest the QF_BV subset of SMT-LIB2 that Verus emits, decide it, and return
-      a portable LRAT certificate. The gale unlock: its 52 by(bit_vector) ASIL-D
-      obligations (fault_decode/mpu/cpu_mask) are discharged today by UNCHECKED
-      Z3 inside a safety case that names "Verus SMT/Z3" as the evidence — this
-      converts that into an independently re-checkable, Lean-checker-backed
-      certificate. Also serves relay's ~30 Verus escape hatches and any Verus
-      consumer.
+      The minimal SMT-LIB2 QF_BV reader already ships (v0.9.1) and the gale
+      cpu_mask pilot (gale#173) proved the end-state on a real ASIL-D leaf with a
+      28 KB checker-validated LRAT cert. This release AUTOMATES it: ingest the VC
+      dialect Verus emits to Z3 + harden the reader for the full obligation set,
+      decide, and return a portable LRAT certificate. The gale unlock: its 54
+      by(bit_vector) ASIL-D obligations (fault_decode/mpu/cpu_mask) are discharged
+      today by UNCHECKED Z3 inside a safety case that names "Verus SMT/Z3" as the
+      evidence — this converts that into an independently re-checkable,
+      Lean-checker-backed certificate. Also serves relay's ~30 Verus escape
+      hatches and any Verus consumer.
     status: draft
     release: v0.11.0
     tags: [roadmap, p8, smtlib, verus, gale, relay, asil-d, certificate]
