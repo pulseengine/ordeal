@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-11
+
+**Phase B — float→int truncation trap classifier** (TR-020, issue #59). Completes
+the trap library: the trap condition for `iN.trunc_fM_s/u` — NaN, ±∞, and
+out-of-target-range — expressed as a QF_BV predicate over the **float's bits**,
+so a consumer gates trunc trap-preservation with no new solver theory.
+
+### Added — `crates/ordeal/src/trap.rs`
+- `FpFmt` (F32/F64), `IntTarget` (I32/I64), and classifiers `fp_is_nan`,
+  `fp_is_inf`, `fp_trunc_out_of_range`, and `trap_trunc` — the out-of-range check
+  uses the IEEE **monotonic bit-order** (magnitude compares against derived
+  `2^k` threshold bit-patterns, with the WASM sign asymmetry: `x == 2^(N-1)`
+  traps but `x == -2^(N-1)` converts).
+
+### Boundary (held)
+No floating-point in the solver, no new operations — the float enters only as a
+`BvTerm` bitvector, classified with `Extract`/`Eq`/`Ne`/`Uge`/`And`/`Or`/`Not`.
+FP-value arithmetic equivalence (QF_FP) remains out of the fragment by design.
+
+### Proof
+Each classifier is verified by eval-equivalence against the **real Rust float**
+WASM trunc trap predicate (range math in exact f64). **f32→i32 (signed and
+unsigned) is EXHAUSTIVE** over all 2³² bit patterns; the other six
+source×target×signedness variants use a structured exponent×mantissa sweep + a
+±64-ULP boundary sweep; every synth#709 boundary case is an explicit assertion.
+Independently clean-room-verified (own exhaustive re-run + independent threshold
+constants). Consumer: synth trunc gate (#709 regression-lock).
+
+### Falsification
+Wrong if `trap_trunc(bits)` disagrees with `iN.trunc_fM_s/u`'s real-float trap
+predicate for any bit pattern.
+
 ## [0.9.0] - 2026-07-11
 
 **P6 (Phase A) — WASM trap/partiality semantics** (FEAT-007 / TR-019, issue #59).

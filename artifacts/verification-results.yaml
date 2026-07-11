@@ -665,3 +665,41 @@ artifacts:
     fields:
       verdict: pass
       evidence: "trap:: 9 tests (per-builder eval-equivalence + VC drop/preserve)"
+
+  - id: VE-010
+    type: verification-execution
+    title: Float→int trunc trap classifier (Phase B) @ v0.9.1
+    description: >
+      Ran the Phase B trap:: suite (21 pass incl. all trunc variants + #709
+      boundaries + dropped/preserved trunc VC) and the ignored exhaustive test.
+      MY OWN exhaustive re-run of exhaustive_f32_to_i32_all_bit_patterns passed
+      (release, 410.55s, all 2^32 patterns × {signed, unsigned} vs the real-float
+      reference). Independent Python re-derivation of the IEEE threshold
+      constants (2^31=0x4F000000, neg-signed 1-ULP=0x4F000001, 2^63, 1.0) and the
+      #709 sign asymmetry agreed. clippy 0, fmt clean, term.rs unchanged.
+      Implemented by a fable subagent, clean-room-verified before landing.
+    status: implemented
+    fields:
+      version: v0.9.1
+      timestamp: "2026-07-11T14:30:00Z"
+      executor: local
+      environment:
+        note: "own cargo test trap:: (21 pass) + own --release --ignored exhaustive (1 pass, 410s); independent constant check"
+
+  - id: VV-032
+    type: verification-verdict
+    title: "TR-020 — trunc trap classifier matches real-float WASM semantics"
+    description: >
+      Executed pass. trap_trunc equals the real-float trap predicate — exhaustive
+      for f32→i32, structured+ULP+boundary for the rest — independently
+      re-verified (own exhaustive run + own constant derivation), not trusted
+      from the subagent's report.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-019
+      - type: part-of-execution
+        target: VE-010
+    fields:
+      verdict: pass
+      evidence: "own exhaustive 2^32 re-run pass + independent IEEE threshold constants + #709 boundary asserts"

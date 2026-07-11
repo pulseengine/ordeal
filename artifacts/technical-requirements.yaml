@@ -345,6 +345,39 @@ artifacts:
         a SAT counterexample from the VC; a preserved lowering yields a
         re-checkable Unsat. No new BvTerm/BoolTerm op is added; no FP.
 
+  - id: TR-020
+    type: sw-req
+    title: Float→int truncation trap classifier (trap library Phase B)
+    description: >
+      Extends TR-019 with the trap condition for iN.trunc_fM_s/u: the float
+      traps on NaN, ±∞, or an out-of-target-range value. Expressed as a QF_BV
+      predicate over the FLOAT's bits (the consumer supplies the float as a
+      BvTerm bitvector) — NaN/∞ are exponent-field bit-pattern checks; the
+      out-of-range check uses the IEEE monotonic bit-order (unsigned magnitude
+      compares against derived 2^k threshold patterns, with the WASM sign
+      asymmetry x==2^(N-1) traps but x==-2^(N-1) converts). Boundary held: no
+      floating-point arithmetic or theory and no new operations enter the solver;
+      FP-VALUE equivalence (QF_FP) stays out of the fragment by design.
+    status: verified
+    release: v0.9.1
+    tags: [trap, trunc, float, wasm, ieee, synth, no-fp]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: refines
+        target: TR-019
+      - type: allocated-to
+        target: ARC-002
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        trap_trunc evaluates identically to the real-float iN.trunc_fM_s/u trap
+        predicate: EXHAUSTIVE over all 2^32 patterns for f32→i32 (signed and
+        unsigned); structured exponent×mantissa + ±ULP boundary sweeps for the
+        other six variants; every synth#709 boundary case asserted. No new op; no
+        FP arithmetic.
+
   - id: TR-010
     type: sw-req
     title: Scope enforcement and error reporting
