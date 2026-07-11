@@ -409,3 +409,28 @@ artifacts:
       steps:
         run: "cargo test -p ordeal canon::; cargo test -p ordeal solver::a5_mul_commutativity_decides_unsat_after_canonicalization; CI 'Z3 Oracle' differential"
         coverage: "eval-equivalence sweeps; A5 UNSAT + re-check; budget semantics on a hard survivor query; Z3 corpus agreement"
+
+  - id: VER-018
+    type: sw-verification
+    title: Trap-condition builders match WASM semantics; VC catches dropped traps
+    description: >
+      Confirms the trap_condition library (Phase A) is correct and useful. Each
+      builder evaluates identically to the WASM trap predicate over an input
+      sweep (trap_div exhaustive at width 8 for all four ops incl. INT_MIN/-1
+      overflow; trap_mem_oob vs a wide-arithmetic reference incl. a wraparound
+      case; trap_call_indirect over bounds/null/type incl. statically-discharged;
+      trap_any Or-fold). The trap-preservation VC catches a dropped ÷0 trap with
+      a divisor-0 counterexample and a dropped OOB bounds-check via the
+      conjunct-1 gate, and proves a preserved lowering with a re-checkable Unsat.
+      No new op is added; no FP.
+    status: verified
+    release: v0.9.0
+    tags: [trap, partiality, semantics, counterexample, synth, loom]
+    links:
+      - type: verifies
+        target: TR-019
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal trap::"
+        coverage: "per-builder eval-equivalence; dropped-trap SAT counterexamples (div ÷0, OOB); preserved-lowering re-checkable Unsat; conjunct-1 trap-drop gate"

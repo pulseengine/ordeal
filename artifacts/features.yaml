@@ -227,3 +227,42 @@ artifacts:
         certificate) and is semantics-preserving (VER-017). LRAT trimming,
         incremental caching, and the full benchmark suite are deferred and
         tracked separately — not claimed verified here.
+
+  - id: FEAT-007
+    type: sw-req
+    title: "P6 — WASM trap/partiality semantics (shared trap-preservation library)"
+    description: >
+      Close the trap-elimination miscompile class (loom#273/#274/#278,
+      synth#633/#666/#665/#642) at its root: a verifier that proves only VALUE
+      equivalence over a total-op model cannot see a transformation that drops a
+      trap. Ordeal ships a shared trap_condition library (TR-019) so both
+      consumers verify TRAP-equivalence as a mandatory gate — loom (loom#279) and
+      synth's translation_validator (VCR-VER-002).
+
+      Phase A (v0.9.0): trap conditions for div/rem, unreachable, load/store OOB
+      (symbolic mem_bound), and call_indirect (bounds/null-slot/type with a
+      runtime-or-statically-discharged mode), the (value, may_trap) wrapper, and
+      the full + trap-clause-only VC helpers. Pure QF_BV over the existing
+      fragment — no new ops, no FP. Phase B (later): float→int trunc trap
+      classifier, proven against synth's #709 IEEE truth table. Out of scope by
+      design: FP-value arithmetic equivalence (QF_FP), which stays consumer-side
+      differential.
+    status: implemented
+    release: v0.9.0
+    tags: [roadmap, p6, trap, partiality, wasm, loom, synth, shared-checker]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: derives-from
+        target: SYS-006
+      - type: satisfies
+        target: TR-019
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Phase A trap_condition builders + VC helpers land, oracle-gated
+        (VER-018): trap conditions match WASM semantics, dropped traps are caught
+        with counterexamples, preserved lowerings prove re-checkable Unsat.
+        Cross-repo adoption (loom#279, synth VCR-VER-002) is external. Phase B
+        (trunc) and FP-value equivalence are tracked separately, not claimed here.
