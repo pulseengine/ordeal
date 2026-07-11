@@ -591,3 +591,40 @@ artifacts:
     fields:
       verdict: pass
       evidence: "solver::certificate_is_independently_recheckable + translation_validation example"
+
+  - id: VE-008
+    type: verification-execution
+    title: Canonicalization — A5 cliff closed + semantics preserved @ v0.8.0
+    description: >
+      Ran the canonicalization suite and the A5 kill-criterion. canon:: tests
+      pass (commuted products canonicalize identically; mul(2,3)->6 and modular
+      folds; Ugt mirrors to Ult; eval(canonicalize(t)) == eval(t) over sweeps for
+      both bv and bool). The A5 query Ne(Mul(a,b),Mul(b,a)) @ 32 decides UNSAT in
+      <0.01 s with a re-checkable certificate, at any budget (root-decided). Full
+      workspace suite 108 lib + 18 doc tests green; no verdict changed. The Z3
+      differential runs in CI (local libz3 link unavailable).
+    status: implemented
+    fields:
+      version: v0.8.0
+      timestamp: "2026-07-11T07:40:00Z"
+      executor: local
+      environment:
+        note: "cargo test -p ordeal canon:: + a5 decide-unsat; 108 lib tests pass; Z3 differential deferred to CI 'Z3 Oracle' job"
+
+  - id: VV-030
+    type: verification-verdict
+    title: "TR-018 — canonicalization closes the A5 cliff without changing verdicts"
+    description: >
+      Executed pass. Commutative canonicalization + const-folding make the A5
+      shape root-decidable (590 s -> instant, certificate re-checks) and are
+      semantics-preserving under eval; the untrusted-side placement keeps
+      soundness intact.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-017
+      - type: part-of-execution
+        target: VE-008
+    fields:
+      verdict: pass
+      evidence: "canon:: eval-equivalence sweeps + a5_mul_commutativity_decides_unsat_after_canonicalization"

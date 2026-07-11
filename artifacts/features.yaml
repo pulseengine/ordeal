@@ -200,10 +200,16 @@ artifacts:
       Optimize for CI-gating latency: AIG structural hashing, a curated
       Bitwuzla-subset of rewrites, LRAT trimming, incremental term-graph
       caching across a loom/synth pass, and benchmarking vs Z3. The honest win
-      is amortized per-op integration latency, not out-solving Z3's SAT
-      engine. Deliverable: performance within the CI budget with measured
-      benchmarks.
-    status: draft
+      is amortized per-op integration latency, not out-solving Z3's SAT engine.
+
+      Delivered in v0.8.0: the highest-value slice — commutative-operand
+      canonicalization + constant-folding above the AIG (TR-018), which closes
+      the concrete measured cliff (synth's A5: Ne(Mul(a,b),Mul(b,a)) @ 32, did
+      not finish in 590 s → decides UNSAT instantly). AIG structural hashing
+      already shipped (v0.2.0). DEFERRED to a follow-up (tracked as #57):
+      LRAT-proof trimming, cross-pass incremental term-graph caching, and a
+      full criterion benchmark harness vs Z3 — none are on the soundness path.
+    status: implemented
     release: v0.8.0
     tags: [roadmap, p5, performance, benchmark]
     links:
@@ -211,9 +217,13 @@ artifacts:
         target: SYS-005
       - type: satisfies
         target: TR-009
+      - type: satisfies
+        target: TR-018
     fields:
       req-type: performance
       priority: should
       verification-criteria: >
-        Per-op integration latency below the CI budget; structural hashing and
-        LRAT trimming measurably reduce work.
+        Canonicalization closes the A5 cliff (UNSAT with a re-checkable
+        certificate) and is semantics-preserving (VER-017). LRAT trimming,
+        incremental caching, and the full benchmark suite are deferred and
+        tracked separately — not claimed verified here.

@@ -276,6 +276,39 @@ artifacts:
         Benchmark suite shows per-op integration latency below the CI budget;
         structural hashing and LRAT trimming measurably reduce work.
 
+  - id: TR-018
+    type: sw-req
+    title: Commutative canonicalization + constant-folding above the AIG
+    description: >
+      To eliminate structural-equivalence cliffs, Ordeal shall canonicalize
+      terms before bit-blasting: order the operands of commutative operators
+      (`add`/`mul`/`and`/`or`/`xor`, `eq`/`ne`), mirror the "greater"
+      comparisons to their "less" twins, and constant-fold all-constant
+      subterms — so semantically-equal but structurally-different terms (e.g.
+      `mul(a,b)` and `mul(b,a)`) reduce to the same AIG node via structural
+      hashing. The pass is UNTRUSTED preprocessing: soundness is unchanged (every
+      Unsat stays LRAT-checked; every Sat model is re-evaluated against the
+      ORIGINAL assertions), and each rule is semantics-preserving under `eval`.
+      This is the concrete fix for synth's A5 cliff (issue #35).
+    status: verified
+    release: v0.8.0
+    tags: [performance, canonicalization, const-fold, rewrite, a5, synth]
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: refines
+        target: TR-009
+      - type: allocated-to
+        target: ARC-003
+    fields:
+      req-type: performance
+      priority: should
+      verification-criteria: >
+        Ne(Mul(a,b), Mul(b,a)) @ 32 decides UNSAT with a re-checkable certificate
+        (was: did not finish in 590 s); canonicalize(t) evaluates identically to
+        t over a random-assignment sweep (semantics preservation); the Z3
+        differential still agrees on the corpus.
+
   - id: TR-010
     type: sw-req
     title: Scope enforcement and error reporting

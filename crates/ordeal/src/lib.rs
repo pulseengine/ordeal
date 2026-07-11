@@ -39,6 +39,7 @@
 
 pub mod aig;
 pub mod blast;
+pub mod canon;
 pub mod cnf;
 pub mod eval;
 pub mod lowering;

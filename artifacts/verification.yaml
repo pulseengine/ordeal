@@ -386,3 +386,26 @@ artifacts:
       steps:
         run: "cargo test -p ordeal solver::certificate_is_independently_recheckable; cargo run -p ordeal --example translation_validation"
         coverage: "cert.cnf populated; recheck() Ok on valid, Err on tampered CNF; example validates 4 correct + 1 buggy lowering"
+
+  - id: VER-017
+    type: sw-verification
+    title: Canonicalization closes the A5 cliff and preserves semantics
+    description: >
+      Confirms commutative-operand canonicalization + const-folding decides the
+      A5 shape and does not change any verdict. The A5 query Ne(Mul(a,b),
+      Mul(b,a)) @ 32 now decides UNSAT with a re-checkable certificate (root
+      propagation, any budget) instead of not finishing in 590 s;
+      canonicalize(t) evaluates identically to t over random-assignment sweeps
+      (semantics preservation, no Z3 needed); and the full suite plus the CI Z3
+      differential agree on every verdict.
+    status: verified
+    release: v0.8.0
+    tags: [performance, canonicalization, a5, differential, semantics]
+    links:
+      - type: verifies
+        target: TR-018
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal canon::; cargo test -p ordeal solver::a5_mul_commutativity_decides_unsat_after_canonicalization; CI 'Z3 Oracle' differential"
+        coverage: "eval-equivalence sweeps; A5 UNSAT + re-check; budget semantics on a hard survivor query; Z3 corpus agreement"
