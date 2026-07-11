@@ -1,0 +1,58 @@
+# ── Kani bit-blaster proofs (FEAT-004 / P4) ───────────────────────────────
+# Machine-checked proofs that each bit-blasting rule equals the concrete
+# reference (SMT-LIB QF_BV semantics) for ALL inputs — the Z3-independent
+# soundness evidence for the blaster (crates/ordeal/src/blast/proofs.rs).
+#
+# Kani (CBMC/SAT) is expensive, so this does NOT run on every PR: it runs on a
+# nightly schedule, on demand, and on PRs that touch the blaster. It is
+# NON-BLOCKING (continue-on-error) — a proof regression is surfaced loudly but
+# does not gate merges while the harness set and CI budget are being tuned.
+#
+# Scope run here: the 8-bit harness for every op family + all comparisons +
+# the structural rules — the fast, exhaustively-tractable tier that exercises
+# every rule. The wider tier (light ops at 32/64) is verified locally/nightly;
+# 64-bit mul/udiv are a known compute frontier and retain exhaustive-8 + the Z3
+# differential (see the release notes and blast/proofs.rs).
+name: Kani proofs
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 4 * * *" # nightly 04:00 UTC
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/ordeal/src/blast/**"
+      - "crates/ordeal/src/aig.rs"
+      - "crates/ordeal/src/eval.rs"
+      - ".github/workflows/kani.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kani-${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  proofs:
+    name: Bit-blaster equivalence proofs
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kani
+      - name: Run Kani (fast tier — every rule at width 8 + structural)
+        uses: model-checking/kani-github-action@v1
+        with:
+          args: >-
+            --harness add_8 --harness sub_8 --harness and_8 --harness or_8
+            --harness xor_8 --harness shl_8 --harness lshr_8 --harness ashr_8
+            --harness rotr_8 --harness eq_8 --harness ne_8 --harness ult_8
+            --harness ule_8 --harness ugt_8 --harness uge_8 --harness slt_8
+            --harness sle_8 --harness sgt_8 --harness sge_8
+            --harness concat_4_4 --harness extract_16_hi --harness extract_16_lo
+            --harness zext_8_8 --harness sext_8_8 --harness ite_8

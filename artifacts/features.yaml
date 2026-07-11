@@ -157,7 +157,7 @@ artifacts:
       soundness story no longer contains the words "trust Z3"; removing the
       oracle feature removes Z3 completely with no effect on correctness
       guarantees.
-    status: draft
+    status: implemented
     release: v0.6.0
     tags: [roadmap, p4, soundness, bit-blaster, formal-verification]
     links:
