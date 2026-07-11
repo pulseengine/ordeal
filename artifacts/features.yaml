@@ -243,10 +243,11 @@ artifacts:
       (symbolic mem_bound), and call_indirect (bounds/null-slot/type with a
       runtime-or-statically-discharged mode), the (value, may_trap) wrapper, and
       the full + trap-clause-only VC helpers. Pure QF_BV over the existing
-      fragment — no new ops, no FP. Phase B (later): float→int trunc trap
-      classifier, proven against synth's #709 IEEE truth table. Out of scope by
-      design: FP-value arithmetic equivalence (QF_FP), which stays consumer-side
-      differential.
+      fragment — no new ops, no FP. Phase B (v0.9.1, TR-020): the float→int
+      trunc trap classifier, proven against the real-float WASM predicate
+      (exhaustive 2^32 for f32→i32; structured+ULP for the rest) incl. synth's
+      #709 boundaries. Out of scope by design: FP-value arithmetic equivalence
+      (QF_FP), which stays consumer-side differential.
     status: implemented
     release: v0.9.0
     tags: [roadmap, p6, trap, partiality, wasm, loom, synth, shared-checker]
@@ -257,6 +258,8 @@ artifacts:
         target: SYS-006
       - type: satisfies
         target: TR-019
+      - type: satisfies
+        target: TR-020
     fields:
       req-type: functional
       priority: should

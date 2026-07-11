@@ -191,6 +191,247 @@ pub fn trap_call_indirect(ci: &CallIndirect) -> BoolTerm {
     BoolTerm::Or(bb(BoolTerm::Or(bb(bounds), bb(null_slot))), bb(type_clause))
 }
 
+// ---------------------------------------------------------------------------
+// Float→int truncation traps (Phase B, synth #709).
+//
+// WASM `iN.trunc_fM_s/u` traps on NaN, ±∞, and when the round-toward-zero
+// truncation falls outside the target integer range. ordeal stays QF_BV: the
+// float enters ONLY as its bit pattern (BV32/BV64) and is *classified* with
+// extracts and unsigned compares — no FP theory, no new ops. The key fact is
+// IEEE-754's monotonic bit order: for a fixed sign, a float's magnitude is
+// strictly monotonic in the unsigned integer value of its sign-stripped bit
+// pattern, so "|x| ≥ threshold" is a single `Uge` against a constant pattern.
+// ---------------------------------------------------------------------------
+
+/// An IEEE-754 binary interchange format, for the trunc-trap classifiers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FpFmt {
+    /// binary32: 1 sign / 8 exponent / 23 mantissa bits.
+    F32,
+    /// binary64: 1 sign / 11 exponent / 52 mantissa bits.
+    F64,
+}
+
+impl FpFmt {
+    /// Total width of the bit pattern (32 / 64).
+    pub const fn total_bits(self) -> u32 {
+        match self {
+            FpFmt::F32 => 32,
+            FpFmt::F64 => 64,
+        }
+    }
+    /// Width of the biased-exponent field (8 / 11).
+    pub const fn exp_bits(self) -> u32 {
+        match self {
+            FpFmt::F32 => 8,
+            FpFmt::F64 => 11,
+        }
+    }
+    /// Width of the trailing-significand (mantissa) field (23 / 52).
+    pub const fn mant_bits(self) -> u32 {
+        match self {
+            FpFmt::F32 => 23,
+            FpFmt::F64 => 52,
+        }
+    }
+    /// Exponent bias (127 / 1023).
+    const fn bias(self) -> u32 {
+        match self {
+            FpFmt::F32 => 127,
+            FpFmt::F64 => 1023,
+        }
+    }
+    /// The all-ones exponent-field value (NaN/∞ marker: 0xFF / 0x7FF).
+    const fn exp_all_ones(self) -> u128 {
+        (1u128 << self.exp_bits()) - 1
+    }
+}
+
+/// The integer target of a truncation, for [`fp_trunc_out_of_range`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntTarget {
+    /// `i32` (WASM `i32.trunc_f*`).
+    I32,
+    /// `i64` (WASM `i64.trunc_f*`).
+    I64,
+}
+
+impl IntTarget {
+    /// Bit width of the target integer (32 / 64).
+    pub const fn width(self) -> u32 {
+        match self {
+            IntTarget::I32 => 32,
+            IntTarget::I64 => 64,
+        }
+    }
+}
+
+/// Extract the biased-exponent field `bits[total-2 : mant]`.
+fn fp_exp_field(bits: &BvTerm, fmt: FpFmt) -> BvTerm {
+    BvTerm::Extract {
+        hi: fmt.total_bits() - 2,
+        lo: fmt.mant_bits(),
+        arg: bx(bits.clone()),
+    }
+}
+
+/// Extract the trailing-significand field `bits[mant-1 : 0]`.
+fn fp_mant_field(bits: &BvTerm, fmt: FpFmt) -> BvTerm {
+    BvTerm::Extract {
+        hi: fmt.mant_bits() - 1,
+        lo: 0,
+        arg: bx(bits.clone()),
+    }
+}
+
+/// Extract the sign bit `bits[total-1]` (1-bit term).
+fn fp_sign_bit(bits: &BvTerm, fmt: FpFmt) -> BvTerm {
+    let hi = fmt.total_bits() - 1;
+    BvTerm::Extract {
+        hi,
+        lo: hi,
+        arg: bx(bits.clone()),
+    }
+}
+
+/// Extract the sign-stripped magnitude pattern `bits[total-2 : 0]`. For a fixed
+/// sign, IEEE float magnitude is monotonic in this unsigned value.
+fn fp_magnitude(bits: &BvTerm, fmt: FpFmt) -> BvTerm {
+    BvTerm::Extract {
+        hi: fmt.total_bits() - 2,
+        lo: 0,
+        arg: bx(bits.clone()),
+    }
+}
+
+/// `exp field == all-ones` (the NaN/∞ exponent marker).
+fn fp_exp_is_all_ones(bits: &BvTerm, fmt: FpFmt) -> BoolTerm {
+    BoolTerm::Eq(
+        bx(fp_exp_field(bits, fmt)),
+        bx(BvTerm::Const {
+            value: fmt.exp_all_ones(),
+            sort: Sort::new(fmt.exp_bits()),
+        }),
+    )
+}
+
+/// The float's bits encode a NaN: exponent all-ones AND mantissa ≠ 0.
+pub fn fp_is_nan(bits: &BvTerm, fmt: FpFmt) -> BoolTerm {
+    let mant_nonzero = BoolTerm::Ne(
+        bx(fp_mant_field(bits, fmt)),
+        bx(BvTerm::Const {
+            value: 0,
+            sort: Sort::new(fmt.mant_bits()),
+        }),
+    );
+    BoolTerm::And(bb(fp_exp_is_all_ones(bits, fmt)), bb(mant_nonzero))
+}
+
+/// The float's bits encode ±∞: exponent all-ones AND mantissa == 0.
+pub fn fp_is_inf(bits: &BvTerm, fmt: FpFmt) -> BoolTerm {
+    let mant_zero = BoolTerm::Eq(
+        bx(fp_mant_field(bits, fmt)),
+        bx(BvTerm::Const {
+            value: 0,
+            sort: Sort::new(fmt.mant_bits()),
+        }),
+    );
+    BoolTerm::And(bb(fp_exp_is_all_ones(bits, fmt)), bb(mant_zero))
+}
+
+/// Sign-stripped bit pattern of `2^k` in `fmt`: exponent field `bias + k`,
+/// mantissa 0. Exact for every `k` used here (k ≤ 64 ≪ exponent range).
+fn pow2_magnitude_pattern(fmt: FpFmt, k: u32) -> u128 {
+    ((fmt.bias() + k) as u128) << fmt.mant_bits()
+}
+
+/// Sign-stripped bit pattern of the **smallest** float of `fmt` whose value is
+/// `≥ 2^k + 1` — the negative-side trap threshold for a signed target of width
+/// `k + 1` (trap iff `x ≤ -(2^k + 1)`, i.e. `|x| ≥ 2^k + 1`).
+///
+/// If the format has ≥ `k` mantissa bits, `2^k + 1` is exactly representable:
+/// pattern of `2^k` with mantissa bit `mant - k` set. Otherwise the next float
+/// above `2^k` (pattern + 1, one ULP) is the smallest one `≥ 2^k + 1`.
+fn min_pattern_ge_pow2_plus_1(fmt: FpFmt, k: u32) -> u128 {
+    let p2 = pow2_magnitude_pattern(fmt, k);
+    if fmt.mant_bits() >= k {
+        p2 | (1u128 << (fmt.mant_bits() - k))
+    } else {
+        p2 + 1
+    }
+}
+
+/// The float's truncation (round-toward-zero) falls outside the target integer
+/// range — **finite values only** (NaN/∞ are `false` here; they are separate
+/// disjuncts of [`trap_trunc`]). Matches WASM `iN.trunc_fM_s/u` (synth #709):
+///
+/// - signed:   in-range iff `trunc(x) ∈ [-2^(N-1), 2^(N-1)-1]`, i.e.
+///   `-(2^(N-1)+1) < x < 2^(N-1)`. Positive trap: `|x| ≥ 2^(N-1)` (so
+///   `x == 2^(N-1)` traps). Negative trap: `|x| ≥ 2^(N-1)+1` (so
+///   `x == -2^(N-1)` converts, and any float in `(-(2^(N-1)+1), -2^(N-1)]`
+///   truncates to `-2^(N-1)`).
+/// - unsigned: in-range iff `trunc(x) ∈ [0, 2^N-1]`, i.e. `-1 < x < 2^N`.
+///   Positive trap: `|x| ≥ 2^N`. Negative trap: `|x| ≥ 1` (so `x == -1.0`
+///   traps but `-1 < x < 0`, incl. `-0.0`, truncates to 0).
+///
+/// Each magnitude bound is one unsigned compare against a constant bit pattern
+/// (IEEE monotonic bit order), split on the sign bit.
+pub fn fp_trunc_out_of_range(
+    bits: &BvTerm,
+    fmt: FpFmt,
+    target: IntTarget,
+    signed: bool,
+) -> BoolTerm {
+    let mag_sort = Sort::new(fmt.total_bits() - 1);
+    let mag = fp_magnitude(bits, fmt);
+    let is_neg = BoolTerm::Eq(
+        bx(fp_sign_bit(bits, fmt)),
+        bx(BvTerm::Const {
+            value: 1,
+            sort: Sort::new(1),
+        }),
+    );
+    let finite = BoolTerm::Not(bb(fp_exp_is_all_ones(bits, fmt)));
+
+    // Positive side: trap iff x ≥ 2^k, k = N (unsigned) / N-1 (signed).
+    let k = target.width() - u32::from(signed);
+    let pos_thresh = pow2_magnitude_pattern(fmt, k);
+    // Negative side: trap iff |x| ≥ 2^(N-1)+1 (signed) / ≥ 1.0 (unsigned).
+    let neg_thresh = if signed {
+        min_pattern_ge_pow2_plus_1(fmt, target.width() - 1)
+    } else {
+        pow2_magnitude_pattern(fmt, 0) // bit pattern of 1.0
+    };
+
+    let uge_const = |t: BvTerm, value: u128| {
+        BoolTerm::Uge(
+            bx(t),
+            bx(BvTerm::Const {
+                value,
+                sort: mag_sort,
+            }),
+        )
+    };
+    let pos_oob = BoolTerm::And(
+        bb(BoolTerm::Not(bb(is_neg.clone()))),
+        bb(uge_const(mag.clone(), pos_thresh)),
+    );
+    let neg_oob = BoolTerm::And(bb(is_neg), bb(uge_const(mag, neg_thresh)));
+    BoolTerm::And(bb(finite), bb(BoolTerm::Or(bb(pos_oob), bb(neg_oob))))
+}
+
+/// Trap condition for WASM `iN.trunc_fM_s/u` (synth #709):
+/// `NaN ∨ ±∞ ∨ out-of-range` over the float's bit pattern.
+pub fn trap_trunc(bits: &BvTerm, fmt: FpFmt, target: IntTarget, signed: bool) -> BoolTerm {
+    BoolTerm::Or(
+        bb(BoolTerm::Or(
+            bb(fp_is_nan(bits, fmt)),
+            bb(fp_is_inf(bits, fmt)),
+        )),
+        bb(fp_trunc_out_of_range(bits, fmt, target, signed)),
+    )
+}
+
 /// Compose a block's trap condition from its partial ops: `may_trap` holds iff
 /// **any** of `conds` holds (an `Or`-fold; empty ⇒ never traps). Sound for
 /// straight-line code — control-flow sequencing is the consumer's VC's job.
@@ -392,7 +633,634 @@ mod tests {
         assert!(!eval::eval_bool(&any, &env2(5, 5)).unwrap());
     }
 
+    // ---- float→int truncation traps (Phase B, synth #709) ----
+    //
+    // The proof style: build the BoolTerm classifier, then evaluate it with
+    // `eval::eval_bool` against a reference predicate computed on the REAL
+    // Rust float (`f32::from_bits` / `f64::from_bits`, `is_nan`,
+    // `is_infinite`, `trunc`). The reference does all range math in f64,
+    // which is exact for every case here: f32→f64 is exact, `trunc` of a
+    // finite float is an exactly-representable integer-valued f64, the
+    // bounds ±2^31, ±2^63, 2^32, 2^64, 0 are exact f64 values, and for an
+    // integer t, `t ≤ 2^N - 1 ⟺ t < 2^N` (so the unrepresentable 2^63-1 /
+    // 2^64-1 bounds are never materialized).
+
+    /// The float value (widened to f64, exactly) of a bit pattern.
+    fn fval(fmt: FpFmt, p: u128) -> f64 {
+        match fmt {
+            FpFmt::F32 => f32::from_bits(p as u32) as f64,
+            FpFmt::F64 => f64::from_bits(p as u64),
+        }
+    }
+
+    /// Reference: finite `x` truncates (round-toward-zero) outside the target
+    /// range. Caller guards non-finite inputs.
+    fn ref_out_of_range(x: f64, target: IntTarget, signed: bool) -> bool {
+        let t = x.trunc();
+        let n = target.width() as i32;
+        if signed {
+            !(t >= -(2f64.powi(n - 1)) && t < 2f64.powi(n - 1))
+        } else {
+            !(t >= 0.0 && t < 2f64.powi(n))
+        }
+    }
+
+    /// Reference: the exact WASM `iN.trunc_fM_s/u` trap predicate.
+    fn ref_trap_trunc(x: f64, target: IntTarget, signed: bool) -> bool {
+        !x.is_finite() || ref_out_of_range(x, target, signed)
+    }
+
+    /// The derived magnitude thresholds must be the bit patterns of the IEEE
+    /// values the WASM spec bounds are stated in. Cross-checked against the
+    /// host float's `to_bits`, plus the one-ULP semantics of the negative
+    /// signed threshold (smallest float ≥ 2^k + 1).
+    #[test]
+    fn derived_threshold_constants_match_ieee_bit_patterns() {
+        for k in [0u32, 31, 32, 63, 64] {
+            assert_eq!(
+                pow2_magnitude_pattern(FpFmt::F32, k),
+                2f32.powi(k as i32).to_bits() as u128,
+                "f32 2^{k}"
+            );
+            assert_eq!(
+                pow2_magnitude_pattern(FpFmt::F64, k),
+                2f64.powi(k as i32).to_bits() as u128,
+                "f64 2^{k}"
+            );
+        }
+        // Spelled-out constants, for clean-room comparison.
+        assert_eq!(pow2_magnitude_pattern(FpFmt::F32, 31), 0x4F00_0000);
+        assert_eq!(pow2_magnitude_pattern(FpFmt::F32, 32), 0x4F80_0000);
+        assert_eq!(pow2_magnitude_pattern(FpFmt::F32, 63), 0x5F00_0000);
+        assert_eq!(pow2_magnitude_pattern(FpFmt::F32, 64), 0x5F80_0000);
+        assert_eq!(pow2_magnitude_pattern(FpFmt::F32, 0), 0x3F80_0000);
+        assert_eq!(
+            pow2_magnitude_pattern(FpFmt::F64, 31),
+            0x41E0_0000_0000_0000
+        );
+        assert_eq!(
+            pow2_magnitude_pattern(FpFmt::F64, 32),
+            0x41F0_0000_0000_0000
+        );
+        assert_eq!(
+            pow2_magnitude_pattern(FpFmt::F64, 63),
+            0x43E0_0000_0000_0000
+        );
+        assert_eq!(
+            pow2_magnitude_pattern(FpFmt::F64, 64),
+            0x43F0_0000_0000_0000
+        );
+        assert_eq!(pow2_magnitude_pattern(FpFmt::F64, 0), 0x3FF0_0000_0000_0000);
+        // Negative-side signed thresholds: smallest float ≥ 2^k + 1.
+        assert_eq!(min_pattern_ge_pow2_plus_1(FpFmt::F32, 31), 0x4F00_0001);
+        assert_eq!(min_pattern_ge_pow2_plus_1(FpFmt::F32, 63), 0x5F00_0001);
+        assert_eq!(
+            min_pattern_ge_pow2_plus_1(FpFmt::F64, 31),
+            0x41E0_0000_0020_0000
+        );
+        assert_eq!(
+            min_pattern_ge_pow2_plus_1(FpFmt::F64, 63),
+            0x43E0_0000_0000_0001
+        );
+        // One-ULP semantics of each: value at the threshold is ≥ 2^k + 1,
+        // one ULP below is < 2^k + 1.
+        for (fmt, k, thresh) in [
+            (FpFmt::F32, 31u32, 0x4F00_0001u128),
+            (FpFmt::F32, 63, 0x5F00_0001),
+            (FpFmt::F64, 31, 0x41E0_0000_0020_0000),
+            (FpFmt::F64, 63, 0x43E0_0000_0000_0001),
+        ] {
+            if k <= 52 {
+                // 2^k + 1 is an exact f64; floats near 2^k may be fractional
+                // (f64 spacing < 1 there) but every one is f64-exact.
+                let bound = 2f64.powi(k as i32) + 1.0;
+                assert!(fval(fmt, thresh) >= bound, "{fmt:?} 2^{k}+1 at threshold");
+                assert!(fval(fmt, thresh - 1) < bound, "{fmt:?} 2^{k}+1 one below");
+            } else {
+                // 2^63 + 1 is NOT an f64 (needs 64 significand bits) — but
+                // every float near 2^63 is an integer (spacing ≥ 2048), so
+                // compare exactly in u128.
+                let bound = (1u128 << k) + 1;
+                assert!(
+                    fval(fmt, thresh) as u128 >= bound,
+                    "{fmt:?} 2^{k}+1 at threshold"
+                );
+                assert!(
+                    (fval(fmt, thresh - 1) as u128) < bound,
+                    "{fmt:?} 2^{k}+1 one below"
+                );
+            }
+        }
+    }
+
+    /// `fp_is_nan` / `fp_is_inf` ⇔ the host float's `is_nan` / `is_infinite`,
+    /// over every exponent value × structured mantissa samples × both signs.
+    #[test]
+    fn nan_inf_classifiers_match_ieee_reference() {
+        for fmt in [FpFmt::F32, FpFmt::F64] {
+            let f = v("f", fmt.total_bits());
+            let nan_t = fp_is_nan(&f, fmt);
+            let inf_t = fp_is_inf(&f, fmt);
+            let mut env = Env::new();
+            for p in structured_patterns(fmt) {
+                env.insert("f".into(), p);
+                let x = fval(fmt, p);
+                assert_eq!(
+                    eval::eval_bool(&nan_t, &env).unwrap(),
+                    x.is_nan(),
+                    "is_nan {fmt:?} pattern {p:#x}"
+                );
+                assert_eq!(
+                    eval::eval_bool(&inf_t, &env).unwrap(),
+                    x.is_infinite(),
+                    "is_inf {fmt:?} pattern {p:#x}"
+                );
+            }
+        }
+    }
+
+    /// Structured pattern sweep for a format: every exponent value × mantissa
+    /// samples (0..=3, top three, thirds, and every single-bit mantissa) ×
+    /// both signs. Covers all exponent boundaries and every mantissa bit
+    /// position — 15,872 patterns for f32 (256 × 31 × 2), 245,760 for f64
+    /// (2048 × 60 × 2).
+    fn structured_patterns(fmt: FpFmt) -> Vec<u128> {
+        let m = fmt.mant_bits();
+        let mant_max = (1u128 << m) - 1;
+        let mut mants = vec![
+            0,
+            1,
+            2,
+            3,
+            mant_max,
+            mant_max - 1,
+            mant_max - 2,
+            mant_max / 3,
+            mant_max / 2,
+            2 * (mant_max / 3),
+        ];
+        for i in 2..m {
+            mants.push(1u128 << i);
+        }
+        let mut out = Vec::new();
+        for exp in 0..=fmt.exp_all_ones() {
+            for &mant in &mants {
+                for sign in [0u128, 1] {
+                    out.push((sign << (fmt.total_bits() - 1)) | (exp << m) | mant);
+                }
+            }
+        }
+        out
+    }
+
+    /// One trunc variant, proven two ways against the real-float reference:
+    /// the structured sweep of [`structured_patterns`], plus a ±64-ULP
+    /// magnitude sweep (both signs) around BOTH derived threshold patterns —
+    /// i.e. the ±2^31 / ±2^32 / ±2^63 / ±2^64 / ±1.0 neighborhoods at ULP
+    /// granularity.
+    fn sweep_trunc_variant(fmt: FpFmt, target: IntTarget, signed: bool) {
+        let f = v("f", fmt.total_bits());
+        let oor_t = fp_trunc_out_of_range(&f, fmt, target, signed);
+        let trap_t = trap_trunc(&f, fmt, target, signed);
+        let mut env = Env::new();
+        let mut check = |p: u128| {
+            env.insert("f".into(), p);
+            let x = fval(fmt, p);
+            assert_eq!(
+                eval::eval_bool(&oor_t, &env).unwrap(),
+                x.is_finite() && ref_out_of_range(x, target, signed),
+                "out_of_range {fmt:?}->{target:?} signed={signed} pattern {p:#x} value {x:e}"
+            );
+            assert_eq!(
+                eval::eval_bool(&trap_t, &env).unwrap(),
+                ref_trap_trunc(x, target, signed),
+                "trap_trunc {fmt:?}->{target:?} signed={signed} pattern {p:#x} value {x:e}"
+            );
+        };
+        for p in structured_patterns(fmt) {
+            check(p);
+        }
+        let k = target.width() - u32::from(signed);
+        let pos_thresh = pow2_magnitude_pattern(fmt, k);
+        let neg_thresh = if signed {
+            min_pattern_ge_pow2_plus_1(fmt, target.width() - 1)
+        } else {
+            pow2_magnitude_pattern(fmt, 0)
+        };
+        for thresh in [pos_thresh, neg_thresh] {
+            for mag in (thresh - 64)..=(thresh + 64) {
+                for sign in [0u128, 1] {
+                    check((sign << (fmt.total_bits() - 1)) | mag);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn trunc_f32_to_i32_signed_matches_reference() {
+        sweep_trunc_variant(FpFmt::F32, IntTarget::I32, true);
+    }
+    #[test]
+    fn trunc_f32_to_i32_unsigned_matches_reference() {
+        sweep_trunc_variant(FpFmt::F32, IntTarget::I32, false);
+    }
+    #[test]
+    fn trunc_f32_to_i64_signed_matches_reference() {
+        sweep_trunc_variant(FpFmt::F32, IntTarget::I64, true);
+    }
+    #[test]
+    fn trunc_f32_to_i64_unsigned_matches_reference() {
+        sweep_trunc_variant(FpFmt::F32, IntTarget::I64, false);
+    }
+    #[test]
+    fn trunc_f64_to_i32_signed_matches_reference() {
+        sweep_trunc_variant(FpFmt::F64, IntTarget::I32, true);
+    }
+    #[test]
+    fn trunc_f64_to_i32_unsigned_matches_reference() {
+        sweep_trunc_variant(FpFmt::F64, IntTarget::I32, false);
+    }
+    #[test]
+    fn trunc_f64_to_i64_signed_matches_reference() {
+        sweep_trunc_variant(FpFmt::F64, IntTarget::I64, true);
+    }
+    #[test]
+    fn trunc_f64_to_i64_unsigned_matches_reference() {
+        sweep_trunc_variant(FpFmt::F64, IntTarget::I64, false);
+    }
+
+    /// The synth #709 boundary cases, spelled out one by one.
+    #[test]
+    fn trunc_boundary_cases_synth_709() {
+        #[track_caller]
+        fn t(fmt: FpFmt, target: IntTarget, signed: bool, p: u128, want: bool, label: &str) {
+            let f = v("f", fmt.total_bits());
+            let term = trap_trunc(&f, fmt, target, signed);
+            let mut e = Env::new();
+            e.insert("f".into(), p);
+            assert_eq!(eval::eval_bool(&term, &e).unwrap(), want, "{label}");
+        }
+        let b32 = |x: f32| x.to_bits() as u128;
+        let b64 = |x: f64| x.to_bits() as u128;
+        use FpFmt::{F32, F64};
+        use IntTarget::{I32, I64};
+
+        // --- i32.trunc_f32_s ---
+        t(
+            F32,
+            I32,
+            true,
+            b32(2f32.powi(31)),
+            true,
+            "f32→i32_s: 2^31 traps",
+        );
+        #[allow(clippy::approx_constant)]
+        {
+            // (2^31 - 1) is not an f32; the literal rounds UP to 2^31 — traps.
+            assert_eq!((2_147_483_647f32).to_bits(), 0x4F00_0000);
+        }
+        t(
+            F32,
+            I32,
+            true,
+            b32(-(2f32.powi(31))),
+            false,
+            "f32→i32_s: -2^31 is in range",
+        );
+        t(
+            F32,
+            I32,
+            true,
+            b32(2_147_483_520.0), // 2^31 - 128: largest f32 below 2^31
+            false,
+            "f32→i32_s: largest f32 below 2^31 converts",
+        );
+        t(
+            F32,
+            I32,
+            true,
+            0xCF00_0001, // -(2^31 + 256): next f32 below -2^31
+            true,
+            "f32→i32_s: -(2^31+256) traps",
+        );
+        t(F32, I32, true, b32(f32::NAN), true, "f32→i32_s: NaN traps");
+        t(
+            F32,
+            I32,
+            true,
+            b32(f32::INFINITY),
+            true,
+            "f32→i32_s: +∞ traps",
+        );
+        t(
+            F32,
+            I32,
+            true,
+            b32(f32::NEG_INFINITY),
+            true,
+            "f32→i32_s: -∞ traps",
+        );
+        t(F32, I32, true, b32(0.5), false, "f32→i32_s: 0.5 → 0");
+        t(F32, I32, true, b32(-0.5), false, "f32→i32_s: -0.5 → 0");
+
+        // --- i32.trunc_f32_u ---
+        t(F32, I32, false, b32(-1.0), true, "f32→i32_u: -1.0 traps");
+        t(F32, I32, false, b32(0.5), false, "f32→i32_u: 0.5 → 0");
+        t(F32, I32, false, b32(-0.5), false, "f32→i32_u: -0.5 → 0");
+        t(F32, I32, false, b32(-0.0), false, "f32→i32_u: -0.0 → 0");
+        t(
+            F32,
+            I32,
+            false,
+            b32(f32::from_bits(0xBF7F_FFFF)), // -(1 - 2^-24): just above -1
+            false,
+            "f32→i32_u: -(1-ε) → 0",
+        );
+        t(
+            F32,
+            I32,
+            false,
+            b32(2f32.powi(32)),
+            true,
+            "f32→i32_u: 2^32 traps",
+        );
+        t(
+            F32,
+            I32,
+            false,
+            b32(4_294_967_040.0), // 2^32 - 256: largest f32 below 2^32
+            false,
+            "f32→i32_u: largest f32 below 2^32 converts",
+        );
+        t(F32, I32, false, b32(f32::NAN), true, "f32→i32_u: NaN traps");
+
+        // --- i32.trunc_f64_s ---
+        t(
+            F64,
+            I32,
+            true,
+            b64(2f64.powi(31)),
+            true,
+            "f64→i32_s: 2^31 traps",
+        );
+        t(
+            F64,
+            I32,
+            true,
+            b64(2_147_483_647.5),
+            false,
+            "f64→i32_s: 2^31-0.5 → 2^31-1",
+        );
+        t(
+            F64,
+            I32,
+            true,
+            b64(-(2f64.powi(31))),
+            false,
+            "f64→i32_s: -2^31 is in range",
+        );
+        t(
+            F64,
+            I32,
+            true,
+            b64(-2_147_483_648.5),
+            false,
+            "f64→i32_s: -(2^31+0.5) → -2^31",
+        );
+        t(
+            F64,
+            I32,
+            true,
+            b64(-2_147_483_649.0),
+            true,
+            "f64→i32_s: -(2^31+1) traps",
+        );
+        t(F64, I32, true, b64(f64::NAN), true, "f64→i32_s: NaN traps");
+
+        // --- i32.trunc_f64_u ---
+        t(F64, I32, false, b64(-1.0), true, "f64→i32_u: -1.0 traps");
+        t(
+            F64,
+            I32,
+            false,
+            b64(-0.999_999_999),
+            false,
+            "f64→i32_u: just above -1 → 0",
+        );
+        t(
+            F64,
+            I32,
+            false,
+            b64(2f64.powi(32)),
+            true,
+            "f64→i32_u: 2^32 traps",
+        );
+        t(
+            F64,
+            I32,
+            false,
+            b64(4_294_967_295.5),
+            false,
+            "f64→i32_u: 2^32-0.5 → 2^32-1",
+        );
+
+        // --- i64.trunc_f32_s ---
+        t(
+            F32,
+            I64,
+            true,
+            b32(2f32.powi(63)),
+            true,
+            "f32→i64_s: 2^63 traps",
+        );
+        t(
+            F32,
+            I64,
+            true,
+            b32(f32::from_bits(0x5EFF_FFFF)), // largest f32 below 2^63
+            false,
+            "f32→i64_s: largest f32 below 2^63 converts",
+        );
+        t(
+            F32,
+            I64,
+            true,
+            b32(-(2f32.powi(63))),
+            false,
+            "f32→i64_s: -2^63 is in range",
+        );
+        t(
+            F32,
+            I64,
+            true,
+            0xDF00_0001, // next f32 below -2^63
+            true,
+            "f32→i64_s: below -2^63 traps",
+        );
+
+        // --- i64.trunc_f32_u ---
+        t(
+            F32,
+            I64,
+            false,
+            b32(2f32.powi(64)),
+            true,
+            "f32→i64_u: 2^64 traps",
+        );
+        t(
+            F32,
+            I64,
+            false,
+            b32(f32::from_bits(0x5F7F_FFFF)), // largest f32 below 2^64
+            false,
+            "f32→i64_u: largest f32 below 2^64 converts",
+        );
+        t(F32, I64, false, b32(-1.0), true, "f32→i64_u: -1.0 traps");
+
+        // --- i64.trunc_f64_s ---
+        t(
+            F64,
+            I64,
+            true,
+            b64(2f64.powi(63)),
+            true,
+            "f64→i64_s: 2^63 traps",
+        );
+        t(
+            F64,
+            I64,
+            true,
+            0x43DF_FFFF_FFFF_FFFF, // 2^63 - 1024: largest f64 below 2^63
+            false,
+            "f64→i64_s: largest f64 below 2^63 converts",
+        );
+        t(
+            F64,
+            I64,
+            true,
+            b64(-(2f64.powi(63))),
+            false,
+            "f64→i64_s: -2^63 is in range",
+        );
+        t(
+            F64,
+            I64,
+            true,
+            0xC3E0_0000_0000_0001, // -(2^63 + 2048): next f64 below -2^63
+            true,
+            "f64→i64_s: below -2^63 traps",
+        );
+
+        // --- i64.trunc_f64_u ---
+        t(
+            F64,
+            I64,
+            false,
+            b64(2f64.powi(64)),
+            true,
+            "f64→i64_u: 2^64 traps",
+        );
+        t(
+            F64,
+            I64,
+            false,
+            0x43EF_FFFF_FFFF_FFFF, // 2^64 - 2048: largest f64 below 2^64
+            false,
+            "f64→i64_u: largest f64 below 2^64 converts",
+        );
+        t(F64, I64, false, b64(-1.0), true, "f64→i64_u: -1.0 traps");
+        t(
+            F64,
+            I64,
+            false,
+            0xBFEF_FFFF_FFFF_FFFF, // -(1 - 2^-53): just above -1
+            false,
+            "f64→i64_u: -(1-ε) → 0",
+        );
+    }
+
+    /// Exhaustive proof for f32→i32, both signednesses: ALL 2^32 bit patterns
+    /// evaluated against the real-float reference. ~8.6e9 term evaluations —
+    /// ignored by default; run explicitly in release:
+    /// `cargo test -p ordeal --release --lib trap:: -- --ignored`
+    #[test]
+    #[ignore = "exhaustive 2^32 sweep; run with --release --ignored"]
+    fn exhaustive_f32_to_i32_all_bit_patterns() {
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(8);
+        let chunk = (1u64 << 32).div_ceil(threads as u64);
+        std::thread::scope(|s| {
+            for tid in 0..threads {
+                s.spawn(move || {
+                    let f = v("f", 32);
+                    let signed_t = trap_trunc(&f, FpFmt::F32, IntTarget::I32, true);
+                    let unsigned_t = trap_trunc(&f, FpFmt::F32, IntTarget::I32, false);
+                    let mut env = Env::new();
+                    let lo = tid as u64 * chunk;
+                    let hi = ((tid as u64 + 1) * chunk).min(1u64 << 32);
+                    for p in lo..hi {
+                        env.insert("f".into(), p as u128);
+                        let x = f32::from_bits(p as u32) as f64;
+                        assert_eq!(
+                            eval::eval_bool(&signed_t, &env).unwrap(),
+                            ref_trap_trunc(x, IntTarget::I32, true),
+                            "i32.trunc_f32_s pattern {p:#010x}"
+                        );
+                        assert_eq!(
+                            eval::eval_bool(&unsigned_t, &env).unwrap(),
+                            ref_trap_trunc(x, IntTarget::I32, false),
+                            "i32.trunc_f32_u pattern {p:#010x}"
+                        );
+                    }
+                });
+            }
+        });
+    }
+
     // ---- VC helpers: preservation proves, trap-drop is caught ----
+
+    #[test]
+    fn dropped_trunc_trap_is_caught_and_preserved_lowering_proves() {
+        // End-to-end through the certificate-checked solver: `i32.trunc_f32_s`
+        // whose lowering DROPS the trap (may_trap = false) must be caught with
+        // a counterexample that really traps; the preserving lowering must
+        // prove Unsat with a re-checkable certificate. The #709 shape.
+        let f = v("f", 32);
+        let trap = trap_trunc(&f, FpFmt::F32, IntTarget::I32, true);
+        let orig = DefineOrTrap {
+            value: f.clone(),
+            may_trap: trap.clone(),
+        };
+        let dropped = DefineOrTrap {
+            value: f.clone(),
+            may_trap: bool_false(),
+        };
+        match prove_trap_equivalence(&orig, &dropped) {
+            CheckResult::Sat(m) => {
+                let p = m
+                    .assignments
+                    .iter()
+                    .find(|(n, _)| n == "f")
+                    .map(|(_, x)| *x)
+                    .expect("model must assign f");
+                let x = f32::from_bits(p as u32) as f64;
+                assert!(
+                    ref_trap_trunc(x, IntTarget::I32, true),
+                    "counterexample {p:#010x} must be a genuinely trapping input"
+                );
+            }
+            other => panic!("dropped trunc trap must be Sat, got {other:?}"),
+        }
+        let preserved = DefineOrTrap {
+            value: f.clone(),
+            may_trap: trap,
+        };
+        match prove_trap_equivalence(&orig, &preserved) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("trunc-trap cert re-checks"),
+            other => panic!("preserved trunc trap must be Unsat, got {other:?}"),
+        }
+    }
 
     #[test]
     fn preserved_div_lowering_proves_unsat() {

@@ -434,3 +434,28 @@ artifacts:
       steps:
         run: "cargo test -p ordeal trap::"
         coverage: "per-builder eval-equivalence; dropped-trap SAT counterexamples (div ÷0, OOB); preserved-lowering re-checkable Unsat; conjunct-1 trap-drop gate"
+
+  - id: VER-019
+    type: sw-verification
+    title: Float→int trunc trap classifier matches real-float WASM semantics
+    description: >
+      Confirms trap_trunc equals the real Rust-float iN.trunc_fM_s/u trap
+      predicate (NaN/±∞/out-of-range, range math in exact f64). f32→i32 signed
+      and unsigned are verified EXHAUSTIVELY over all 2^32 bit patterns; the other
+      six source×target×signedness variants use structured exponent×mantissa +
+      ±64-ULP boundary sweeps; every synth#709 boundary case (2^31 traps, -2^31
+      in-range, -1.0 traps unsigned, NaN/∞, ULP neighbours) is an explicit
+      assertion; and an end-to-end VC catches a dropped trunc trap and proves a
+      preserving lowering. Independently clean-room-verified (own exhaustive
+      re-run + independent IEEE threshold-constant derivation). No new op; no FP.
+    status: verified
+    release: v0.9.1
+    tags: [trap, trunc, float, ieee, exhaustive, differential, synth]
+    links:
+      - type: verifies
+        target: TR-020
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib trap::; cargo test -p ordeal --lib --release exhaustive_f32_to_i32_all_bit_patterns -- --ignored"
+        coverage: "exhaustive 2^32 f32→i32 (s/u); structured+ULP sweeps f32→i64, f64→i32/i64; #709 boundary asserts; dropped/preserved trunc VC"
