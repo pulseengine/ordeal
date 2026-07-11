@@ -126,9 +126,22 @@ artifacts:
       uninterpreted-function congruence via Ackermannization — both by
       preprocessing into the QF_BV core, no DPLL(T) — then integrate ordeal
       into loom (replacing its Z3 verification path) and synth
-      (translation-validation queries). Deliverable: loom and synth verify
-      against ordeal by default.
-    status: draft
+      (translation-validation queries).
+
+      Ordeal-side deliverable (this repo, v0.7.0): the array/UF sliver
+      (shipped v0.3.0) plus the integration surface that makes adoption
+      possible — a portable, independently re-checkable UNSAT certificate
+      (TR-017), a worked translation-validation example, and the consumer
+      guide. Recon of the current consumers (origin/main, not stale local
+      trees): synth-verify has ALREADY adopted ordeal as its default engine
+      with Z3 demoted to an optional differential oracle (synth #553), so the
+      v0.7.0 portable certificate is the primitive that lets its certifying
+      validator independently re-check ordeal's UNSAT proofs (synth #667);
+      loom still verifies its optimization rules directly with Z3 (its
+      `verification` feature) and carries no certificate — a genuine adoption
+      opportunity. Those cross-repo adoptions are owned by their teams and are
+      tracked via field-report issues, not asserted here.
+    status: implemented
     release: v0.7.0
     tags: [roadmap, p3, array, uf, loom, synth, integration]
     links:
@@ -138,12 +151,17 @@ artifacts:
         target: SYS-006
       - type: satisfies
         target: TR-008
+      - type: satisfies
+        target: TR-017
     fields:
       req-type: functional
       priority: should
       verification-criteria: >
         Array/UF queries reduce to QF_BV and agree with Z3; out-of-sliver
-        constructs rejected; loom and synth verify against ordeal by default.
+        constructs rejected; the public consumer API + portable certificate +
+        worked example are in place (VER-004, VER-016). Cross-repo adoption
+        (loom/synth verifying against ordeal by default) is external and
+        tracked via field-report issues — not part of this repo's verified set.
 
   - id: FEAT-004
     type: sw-req

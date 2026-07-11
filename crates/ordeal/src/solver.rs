@@ -46,16 +46,67 @@ use crate::sat::{SatResult, SatSolver};
 use crate::term::{BoolTerm, BvTerm};
 use std::collections::HashMap;
 
-/// A machine-checkable UNSAT certificate.
+/// A machine-checkable UNSAT certificate — a **self-contained, portable proof
+/// object**.
 ///
 /// The solver (untrusted) emits an LRAT proof; the `ordeal-lrat` checker
-/// (the only trusted component) validated exactly these bytes before this
-/// value was constructed. Callers can independently re-run
-/// `ordeal_lrat::check` on them.
+/// (the only trusted component) validated exactly these bytes against
+/// [`cnf`](Certificate::cnf) before this value was constructed. Because the
+/// certificate carries *both halves* — the DIMACS CNF and the LRAT refutation —
+/// a consumer can re-establish the UNSAT verdict **with zero trust in ordeal**
+/// by calling [`recheck`](Certificate::recheck) (or running `ordeal_lrat::check`
+/// directly). That independent re-check is the whole point: an UNSAT is
+/// believable because *you* can validate the proof, not because the solver says
+/// so. This is what a translation validator (synth) needs to turn a proof-less
+/// solver verdict into checkable evidence.
 #[derive(Clone, Debug, Default)]
 pub struct Certificate {
     /// The checker-validated textual LRAT proof bytes.
     pub lrat: Vec<u8>,
+    /// The exact DIMACS CNF clause set the LRAT proof refutes — the other half
+    /// of the checkable pair. Together with [`lrat`](Certificate::lrat) it is a
+    /// complete, independently-verifiable proof of unsatisfiability.
+    pub cnf: Vec<Vec<i32>>,
+}
+
+/// Why an independent [`Certificate::recheck`] could not confirm the proof.
+#[derive(Debug)]
+pub enum CertificateError {
+    /// The LRAT bytes were not valid UTF-8 (only possible for a hand-built
+    /// certificate; ones ordeal emits are always text).
+    NotText,
+    /// The trusted `ordeal-lrat` checker rejected the LRAT proof against the
+    /// carried CNF.
+    Rejected(ordeal_lrat::CheckError),
+}
+
+impl std::fmt::Display for CertificateError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CertificateError::NotText => write!(f, "LRAT certificate is not valid UTF-8"),
+            CertificateError::Rejected(e) => write!(f, "checker rejected certificate: {e:?}"),
+        }
+    }
+}
+
+impl std::error::Error for CertificateError {}
+
+impl Certificate {
+    /// The LRAT proof as text, if the bytes are valid UTF-8 (ordeal-emitted
+    /// certificates always are).
+    pub fn lrat_text(&self) -> Option<&str> {
+        std::str::from_utf8(&self.lrat).ok()
+    }
+
+    /// Independently re-validate this certificate with the trusted `ordeal-lrat`
+    /// checker — the *same* check ordeal ran internally before returning
+    /// `Unsat`, reproducible by any consumer with no faith in the (untrusted)
+    /// solver. `Ok(())` ⟺ the LRAT proof refutes [`cnf`](Certificate::cnf), so
+    /// the conjunction really is unsatisfiable.
+    pub fn recheck(&self) -> Result<(), CertificateError> {
+        let text = self.lrat_text().ok_or(CertificateError::NotText)?;
+        ordeal_lrat::check(&self.cnf, text).map_err(CertificateError::Rejected)
+    }
 }
 
 /// A satisfying assignment (counterexample) for a SAT query.
@@ -498,10 +549,14 @@ impl Solver {
             }),
             Pipeline::Unsat {
                 certificate: Some(lrat),
-            } => CheckResult::Unsat(Certificate { lrat }),
+                cnf,
+            } => CheckResult::Unsat(Certificate { lrat, cnf }),
             // The checker rejected our own certificate: an ordeal bug, but a
             // sound outcome — degrade to Unknown rather than assert UNSAT.
-            Pipeline::Unsat { certificate: None } | Pipeline::Unknown => CheckResult::Unknown,
+            Pipeline::Unsat {
+                certificate: None, ..
+            }
+            | Pipeline::Unknown => CheckResult::Unknown,
         }
     }
 
@@ -559,10 +614,16 @@ impl Solver {
                 match ordeal_lrat::check(&cnf.clauses, &cert) {
                     Ok(()) => Pipeline::Unsat {
                         certificate: Some(cert.into_bytes()),
+                        // Carry the refuted CNF so the caller's Certificate is a
+                        // self-contained, independently re-checkable proof.
+                        cnf: cnf.clauses,
                     },
                     Err(_) => {
                         debug_assert!(false, "checker rejected our certificate — ordeal bug");
-                        Pipeline::Unsat { certificate: None }
+                        Pipeline::Unsat {
+                            certificate: None,
+                            cnf: Vec::new(),
+                        }
                     }
                 }
             }
@@ -603,7 +664,12 @@ impl Solver {
 /// checker-validated certificate on UNSAT (None = checker rejected it).
 enum Pipeline {
     Sat(Env),
-    Unsat { certificate: Option<Vec<u8>> },
+    Unsat {
+        certificate: Option<Vec<u8>>,
+        /// The refuted DIMACS CNF, carried to the caller's [`Certificate`] so
+        /// the proof is independently re-checkable.
+        cnf: Vec<Vec<i32>>,
+    },
     Unknown,
 }
 
@@ -687,6 +753,36 @@ mod tests {
         }
         // The raw engine verdict (oracle-only) agrees.
         assert_eq!(s.check_raw(), RawVerdict::Unsat);
+    }
+
+    #[test]
+    fn certificate_is_independently_recheckable() {
+        // The trust story for consumers (synth translation validation): an
+        // UNSAT certificate is a portable proof object a caller can re-validate
+        // with the trusted checker, needing zero faith in the solver.
+        // Equivalence: x*2 ≡ x<<1 (a strength-reduction a codegen rule emits).
+        let x = || var("x", 32);
+        match Solver::prove_equiv(
+            BvTerm::Mul(b(x()), b(c(2, 32))),
+            BvTerm::Shl(b(x()), b(c(1, 32))),
+        ) {
+            CheckResult::Unsat(cert) => {
+                assert!(!cert.cnf.is_empty(), "certificate must carry the CNF");
+                // Independent re-check with the trusted checker succeeds.
+                cert.recheck()
+                    .expect("consumer re-check must confirm UNSAT");
+                // And it genuinely depends on the carried CNF (recheck is not a
+                // no-op): the same LRAT proof no longer validates once the
+                // clauses it refutes are gone.
+                let mut tampered = cert.clone();
+                tampered.cnf.clear();
+                assert!(
+                    tampered.recheck().is_err(),
+                    "re-check must fail when the refuted CNF is removed"
+                );
+            }
+            other => panic!("x*2 ≡ x<<1 must be certificate-checked Unsat, got {other:?}"),
+        }
     }
 
     #[test]

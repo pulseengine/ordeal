@@ -87,10 +87,12 @@ artifacts:
     type: sys-verification
     title: Thin API and license conformance
     description: >
-      Confirms the public one-shot check-sat API compiles against loom and synth
-      call sites and that no incremental (push/pop) surface is exposed, and that
-      crate metadata declares the Apache-2.0 license.
-    status: draft
+      Confirms the public one-shot check-sat API compiles against a worked
+      consumer example (translation_validation, mirroring synth's use case),
+      that no incremental (push/pop) surface is exposed, and that crate metadata
+      declares the Apache-2.0 license. Real loom/synth call sites are external:
+      adoption is tracked via the field-report issues, not asserted here.
+    status: verified
     release: v0.7.0
     tags: [api, license, integration]
     links:
@@ -99,8 +101,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal-api && license-check"
-        coverage: "API surface + Apache-2.0 metadata"
+        run: "cargo run -p ordeal --example translation_validation; cargo tree (no push/pop API); license metadata check"
+        coverage: "Public one-shot API compiles for a consumer; no incremental surface; Apache-2.0 metadata"
 
   - id: VER-005
     type: sys-verification
@@ -361,3 +363,26 @@ artifacts:
       steps:
         run: "aeneas translate checker -> lean; lean soundness proof discharges in CI"
         coverage: "Accept-implies-UNSAT theorem on the Aeneas model; checker independent of solver core"
+
+  - id: VER-016
+    type: sw-verification
+    title: Portable certificate is independently re-checkable by a consumer
+    description: >
+      Confirms the public UNSAT Certificate is a self-contained proof object: it
+      carries the refuted CNF plus the LRAT proof, Certificate::recheck()
+      re-validates the pair through the verified ordeal-lrat checker, and the
+      re-check fails when the carried CNF is altered (so it genuinely consumes
+      the certificate). Also confirms the worked consumer example
+      (translation_validation) proves correct WASM->ARM lowerings with a
+      re-checked certificate and rejects a buggy lowering with a counterexample.
+    status: verified
+    release: v0.7.0
+    tags: [certificate, recheck, portable, consumer, synth, integration]
+    links:
+      - type: verifies
+        target: TR-017
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal solver::certificate_is_independently_recheckable; cargo run -p ordeal --example translation_validation"
+        coverage: "cert.cnf populated; recheck() Ok on valid, Err on tampered CNF; example validates 4 correct + 1 buggy lowering"

@@ -7,7 +7,7 @@ guide for trying it as a dependency and reporting back.
 
 ```toml
 [dependencies]
-ordeal = "0.3.0"
+ordeal = "0.7.0"
 ```
 
 `ordeal-lrat` (the trusted checker) is pulled transitively. The default
@@ -22,8 +22,8 @@ use ordeal::{Solver, BoolTerm, BvTerm, Sort, CheckResult};
 let mut s = Solver::new();
 s.assert(/* a BoolTerm: the negation of your equivalence */);
 match s.check() {
-    CheckResult::Unsat(cert) => { /* equivalence holds; cert.lrat is a
-                                     checker-validated LRAT proof */ }
+    CheckResult::Unsat(cert) => { /* equivalence holds; cert is a portable
+                                     proof — cert.recheck() re-validates it */ }
     CheckResult::Sat(model)  => { /* counterexample in model.assignments */ }
     CheckResult::Unknown     => { /* DO NOT optimize — see contract below */ }
 }
@@ -72,6 +72,42 @@ assertions; a conditional field selector (`cond ? A : B`) is `BvTerm::Ite`.
 `prove_equiv` is decision-only — it does **not** grow an optimization/LP arm
 (that problem class stays on HiGHS/good_lp).
 
+### Translation validation (synth): a certificate you can re-check
+
+A WASM→ARM translation validator proves each codegen rule equivalent: assert
+the two results *differ*, and `Unsat` means "equal for every input". A bare
+`z3.check() == Unsat` verdict is **unchecked** — if the solver has a soundness
+bug, an *incorrect* lowering is silently accepted as proven. ordeal returns the
+same `Unsat`, but as a **portable proof object**: the certificate carries both
+the refuted CNF (`cert.cnf`) and the LRAT proof (`cert.lrat`), so the caller
+re-establishes the result with zero trust in the solver.
+
+```rust
+use ordeal::{Solver, BvTerm, Sort, CheckResult};
+
+// i32.mul(x, 2)  ⇒  LSL x, #1   (a strength-reduction the backend emits)
+let x = || BvTerm::Var { name: "x".into(), sort: Sort::new(32) };
+match Solver::prove_equiv(
+    BvTerm::Mul(Box::new(x()), Box::new(BvTerm::Const { value: 2, sort: Sort::new(32) })),
+    BvTerm::Shl(Box::new(x()), Box::new(BvTerm::Const { value: 1, sort: Sort::new(32) })),
+) {
+    CheckResult::Unsat(cert) => {
+        // Re-run the trusted checker yourself. Ok(()) ⟺ the proof refutes the
+        // CNF, so "equivalent" is evidence you reproduced — not solver faith.
+        cert.recheck().expect("independent re-check confirms equivalence");
+    }
+    CheckResult::Sat(model) => { /* NOT equivalent: model is a counterexample */ }
+    CheckResult::Unknown    => { /* undecided — do NOT accept the lowering */ }
+}
+```
+
+`cert.recheck()` runs the formally-verified `ordeal-lrat` checker over
+`(cert.cnf, cert.lrat)` — the same validation ordeal did internally, now
+reproducible on your side or in a separate audit step. See the runnable
+[`translation_validation` example](../crates/ordeal/examples/translation_validation.rs)
+(`cargo run -p ordeal --example translation_validation`) for correct rules being
+proven and a buggy `i32.mul(x,3) ⇒ LSL x,#1` being caught with a counterexample.
+
 ## The soundness contract (read this)
 
 - **`Unknown` is conservative.** It means "not proven" — the solver could
@@ -80,9 +116,11 @@ assertions; a conditional field selector (`cond ? A : B`) is `BvTerm::Ite`.
   You MUST NOT apply an optimization / accept a transformation on `Unknown`.
   Keep the original.
 - **`Unsat` is the only verdict that authorizes a transformation.** It
-  carries an LRAT certificate that the formally-scrutinized `ordeal-lrat`
-  checker already validated; you can independently re-check `cert.lrat` with
-  `ordeal_lrat::check`.
+  carries a self-contained proof — the refuted CNF (`cert.cnf`) and the LRAT
+  refutation (`cert.lrat`) — that the formally-scrutinized `ordeal-lrat`
+  checker already validated. Call `cert.recheck()` (or `ordeal_lrat::check(
+  &cert.cnf, cert.lrat_text().unwrap())`) to re-validate it independently: your
+  trust rests on the proof, not on the solver.
 - **`Sat` carries a counterexample** already re-evaluated against your
   assertions.
 

@@ -556,3 +556,38 @@ artifacts:
     fields:
       verdict: pass
       evidence: "lean/regen.sh no-drift; kernel-model-drift workflow (#44)"
+
+  - id: VE-007
+    type: verification-execution
+    title: Portable-certificate re-check + consumer example @ v0.7.0
+    description: >
+      Ran the recheck oracle and the worked consumer example. The test
+      solver::certificate_is_independently_recheckable proves x*2 ≡ x<<1, asserts
+      cert.cnf is non-empty, cert.recheck() returns Ok, and recheck() fails after
+      the carried CNF is cleared. The translation_validation example proves four
+      correct WASM->ARM lowerings (each certificate re-checked) and rejects the
+      buggy i32.mul(x,3) ⇒ LSL x,#1 with counterexample x=0x80000000.
+    status: implemented
+    fields:
+      version: v0.7.0
+      timestamp: "2026-07-11T07:00:00Z"
+      executor: local
+      environment:
+        note: "cargo test -p ordeal (102 lib tests pass incl. recheck oracle); cargo run --example translation_validation exits 0"
+
+  - id: VV-029
+    type: verification-verdict
+    title: "TR-017 — UNSAT certificate is a portable, independently re-checkable proof"
+    description: >
+      Executed pass. The public Certificate carries (cnf, lrat); recheck()
+      re-validates via ordeal-lrat and fails on a tampered CNF; the consumer
+      example demonstrates the translation-validation use case end to end.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-016
+      - type: part-of-execution
+        target: VE-007
+    fields:
+      verdict: pass
+      evidence: "solver::certificate_is_independently_recheckable + translation_validation example"
