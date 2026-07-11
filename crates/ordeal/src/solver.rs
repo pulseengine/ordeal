@@ -589,7 +589,13 @@ impl Solver {
         let mut blaster = Blaster::new();
         let mut roots = Vec::with_capacity(self.assertions.len());
         for a in &self.assertions {
-            match blaster.blast_bool(a) {
+            // Untrusted canonicalization above the AIG (issue #35 / TR-009):
+            // commutative-operand ordering + const-folding so equal-but-
+            // structurally-different terms share a node. Soundness is unaffected
+            // — Unsat stays LRAT-checked, and the SAT model self-check below
+            // re-evaluates against the ORIGINAL assertions.
+            let a = crate::canon::canonicalize_bool(a);
+            match blaster.blast_bool(&a) {
                 Ok(lit) => roots.push(lit),
                 // Ill-sorted input: conservative. `validate()` diagnoses.
                 Err(_) => return Pipeline::Unknown,
@@ -932,16 +938,19 @@ mod tests {
 
     #[test]
     fn zero_budget_forces_unknown() {
-        // The A5 mul-commutativity shape is UNSAT but reaching that verdict
-        // needs search conflicts (it is not refuted by root propagation), so a
-        // zero budget must yield Unknown — never Unsat, never a hang. Budget 0
-        // abandons at the first search conflict, so this returns immediately.
-        let s = a5_mul_commutativity();
+        // A genuinely hard multiplier-equivalence (distributivity) that
+        // canonicalization does NOT trivialize: reaching UNSAT needs search
+        // conflicts, so a zero budget must yield Unknown — never Unsat, never a
+        // hang. Budget 0 abandons at the first search conflict, returning
+        // immediately.
+        let s = hard_mul_equivalence();
         assert!(matches!(s.check_with_limit(0), CheckResult::Unknown));
     }
 
-    /// The #29 A5 shape: mul is commutative, so `a*b != b*a` is UNSAT — but at
-    /// width 32 refuting it is expensive (synth's DNF blew past 590s).
+    /// The #29 A5 shape: mul is commutative, so `a*b != b*a` is UNSAT. Since
+    /// v0.8.0 (issue #35) commutative-operand canonicalization collapses this to
+    /// `Ne(t,t)` and the AIG folds it to false, so it is now decided by root
+    /// propagation — instantly, at any budget (was: did not finish in 590s).
     fn a5_mul_commutativity() -> Solver {
         let (a, b_) = (var("a", 32), var("b", 32));
         let mut s = Solver::new();
@@ -952,32 +961,68 @@ mod tests {
         s
     }
 
+    /// A hard multiplier-equivalence that survives canonicalization: modular
+    /// distributivity `a*(b+c) == a*b + a*c` is UNSAT for the `Ne`, but the two
+    /// sides are structurally different multiplier expressions (not a mere
+    /// commutation or constant fold), so deciding it needs real CDCL search.
+    /// Used to exercise the conflict-budget semantics.
+    fn hard_mul_equivalence() -> Solver {
+        let (a, bb, cc) = (var("a", 32), var("b", 32), var("c", 32));
+        let lhs = BvTerm::Mul(b(a.clone()), b(BvTerm::Add(b(bb.clone()), b(cc.clone()))));
+        let rhs = BvTerm::Add(
+            b(BvTerm::Mul(b(a.clone()), b(bb))),
+            b(BvTerm::Mul(b(a), b(cc))),
+        );
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(b(lhs), b(rhs)));
+        s
+    }
+
     #[test]
-    fn a5_mul_commutativity_is_bounded_to_unknown() {
-        // The point is that a SMALL budget makes the hard shape *survivable*:
-        // check_with_limit returns (Unknown) fast instead of hanging. We do
-        // NOT assert Unsat under this budget.
+    fn a5_mul_commutativity_now_root_decided_at_any_budget() {
+        // The v0.4.0 conflict-budget stopgap is no longer needed for A5:
+        // canonicalization makes it root-decidable, so even a ZERO budget
+        // (which abandons before any search conflict) still returns a checked
+        // UNSAT — the shape is refuted by propagation, not search.
+        match a5_mul_commutativity().check_with_limit(0) {
+            CheckResult::Unsat(cert) => {
+                cert.recheck()
+                    .expect("root-decided A5 certificate must re-check");
+            }
+            other => panic!("canonicalized A5 must be root-decided UNSAT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a5_mul_commutativity_decides_unsat_after_canonicalization() {
+        // The v0.8.0 kill criterion (issue #35): with commutative-operand
+        // canonicalization, Ne(Mul(a,b), Mul(b,a)) collapses to Ne(t,t) which
+        // the AIG folds to false, so the UNBOUNDED check now decides UNSAT
+        // essentially instantly — the shape that did not finish in 590 s.
         let s = a5_mul_commutativity();
         let start = std::time::Instant::now();
-        let verdict = s.check_with_limit(100);
+        let verdict = s.check();
         let elapsed = start.elapsed();
+        match verdict {
+            CheckResult::Unsat(cert) => {
+                cert.recheck()
+                    .expect("A5 certificate must independently re-check");
+            }
+            other => panic!("A5 must now decide UNSAT unbounded, got {other:?}"),
+        }
         assert!(
-            matches!(verdict, CheckResult::Unknown),
-            "small budget must bound the A5 cliff to Unknown, got {verdict:?}"
-        );
-        // Generous ceiling: the real point is it terminates rather than hangs.
-        assert!(
-            elapsed < std::time::Duration::from_secs(60),
-            "bounded A5 query should return quickly, took {elapsed:?}"
+            elapsed < std::time::Duration::from_secs(5),
+            "canonicalized A5 must decide fast, took {elapsed:?}"
         );
     }
 
     #[test]
     fn bounded_check_is_deterministic() {
         // Same query + same budget ⇒ same verdict (the CDCL core is
-        // deterministic on the decided path and at the budget boundary).
-        let a = a5_mul_commutativity().check_with_limit(100);
-        let b_ = a5_mul_commutativity().check_with_limit(100);
+        // deterministic on the decided path and at the budget boundary). The
+        // hard distributivity query stays Unknown at budget 100.
+        let a = hard_mul_equivalence().check_with_limit(100);
+        let b_ = hard_mul_equivalence().check_with_limit(100);
         assert!(matches!(a, CheckResult::Unknown));
         assert!(matches!(b_, CheckResult::Unknown));
 

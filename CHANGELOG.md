@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-11
+
+**P5 (core) — canonicalization + const-folding above the AIG** (FEAT-005 /
+TR-018, issue #35). Closes a concrete, measured solver cliff by making
+semantically-equal-but-structurally-different terms share an AIG node before
+blasting — an untrusted preprocessing pass, so soundness is untouched.
+
+### Added
+- `crates/ordeal/src/canon.rs`: a semantics-preserving canonicalization pass
+  run on every assertion before bit-blasting. It (1) orders the operands of
+  commutative operators (`add`/`mul`/`and`/`or`/`xor`, `eq`/`ne`), (2) mirrors
+  the "greater" comparisons to their "less" twins, and (3) constant-folds
+  all-constant subterms. So `mul(a,b)` and `mul(b,a)` reduce to the **same**
+  term → the same node via structural hashing.
+- Kill criterion met: **synth's A5 shape** `Ne(Mul(a,b), Mul(b,a))` @ 32 now
+  decides **UNSAT with a re-checkable certificate essentially instantly** (was:
+  did not finish in 590 s). It is now decided by root propagation at any conflict
+  budget — the v0.4.0 `check_with_limit` stopgap is no longer needed for it.
+
+### Soundness (unchanged)
+The rewrites are on the **untrusted side**: every `Unsat` is still validated by
+`ordeal-lrat`, and every `Sat` model is re-evaluated against the **original**
+assertions. A wrong rewrite could only make the solver slower or `Unknown`,
+never unsound. Each rule is proven semantics-preserving under `eval` (the
+reference) by `eval(canonicalize(t)) == eval(t)` sweeps in `canon.rs`.
+
+### Deferred (tracked as #57)
+LRAT-proof trimming, cross-pass incremental term-graph caching, and a full
+criterion benchmark harness vs Z3 — none on the soundness path.
+
+### Falsification
+This release is wrong if: canonicalization ever changes a verdict — i.e. for
+some query `check` disagrees with the pre-canonicalization pipeline or with the
+Z3 differential, or `eval(canonicalize(t)) ≠ eval(t)` for some assignment.
+
 ## [0.7.0] - 2026-07-11
 
 **P3 (ordeal side) — portable, independently re-checkable certificate + consumer
