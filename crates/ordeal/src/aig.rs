@@ -8,7 +8,32 @@
 //! `x&!x=0`) and structurally hashes operand-normalized pairs, so common
 //! subexpressions collapse before the CNF stage ever sees them.
 
+#[cfg(not(kani))]
 use std::collections::HashMap;
+
+/// Structural-hash map over operand-normalized gate-index pairs — a pure
+/// de-duplication cache: on a repeated `(x, y)` it returns the existing,
+/// structurally-identical gate instead of a fresh one.
+///
+/// Production uses `HashMap`. Under Kani the cache is a **no-op** (`get` always
+/// misses): `RandomState` seeds from the OS RNG, which Kani cannot model, and
+/// modeling any real hash/tree map explodes the SAT problem. Skipping dedup
+/// yields a larger but *simulation-identical* AIG (the strash only ever returns
+/// a gate with the same fanins), so a correctness proof over the un-deduped AIG
+/// establishes the deduped production AIG too. See `blast::proofs`.
+#[cfg(not(kani))]
+type Strash = HashMap<(u32, u32), Lit>;
+
+#[cfg(kani)]
+#[derive(Clone, Debug, Default)]
+struct Strash;
+#[cfg(kani)]
+impl Strash {
+    fn get(&self, _key: &(u32, u32)) -> Option<&Lit> {
+        None
+    }
+    fn insert(&mut self, _key: (u32, u32), _lit: Lit) {}
+}
 
 /// An AIG literal: a variable with a complement flag (AIGER convention).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -65,7 +90,7 @@ enum Node {
 #[derive(Clone, Debug, Default)]
 pub struct Aig {
     nodes: Vec<Node>,
-    strash: HashMap<(u32, u32), Lit>,
+    strash: Strash,
     num_inputs: u32,
 }
 
@@ -74,7 +99,7 @@ impl Aig {
     pub fn new() -> Self {
         Aig {
             nodes: vec![Node::Const],
-            strash: HashMap::new(),
+            strash: Strash::default(),
             num_inputs: 0,
         }
     }
