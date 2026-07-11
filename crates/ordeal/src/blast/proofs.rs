@@ -13,7 +13,7 @@
 //! Pattern: build the AIG for `op(a, b)`, make the input bits symbolic, and
 //! assert `word_value(blast) == r_op(a, b)` for every assignment.
 
-use crate::aig::{word_input, word_value, Aig};
+use crate::aig::{Aig, word_input, word_value};
 
 /// Low `w` bits set (`w ≤ 128`).
 fn mask(w: u32) -> u128 {
@@ -69,21 +69,13 @@ fn r_shl(x: u128, sh: u128, w: u32) -> u128 {
     }
 }
 fn r_lshr(x: u128, sh: u128, w: u32) -> u128 {
-    if sh >= w as u128 {
-        0
-    } else {
-        x >> sh
-    }
+    if sh >= w as u128 { 0 } else { x >> sh }
 }
 fn r_ashr(x: u128, sh: u128, w: u32) -> u128 {
     let m = mask(w);
     let sign = (x >> (w - 1)) & 1 == 1;
     if sh >= w as u128 {
-        if sign {
-            m
-        } else {
-            0
-        }
+        if sign { m } else { 0 }
     } else if sign {
         ((x >> sh) | (m & !(m >> sh))) & m
     } else {
