@@ -269,3 +269,137 @@ artifacts:
         with counterexamples, preserved lowerings prove re-checkable Unsat.
         Cross-repo adoption (loom#279, synth VCR-VER-002) is external. Phase B
         (trunc) and FP-value equivalence are tracked separately, not claimed here.
+
+  - id: FEAT-008
+    type: sw-req
+    title: "P7 — layout & arithmetic completeness (v0.10.0)"
+    description: >
+      Foundation for the byte-layout consumers, pure QF_BV, no new theory:
+      native 16-bit width, verified to_le_bytes/from_le_bytes helpers
+      (extract+concat), and the signed div/rem value ops bvsdiv/bvsrem/bvurem
+      (proven + Kani). The single most reusable piece — three consumer researches
+      independently named byte-layout + 16-bit as the recurring need. Unblocks
+      relay codecs, spar ABI layout, and kiln extends/signed-div values.
+    status: draft
+    release: v0.10.0
+    tags: [roadmap, p7, width-16, byte-layout, signed-div, relay, spar, kiln]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: satisfies
+        target: TR-021
+      - type: satisfies
+        target: TR-022
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Width-16 + byte helpers + signed div/rem ship oracle-gated (differential
+        + Kani), no verdict changes; a relay/spar/kiln byte-layout equivalence
+        query decides with a re-checkable certificate.
+
+  - id: FEAT-009
+    type: sw-req
+    title: "P8 — SMT-LIB2 QF_BV front-end / Verus bridge (v0.11.0)"
+    description: >
+      Ingest the QF_BV subset of SMT-LIB2 that Verus emits, decide it, and return
+      a portable LRAT certificate. The gale unlock: its 52 by(bit_vector) ASIL-D
+      obligations (fault_decode/mpu/cpu_mask) are discharged today by UNCHECKED
+      Z3 inside a safety case that names "Verus SMT/Z3" as the evidence — this
+      converts that into an independently re-checkable, Lean-checker-backed
+      certificate. Also serves relay's ~30 Verus escape hatches and any Verus
+      consumer.
+    status: draft
+    release: v0.11.0
+    tags: [roadmap, p8, smtlib, verus, gale, relay, asil-d, certificate]
+    links:
+      - type: derives-from
+        target: SYS-006
+      - type: satisfies
+        target: TR-023
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        On gale fault_decode/mpu and relay bitpack obligations, the reader yields
+        UNSAT + a checker-accepted certificate; out-of-fragment input errors
+        clearly.
+
+  - id: FEAT-010
+    type: sw-req
+    title: "P9 — equivalence & soundness toolkit (v0.12.0)"
+    description: >
+      A reusable prove_valid API + byte-layout prove_equiv recipes for the
+      recurring consumer shapes, shipping flagship applications: relay codec
+      round-trip + CRC per-step (relay#4/#253), spar AADL↔WIT↔ABI layout (#319),
+      scry-bits transfer soundness at 32/64 (scry#95, DO-333), with sigil varint
+      overflow (#88) and meld const-expr fold (#338) as fast-follows.
+    status: draft
+    release: v0.12.0
+    tags: [roadmap, p9, prove-valid, equivalence, soundness, relay, spar, scry]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: satisfies
+        target: TR-024
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        prove_valid decides representative goals from relay/spar/scry/sigil/meld
+        with re-checkable certs; each recipe ships as a runnable example.
+
+  - id: FEAT-011
+    type: sw-req
+    title: "P10 — the certificate as evidence (v0.13.0)"
+    description: >
+      Turn the portable certificate into audit-grade evidence the whole org
+      consumes: a hermetic rules_ordeal Bazel gate (paralleling
+      rules_verus/rules_lean), an ordeal-certificate rivet evidence artifact type
+      + serialization, and a propositional-SAT front-end for rivet feature-model
+      consistency (EU AI Act). ordeal's real differentiator over Z3 (loom/synth)
+      and Kani/CBMC (sigil/spar/kiln) is the offline-re-checkable certificate;
+      this makes every verified transform a machine-re-checkable DO-178C /
+      ISO-26262 / EU-AI-Act artifact.
+    status: draft
+    release: v0.13.0
+    tags: [roadmap, p10, rules_ordeal, rivet, evidence, sat, cross-cutting]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: satisfies
+        target: TR-025
+      - type: satisfies
+        target: TR-026
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        rules_ordeal gates a build hermetically; a produced certificate is a
+        valid rivet artifact that re-checks offline; a rivet feature-model
+        instance decides with a re-checkable certificate.
+
+  - id: FEAT-012
+    type: sw-req
+    title: "P11 — trusted-core deepening: Lean-verified bit-blaster (v0.14.0)"
+    description: >
+      Assurance capstone: extend the formally-verified core from the checker to
+      the ENCODER. Prove in Lean 4 (via Aeneas) that each bit-blasting rule
+      equals the formal BitVec semantics, replacing today's Kani-BOUNDED evidence
+      with an unbounded proof so the whole pipeline is formally trusted, not just
+      the checker. Optionally add a re-checkable Sat witness for parity with the
+      Unsat certificate.
+    status: draft
+    release: v0.14.0
+    tags: [roadmap, p11, lean, aeneas, bit-blaster, trusted-core, assurance]
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: satisfies
+        target: TR-027
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Each blast rule's equality to BitVec semantics discharges in Lean (no
+        sorry), CI-gated like the checker's soundness proof.
