@@ -178,6 +178,23 @@ jobs:
             echo "::error file=lean/Sound.lean::Expected the soundness proof to be sorry-free (kernel_refines_pure, #12, is discharged), found $count sorry-bearing declaration(s) — a proven leaf regressed or a new gap was introduced."
             exit 1
           fi
+      - name: Guard lean/README.md against status drift (issue #53)
+        working-directory: lean
+        run: |
+          # The soundness proof is complete and gated by the step above. The doc
+          # must not drift back to describing it as open/unfinished, or a reader
+          # (or an external reviewer) wrongly concludes the theorem is
+          # undischarged — exactly the stale-doc regression of issue #53. One-way
+          # binding: if the proof ever genuinely regressed, the sorry-budget step
+          # above fails first, so this guard only bites when the proof IS complete
+          # and the prose says otherwise.
+          stale=$(grep -niE 'no proof yet|tracked and open|single tracked .?sorry|one tracked .?sorry|still open \(issue #12\)|until the theorem is discharged' README.md || true)
+          if [ -n "$stale" ]; then
+            echo "$stale"
+            echo "::error file=lean/README.md::lean/README.md describes the soundness proof as open, but it is discharged and gated above (see issue #53). Update the prose to match the proved state."
+            exit 1
+          fi
+          echo "lean/README.md status wording is consistent with the proved, gated state."
 
   # ── Optional Z3 differential oracle (non-blocking) ────────────────────
   # `ordeal` is a self-contained QF_BV solver; the `oracle` cargo feature
