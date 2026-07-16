@@ -222,7 +222,7 @@ artifacts:
       theory combination) against the CI budget. Confirms AIG structural hashing
       and LRAT trimming measurably reduce work.
     status: draft
-    release: v0.8.0
+    release: v0.16.0
     tags: [benchmark, performance, latency, z3-rival]
     links:
       - type: verifies
