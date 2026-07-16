@@ -4,8 +4,11 @@
    It states what "the checker is sound" means — the semantics of CNF
    satisfiability — and proves the mathematical content of issue #12:
    a PURE restatement of the checker is sound (COMPLETE proof below), and
-   the top-level theorem `lrat_check_sound` reduces to the single remaining
-   obligation `kernel_refines_pure` (the Aeneas-model-to-pure simulation).
+   the top-level theorem `lrat_check_sound` composes it with `kernel_refines_pure`
+   (the Aeneas-model-to-pure simulation), now PROVEN — so the checker is sound
+   end to end, `sorry`-free. (This header previously described `kernel_refines_pure`
+   as "the single remaining obligation"; it has since been discharged, matching
+   lean/README.md.)
 
    Spec-review notes (the property must be the RIGHT one, not just provable):
    * The assignment quantifies over ALL total maps from DIMACS variables to
