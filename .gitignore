@@ -31,6 +31,9 @@ result-*
 
 # Claude Code local settings (environment-specific)
 .claude/settings.local.json
+# Per-session, machine-local resume state: the pulseengine hooks rewrite this
+# on every save, so it churns constantly and gets swept into unrelated commits.
+**/.claude/pulseengine/working-context.md
 
 # Rivet external project cache
 .rivet/
