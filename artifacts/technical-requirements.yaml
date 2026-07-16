@@ -493,3 +493,183 @@ artifacts:
         The Rust checker translates via Aeneas to a Lean model whose soundness
         theorem (accept implies UNSAT) discharges in CI; the checker has no
         build/link dependency on the solver core.
+
+  - id: TR-021
+    type: sw-req
+    title: Native 16-bit width and byte-layout helpers
+    description: >
+      Ordeal shall support bit-vector width 16 alongside 8/32/64 (CCSDS/CRC-16,
+      wasm extend8/16_s, SIMD lanes), and provide verified byte-layout helpers
+      to_le_bytes/from_le_bytes as pure extract/concat compositions. Enables
+      wire-codec and ABI-layout equivalence checking across relay, spar, and
+      kiln with no new theory.
+    status: draft
+    release: v0.10.0
+    tags: [width-16, byte-layout, le-bytes, relay, spar, kiln]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-003
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Width-16 ops pass the same differential/Kani gates as 8/32/64;
+        to/from_le_bytes round-trip and equal a byte-extract/concat reference.
+
+  - id: TR-022
+    type: sw-req
+    title: Signed division/remainder value operations (bvsdiv/bvsrem/bvurem)
+    description: >
+      Ordeal shall add bvsdiv, bvsrem, and bvurem to the closed fragment (today
+      only bvudiv), each with a proven bit-blasting rule and a Kani harness
+      (P4-style), so consumers can model signed div/rem VALUES in-house (kiln
+      instruction semantics; the trap library's value clause for signed div).
+    status: draft
+    release: v0.10.0
+    tags: [bvsdiv, bvsrem, bvurem, signed, kiln, closed-fragment]
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-003
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        Each new op equals its SMT-LIB QF_BV reference exhaustively at width 8
+        (Kani) and differentially at 32/64; no other verdict changes.
+
+  - id: TR-023
+    type: sw-req
+    title: Verus-VC bridge over the SMT-LIB2 QF_BV front-end
+    description: >
+      A minimal SMT-LIB2 QF_BV reader already ships (v0.9.1, `ordeal check
+      foo.smt2`) — validated end-to-end by the gale cpu_mask pilot (gale#173),
+      which hand-encoded a real ASIL-D by(bit_vector) obligation and got a
+      28 KB checker-validated LRAT certificate. The remaining work is the
+      AUTOMATED bridge: ingest the exact VC dialect Verus emits to Z3 (let-
+      bindings and the bitvector idioms Verus uses) and harden the reader to the
+      full obligation set, plus a file/stream certificate-out path, so a Verus
+      consumer re-discharges its obligations automatically with a re-checkable
+      certificate instead of hand-encoding each — the CompCert-style argument for
+      ASIL-D / DO-178C.
+    status: draft
+    release: v0.11.0
+    tags: [smtlib, front-end, verus, gale, relay, certificate]
+    links:
+      - type: derives-from
+        target: SYS-006
+      - type: derives-from
+        target: SYS-002
+      - type: allocated-to
+        target: ARC-001
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        Parses the QF_BV fragment; on gale's fault_decode/mpu obligations and
+        relay's bitpack codecs, yields UNSAT with a cert the checker accepts;
+        rejects out-of-fragment constructs with a clear error.
+
+  - id: TR-024
+    type: sw-req
+    title: Equivalence and soundness verification toolkit
+    description: >
+      Ordeal shall expose a reusable prove_valid API (prove a QF_BV predicate
+      valid, returning a re-checkable certificate on success) plus worked
+      byte-layout prove_equiv recipes, covering the recurring consumer shapes:
+      codec round-trip (relay), ABI-layout equivalence (spar), abstract-domain
+      transfer soundness per concrete input (scry-bits), overflow rejection
+      (sigil), and const-expr fold validation (meld).
+    status: draft
+    release: v0.12.0
+    tags: [prove-valid, equivalence, soundness, relay, spar, scry, sigil, meld]
+    links:
+      - type: derives-from
+        target: SYS-006
+      - type: derives-from
+        target: SYS-007
+      - type: allocated-to
+        target: ARC-001
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        prove_valid decides representative goals from each consumer with a
+        re-checkable cert on UNSAT and a counterexample on SAT; recipes ship as
+        runnable examples.
+
+  - id: TR-025
+    type: sw-req
+    title: Certificate as evidence — rules_ordeal + rivet artifact type
+    description: >
+      Ordeal certificates shall be consumable as audit-grade evidence: a
+      hermetic rules_ordeal Bazel rule (paralleling rules_verus/rules_lean) to
+      invoke ordeal as a build/CI verification gate, an ordeal-certificate rivet
+      evidence artifact type, and a stable certificate serialization/bundle so a
+      verified transform's UNSAT becomes a machine-re-checkable DO-178C /
+      ISO-26262 / EU-AI-Act artifact rivet ingests.
+    status: draft
+    release: v0.13.0
+    tags: [rules_ordeal, bazel, rivet, evidence, certificate, cross-cutting]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: allocated-to
+        target: ARC-006
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        rules_ordeal runs ordeal hermetically and fails on a non-UNSAT gate; a
+        produced certificate validates as a rivet artifact and re-checks offline.
+
+  - id: TR-026
+    type: sw-req
+    title: Propositional-SAT front-end (certified feature-model consistency)
+    description: >
+      Ordeal shall expose its certified CNF+LRAT core below the bit-blaster as a
+      propositional-SAT front-end, so a consumer (rivet feature-model / variant
+      solve) can decide config validity / model consistency and emit a
+      cert.recheck()-able artifact — the EU AI Act per-configuration trace ask.
+    status: draft
+    release: v0.13.0
+    tags: [sat, propositional, rivet, feature-model, eu-ai-act, certificate]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: allocated-to
+        target: ARC-005
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        A feature-model SAT instance decides SAT/UNSAT; UNSAT carries a
+        re-checkable LRAT certificate; matches rivet variant-solve semantics.
+
+  - id: TR-027
+    type: sw-req
+    title: Lean-verified bit-blaster (encoder in the trusted core)
+    description: >
+      Ordeal shall extend the formally-verified trusted core from the checker to
+      the ENCODER: prove in Lean 4 (via Aeneas, as with the checker) that each
+      bit-blasting rule equals the formal BitVec semantics — replacing today's
+      Kani-BOUNDED evidence with an unbounded proof, so the whole pipeline is
+      formally trusted, not only the checker. Optionally add a re-checkable Sat
+      witness for parity with the Unsat certificate.
+    status: draft
+    release: v0.14.0
+    tags: [lean, aeneas, bit-blaster, trusted-core, assurance, sat-witness]
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: allocated-to
+        target: ARC-003
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Each blast rule's equality to BitVec semantics discharges in Lean with
+        no sorry; the proof is CI-gated like the checker's.
