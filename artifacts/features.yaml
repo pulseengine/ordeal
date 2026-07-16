@@ -438,7 +438,7 @@ artifacts:
       loom already maps Unknown to a conservative revert, so partial coverage
       raises optimization rather than risking soundness, and the encoding can
       land behind the existing concrete fast-path.
-    status: draft
+    status: implemented
     release: v0.11.0
     tags: [roadmap, p8, array, symbolic-index, read-over-write, loom, sliver]
     links:

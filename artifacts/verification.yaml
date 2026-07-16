@@ -498,3 +498,36 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib layout:: lowering::tests blast::muldiv; cargo kani --harness urem_8"
         coverage: "le-bytes round-trip certificate + byte-swap counterexample; exhaustive width-8 native + derived div/rem vs SMT-LIB reference; width 16; multiplier-free structural assertion"
+  - id: VER-021
+    type: sw-verification
+    title: Symbolic-index select/store reduces soundly and matches Z3's array theory
+    description: >
+      Confirms TR-028. Read-over-write law under a SYMBOLIC BV32 index:
+      select(store(a,i,v),i) = v is UNSAT to refute; with i != j the store is
+      transparent (UNSAT to refute); and WITHOUT i != j the same equality stays
+      SAT — so the encoding is not vacuous and does not silently assume
+      non-aliasing. Array congruence (the soundness core) is checked by
+      i = 5 => a[i] = a[5], and MUTATION-CHECKED: removing the array_congruence
+      emission makes that test fail with the spurious model
+      Sat([("$sel:a:#0",0), ("$sel:a:5",128), ("i",5)]), so the oracle is known
+      to bite rather than merely pass. loom's own shape — a multi-byte
+      little-endian chain over a symbolic base — round-trips. The concrete fast
+      path is pinned: an all-constant query emits no Ite and no congruence
+      clause. Every Unsat here runs the full certificate-checked pipeline.
+      Independently, the Z3 differential draws concrete / symbolic /
+      symbolic+offset indices and cross-checks against Z3's native array
+      theory, which performs neither the read-over-write elimination nor the
+      Ackermann congruence.
+    status: implemented
+    release: v0.11.0
+    tags: [array, symbolic-index, read-over-write, congruence, loom, differential]
+    links:
+      - type: verifies
+        target: TR-028
+      - type: verifies
+        target: FEAT-013
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib sliver:: solver::tests::symbolic_ solver::tests::loom_; cargo test -p ordeal --features oracle --lib sliver_diff"
+        coverage: "Read-over-write law (alias/non-alias/undetermined), congruence, loom LE chain, concrete fast path, Z3 differential"

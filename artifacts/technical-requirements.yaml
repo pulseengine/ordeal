@@ -728,7 +728,7 @@ artifacts:
       scope, as loom never asserts it. The number of distinct accesses per
       function is small and bounded, so eager instantiation is expected to be
       tractable; the concrete-index fast path is retained.
-    status: draft
+    status: implemented
     release: v0.11.0
     tags: [array, symbolic-index, ackermannization, read-over-write, loom, sliver]
     links:
