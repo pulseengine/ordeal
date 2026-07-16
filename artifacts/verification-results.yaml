@@ -717,13 +717,25 @@ artifacts:
       bvsdiv/bvsrem). blast::muldiv pass incl.
       exhaustive_width8_all_muldiv_ops_match_evaluator (mul/udiv/urem) and
       randomized width 16/32/64. Full lib suite green with no verdict changes.
+      The native bvurem rule additionally carries machine-checked (not merely
+      exhaustive-test) evidence: the Kani urem_8 harness verified SUCCESSFUL —
+      1117 checks, 0 failed, 6 unreachable, 1437s — proving blast_urem equals
+      the concrete SMT-LIB reference for ALL width-8 inputs, Z3-independently.
+      This discharges the "proven bit-blasting rule + Kani harness (P4-style)"
+      clause the new trusted op is required to carry, so urem enters the closed
+      fragment at the same evidence tier as every other op family rather than as
+      a weaker citizen.
     status: implemented
     fields:
       version: v0.10.0
       timestamp: "2026-07-11T19:20:00Z"
       executor: local
       environment:
-        note: "cargo test -p ordeal --lib; Kani urem_8/32/64 harnesses added (nightly CI job runs the fast tier)"
+        note: >-
+          cargo test -p ordeal --lib; cargo kani --harness urem_8 (local, exit 0,
+          VERIFICATION SUCCESSFUL). urem_8 is wired into the kani.yml fast tier;
+          urem_32/64 remain the known compute frontier (exhaustive-8 + Z3
+          differential), as for mul/udiv.
 
   - id: VV-033
     type: verification-verdict
@@ -732,7 +744,8 @@ artifacts:
       Executed pass. The le-bytes round-trip proves with a re-checkable
       certificate and a wrong byte order is caught; width 16 is exercised; the
       div/rem family matches the SMT-LIB reference exhaustively at width 8 and
-      carries no multiplier, for exactly one new trusted op (bvurem).
+      carries no multiplier, for exactly one new trusted op (bvurem) — whose
+      blast rule is Kani-proven equal to the reference for all width-8 inputs.
     status: implemented
     links:
       - type: result-of
@@ -741,4 +754,4 @@ artifacts:
         target: VE-011
     fields:
       verdict: pass
-      evidence: "layout:: 4/4; exhaustive width-8 derived div/rem vs SMT-LIB ref; multiplier-free structural check; muldiv exhaustive width-8 native urem"
+      evidence: "layout:: 4/4; exhaustive width-8 derived div/rem vs SMT-LIB ref; multiplier-free structural check; muldiv exhaustive width-8 native urem; Kani urem_8 SUCCESSFUL (1117 checks, 0 failed)"
