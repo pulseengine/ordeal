@@ -177,12 +177,23 @@ pub fn lower_traced(assertions: &[ExtBoolTerm]) -> Result<Lowered, SliverError> 
     for a in assertions {
         out.push(low.lower_bool(a)?);
     }
+    out.extend(low.array_congruence());
     out.extend(low.congruence());
     Ok(Lowered {
         assertions: out,
         reads: low.read_trace,
         calls: low.call_trace,
     })
+}
+
+/// The constant value of a lowered term, if it is one. Used to keep the
+/// concrete fast path: a `store`/`select` index pair that is statically
+/// decidable never reaches the SAT core.
+fn as_const(t: &BvTerm) -> Option<u128> {
+    match t {
+        BvTerm::Const { value, .. } => Some(*value),
+        _ => None,
+    }
 }
 
 /// A distinct uninterpreted-call site kept for congruence: its lowered
@@ -192,16 +203,32 @@ struct CallSite {
     result: BvTerm,
 }
 
+/// A distinct base-array read kept for congruence: the lowered BV32 index
+/// and the fresh BV8 variable standing for the byte at that index.
+struct ArrayRead {
+    index: BvTerm,
+    value: BvTerm,
+}
+
 /// The per-`lower` elimination state: fresh-variable memo tables plus the
 /// per-function call registry that congruence is generated from.
 #[derive(Default)]
 struct Lowering {
     /// Counter for unique fresh call-result variable names.
     next_id: usize,
-    /// Memo: `(base_array, concrete_index)` → its fresh BV8 read variable.
-    read_memo: BTreeMap<(String, u32), BvTerm>,
+    /// Memo: `(base_array, structural key of the lowered index)` → its fresh
+    /// BV8 read variable. Keyed by the index *term*, not a `u32`, so a
+    /// symbolic index memoizes exactly like a concrete one: the same index
+    /// term always yields the same read variable.
+    read_memo: BTreeMap<(String, String), BvTerm>,
     /// Read provenance in creation order (for [`Lowered::reads`]).
+    /// Concrete reads only — a symbolic index has no `u32` to report.
     read_trace: Vec<(String, String, u32)>,
+    /// Per base array, the access set: `(lowered index, its read variable)`,
+    /// in creation order. This is what array congruence is generated from
+    /// (TR-028): a base-array read is a unary uninterpreted function of its
+    /// index, so two reads of one array must agree wherever their indices do.
+    array_reads: BTreeMap<String, Vec<ArrayRead>>,
     /// Memo: `(fn_name, structural key of lowered args)` → result variable.
     /// Structural equality of the arguments is captured via their `Debug`
     /// form, so an identical call site reuses the same variable.
@@ -279,8 +306,8 @@ impl Lowering {
             ExtBvTerm::Core(bv) => bv.clone(),
             ExtBvTerm::Op(op) => self.lower_op(op)?,
             ExtBvTerm::Select { array, index } => {
-                let j = self.concrete_index(index)?;
-                self.resolve_select(array, j)?
+                let j = self.lower_index(index)?;
+                self.resolve_select(array, &j)?
             }
             ExtBvTerm::PureCall { name, args, sort } => {
                 let largs = args
@@ -362,21 +389,30 @@ impl Lowering {
         })
     }
 
-    /// Eager read-over-write (DES-015): resolve a `select` at concrete
-    /// index `j` down the store chain to a single BV8 core term. Because
-    /// every index is concrete, each `store` is settled statically — the
-    /// most recent write to `j` wins, and the base array's reads become
-    /// fresh per-index variables. The full chain is walked so every node is
-    /// sort-checked even when its value is not selected.
-    fn resolve_select(&mut self, array: &ArrayTerm, j: u32) -> Result<BvTerm, SliverError> {
+    /// Eager read-over-write (DES-015, extended by TR-028): resolve a
+    /// `select` at BV32 index `j` — **concrete or symbolic** — down the store
+    /// chain to a single BV8 core term.
+    ///
+    /// `select(store(a, i, v), j)` is `ite(i = j, v, select(a, j))`. When both
+    /// `i` and `j` are constants the equality is settled *statically* and no
+    /// `ite` is built — that is the concrete fast path, preserved verbatim
+    /// from the original concrete-only lowering, so nothing regresses for
+    /// queries that never use a symbolic index. Otherwise the equality is a
+    /// real `Eq` over BV32 and the branch becomes an `Ite`, which is already
+    /// in the closed fragment with a proven per-bit mux rule — so this adds
+    /// **no new solver theory and no new trusted operation**.
+    ///
+    /// The full chain is always walked, so every node is sort-checked even
+    /// when its value is not selected.
+    fn resolve_select(&mut self, array: &ArrayTerm, j: &BvTerm) -> Result<BvTerm, SliverError> {
         match array {
-            ArrayTerm::Var { name } => Ok(self.read_var(name, j)),
+            ArrayTerm::Var { name } => Ok(self.read_at(name, j)),
             ArrayTerm::Store {
                 array,
                 index,
                 value,
             } => {
-                let i = self.concrete_index(index)?;
+                let i = self.lower_index(index)?;
                 let v = self.lower_bv(value)?;
                 if eval::bv_sort(&v)
                     .map_err(|_| SliverError::BadArraySort)?
@@ -386,33 +422,70 @@ impl Lowering {
                     return Err(SliverError::BadArraySort);
                 }
                 let rest = self.resolve_select(array, j)?;
-                Ok(if i == j { v } else { rest })
+                Ok(match (as_const(&i), as_const(j)) {
+                    // Both concrete: the most recent write to `j` wins,
+                    // decided here rather than handed to the SAT core.
+                    (Some(a), Some(b)) => {
+                        if a == b {
+                            v
+                        } else {
+                            rest
+                        }
+                    }
+                    // Otherwise the aliasing is a real query.
+                    _ => BvTerm::Ite {
+                        cond: Box::new(BoolTerm::Eq(Box::new(i), Box::new(j.clone()))),
+                        then_: Box::new(v),
+                        else_: Box::new(rest),
+                    },
+                })
             }
         }
     }
 
-    /// The fresh BV8 variable for reading `array[index]`, memoized so the
-    /// same `(array, index)` pair always yields the same variable.
-    fn read_var(&mut self, array: &str, index: u32) -> BvTerm {
-        let key = (array.to_string(), index);
+    /// The fresh BV8 variable for reading `array[index]`, memoized on the
+    /// index *term* so the same index — concrete or symbolic — always yields
+    /// the same variable. Every read is registered in the array's access set
+    /// so [`Lowering::array_congruence`] can relate it to the others.
+    fn read_at(&mut self, array: &str, index: &BvTerm) -> BvTerm {
+        let key = (array.to_string(), format!("{index:?}"));
         if let Some(v) = self.read_memo.get(&key) {
             return v.clone();
         }
-        let name = format!("$sel:{array}:{index}");
+        // Concrete reads keep their original `$sel:<array>:<index>` name and
+        // their `Lowered::reads` provenance; a symbolic index has no `u32` to
+        // report, so it gets a counter-named variable instead.
+        let name = match as_const(index) {
+            Some(c) => format!("$sel:{array}:{c}"),
+            None => {
+                let n = format!("$sel:{array}:#{}", self.next_id);
+                self.next_id += 1;
+                n
+            }
+        };
         let v = BvTerm::Var {
             name: name.clone(),
             sort: Sort::new(8),
         };
         self.read_memo.insert(key, v.clone());
-        self.read_trace.push((name, array.to_string(), index));
+        if let Some(c) = as_const(index) {
+            // The index is BV32 (checked in `lower_index`), so it fits.
+            self.read_trace.push((name, array.to_string(), c as u32));
+        }
+        self.array_reads
+            .entry(array.to_string())
+            .or_default()
+            .push(ArrayRead {
+                index: index.clone(),
+                value: v.clone(),
+            });
         v
     }
 
-    /// Lower an array index and require it to be a concrete BV32 value.
-    /// Non-constant indices (including ones that read another array) are
-    /// [`SliverError::NonConcreteIndex`]; a non-BV32 index is
-    /// [`SliverError::BadArraySort`].
-    fn concrete_index(&mut self, index: &ExtBvTerm) -> Result<u32, SliverError> {
+    /// Lower an array index and require it to be BV32. The value may be
+    /// symbolic: a non-constant index is no longer an error (TR-028).
+    /// A non-BV32 index is [`SliverError::BadArraySort`].
+    fn lower_index(&mut self, index: &ExtBvTerm) -> Result<BvTerm, SliverError> {
         let lowered = self.lower_bv(index)?;
         let w = eval::bv_sort(&lowered)
             .map_err(|_| SliverError::BadArraySort)?
@@ -420,13 +493,7 @@ impl Lowering {
         if w != 32 {
             return Err(SliverError::BadArraySort);
         }
-        // A ground term evaluates under the empty environment; a symbolic
-        // one fails with an unbound variable — that is exactly a
-        // non-concrete index.
-        match eval::eval_bv(&lowered, &Env::new()) {
-            Ok(v) => Ok(v as u32),
-            Err(_) => Err(SliverError::NonConcreteIndex),
-        }
+        Ok(lowered)
     }
 
     /// Ackermannization (DES-016): replace this call site with a fresh
@@ -480,6 +547,44 @@ impl Lowering {
         self.call_trace
             .push((var_name, name.to_string(), args, sort));
         Ok(result)
+    }
+
+    /// Emit array congruence (TR-028): for every pair of distinct reads of
+    /// one base array, `index_i = index_j → value_i = value_j`.
+    ///
+    /// A base-array read is a unary uninterpreted function of its index, so
+    /// this is Ackermann over the access set — the same shape as
+    /// [`Lowering::congruence`], specialised to the one-argument case.
+    ///
+    /// **This is the soundness core of symbolic indexing.** Without it, a
+    /// symbolic read `mem[j]` and a concrete read `mem[5]` would be unrelated
+    /// variables, and the solver could satisfy `j = 5 ∧ mem[j] ≠ mem[5]` — a
+    /// spurious model. Identical index terms already share a variable via the
+    /// read memo, so no pair here is trivially reflexive.
+    ///
+    /// Two *distinct constant* indices are statically unequal, so their
+    /// implication is vacuous and is skipped rather than handed to the SAT
+    /// core — which is why a fully concrete query pays nothing for this.
+    fn array_congruence(&self) -> Vec<BoolTerm> {
+        let mut out = Vec::new();
+        for reads in self.array_reads.values() {
+            for i in 0..reads.len() {
+                for j in (i + 1)..reads.len() {
+                    let (a, b) = (&reads[i], &reads[j]);
+                    if let (Some(x), Some(y)) = (as_const(&a.index), as_const(&b.index)) {
+                        debug_assert_ne!(x, y, "identical indices must share a read variable");
+                        continue; // distinct constants never alias
+                    }
+                    let ante = BoolTerm::Eq(Box::new(a.index.clone()), Box::new(b.index.clone()));
+                    let concl = BoolTerm::Eq(Box::new(a.value.clone()), Box::new(b.value.clone()));
+                    out.push(BoolTerm::Or(
+                        Box::new(BoolTerm::Not(Box::new(ante))),
+                        Box::new(concl),
+                    ));
+                }
+            }
+        }
+        out
     }
 
     /// Emit the Ackermann congruence constraints: for every pair of distinct
@@ -875,17 +980,59 @@ mod array {
         assert_eq!(lowered.reads.len(), 1, "a[5] must map to one read variable");
     }
 
+    // ── TR-028: symbolic-index select/store ──────────────────────────────
+    //
+    // These four replace the pair that asserted `NonConcreteIndex`, which
+    // encoded the limitation this requirement removes (#70: loom's base
+    // address is a symbolic BV32, so that limitation reverted every loom
+    // function touching memory).
+
     #[test]
-    fn symbolic_index_on_select_is_rejected() {
+    fn symbolic_index_on_select_lowers() {
         let q = ExtBoolTerm::Eq(select(arr("a"), v32("i")), c8(0));
-        assert_eq!(lower(&[q]).err(), Some(SliverError::NonConcreteIndex));
+        assert!(
+            lower(&[q]).is_ok(),
+            "a symbolic select must lower, not error"
+        );
     }
 
     #[test]
-    fn symbolic_index_on_store_is_rejected() {
+    fn symbolic_index_on_store_lowers() {
         let a = store(arr("a"), v32("i"), c8(1));
         let q = ExtBoolTerm::Eq(select(a, i32c(0)), c8(0));
-        assert_eq!(lower(&[q]).err(), Some(SliverError::NonConcreteIndex));
+        assert!(
+            lower(&[q]).is_ok(),
+            "a symbolic store must lower, not error"
+        );
+    }
+
+    /// The concrete fast path is preserved: when every index is a constant
+    /// the aliasing is settled statically, so no `Ite` and no congruence
+    /// clause reaches the core. A fully concrete query pays nothing for
+    /// symbolic support.
+    #[test]
+    fn concrete_indices_still_cost_nothing() {
+        let a = store(store(arr("a"), i32c(4), c8(1)), i32c(7), c8(2));
+        let core = lower(&[ExtBoolTerm::Eq(select(a, i32c(4)), c8(1))]).unwrap();
+        let dump = format!("{core:?}");
+        assert!(
+            !dump.contains("Ite"),
+            "concrete store-chain must settle statically, got: {dump}"
+        );
+        // Only the original assertion — no congruence clauses appended.
+        assert_eq!(core.len(), 1, "no congruence for distinct constant indices");
+    }
+
+    /// A symbolic store index DOES build the mux — the aliasing is a real
+    /// query, not something to guess.
+    #[test]
+    fn symbolic_index_builds_the_read_over_write_mux() {
+        let a = store(arr("a"), v32("i"), c8(1));
+        let core = lower(&[ExtBoolTerm::Eq(select(a, v32("j")), c8(0))]).unwrap();
+        assert!(
+            format!("{core:?}").contains("Ite"),
+            "symbolic aliasing must lower to an Ite over Eq(i, j)"
+        );
     }
 
     #[test]

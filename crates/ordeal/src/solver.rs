@@ -1083,16 +1083,17 @@ mod tests {
     #[test]
     fn check_sliver_out_of_sliver_is_unknown() {
         use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm};
-        // Symbolic (variable) index: out of the sliver ⇒ conservative Unknown.
-        let bv32 = Sort::new(32);
+        // A symbolic index is IN the sliver as of TR-028, so the witness for
+        // "out of sliver ⇒ conservative Unknown" is now a bad array sort: an
+        // 8-bit index is not the BV32 the fixed BV32→BV8 sort demands.
         let bv8 = Sort::new(8);
-        let sym = ExtBvTerm::Core(BvTerm::Var {
+        let bad_index = ExtBvTerm::Core(BvTerm::Var {
             name: "i".into(),
-            sort: bv32,
+            sort: bv8,
         });
         let read = ExtBvTerm::Select {
             array: Box::new(ArrayTerm::Var { name: "a".into() }),
-            index: Box::new(sym),
+            index: Box::new(bad_index),
         };
         let q = ExtBoolTerm::Eq(
             read,
@@ -1102,5 +1103,154 @@ mod tests {
             }),
         );
         assert!(matches!(Solver::check_sliver(&[q]), CheckResult::Unknown));
+    }
+
+    // ── TR-028 semantics: symbolic read-over-write, end-to-end ───────────
+    //
+    // These check the ENCODING IS RIGHT, not merely that it lowers. Each
+    // `Unsat` is certificate-checked by construction (check_sliver runs the
+    // full pipeline), so a wrong encoding cannot pass by asserting itself.
+
+    fn sym_bv32(name: &str) -> crate::sliver::ExtBvTerm {
+        crate::sliver::ExtBvTerm::Core(BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(32),
+        })
+    }
+    fn sym_bv8(name: &str) -> crate::sliver::ExtBvTerm {
+        crate::sliver::ExtBvTerm::Core(BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(8),
+        })
+    }
+    fn sel(a: crate::sliver::ArrayTerm, i: crate::sliver::ExtBvTerm) -> crate::sliver::ExtBvTerm {
+        crate::sliver::ExtBvTerm::Select {
+            array: Box::new(a),
+            index: Box::new(i),
+        }
+    }
+    fn st(
+        a: crate::sliver::ArrayTerm,
+        i: crate::sliver::ExtBvTerm,
+        v: crate::sliver::ExtBvTerm,
+    ) -> crate::sliver::ArrayTerm {
+        crate::sliver::ArrayTerm::Store {
+            array: Box::new(a),
+            index: Box::new(i),
+            value: Box::new(v),
+        }
+    }
+    fn base(n: &str) -> crate::sliver::ArrayTerm {
+        crate::sliver::ArrayTerm::Var { name: n.into() }
+    }
+
+    /// `select(store(a, i, v), i) = v` for a SYMBOLIC `i` — the defining law
+    /// of read-over-write. Refuting it must be UNSAT with a checked cert.
+    #[test]
+    fn symbolic_read_over_write_same_index_is_valid() {
+        use crate::sliver::ExtBoolTerm;
+        let (i, v) = (sym_bv32("i"), sym_bv8("v"));
+        let read = sel(st(base("a"), i.clone(), v.clone()), i);
+        match Solver::check_sliver(&[ExtBoolTerm::Not(Box::new(ExtBoolTerm::Eq(read, v)))]) {
+            CheckResult::Unsat(_) => {}
+            other => panic!("select(store(a,i,v),i) must equal v; got {other:?}"),
+        }
+    }
+
+    /// With `i ≠ j`, the store is invisible to the read: it must reduce to
+    /// `select(a, j)`. This is the non-aliasing half of the law.
+    #[test]
+    fn symbolic_read_over_write_distinct_index_sees_through() {
+        use crate::sliver::ExtBoolTerm;
+        let (i, j, v) = (sym_bv32("i"), sym_bv32("j"), sym_bv8("v"));
+        let read = sel(st(base("a"), i.clone(), v), j.clone());
+        let underlying = sel(base("a"), j.clone());
+        // i != j  ∧  read != select(a, j)   →   UNSAT
+        let q = vec![
+            ExtBoolTerm::Not(Box::new(ExtBoolTerm::Eq(i, j))),
+            ExtBoolTerm::Not(Box::new(ExtBoolTerm::Eq(read, underlying))),
+        ];
+        match Solver::check_sliver(&q) {
+            CheckResult::Unsat(_) => {}
+            other => panic!("with i != j the store must be transparent; got {other:?}"),
+        }
+    }
+
+    /// The oracle is NOT vacuous: without `i ≠ j` the store may well be
+    /// visible, so the same equality must be falsifiable (SAT). If this ever
+    /// returned UNSAT the encoding would be silently assuming non-aliasing.
+    #[test]
+    fn symbolic_read_over_write_does_not_assume_non_aliasing() {
+        use crate::sliver::ExtBoolTerm;
+        let (i, j, v) = (sym_bv32("i"), sym_bv32("j"), sym_bv8("v"));
+        let read = sel(st(base("a"), i, v), j.clone());
+        let underlying = sel(base("a"), j);
+        match Solver::check_sliver(&[ExtBoolTerm::Not(Box::new(ExtBoolTerm::Eq(
+            read, underlying,
+        )))]) {
+            CheckResult::Sat(_) => {}
+            other => panic!("aliasing must stay possible without i != j; got {other:?}"),
+        }
+    }
+
+    /// THE congruence test — the soundness core of symbolic indexing.
+    ///
+    /// `i = 5 → a[i] = a[5]`. Without array congruence the symbolic read
+    /// `a[i]` and the concrete read `a[5]` are unrelated variables, and the
+    /// solver would happily satisfy `i = 5 ∧ a[i] ≠ a[5]` — a spurious model
+    /// that would let a consumer "prove" a false equivalence. Mutation-check:
+    /// delete the `array_congruence` call in `lower_traced` and this test
+    /// fails with Sat.
+    #[test]
+    fn symbolic_and_concrete_reads_are_congruent() {
+        use crate::sliver::ExtBoolTerm;
+        let i = sym_bv32("i");
+        let five = crate::sliver::ExtBvTerm::Core(BvTerm::Const {
+            value: 5,
+            sort: Sort::new(32),
+        });
+        let q = vec![
+            ExtBoolTerm::Eq(i.clone(), five.clone()),
+            ExtBoolTerm::Not(Box::new(ExtBoolTerm::Eq(
+                sel(base("a"), i),
+                sel(base("a"), five),
+            ))),
+        ];
+        match Solver::check_sliver(&q) {
+            CheckResult::Unsat(_) => {}
+            other => panic!("i = 5 must force a[i] = a[5] (missing congruence?); got {other:?}"),
+        }
+    }
+
+    /// loom's actual shape (#70): a two-byte little-endian store/load chain
+    /// over a SYMBOLIC base address. Must round-trip, and must DECIDE —
+    /// this is precisely the query that used to revert to Unknown and take
+    /// every memory-touching loom function with it.
+    #[test]
+    fn loom_multibyte_le_chain_over_symbolic_base_round_trips() {
+        use crate::sliver::{ExtBoolTerm, ExtOp};
+        let addr = sym_bv32("addr");
+        let (b0, b1) = (sym_bv8("b0"), sym_bv8("b1"));
+        let addr1 = crate::sliver::ExtBvTerm::Op(Box::new(ExtOp::Add(
+            addr.clone(),
+            crate::sliver::ExtBvTerm::Core(BvTerm::Const {
+                value: 1,
+                sort: Sort::new(32),
+            }),
+        )));
+        // store b0 @ addr, b1 @ addr+1, then read both back.
+        let mem = st(
+            st(base("mem"), addr.clone(), b0.clone()),
+            addr1.clone(),
+            b1.clone(),
+        );
+        let q = vec![ExtBoolTerm::Not(Box::new(ExtBoolTerm::And(
+            Box::new(ExtBoolTerm::Eq(sel(mem.clone(), addr1), b1)),
+            Box::new(ExtBoolTerm::Eq(sel(mem, addr), b0)),
+        )))];
+        match Solver::check_sliver(&q) {
+            CheckResult::Unsat(_) => {}
+            other => panic!("loom's LE chain over a symbolic base must round-trip; got {other:?}"),
+        }
     }
 }
