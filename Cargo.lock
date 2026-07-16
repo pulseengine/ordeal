@@ -10,7 +10,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "ordeal"
-version = "0.9.1"
+version = "0.10.0"
 dependencies = [
  "ordeal-lrat",
  "z3",
@@ -18,7 +18,7 @@ dependencies = [
 
 [[package]]
 name = "ordeal-lrat"
-version = "0.9.1"
+version = "0.10.0"
 
 [[package]]
 name = "pkg-config"

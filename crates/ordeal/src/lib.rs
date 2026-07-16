@@ -42,6 +42,7 @@ pub mod blast;
 pub mod canon;
 pub mod cnf;
 pub mod eval;
+pub mod layout;
 pub mod lowering;
 pub mod lrat;
 pub mod sat;

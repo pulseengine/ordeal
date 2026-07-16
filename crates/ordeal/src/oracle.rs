@@ -86,6 +86,9 @@ pub fn bv_to_z3(term: &BvTerm) -> BV {
         // SMT-LIB bvudiv: division by zero yields all-ones — Z3's bvudiv
         // already has exactly this semantics.
         BvTerm::Udiv(a, b) => bv_to_z3(a).bvudiv(bv_to_z3(b)),
+        // SMT-LIB bvurem: remainder by zero yields the dividend — Z3's
+        // bvurem already has exactly this semantics.
+        BvTerm::Urem(a, b) => bv_to_z3(a).bvurem(bv_to_z3(b)),
         BvTerm::And(a, b) => bv_to_z3(a).bvand(bv_to_z3(b)),
         BvTerm::Or(a, b) => bv_to_z3(a).bvor(bv_to_z3(b)),
         BvTerm::Xor(a, b) => bv_to_z3(a).bvxor(bv_to_z3(b)),
@@ -412,6 +415,7 @@ fn collect_bv_vars(term: &BvTerm, out: &mut BTreeMap<String, u32>) {
         | BvTerm::Sub(a, b)
         | BvTerm::Mul(a, b)
         | BvTerm::Udiv(a, b)
+        | BvTerm::Urem(a, b)
         | BvTerm::And(a, b)
         | BvTerm::Or(a, b)
         | BvTerm::Xor(a, b)
@@ -676,7 +680,7 @@ fn gen_bv(rng: &mut XorShift64, width: u32, depth: u32, vars: &[(String, u32)]) 
         let b = Box::new(gen_bv(rng, width, depth - 1, vars));
         (a, b)
     };
-    match rng.below(16) {
+    match rng.below(17) {
         0 => {
             let (a, b) = bin(rng);
             BvTerm::Add(a, b)
@@ -761,6 +765,10 @@ fn gen_bv(rng: &mut XorShift64, width: u32, depth: u32, vars: &[(String, u32)]) 
             then_: Box::new(gen_bv(rng, width, depth - 1, vars)),
             else_: Box::new(gen_bv(rng, width, depth - 1, vars)),
         },
+        16 => {
+            let (a, b) = bin(rng);
+            BvTerm::Urem(a, b)
+        }
         // Structural op not expressible at this width — fall back to a leaf.
         _ => gen_leaf(rng, width, vars),
     }
@@ -920,7 +928,7 @@ mod tests {
 
     #[test]
     fn corpus_exercises_every_variant() {
-        fn mark_bv(t: &BvTerm, bv: &mut [bool; 17]) {
+        fn mark_bv(t: &BvTerm, bv: &mut [bool; 18]) {
             let (idx, children): (usize, Vec<&BvTerm>) = match t {
                 BvTerm::Const { .. } => (0, vec![]),
                 BvTerm::Var { .. } => (1, vec![]),
@@ -939,6 +947,7 @@ mod tests {
                 BvTerm::Concat(a, b) => (14, vec![a, b]),
                 BvTerm::ZeroExt { arg, .. } | BvTerm::SignExt { arg, .. } => (15, vec![arg]),
                 BvTerm::Ite { then_, else_, .. } => (16, vec![then_, else_]),
+                BvTerm::Urem(a, b) => (17, vec![a, b]),
             };
             bv[idx] = true;
             // Distinguish ZeroExt/SignExt via a second pass below.
@@ -946,7 +955,7 @@ mod tests {
                 mark_bv(c, bv);
             }
         }
-        fn mark_bool(t: &BoolTerm, bl: &mut [bool; 13], bv: &mut [bool; 17], zs: &mut [bool; 2]) {
+        fn mark_bool(t: &BoolTerm, bl: &mut [bool; 13], bv: &mut [bool; 18], zs: &mut [bool; 2]) {
             let (idx, bvs, bools): (usize, Vec<&BvTerm>, Vec<&BoolTerm>) = match t {
                 BoolTerm::Eq(a, b) => (0, vec![a, b], vec![]),
                 BoolTerm::Ne(a, b) => (1, vec![a, b], vec![]),
@@ -990,6 +999,7 @@ mod tests {
                 | BvTerm::Sub(a, b)
                 | BvTerm::Mul(a, b)
                 | BvTerm::Udiv(a, b)
+                | BvTerm::Urem(a, b)
                 | BvTerm::And(a, b)
                 | BvTerm::Or(a, b)
                 | BvTerm::Xor(a, b)
@@ -1005,7 +1015,7 @@ mod tests {
             }
         }
 
-        let mut bv = [false; 17];
+        let mut bv = [false; 18];
         let mut bl = [false; 13];
         let mut zs = [false; 2];
         for query in gen_corpus(0xC0FFEE, 150) {

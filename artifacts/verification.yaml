@@ -459,3 +459,32 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib trap::; cargo test -p ordeal --lib --release exhaustive_f32_to_i32_all_bit_patterns -- --ignored"
         coverage: "exhaustive 2^32 f32→i32 (s/u); structured+ULP sweeps f32→i64, f64→i32/i64; #709 boundary asserts; dropped/preserved trunc VC"
+
+  - id: VER-020
+    type: sw-verification
+    title: Byte-layout helpers, width-16 coverage, and a multiplier-free div/rem family
+    description: >
+      Confirms the v0.10.0 foundation. Byte layout: to_le_bytes extracts each
+      byte least-significant-first; from_le_bytes(to_le_bytes(x)) is proven
+      equivalent to x with a cert.recheck()-able certificate at widths 16/32, and
+      a byte-swapped reassembly is caught as Sat (so the oracle is not vacuous).
+      Width 16: exercised by the blast-vs-evaluator matrix and the derived
+      div/rem family. Div/rem: native bvurem matches the evaluator exhaustively
+      at width 8 (all 65536 pairs, incl. every remainder-by-zero case) and at
+      16/32/64 sampled + boundary, with a Kani harness at 8/32/64; the DERIVED
+      bvurem/bvsdiv/bvsrem match a Z3-free SMT-LIB reference exhaustively at
+      width 8 (every sign combination, INT_MIN/-1, divide-by-zero) and at 16; and
+      no derivation instantiates a Mul node — the measured multiplier-free claim.
+    status: verified
+    release: v0.10.0
+    tags: [layout, le-bytes, width-16, bvurem, multiplier-free, relay, spar, kiln]
+    links:
+      - type: verifies
+        target: TR-021
+      - type: verifies
+        target: TR-022
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib layout:: lowering::tests blast::muldiv; cargo kani --harness urem_8"
+        coverage: "le-bytes round-trip certificate + byte-swap counterexample; exhaustive width-8 native + derived div/rem vs SMT-LIB reference; width 16; multiplier-free structural assertion"
