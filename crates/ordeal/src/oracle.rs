@@ -1272,7 +1272,6 @@ mod sliver_oracle_tests {
                 | Sub(a, b)
                 | Mul(a, b)
                 | Udiv(a, b)
-                | Urem(a, b)
                 | And(a, b)
                 | Or(a, b)
                 | Xor(a, b)
