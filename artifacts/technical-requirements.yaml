@@ -254,14 +254,28 @@ artifacts:
     type: sw-req
     title: Amortized integration-latency optimizations
     description: >
-      To meet CI-gating latency, Ordeal shall apply AIG structural hashing, a
-      curated Bitwuzla-subset of local rewrites, and LRAT trimming, and shall be
-      benchmarked against Z3. The honest performance claim is amortized
-      per-operation integration latency (in-process, no SMT-LIB parsing, no
-      theory combination), not out-solving Z3's SAT engine.
+      Umbrella performance requirement. Ordeal shall apply AIG structural
+      hashing, a curated Bitwuzla-subset of local rewrites, and LRAT trimming,
+      and shall be benchmarked against Z3. The honest performance claim is
+      amortized per-operation integration latency (in-process, no SMT-LIB
+      parsing, no theory combination), not out-solving Z3's SAT engine.
+      SPLIT 2026-07-16 — it was `draft` on the SHIPPED v0.8.0, which made the
+      release query overstate what v0.8.0 contained. Its refinements are
+      delivered piecemeal, so its `release:` is the slot where the LAST one
+      lands, not where the first did. Delivered: AIG structural hashing
+      (v0.2.0); commutative-operand canonicalization + const-folding above the
+      AIG (v0.8.0), which is the refining requirement TR-018 (verified) and
+      closed synth's A5 cliff — Ne(Mul(a,b),Mul(b,a)) @ 32 went from not
+      finishing in 590 s to root-decided (issue #35, now closed). Deferred and
+      still open (issue #57, with its benchmark measure moved alongside it):
+      LRAT-proof trimming so
+      cert.lrat and consumers' recheck() do less work; cross-pass incremental
+      term-graph caching across the related queries one loom/synth pass emits;
+      and a criterion benchmark harness vs Z3. None of the remainder is on the
+      soundness path — it is all untrusted-side or measurement.
     status: draft
-    release: v0.8.0
-    tags: [performance, structural-hashing, rewrites, trimming, benchmark]
+    release: v0.16.0
+    tags: [performance, structural-hashing, rewrites, trimming, benchmark, deferred]
     links:
       - type: derives-from
         target: SYS-005
@@ -269,12 +283,15 @@ artifacts:
         target: ARC-003
       - type: allocated-to
         target: ARC-006
+      - type: traces-to
+        target: TR-018
     fields:
       req-type: performance
       priority: should
       verification-criteria: >
         Benchmark suite shows per-op integration latency below the CI budget;
-        structural hashing and LRAT trimming measurably reduce work.
+        structural hashing and LRAT trimming measurably reduce work (before/after
+        certificate size + recheck time). The correctness oracle stays green.
 
   - id: TR-018
     type: sw-req
@@ -581,7 +598,7 @@ artifacts:
       certificate instead of hand-encoding each — the CompCert-style argument for
       ASIL-D / DO-178C.
     status: draft
-    release: v0.11.0
+    release: v0.12.0
     tags: [smtlib, front-end, verus, gale, relay, certificate]
     links:
       - type: derives-from
@@ -609,7 +626,7 @@ artifacts:
       transfer soundness per concrete input (scry-bits), overflow rejection
       (sigil), and const-expr fold validation (meld).
     status: draft
-    release: v0.12.0
+    release: v0.13.0
     tags: [prove-valid, equivalence, soundness, relay, spar, scry, sigil, meld]
     links:
       - type: derives-from
@@ -637,7 +654,7 @@ artifacts:
       verified transform's UNSAT becomes a machine-re-checkable DO-178C /
       ISO-26262 / EU-AI-Act artifact rivet ingests.
     status: draft
-    release: v0.13.0
+    release: v0.14.0
     tags: [rules_ordeal, bazel, rivet, evidence, certificate, cross-cutting]
     links:
       - type: derives-from
@@ -660,7 +677,7 @@ artifacts:
       solve) can decide config validity / model consistency and emit a
       cert.recheck()-able artifact — the EU AI Act per-configuration trace ask.
     status: draft
-    release: v0.13.0
+    release: v0.14.0
     tags: [sat, propositional, rivet, feature-model, eu-ai-act, certificate]
     links:
       - type: derives-from
@@ -685,7 +702,7 @@ artifacts:
       formally trusted, not only the checker. Optionally add a re-checkable Sat
       witness for parity with the Unsat certificate.
     status: draft
-    release: v0.14.0
+    release: v0.15.0
     tags: [lean, aeneas, bit-blaster, trusted-core, assurance, sat-witness]
     links:
       - type: derives-from
@@ -698,3 +715,34 @@ artifacts:
       verification-criteria: >
         Each blast rule's equality to BitVec semantics discharges in Lean with
         no sorry; the proof is CI-gated like the checker's.
+  - id: TR-028
+    type: sw-req
+    title: Symbolic-index array select/store over Array(BV32 -> BV8)
+    description: >
+      Ordeal shall support select/store on Array(BV32 -> BV8) where the index is
+      a SYMBOLIC BV32, via a sound symbolic read-over-write (index-equality case
+      splits / Ackermann over the access set, or store-chain expansion), reduced
+      into the existing closed QF_BV fragment and bit-blasted — no new solver
+      theory and no new trusted operation. Sorts are fixed to BV32 -> BV8 to
+      match loom exactly; whole-array (extensional) equality remains out of
+      scope, as loom never asserts it. The number of distinct accesses per
+      function is small and bounded, so eager instantiation is expected to be
+      tractable; the concrete-index fast path is retained.
+    status: draft
+    release: v0.11.0
+    tags: [array, symbolic-index, ackermannization, read-over-write, loom, sliver]
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-002
+    fields:
+      req-type: functional
+      priority: must
+      verification-criteria: >
+        Symbolic-index select/store reduces to QF_BV and matches the Z3
+        differential over randomized store-chains and aliasing/non-aliasing
+        index pairs; a read-over-write with a symbolic index no longer returns
+        NonConcreteIndex/Unknown; Unsat certificates re-check.
