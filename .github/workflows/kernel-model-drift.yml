@@ -59,7 +59,7 @@ jobs:
       # only happens when the pinned toolchain revisions in regen.sh change.
       - name: Cache nix store (Charon/Aeneas)
         if: steps.filter.outputs.model == 'true'
-        uses: nix-community/cache-nix-action@v6
+        uses: nix-community/cache-nix-action@v7
         with:
           primary-key: nix-charon-aeneas-${{ runner.os }}-${{ hashFiles('lean/regen.sh') }}
           restore-prefixes-first-match: nix-charon-aeneas-${{ runner.os }}-
