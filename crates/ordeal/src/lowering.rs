@@ -2,21 +2,37 @@
 //!
 //! synth-verify emits a handful of bitvector operations that the closed core
 //! fragment ([`crate::term`], loom #246) deliberately omits: `bvnot`, `bvneg`,
-//! `bvrotl`, `bvurem`, `bvsdiv`, and `bvsrem`. Rather than widen the closed set
-//! (each new [`BvTerm`] variant would need its own proven bit-blasting rule),
-//! this module provides them as **derived-term constructors**: pure functions
-//! that build a [`BvTerm`] out of the operations the core already decides.
+//! `bvrotl`, `bvsdiv`, and `bvsrem`. Rather than widen the closed set (each new
+//! [`BvTerm`] variant would need its own proven bit-blasting rule), this module
+//! provides them as **derived-term constructors**: pure functions that build a
+//! [`BvTerm`] out of the operations the core already decides.
+//!
+//! `bvurem` is the one exception: as of v0.10.0 it is a NATIVE op
+//! ([`BvTerm::Urem`]) because the remainder falls straight out of the
+//! restoring-division circuit, whereas the term-level `a - (a/b)*b` identity
+//! cannot avoid a multiplier. Promoting that single op made the whole div/rem
+//! family multiplier-free (`bvsrem` is now a sign correction over it), for +1
+//! trusted op instead of +3. [`bvurem`] remains here as a thin constructor so
+//! the SMT-LIB front-end and existing callers keep working.
 //!
 //! # Trust
 //!
 //! These are ordinary term builders — they are **not** new blast rules and add
-//! nothing to the trusted base. Every `Unsat` a consumer derives from a lowered
-//! term is still gated by the verified LRAT checker; the derived forms
-//! themselves remain untrusted. What makes them *blessed* is that issue #29
-//! validated these exact constructions 8-bit-exhaustively against Z3, and
-//! [`UV-017`](../../../artifacts/field-asks.yaml) re-checks each against Z3's
-//! native operator (widths 8/32/64, including the division-by-zero and
-//! signed-boundary edges) so consumers do not have to re-derive them.
+//! nothing to the trusted base (the one native op, `bvurem`, carries its own
+//! proven blast rule + Kani harness like every other fragment op). Every `Unsat`
+//! a consumer derives from a lowered term is still gated by the verified LRAT
+//! checker; the derived forms themselves remain untrusted.
+//!
+//! What makes them *blessed* is a mechanical oracle, not assertion:
+//! `exhaustive_width8_div_rem_family_matches_smtlib_reference` checks `bvurem`,
+//! `bvsdiv` and `bvsrem` against an independent SMT-LIB reference over **all
+//! 65536 width-8 input pairs** — every sign combination, the `INT_MIN / -1`
+//! overflow, and every divide-/remainder-by-zero case — with **no Z3 required**,
+//! so it runs in the default build. `UV-017` additionally re-checks each against
+//! Z3's native operator (widths 8/32/64) under the `oracle` feature. NOTE: the
+//! `bvurem`/`bvsrem` forms CHANGED in v0.10.0 (see above), so the Z3-free
+//! exhaustive test — not the older issue-#29 validation of the previous forms —
+//! is what backs them now.
 //!
 //! # The chosen forms (all match SMT-LIB QF_BV / Z3 semantics)
 //!
@@ -24,11 +40,11 @@
 //! - `bvneg x   = 0 - x`
 //! - `bvrotl a b = rotr(a, 0 - b)` — exact for power-of-two widths (see
 //!   [`bvrotl`]), which covers the target widths 8/32/64.
-//! - `bvurem a b = a - (a udiv b) * b` — exact including `b = 0` (SMT-LIB's
-//!   `bvurem` by zero returns `a`, and this form yields `a` there too).
+//! - `bvurem a b` — the native [`BvTerm::Urem`] (multiplier-free; see above).
 //! - `bvsdiv a b` — the SMT-LIB sign-mask construction over `bvudiv`.
-//! - `bvsrem a b = a - bvsdiv(a, b) * b` — exact including `b = 0` and the
-//!   `INT_MIN / -1` overflow edge.
+//! - `bvsrem a b = (|a| urem |b| ^ sa) - sa` — the SMT-LIB sign-mask
+//!   construction over the native `bvurem`, exact including `b = 0` and the
+//!   `INT_MIN / -1` overflow edge, and multiplier-free.
 //!
 //! Widths are accepted in `1..=128`; the operands of each binary helper must
 //! already share the given width (this module does not sort-check — build
@@ -106,20 +122,20 @@ pub fn bvrotl(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
     BvTerm::Rotr(Box::new(a), Box::new(neg_b))
 }
 
-/// Unsigned remainder (`bvurem`): `a - (a udiv b) * b`.
+/// Unsigned remainder (`bvurem`) — the native fragment op.
 ///
-/// Exact including the SMT-LIB `b = 0` case: there `a udiv 0` is all-ones, so
-/// `(a udiv 0) * 0 = 0` and the result is `a` — exactly what SMT-LIB's
-/// `bvurem` by zero returns. For `b != 0` this is the textbook
-/// `a - floor(a/b) * b`.
+/// This was previously derived as `a - (a udiv b) * b`, which is exact but
+/// costs a **multiplier**. `bvurem` is now native ([`BvTerm::Urem`]) because the
+/// restoring-division circuit already produces the remainder, so blasting it
+/// directly is multiplier-free. The SMT-LIB `b = 0` case (result `a`) is handled
+/// by the blast rule and the evaluator.
+///
+/// Kept as a helper so the SMT-LIB front-end and existing callers keep working.
 pub fn bvurem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
-    // `width` is unused: bvurem's derivation needs no explicit mask (the
-    // evaluator/blaster already mask each op to width). Kept for signature
+    // `width` is unused: the op carries its operands' sort. Kept for signature
     // symmetry with the other binary helpers.
     let _ = width;
-    let q = BvTerm::Udiv(Box::new(a.clone()), Box::new(b.clone()));
-    let prod = BvTerm::Mul(Box::new(q), Box::new(b));
-    BvTerm::Sub(Box::new(a), Box::new(prod))
+    BvTerm::Urem(Box::new(a), Box::new(b))
 }
 
 /// Signed division (`bvsdiv`) via the SMT-LIB sign-mask construction over
@@ -151,25 +167,154 @@ pub fn bvsdiv(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
     )
 }
 
-/// Signed remainder (`bvsrem`, sign follows the dividend): `a - bvsdiv(a,b)*b`.
+/// Signed remainder (`bvsrem`, sign follows the dividend) via the SMT-LIB
+/// sign-mask construction over the native `bvurem`.
 ///
-/// Because [`bvsdiv`] truncates toward zero, the identity
-/// `a = bvsdiv(a,b) * b + bvsrem(a,b)` holds and the remainder carries the
-/// dividend's sign, matching SMT-LIB's `bvsrem`. Edge cases are inherited:
-/// - `b = 0`: `bvsdiv(a,0) * 0 = 0`, so the result is `a` — SMT-LIB's
-///   `bvsrem` by zero also returns `a`.
-/// - `INT_MIN / -1`: `bvsdiv = INT_MIN`, `INT_MIN * -1 = INT_MIN`, and
-///   `a - INT_MIN = 0`, matching SMT-LIB.
+/// Previously derived as `a - bvsdiv(a,b)*b`, which costs a **multiplier**. Now
+/// that [`BvTerm::Urem`] is native (and multiplier-free), the remainder of the
+/// magnitudes can be taken directly and the dividend's sign re-applied — so this
+/// derivation is multiplier-free too:
+///
+/// ```text
+/// r = |a| urem |b|
+/// bvsrem = (r ^ sa) - sa        // negate r iff a < 0
+/// ```
+///
+/// This reproduces SMT-LIB `bvsrem` on every input, including:
+/// - `b = 0`: `|a| urem 0` is `|a|`, and the sign fix maps it back to `a` —
+///   matching SMT-LIB's `bvsrem` by zero.
+/// - `INT_MIN % -1`: `|INT_MIN|` overflows back to `INT_MIN`, `|-1| = 1`, so
+///   `r = 0` and the result is `0`, matching SMT-LIB.
 pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
-    let q = bvsdiv(a.clone(), b.clone(), width);
-    let prod = BvTerm::Mul(Box::new(q), Box::new(b));
-    BvTerm::Sub(Box::new(a), Box::new(prod))
+    let sa = sign_mask(a.clone(), width);
+    let r = BvTerm::Urem(Box::new(abs_bv(a, width)), Box::new(abs_bv(b, width)));
+    // (r ^ sa) - sa  — negate the remainder iff the dividend is negative.
+    BvTerm::Sub(
+        Box::new(BvTerm::Xor(Box::new(r), Box::new(sa.clone()))),
+        Box::new(sa),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::eval::bv_sort;
+    use crate::eval::{Env, bv_sort, eval_bv};
+
+    /// A Z3-free reference for the SMT-LIB div/rem family, computed directly on
+    /// masked values via the spec's own sign-correction definitions. This is the
+    /// oracle for the derived lowerings in the DEFAULT build — the `*_symbolic`
+    /// tests below are Z3-based and only compile under the `oracle` feature.
+    /// Returns `(bvurem, bvsdiv, bvsrem)`.
+    fn smtlib_ref(x: u128, y: u128, w: u32) -> (u128, u128, u128) {
+        let m = if w >= 128 {
+            u128::MAX
+        } else {
+            (1u128 << w) - 1
+        };
+        let neg = |v: u128| v.wrapping_neg() & m;
+        let msb = |v: u128| (v >> (w - 1)) & 1 == 1;
+        let udiv = |p: u128, q: u128| p.checked_div(q).unwrap_or(m);
+        let urem = |p: u128, q: u128| if q == 0 { p } else { p % q };
+        let sdiv = match (msb(x), msb(y)) {
+            (false, false) => udiv(x, y),
+            (true, false) => neg(udiv(neg(x), y)),
+            (false, true) => neg(udiv(x, neg(y))),
+            (true, true) => udiv(neg(x), neg(y)),
+        };
+        let srem = match (msb(x), msb(y)) {
+            (false, false) => urem(x, y),
+            (true, false) => neg(urem(neg(x), y)),
+            (false, true) => urem(x, neg(y)),
+            (true, true) => neg(urem(neg(x), neg(y))),
+        };
+        (urem(x, y), sdiv, srem)
+    }
+
+    #[test]
+    fn exhaustive_width8_div_rem_family_matches_smtlib_reference() {
+        // Every one of the 65536 width-8 input pairs — so every sign
+        // combination, the INT_MIN/-1 overflow, and every divide-/
+        // remainder-by-zero case is covered. Guards the multiplier-free
+        // derivations (bvurem is now the native op; bvsrem is a sign correction
+        // over it) against the SMT-LIB definitions, with no Z3 needed.
+        let w = 8u32;
+        let env = Env::new();
+        for x in 0..=0xFFu128 {
+            for y in 0..=0xFFu128 {
+                let (a, b) = (const_bv(x, w), const_bv(y, w));
+                let (r_urem, r_sdiv, r_srem) = smtlib_ref(x, y, w);
+                let got = |t: BvTerm| eval_bv(&t, &env).unwrap();
+                assert_eq!(
+                    got(bvurem(a.clone(), b.clone(), w)),
+                    r_urem,
+                    "bvurem {x} {y}"
+                );
+                assert_eq!(
+                    got(bvsdiv(a.clone(), b.clone(), w)),
+                    r_sdiv,
+                    "bvsdiv {x} {y}"
+                );
+                assert_eq!(got(bvsrem(a, b, w)), r_srem, "bvsrem {x} {y}");
+            }
+        }
+    }
+
+    #[test]
+    fn div_rem_derivations_are_multiplier_free() {
+        // The measured point of making bvurem native (TR-021/TR-022): the
+        // div/rem family no longer needs the `a - (a/b)*b` identity, so no
+        // derivation instantiates a multiplier circuit. Before: bvurem and
+        // bvsrem each contained one Mul; bvsrem also nested a whole bvsdiv.
+        let w = 32u32;
+        let (a, b) = (var("a", w), var("b", w));
+        let muls = |t: BvTerm| format!("{t:?}").matches("Mul(").count();
+        assert_eq!(
+            muls(bvurem(a.clone(), b.clone(), w)),
+            0,
+            "bvurem must be multiplier-free"
+        );
+        assert_eq!(
+            muls(bvsrem(a.clone(), b.clone(), w)),
+            0,
+            "bvsrem must be multiplier-free"
+        );
+        assert_eq!(muls(bvsdiv(a, b, w)), 0, "bvsdiv must be multiplier-free");
+    }
+
+    #[test]
+    fn width16_div_rem_family_matches_smtlib_reference() {
+        // Width 16 (relay CCSDS/CRC-16, kiln extend16) across signed
+        // boundaries + a sampled sweep.
+        let w = 16u32;
+        let env = Env::new();
+        let mut vals: Vec<u128> = vec![0, 1, 2, 0x7FFF, 0x8000, 0x8001, 0xFFFE, 0xFFFF];
+        let mut s: u128 = 0x1234;
+        for _ in 0..40 {
+            s = (s
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407))
+                & 0xFFFF;
+            vals.push(s);
+        }
+        for &x in &vals {
+            for &y in &vals {
+                let (a, b) = (const_bv(x, w), const_bv(y, w));
+                let (r_urem, r_sdiv, r_srem) = smtlib_ref(x, y, w);
+                let got = |t: BvTerm| eval_bv(&t, &env).unwrap();
+                assert_eq!(
+                    got(bvurem(a.clone(), b.clone(), w)),
+                    r_urem,
+                    "bvurem w16 {x} {y}"
+                );
+                assert_eq!(
+                    got(bvsdiv(a.clone(), b.clone(), w)),
+                    r_sdiv,
+                    "bvsdiv w16 {x} {y}"
+                );
+                assert_eq!(got(bvsrem(a, b, w)), r_srem, "bvsrem w16 {x} {y}");
+            }
+        }
+    }
 
     fn var(name: &str, width: u32) -> BvTerm {
         BvTerm::Var {

@@ -274,13 +274,24 @@ artifacts:
     type: sw-req
     title: "P7 — layout & arithmetic completeness (v0.10.0)"
     description: >
-      Foundation for the byte-layout consumers, pure QF_BV, no new theory:
-      native 16-bit width, verified to_le_bytes/from_le_bytes helpers
-      (extract+concat), and the signed div/rem value ops bvsdiv/bvsrem/bvurem
-      (proven + Kani). The single most reusable piece — three consumer researches
-      independently named byte-layout + 16-bit as the recurring need. Unblocks
-      relay codecs, spar ABI layout, and kiln extends/signed-div values.
-    status: draft
+      Foundation for the byte-layout consumers, pure QF_BV, no new theory.
+      Delivered — with two premises corrected by contact with the code:
+
+      1. Byte-layout helpers to_le_bytes/from_le_bytes (crate::layout), pure
+         extract/concat over the closed fragment. The round-trip is proven
+         equivalent with a re-checkable certificate, and a byte-swapped
+         reassembly is caught as Sat so the oracle is not vacuous. This is the
+         piece three independent consumer researches named — it unblocks relay
+         codecs (#265), spar ABI layout (#327) and kiln conversions (#426).
+      2. Width 16 was ALREADY supported (the engine is width-parametric;
+         check_width admits 1..=128) — it was merely unexercised. Now covered by
+         the oracle matrix (TR-021).
+      3. bvsdiv/bvsrem/bvurem ALREADY existed as derived lowerings — the gap was
+         COST, not capability: each carried a multiplier. Exactly ONE op
+         (bvurem) is promoted to the fragment so the remainder comes straight
+         out of the division circuit, and bvsrem is re-expressed over it. The
+         whole div/rem family is now multiplier-free for +1 trusted op (TR-022).
+    status: implemented
     release: v0.10.0
     tags: [roadmap, p7, width-16, byte-layout, signed-div, relay, spar, kiln]
     links:
@@ -294,9 +305,12 @@ artifacts:
       req-type: functional
       priority: should
       verification-criteria: >
-        Width-16 + byte helpers + signed div/rem ship oracle-gated (differential
-        + Kani), no verdict changes; a relay/spar/kiln byte-layout equivalence
-        query decides with a re-checkable certificate.
+        Byte helpers + width-16 coverage + native bvurem ship oracle-gated
+        (blast-vs-evaluator exhaustive at width 8, 16/32/64 sampled, plus Kani),
+        no verdict changes; the le-bytes round-trip decides with a re-checkable
+        certificate and a byte-swap is caught; the derived div/rem family matches
+        the SMT-LIB reference exhaustively at width 8 with no Z3, and no
+        derivation instantiates a multiplier (VER-019).
 
   - id: FEAT-009
     type: sw-req

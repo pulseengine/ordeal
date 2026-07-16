@@ -496,14 +496,22 @@ artifacts:
 
   - id: TR-021
     type: sw-req
-    title: Native 16-bit width and byte-layout helpers
+    title: 16-bit width coverage and byte-layout helpers
     description: >
-      Ordeal shall support bit-vector width 16 alongside 8/32/64 (CCSDS/CRC-16,
-      wasm extend8/16_s, SIMD lanes), and provide verified byte-layout helpers
-      to_le_bytes/from_le_bytes as pure extract/concat compositions. Enables
-      wire-codec and ABI-layout equivalence checking across relay, spar, and
-      kiln with no new theory.
-    status: draft
+      CORRECTION to this requirement's original premise ("support width 16"):
+      the engine is already width-parametric — `eval::check_width` admits any
+      width in 1..=128 and the blaster blasts per-bit — so width 16 was never
+      unsupported, only unexercised (the validated matrix was 8/32/64). Ordeal
+      shall therefore EXERCISE width 16 in the oracle matrix (blast-vs-evaluator
+      and the derived div/rem family) so the consumers relying on it — relay's
+      CCSDS/CRC-16, kiln's extend8/16_s — rest on tested ground rather than an
+      untested capability.
+
+      Ordeal shall additionally provide byte-layout helpers to_le_bytes /
+      from_le_bytes as pure extract/concat compositions over the closed fragment
+      (no new operations), so wire-codec round-trip and ABI-layout equivalence
+      become one `prove_equiv` call for relay (#265), spar (#327) and kiln (#426).
+    status: implemented
     release: v0.10.0
     tags: [width-16, byte-layout, le-bytes, relay, spar, kiln]
     links:
@@ -515,20 +523,35 @@ artifacts:
       req-type: functional
       priority: should
       verification-criteria: >
-        Width-16 ops pass the same differential/Kani gates as 8/32/64;
-        to/from_le_bytes round-trip and equal a byte-extract/concat reference.
+        Width 16 is exercised by the blast-vs-evaluator matrix and the derived
+        div/rem family against the SMT-LIB reference; to_le_bytes extracts each
+        byte least-significant-first, from_le_bytes(to_le_bytes(x)) is proven
+        equivalent to x with a re-checkable certificate, and a byte-swapped
+        reassembly is caught as Sat (the oracle is not vacuous).
 
   - id: TR-022
     type: sw-req
-    title: Signed division/remainder value operations (bvsdiv/bvsrem/bvurem)
+    title: Multiplier-free div/rem family (native bvurem)
     description: >
-      Ordeal shall add bvsdiv, bvsrem, and bvurem to the closed fragment (today
-      only bvudiv), each with a proven bit-blasting rule and a Kani harness
-      (P4-style), so consumers can model signed div/rem VALUES in-house (kiln
-      instruction semantics; the trap library's value clause for signed div).
-    status: draft
+      CORRECTION to this requirement's original premise ("today only bvudiv"):
+      bvsdiv, bvsrem and bvurem ALREADY existed as DERIVED ops, lowered onto the
+      closed core (crate::lowering, used by the SMT-LIB front-end), deliberately
+      kept out of the fragment to keep the trusted term set minimal. The value
+      capability was therefore never missing — the defect was COST: bvurem was
+      `a - (a udiv b) * b` and bvsrem was `a - bvsdiv(a,b) * b`, so each
+      instantiated a MULTIPLIER circuit.
+
+      Removing that multiplier is only possible at the blast layer (the
+      restoring-division circuit already produces the remainder; the term-level
+      `a - q*b` identity cannot avoid the multiply). Ordeal shall therefore
+      promote exactly ONE operation — bvurem — to the closed fragment, with a
+      proven bit-blasting rule and a Kani harness (P4-style), and re-express
+      bvsrem as a sign correction over it. bvsdiv stays derived (already
+      multiplier-free). Net: the fragment grows by one op, and the whole div/rem
+      family becomes multiplier-free.
+    status: implemented
     release: v0.10.0
-    tags: [bvsdiv, bvsrem, bvurem, signed, kiln, closed-fragment]
+    tags: [bvurem, bvsrem, bvsdiv, multiplier-free, kiln, closed-fragment]
     links:
       - type: derives-from
         target: SYS-001
@@ -538,8 +561,10 @@ artifacts:
       req-type: functional
       priority: should
       verification-criteria: >
-        Each new op equals its SMT-LIB QF_BV reference exhaustively at width 8
-        (Kani) and differentially at 32/64; no other verdict changes.
+        Native bvurem equals its SMT-LIB reference exhaustively at width 8
+        (blast-vs-evaluator + Kani) and at 16/32/64; the derived bvurem/bvsdiv/
+        bvsrem equal the SMT-LIB reference exhaustively at width 8 with NO Z3
+        needed; no derivation instantiates a Mul node; no other verdict changes.
 
   - id: TR-023
     type: sw-req

@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-11
+
+**P7 — layout & arithmetic completeness** (FEAT-008 / TR-021 + TR-022). The
+foundation the consumer research named: byte-layout primitives for the wire-codec
+and ABI-equivalence consumers, plus a multiplier-free div/rem family.
+
+### Added
+- **`crates/ordeal/src/layout.rs`** — `to_le_bytes` / `from_le_bytes`, pure
+  `extract`/`concat` compositions over the closed fragment (no new operations).
+  Byte 0 is least-significant. Paired with `prove_equiv` these turn "does this
+  codec round-trip?" (relay#265) and "does this record encode that layout?"
+  (spar#327) into one certificate-checked query.
+- **`bvurem` is now a native fragment op** (`BvTerm::Urem`) with a proven blast
+  rule (`blast_udivrem` exposes the remainder the restoring-division circuit
+  already computes) and Kani harnesses at 8/32/64.
+
+### Changed
+- **The div/rem family is multiplier-free.** `lowering::bvurem` was
+  `a - (a udiv b) * b` and `lowering::bvsrem` was `a - bvsdiv(a,b) * b` — each
+  instantiated a multiplier. `bvsrem` is now a sign correction over the native
+  `bvurem` (`(|a| urem |b| ^ sa) - sa`); `bvsdiv` was already multiplier-free.
+  Verified structurally: no derivation contains a `Mul` node.
+- Width **16** is now exercised by the oracle matrix (relay CCSDS/CRC-16, kiln
+  `extend8/16_s`).
+
+### Corrections (premises that contact with the code falsified)
+- `bvsdiv`/`bvsrem`/`bvurem` were **not** missing — they already existed as
+  derived lowerings. The gap was **cost** (a multiplier), not capability. So this
+  release promotes exactly **one** op to the trusted fragment, not three.
+- Width 16 was **not** unsupported — the engine is width-parametric
+  (`check_width` admits 1..=128); it was merely untested.
+
+### Evidence
+Exhaustive width-8 (all 65536 pairs): native `bvurem` vs the evaluator, and the
+derived `bvurem`/`bvsdiv`/`bvsrem` vs an independent **Z3-free** SMT-LIB
+reference — every sign combination, `INT_MIN/-1`, and every divide-/
+remainder-by-zero case. Plus width 16/32/64, the le-bytes round-trip proven with
+a `recheck()`-able certificate, and a byte-swapped reassembly caught as `Sat`
+(the oracle is not vacuous).
+
+### Falsification
+Wrong if: a div/rem derivation disagrees with the SMT-LIB reference for any
+input, a `Mul` node reappears in one of them, or the `le-bytes` round-trip fails
+to prove for some width.
+
 ## [0.9.1] - 2026-07-11
 
 **Phase B — float→int truncation trap classifier** (TR-020, issue #59). Completes

@@ -52,6 +52,10 @@ fn r_udiv(x: u128, y: u128, w: u32) -> u128 {
     // SMT-LIB: bvudiv by zero = all-ones.
     x.checked_div(y).unwrap_or(mask(w))
 }
+fn r_urem(x: u128, y: u128, _w: u32) -> u128 {
+    // SMT-LIB: bvurem by zero = the dividend.
+    if y == 0 { x } else { x % y }
+}
 fn r_and(x: u128, y: u128, w: u32) -> u128 {
     (x & y) & mask(w)
 }
@@ -114,7 +118,7 @@ macro_rules! bv_bin_proof {
 
 use crate::blast::arith::{blast_add, blast_sub};
 use crate::blast::bitwise::{blast_and, blast_or, blast_xor};
-use crate::blast::muldiv::{blast_mul, blast_udiv};
+use crate::blast::muldiv::{blast_mul, blast_udiv, blast_urem};
 use crate::blast::shift::{blast_ashr, blast_lshr, blast_rotr, blast_shl};
 
 // ── Arithmetic ────────────────────────────────────────────────────────────
@@ -157,6 +161,9 @@ bv_bin_proof!(mul_64, blast_mul, r_mul, 64);
 bv_bin_proof!(udiv_8, blast_udiv, r_udiv, 8);
 bv_bin_proof!(udiv_32, blast_udiv, r_udiv, 32);
 bv_bin_proof!(udiv_64, blast_udiv, r_udiv, 64);
+bv_bin_proof!(urem_8, blast_urem, r_urem, 8);
+bv_bin_proof!(urem_32, blast_urem, r_urem, 32);
+bv_bin_proof!(urem_64, blast_urem, r_urem, 64);
 
 // ── Comparisons (Word × Word → 1 bit) ──────────────────────────────────────
 fn r_eq(x: u128, y: u128, _w: u32) -> bool {

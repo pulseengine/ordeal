@@ -53,7 +53,9 @@ pub fn blast_mul(aig: &mut Aig, a: &Word, b: &Word) -> Word {
     acc
 }
 
-/// `bvudiv` — restoring long division; divisor 0 yields all-ones (SMT-LIB).
+/// `bvudiv` / `bvurem` — restoring long division returning both quotient and
+/// remainder, each with its SMT-LIB divide-by-zero case (quotient all-ones,
+/// remainder = dividend).
 ///
 /// The dividend is consumed MSB-first into a w-bit partial remainder. Each
 /// step conceptually widens the remainder to w+1 bits when shifting left;
@@ -62,9 +64,10 @@ pub fn blast_mul(aig: &mut Aig, a: &Word, b: &Word) -> Word {
 /// 2^w > divisor, otherwise a plain w-bit `remainder >= divisor` compare
 /// suffices. The w-bit modular difference is correct in both cases because
 /// the invariant `remainder < divisor` before the shift bounds the true
-/// difference below 2^w.
-pub fn blast_udiv(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    debug_assert_eq!(a.len(), b.len(), "blast_udiv: operand width mismatch");
+/// difference below 2^w. After the last step the partial remainder holds the
+/// true remainder.
+pub fn blast_udivrem(aig: &mut Aig, a: &Word, b: &Word) -> (Word, Word) {
+    debug_assert_eq!(a.len(), b.len(), "blast_udivrem: operand width mismatch");
     let w = a.len();
     let mut rem: Word = vec![Lit::FALSE; w];
     let mut quo: Word = vec![Lit::FALSE; w];
@@ -86,12 +89,35 @@ pub fn blast_udiv(aig: &mut Aig, a: &Word, b: &Word) -> Word {
             rem[j] = aig.mux(ge, diff[j], rem[j]);
         }
     }
-    // SMT-LIB: bvudiv by zero is all-ones. Mux the entire quotient.
-    let b_nonzero = b.iter().fold(Lit::FALSE, |acc, &bit| aig.or(acc, bit));
-    quo.iter()
-        .map(|&q| aig.mux(b_nonzero.not(), Lit::TRUE, q))
-        .collect()
+    // SMT-LIB divide-by-zero: quotient all-ones, remainder = dividend.
+    let b_zero = b
+        .iter()
+        .fold(Lit::FALSE, |acc, &bit| aig.or(acc, bit))
+        .not();
+    let quo = quo.iter().map(|&q| aig.mux(b_zero, Lit::TRUE, q)).collect();
+    let rem = rem
+        .iter()
+        .zip(a)
+        .map(|(&r, &ai)| aig.mux(b_zero, ai, r))
+        .collect();
+    (quo, rem)
 }
+
+/// `bvudiv` — the quotient half of [`blast_udivrem`].
+pub fn blast_udiv(aig: &mut Aig, a: &Word, b: &Word) -> Word {
+    blast_udivrem(aig, a, b).0
+}
+
+/// `bvurem` — the remainder half of [`blast_udivrem`].
+pub fn blast_urem(aig: &mut Aig, a: &Word, b: &Word) -> Word {
+    blast_udivrem(aig, a, b).1
+}
+
+// The SIGNED forms (`bvsdiv`/`bvsrem`) are deliberately NOT blasted here: they
+// stay derived ops, lowered onto this core at the term level (see
+// `crate::lowering`). Once `bvurem` is native the derived forms cost no
+// multiplier either — they are sign corrections over `bvudiv`/`bvurem` — so the
+// closed fragment grows by exactly one op rather than three.
 
 #[cfg(test)]
 mod tests {
@@ -107,21 +133,26 @@ mod tests {
         })
     }
 
-    /// Oracle values for both ops via the concrete evaluator (DES-001).
-    fn oracle(x: u128, y: u128, w: u32) -> (u128, u128) {
+    /// Oracle values for every natively-blasted muldiv op via the concrete
+    /// evaluator (DES-001): (mul, udiv, urem). The signed forms are derived
+    /// (see `crate::lowering`) and are verified there.
+    fn oracle(x: u128, y: u128, w: u32) -> (u128, u128, u128) {
         let env = Env::new();
+        let e = |t: BvTerm| eval_bv(&t, &env).unwrap();
         (
-            eval_bv(&BvTerm::Mul(c(x, w), c(y, w)), &env).unwrap(),
-            eval_bv(&BvTerm::Udiv(c(x, w), c(y, w)), &env).unwrap(),
+            e(BvTerm::Mul(c(x, w), c(y, w))),
+            e(BvTerm::Udiv(c(x, w), c(y, w))),
+            e(BvTerm::Urem(c(x, w), c(y, w))),
         )
     }
 
-    /// Two input words plus both ops blasted once over them.
+    /// Two input words plus every natively-blasted muldiv op over them.
     struct Blasted {
         aig: Aig,
         width: u32,
         mul: Word,
         udiv: Word,
+        urem: Word,
     }
 
     impl Blasted {
@@ -131,16 +162,18 @@ mod tests {
             let b = word_input(&mut aig, width);
             let mul = blast_mul(&mut aig, &a, &b);
             let udiv = blast_udiv(&mut aig, &a, &b);
+            let urem = blast_urem(&mut aig, &a, &b);
             Blasted {
                 aig,
                 width,
                 mul,
                 udiv,
+                urem,
             }
         }
 
         /// Simulate with `a`/`b` bit patterns (LSB-first: bit i of `a` is
-        /// input i, bit i of `b` is input width+i) and compare both ops
+        /// input i, bit i of `b` is input width+i) and compare every op
         /// against the evaluator oracle.
         fn check(&self, x: u128, y: u128) {
             let w = self.width;
@@ -149,17 +182,11 @@ mod tests {
                 .chain((0..w).map(|i| (y >> i) & 1 == 1))
                 .collect();
             let vals = self.aig.simulate(&inputs);
-            let (mul, udiv) = oracle(x, y, w);
-            assert_eq!(
-                word_value(&self.aig, &vals, &self.mul),
-                mul,
-                "bvmul {x:#x} {y:#x} width {w}"
-            );
-            assert_eq!(
-                word_value(&self.aig, &vals, &self.udiv),
-                udiv,
-                "bvudiv {x:#x} {y:#x} width {w}"
-            );
+            let (mul, udiv, urem) = oracle(x, y, w);
+            let got = |word: &Word| word_value(&self.aig, &vals, word);
+            assert_eq!(got(&self.mul), mul, "bvmul {x:#x} {y:#x} width {w}");
+            assert_eq!(got(&self.udiv), udiv, "bvudiv {x:#x} {y:#x} width {w}");
+            assert_eq!(got(&self.urem), urem, "bvurem {x:#x} {y:#x} width {w}");
         }
     }
 
@@ -171,11 +198,33 @@ mod tests {
     }
 
     #[test]
-    fn exhaustive_width8_mul_udiv_match_evaluator() {
+    fn exhaustive_width8_all_muldiv_ops_match_evaluator() {
+        // mul, udiv, urem — all 65536 input pairs, so every divisor-zero and
+        // remainder-zero case is covered.
         let blasted = Blasted::new(8);
         for x in 0..=0xFFu128 {
             for y in 0..=0xFFu128 {
-                blasted.check(x, y); // includes all 256 divisor-zero cases
+                blasted.check(x, y);
+            }
+        }
+    }
+
+    #[test]
+    fn randomized_width16_matches_evaluator() {
+        let blasted = Blasted::new(16);
+        let mut s: u64 = 0xB1A5_7016_0000_0016;
+        for _ in 0..2000 {
+            let x = (xorshift(&mut s) & 0xFFFF) as u128;
+            let y = (xorshift(&mut s) & 0xFFFF) as u128;
+            blasted.check(x, y);
+            blasted.check(x, 0);
+            blasted.check(x, 1);
+            blasted.check(x, 0xFFFF); // -1 signed
+        }
+        // Signed boundaries at width 16.
+        for x in [0u128, 1, 0x7FFF, 0x8000, 0xFFFF] {
+            for y in [0u128, 1, 0x7FFF, 0x8000, 0xFFFF] {
+                blasted.check(x, y);
             }
         }
     }

@@ -71,6 +71,7 @@ pub fn canonicalize_bv(t: &BvTerm) -> BvTerm {
         // Non-commutative: canonicalize children, preserve operand order.
         Sub(a, b) => Sub(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Udiv(a, b) => Udiv(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
+        Urem(a, b) => Urem(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Shl(a, b) => Shl(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Lshr(a, b) => Lshr(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Ashr(a, b) => Ashr(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),

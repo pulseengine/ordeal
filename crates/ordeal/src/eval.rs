@@ -60,6 +60,7 @@ pub fn bv_sort(term: &BvTerm) -> Result<Sort, EvalError> {
         | BvTerm::Sub(a, b)
         | BvTerm::Mul(a, b)
         | BvTerm::Udiv(a, b)
+        | BvTerm::Urem(a, b)
         | BvTerm::And(a, b)
         | BvTerm::Or(a, b)
         | BvTerm::Xor(a, b)
@@ -107,6 +108,11 @@ pub fn eval_bv(term: &BvTerm, env: &Env) -> Result<u128, EvalError> {
             let (x, y) = (eval_bv(a, env)?, eval_bv(b, env)?);
             // SMT-LIB: bvudiv by zero yields all-ones.
             x.checked_div(y).unwrap_or(m)
+        }
+        BvTerm::Urem(a, b) => {
+            let (x, y) = (eval_bv(a, env)?, eval_bv(b, env)?);
+            // SMT-LIB: bvurem by zero yields the dividend.
+            if y == 0 { x } else { x % y }
         }
         BvTerm::And(a, b) => eval_bv(a, env)? & eval_bv(b, env)?,
         BvTerm::Or(a, b) => eval_bv(a, env)? | eval_bv(b, env)?,

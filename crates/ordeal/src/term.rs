@@ -62,6 +62,15 @@ pub enum BvTerm {
     /// Unsigned division (`bvudiv`). Division by zero follows SMT-LIB QF_BV
     /// semantics (result is all-ones).
     Udiv(Box<BvTerm>, Box<BvTerm>),
+    /// Unsigned remainder (`bvurem`). Remainder by zero yields the dividend
+    /// (SMT-LIB QF_BV).
+    ///
+    /// Native rather than derived on purpose: the restoring-division circuit
+    /// already produces the remainder, so blasting it directly avoids the
+    /// multiplier that the `a - (a/b)*b` term-level identity would need. The
+    /// signed forms (`bvsdiv`/`bvsrem`) stay *derived* — see [`crate::lowering`]
+    /// — because they cost no multiplier once this op exists.
+    Urem(Box<BvTerm>, Box<BvTerm>),
 
     // --- Bitwise ---
     /// Bitwise AND (`bvand`).

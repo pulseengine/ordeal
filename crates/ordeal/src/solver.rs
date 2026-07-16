@@ -157,6 +157,7 @@ pub enum OpKind {
     Sub,
     Mul,
     Udiv,
+    Urem,
     And,
     Or,
     Xor,
@@ -191,6 +192,7 @@ fn bv_op(term: &BvTerm) -> Option<OpKind> {
         BvTerm::Sub(..) => OpKind::Sub,
         BvTerm::Mul(..) => OpKind::Mul,
         BvTerm::Udiv(..) => OpKind::Udiv,
+        BvTerm::Urem(..) => OpKind::Urem,
         BvTerm::And(..) => OpKind::And,
         BvTerm::Or(..) => OpKind::Or,
         BvTerm::Xor(..) => OpKind::Xor,
@@ -216,6 +218,7 @@ fn bv_uses_disabled(term: &BvTerm) -> bool {
         | BvTerm::Sub(a, b)
         | BvTerm::Mul(a, b)
         | BvTerm::Udiv(a, b)
+        | BvTerm::Urem(a, b)
         | BvTerm::And(a, b)
         | BvTerm::Or(a, b)
         | BvTerm::Xor(a, b)
@@ -307,6 +310,10 @@ impl Blaster {
             BvTerm::Udiv(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
                 muldiv::blast_udiv(&mut self.aig, &wa, &wb)
+            }
+            BvTerm::Urem(a, b) => {
+                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
+                muldiv::blast_urem(&mut self.aig, &wa, &wb)
             }
             BvTerm::And(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);

@@ -703,3 +703,42 @@ artifacts:
     fields:
       verdict: pass
       evidence: "own exhaustive 2^32 re-run pass + independent IEEE threshold constants + #709 boundary asserts"
+
+  - id: VE-011
+    type: verification-execution
+    title: v0.10.0 foundation — layout, width-16, multiplier-free div/rem
+    description: >
+      Ran the v0.10.0 oracle set locally. layout:: 4/4 pass (byte order,
+      round-trip at 8/16/32/64, certificate-checked round-trip at 16/32 with
+      recheck(), byte-swap caught as Sat). lowering::tests pass incl.
+      exhaustive_width8_div_rem_family_matches_smtlib_reference (all 65536 pairs
+      vs a Z3-free SMT-LIB reference), width16_div_rem_family_matches_smtlib_reference,
+      and div_rem_derivations_are_multiplier_free (zero Mul nodes in bvurem/
+      bvsdiv/bvsrem). blast::muldiv pass incl.
+      exhaustive_width8_all_muldiv_ops_match_evaluator (mul/udiv/urem) and
+      randomized width 16/32/64. Full lib suite green with no verdict changes.
+    status: implemented
+    fields:
+      version: v0.10.0
+      timestamp: "2026-07-11T19:20:00Z"
+      executor: local
+      environment:
+        note: "cargo test -p ordeal --lib; Kani urem_8/32/64 harnesses added (nightly CI job runs the fast tier)"
+
+  - id: VV-033
+    type: verification-verdict
+    title: "TR-021/TR-022 — layout helpers + multiplier-free div/rem verified"
+    description: >
+      Executed pass. The le-bytes round-trip proves with a re-checkable
+      certificate and a wrong byte order is caught; width 16 is exercised; the
+      div/rem family matches the SMT-LIB reference exhaustively at width 8 and
+      carries no multiplier, for exactly one new trusted op (bvurem).
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-020
+      - type: part-of-execution
+        target: VE-011
+    fields:
+      verdict: pass
+      evidence: "layout:: 4/4; exhaustive width-8 derived div/rem vs SMT-LIB ref; multiplier-free structural check; muldiv exhaustive width-8 native urem"

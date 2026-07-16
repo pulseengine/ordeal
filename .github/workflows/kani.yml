@@ -49,7 +49,7 @@ jobs:
         uses: model-checking/kani-github-action@v1
         with:
           args: >-
-            --harness add_8 --harness sub_8 --harness and_8 --harness or_8
+            --harness add_8 --harness sub_8 --harness urem_8 --harness and_8 --harness or_8
             --harness xor_8 --harness shl_8 --harness lshr_8 --harness ashr_8
             --harness rotr_8 --harness eq_8 --harness ne_8 --harness ult_8
             --harness ule_8 --harness ugt_8 --harness uge_8 --harness slt_8
