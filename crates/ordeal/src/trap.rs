@@ -86,19 +86,34 @@ pub enum DivOp {
 }
 
 impl DivOp {
-    fn is_signed(self) -> bool {
-        matches!(self, DivOp::DivS | DivOp::RemS)
+    /// Whether this op traps on the `INT_MIN / -1` overflow pair.
+    ///
+    /// **Only `div_s` does.** Per WASM Core §4.4.1 `idiv_s` traps there because
+    /// the true quotient `2^(N-1)` is not representable, but `irem_s` is
+    /// *defined*: `irem_s(INT_MIN, -1) = 0` (ordeal's own `bvsrem` reference
+    /// agrees). `rem_s` therefore traps on divisor-zero and nothing else.
+    ///
+    /// Getting this wrong was ordeal#72: the clause was gated on
+    /// "is the op signed", which wrongly swept in `RemS` and made the library
+    /// demand a trap WASM does not have — rejecting correct `rem_s` lowerings
+    /// (and blessing spuriously-trapping ones). It hid because both sides of a
+    /// trap-equivalence VC used this same builder: consistent wrongness is
+    /// invisible to a consistency gate. synth caught it by deriving the ARM side
+    /// independently, from the emitted guard structure.
+    fn traps_on_overflow(self) -> bool {
+        matches!(self, DivOp::DivS)
     }
 }
 
 /// Trap condition for a division/remainder op: divide-by-zero for all four,
-/// plus `INT_MIN / -1` signed overflow for the signed ops (`div_s`/`rem_s`).
+/// plus the `INT_MIN / -1` overflow for **`div_s` only** (see
+/// [`DivOp::traps_on_overflow`] — `rem_s` does NOT trap there).
 /// Pure compares — `Eq(divisor, 0)` and `And(Eq(dividend, INT_MIN), Eq(divisor, -1))`.
 pub fn trap_div(op: DivOp, dividend: &BvTerm, divisor: &BvTerm, width: u32) -> BoolTerm {
     let sort = Sort::new(width);
     let zero = BvTerm::Const { value: 0, sort };
     let div_by_zero = BoolTerm::Eq(bx(divisor.clone()), bx(zero));
-    if !op.is_signed() {
+    if !op.traps_on_overflow() {
         return div_by_zero;
     }
     // Signed overflow: dividend == INT_MIN and divisor == -1 (all ones).
@@ -526,18 +541,87 @@ mod tests {
 
     // ---- trap-condition builders: eval-equivalence against the reference ----
 
+    /// Spec-grounded reference for WASM Core §4.4.1 div/rem trapping, derived
+    /// from **result definability** — NOT from `trap_div`'s own predicates.
+    ///
+    /// That independence is the whole point: ordeal#72 hid because this test
+    /// previously reused `DivOp::is_signed()`, the very predicate that was
+    /// wrong, so it mirrored the bug instead of catching it. Here the answer
+    /// comes from the spec's actual reason to trap — "the exact result is not
+    /// representable" — computed in `i128`.
+    fn wasm_div_traps(op: DivOp, x: u128, y: u128, w: u32) -> bool {
+        // Divisor zero traps for all four ops.
+        if y == 0 {
+            return true;
+        }
+        let to_signed = |v: u128| -> i128 {
+            let half = 1i128 << (w - 1);
+            let val = v as i128;
+            if val >= half { val - (1i128 << w) } else { val }
+        };
+        match op {
+            // Unsigned div/rem are total once the divisor is non-zero.
+            DivOp::DivU | DivOp::RemU => false,
+            // irem_s is TOTAL for a non-zero divisor: |rem| < |divisor|, so the
+            // result is always representable — including irem_s(INT_MIN, -1) = 0.
+            DivOp::RemS => false,
+            // idiv_s traps exactly when the exact quotient does not fit.
+            DivOp::DivS => {
+                let q = to_signed(x) / to_signed(y);
+                let (lo, hi) = (-(1i128 << (w - 1)), (1i128 << (w - 1)) - 1);
+                q < lo || q > hi
+            }
+        }
+    }
+
     #[test]
     fn trap_div_matches_wasm_semantics() {
-        let (a, b) = (v("a", 8), v("b", 8));
+        let w = 8u32;
+        let (a, b) = (v("a", w), v("b", w));
         for op in [DivOp::DivU, DivOp::DivS, DivOp::RemU, DivOp::RemS] {
-            let cond = trap_div(op, &a, &b, 8);
+            let cond = trap_div(op, &a, &b, w);
             for av in 0u128..256 {
                 for bv in 0u128..256 {
                     let got = eval::eval_bool(&cond, &env2(av, bv)).unwrap();
-                    let zero = bv == 0;
-                    let overflow = op.is_signed() && av == 0x80 && bv == 0xFF;
-                    assert_eq!(got, zero || overflow, "{op:?} a={av} b={bv}");
+                    let want = wasm_div_traps(op, av, bv, w);
+                    assert_eq!(got, want, "{op:?} a={av:#04x} b={bv:#04x}");
                 }
+            }
+        }
+    }
+
+    #[test]
+    fn rem_s_does_not_trap_on_the_int_min_over_minus_one_pair() {
+        // The ordeal#72 regression, pinned explicitly: div_s traps on the
+        // overflow pair (quotient 2^(w-1) is unrepresentable) but rem_s does
+        // NOT — irem_s(INT_MIN, -1) = 0. Found by synth's derived-ARM-trap gate
+        // (synth#166) rejecting a CORRECT shipped rem_s lowering.
+        for w in [8u32, 32] {
+            let (a, b) = (v("a", w), v("b", w));
+            let int_min = 1u128 << (w - 1);
+            let minus_one = if w >= 128 {
+                u128::MAX
+            } else {
+                (1u128 << w) - 1
+            };
+            let at = |op: DivOp| {
+                let mut e = Env::new();
+                e.insert("a".into(), int_min);
+                e.insert("b".into(), minus_one);
+                eval::eval_bool(&trap_div(op, &a, &b, w), &e).unwrap()
+            };
+            assert!(at(DivOp::DivS), "div_s MUST trap on INT_MIN/-1 (w{w})");
+            assert!(!at(DivOp::RemS), "rem_s must NOT trap on INT_MIN/-1 (w{w})");
+            assert!(!at(DivOp::RemU), "rem_u must NOT trap on INT_MIN/-1 (w{w})");
+            // …and every op still traps on divisor zero.
+            for op in [DivOp::DivU, DivOp::DivS, DivOp::RemU, DivOp::RemS] {
+                let mut e = Env::new();
+                e.insert("a".into(), int_min);
+                e.insert("b".into(), 0);
+                assert!(
+                    eval::eval_bool(&trap_div(op, &a, &b, w), &e).unwrap(),
+                    "{op:?} must trap on divisor zero (w{w})"
+                );
             }
         }
     }

@@ -32,6 +32,24 @@ and ABI-equivalence consumers, plus a multiplier-free div/rem family.
 - Width **16** is now exercised by the oracle matrix (relay CCSDS/CRC-16, kiln
   `extend8/16_s`).
 
+### Fixed
+- **`trap_div(DivOp::RemS)` wrongly demanded a trap on `INT_MIN / -1`** (#72).
+  Per WASM Core §4.4.1 only `idiv_s` traps on the overflow pair (its quotient
+  `2^(N-1)` is unrepresentable); `irem_s(INT_MIN, -1)` is **defined and returns
+  0**. The clause was gated on "is the op signed", which swept in `RemS` — so the
+  library rejected **correct** `rem_s` lowerings and would have blessed
+  spuriously-trapping ones. Found by synth's derived-ARM-trap gate (synth#166)
+  with counterexample `dividend=0x80000000, divisor=0xFFFFFFFF`; synth's pinned
+  workaround can now be dropped.
+  - **Why it hid:** both sides of a trap-equivalence VC used this same builder,
+    and ordeal's own test reused the implementation's `is_signed()` predicate —
+    consistent wrongness is invisible to a consistency gate. The test is now
+    grounded in **result definability** per the spec (computed in `i128`),
+    independent of `trap_div`'s internals, and a mutation check confirms it fails
+    if the bug is reintroduced.
+- Z3-bridge (`oracle.rs`) coverage for the native `bvurem`, so the differential
+  corpus generates and cross-checks it against Z3's operator.
+
 ### Corrections (premises that contact with the code falsified)
 - `bvsdiv`/`bvsrem`/`bvurem` were **not** missing — they already existed as
   derived lowerings. The gap was **cost** (a multiplier), not capability. So this
