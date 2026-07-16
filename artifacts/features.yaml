@@ -291,7 +291,7 @@ artifacts:
          (bvurem) is promoted to the fragment so the remainder comes straight
          out of the division circuit, and bvsrem is re-expressed over it. The
          whole div/rem family is now multiplier-free for +1 trusted op (TR-022).
-    status: implemented
+    status: verified
     release: v0.10.0
     tags: [roadmap, p7, width-16, byte-layout, signed-div, relay, spar, kiln]
     links:

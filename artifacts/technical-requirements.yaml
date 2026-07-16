@@ -511,7 +511,7 @@ artifacts:
       from_le_bytes as pure extract/concat compositions over the closed fragment
       (no new operations), so wire-codec round-trip and ABI-layout equivalence
       become one `prove_equiv` call for relay (#265), spar (#327) and kiln (#426).
-    status: implemented
+    status: verified
     release: v0.10.0
     tags: [width-16, byte-layout, le-bytes, relay, spar, kiln]
     links:
@@ -549,7 +549,7 @@ artifacts:
       bvsrem as a sign correction over it. bvsdiv stays derived (already
       multiplier-free). Net: the fragment grows by one op, and the whole div/rem
       family becomes multiplier-free.
-    status: implemented
+    status: verified
     release: v0.10.0
     tags: [bvurem, bvsrem, bvsdiv, multiplier-free, kiln, closed-fragment]
     links:

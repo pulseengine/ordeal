@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.10.0] - 2026-07-11
+## [0.10.0] - 2026-07-16
 
 **P7 — layout & arithmetic completeness** (FEAT-008 / TR-021 + TR-022). The
 foundation the consumer research named: byte-layout primitives for the wire-codec
