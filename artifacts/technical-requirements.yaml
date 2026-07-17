@@ -597,7 +597,7 @@ artifacts:
       consumer re-discharges its obligations automatically with a re-checkable
       certificate instead of hand-encoding each — the CompCert-style argument for
       ASIL-D / DO-178C.
-    status: implemented
+    status: verified
     release: v0.12.0
     tags: [smtlib, front-end, verus, gale, relay, certificate]
     links:

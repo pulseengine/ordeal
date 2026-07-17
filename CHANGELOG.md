@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-17
+
+**P9 — Verus-VC bridge** (FEAT-009 / TR-023, issue #65). Discharge the
+`by (bit_vector)` obligations **Verus itself emits** with a re-checkable
+certificate — no hand transcription in the loop.
+
+### Added
+- **`ordeal verus <verus --log-all dir | file> [--cert-out DIR]`** — lifts each
+  `by (bit_vector)` obligation out of a Verus SMT log and discharges it,
+  writing one `.lrat` certificate per obligation (each re-checked by the trusted
+  checker before its verdict is reported). Prelude dumps and ordinary quantified
+  queries are **skipped, not failed**: only queries Verus marks
+  `;; query spun off because: bitvector` are in the QF_BV fragment.
+- **`ordeal::verus`** module — `extract`/`is_bitvector_query`, the slicer that
+  lifts the bit-blast sub-query out of the surrounding quantified encoding.
+- SMT-LIB reader: **`Bool`-sorted `declare-const`**, **`=>`** (n-ary,
+  right-associative), and **boolean `=`** (`iff`, i.e. Verus's `<==>`). All
+  expressed in the closed fragment — a `Bool` is a BV1 read as `= #b1`, `=>` is
+  `Or(Not a, b)` — so **no new solver theory and no new trusted op**.
+
+### Verified
+Against the real toolchain: verus **0.2026.02.15.61aa1bf** (sha256-identical to
+the release `rules_verus` pins — the exact binary gale verifies with) ran a full
+verification of gale's crate (**1159 verified, 0 errors**), and `ordeal verus`
+discharged **62 of 62** of its `by (bit_vector)` obligations — across
+`fault_decode.rs` (17), `work.rs` (13), `executor.rs` (10), `userspace.rs` (7),
+`event.rs` (6), `spinlock_validate.rs` (4), `atomic.rs` (3), `mpu.rs`,
+`cpu_mask.rs` — converting gale's ASIL-D evidence for those leaves from
+unchecked Z3 into an independently re-checkable, Lean-checker-backed certificate.
+
+### Slicing is sound by construction
+The slicer keeps a **contiguous tail** of Verus's query, so its assertions are a
+subset of what Verus sent — and dropping assertions only makes UNSAT *harder*.
+A sliced UNSAT therefore implies the obligation Verus posed holds; a mis-slice
+can lose a proof, never fabricate one.
+
+### Corrections (premises that contact with the code falsified)
+- Issue #65's stated gap was "let-bindings + the bitvector idioms". Verus emits
+  **zero** `let` and **zero** `define-fun`; the real gaps were a Bool constant
+  (which rejected every VC on its first goal) and `=>`, plus boolean `=` found
+  only by widening past the first lemma.
+- The obligation count is **62**, not the issue's 54.
+
+### Falsification
+Wrong if: a lifted obligation disagrees with gale's hand-encoded transcription
+of the same lemma; the slicer accepts a query Verus did not mark as a bitvector
+spin-off; or a `*_mutant.smt2` discrimination file returns `unsat` instead of
+`sat`.
+
 ## [0.11.0] - 2026-07-17
 
 **P8 — symbolic-index linear-memory sliver** (FEAT-013 / TR-028, issue #70).

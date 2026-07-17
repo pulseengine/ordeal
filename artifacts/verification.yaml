@@ -553,7 +553,7 @@ artifacts:
       transcription of cpu_mask returns the same UNSAT (28210 vs 28250 bytes of
       LRAT), and gale's three *_mutant.smt2 discrimination files still return
       sat, so the pipeline is not vacuously proving everything.
-    status: implemented
+    status: verified
     release: v0.12.0
     tags: [verus, smtlib, gale, asil-d, certificate, bridge]
     links:
