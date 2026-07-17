@@ -51,6 +51,7 @@ pub mod smtlib;
 pub mod solver;
 pub mod term;
 pub mod trap;
+pub mod verus;
 
 #[cfg(feature = "oracle")]
 pub mod oracle;

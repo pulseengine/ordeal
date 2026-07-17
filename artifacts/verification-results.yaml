@@ -813,3 +813,58 @@ artifacts:
     fields:
       verdict: pass
       evidence: "165 oracle-feature tests incl. the Z3 differential (local, 0 failed) + CI Z3 Oracle job success on PR #83; mutation check on array_congruence; clippy 0 default+oracle"
+  - id: VE-013
+    type: verification-execution
+    title: v0.12.0 — Verus VC bridge against gale's real obligations (TR-023)
+    description: >
+      Ran the v0.12.0 oracle set locally. 157 lib tests pass (149 before + 8
+      new), clippy 0 under BOTH default and --features oracle (run with
+      LIBRARY_PATH=/opt/homebrew/lib so the differential actually executes),
+      fmt clean. End-to-end against the real toolchain: verus
+      0.2026.02.15.61aa1bf verified gale's crate (1159 verified, 0 errors) and
+      `ordeal verus` discharged 62/62 of its `by (bit_vector)` obligations,
+      writing 62 .lrat certificates (544 KB), each re-checked by the trusted
+      checker before its verdict was reported.
+      THREE PREMISES WERE FALSIFIED BY MEASUREMENT and are recorded so the
+      plan is not re-derived from the wrong ones: (1) issue #65 says the gap is
+      "let-bindings" — Verus emits ZERO `let` and ZERO `define-fun` here; the
+      real gaps were a Bool-sorted declare-const (which rejected every VC on
+      its first goal) and `=>`; (2) widening past one lemma exposed a third,
+      boolean `=` (Verus's `<==>`, which gale's mpu.rs uses) — found only by
+      running the wider corpus, not by reading the issue; (3) the obligation
+      count is 62, not the issue's 54 nor the ~64 estimated by grepping the
+      source (grepping `by(bit_vector)` without the space finds ~11 of 68).
+    status: implemented
+    fields:
+      version: v0.12.0
+      timestamp: "2026-07-17T16:45:00Z"
+      executor: local
+      environment:
+        note: >-
+          cargo test -p ordeal --lib (157 pass); clippy default + oracle (0/0);
+          fmt clean; verus 0.2026.02.15.61aa1bf --log-all over gale @5ad901d
+          (1159 verified, 0 errors) -> ordeal verus: 62 discharged, 0 failed,
+          53 skipped.
+
+  - id: VV-035
+    type: verification-verdict
+    title: "VER-022 pass — Verus VC bridge discharges gale's 62 obligations"
+    description: >
+      Executed pass. The obligation Verus ACTUALLY checked — not a human
+      transcription of it — is discharged with a certificate the trusted
+      checker re-validated, for all 62 of gale's `by (bit_vector)` leaves. The
+      slicer refuses non-bitvector queries rather than mis-modelling them, and
+      is sound by construction: it keeps a contiguous TAIL of the query, so its
+      assertions are a subset of Verus's and a sliced UNSAT implies the real
+      obligation holds — a mis-slice can lose a proof, never fabricate one.
+      No new trusted op: Bool consts become BV1 read as `= #b1`, `=>` is
+      Or(Not a, b), and boolean `=` is iff — term.rs is untouched.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-022
+      - type: part-of-execution
+        target: VE-013
+    fields:
+      verdict: pass
+      evidence: "62/62 gale obligations discharged + 62 re-checked .lrat certs; 157 lib tests; gale's hand-encoding agrees (28210 vs 28250 B); gale's 3 mutants still sat"
