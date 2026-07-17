@@ -29,6 +29,11 @@ rust_library(
     name = "ordeal",
     srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
     crate_root = "src/lib.rs",
+    # `include_str!` fixtures (verus.rs / smtlib.rs #[cfg(test)] modules) must
+    # be declared as compile inputs, or the sandboxed build cannot read them —
+    # cargo finds them via the filesystem, but Bazel needs them listed. These
+    # are real Verus VC logs used as regression fixtures (issue #65).
+    compile_data = glob(["tests/fixtures/*.smt2"]),
     edition = "2024",
     deps = [
         # The in-workspace LRAT checker (the sole trusted component). The
