@@ -518,7 +518,7 @@ artifacts:
       symbolic+offset indices and cross-checks against Z3's native array
       theory, which performs neither the read-over-write elimination nor the
       Ackermann congruence.
-    status: implemented
+    status: verified
     release: v0.11.0
     tags: [array, symbolic-index, read-over-write, congruence, loom, differential]
     links:
