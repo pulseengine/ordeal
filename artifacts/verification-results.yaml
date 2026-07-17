@@ -769,10 +769,17 @@ artifacts:
       The congruence measure was MUTATION-CHECKED: with the array_congruence
       emission deleted it fails with Sat([("$sel:a:#0",0),("$sel:a:5",128),
       ("i",5)]) — i = 5 while a[i] != a[5] — and passes again once restored.
-      LIMITATION, stated rather than papered over: the Z3 differential
-      (UV-014b) compiles locally but CANNOT RUN on this machine — `ld: library
-      'z3' not found` — so that half is executed by CI's Z3 Oracle job, and
-      this execution record does not claim it.
+      CORRECTION (2026-07-17): this record previously claimed the Z3
+      differential could not run locally (`ld: library 'z3' not found`) and
+      deferred it to CI. That was WRONG — z3 4.15.4 was already installed via
+      Homebrew and the error was only a linker SEARCH-PATH gap. With
+      `LIBRARY_PATH=/opt/homebrew/lib` the full oracle suite runs here: 165
+      tests pass, 0 failed (194 s), including
+      differential_ordeal_vs_z3_on_corpus and the new sliver_diff_symbolic_index
+      (symbolic + aliasing-congruence cases vs Z3's NATIVE array theory, which
+      performs neither the read-over-write elimination nor the Ackermann
+      congruence). So the differential is executed evidence, locally AND by
+      CI's Z3 Oracle job (job conclusion `success` on PR #83).
     status: implemented
     fields:
       version: v0.11.0
@@ -780,9 +787,10 @@ artifacts:
       executor: local
       environment:
         note: >-
-          cargo test -p ordeal --lib (145 pass); cargo clippy --all-targets and
+          cargo test -p ordeal --lib (145 pass); LIBRARY_PATH=/opt/homebrew/lib
+          cargo test -p ordeal --features oracle --lib (165 pass, 0 failed,
+          194 s — the differential INCLUDED); clippy --all-targets and
           --features oracle --all-targets (0/0); cargo fmt --check clean.
-          Z3 differential deferred to CI (no local z3 library to link).
 
   - id: VV-034
     type: verification-verdict
@@ -794,7 +802,8 @@ artifacts:
       a[i] = a[5] when i = 5 and is mutation-checked to fail without it; loom's
       symbolic-base LE chain round-trips; the concrete fast path emits neither
       an Ite nor a congruence clause. term.rs is UNCHANGED — no new trusted op.
-      The Z3-differential half is pending CI.
+      The Z3 differential is EXECUTED, not pending: 165 oracle tests pass
+      locally and CI's Z3 Oracle job concluded `success` on PR #83.
     status: implemented
     links:
       - type: result-of
@@ -803,4 +812,4 @@ artifacts:
         target: VE-012
     fields:
       verdict: pass
-      evidence: "145 lib tests; mutation check on array_congruence; clippy 0 default+oracle; Z3 differential pending CI"
+      evidence: "165 oracle-feature tests incl. the Z3 differential (local, 0 failed) + CI Z3 Oracle job success on PR #83; mutation check on array_congruence; clippy 0 default+oracle"

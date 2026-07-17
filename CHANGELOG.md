@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-07-17
+
+**P8 — symbolic-index linear-memory sliver** (FEAT-013 / TR-028, issue #70).
+Unblocks loom's verifier migration off Z3. Pulled ahead of the Verus-VC bridge
+because it blocks a real consumer today rather than a planned capability.
+
+### Added
+- **Symbolic BV32 indices for `select`/`store`** over `Array(BV32 → BV8)`.
+  loom models linear memory as one global array and does multi-byte load/store
+  as little-endian chains over a **symbolic** base address (a `local.get` or
+  computed stack value). Previously a symbolic index returned
+  `NonConcreteIndex` → `Unknown`, so **every loom function touching memory
+  reverted** — memory-heavy modules would have gotten near-zero optimization
+  the moment loom flipped its backend.
+- **Array congruence** — `index_i = index_j → value_i = value_j` over each base
+  array's access set (Ackermann over the index set). A base-array read is a
+  unary uninterpreted function of its index, so reads must agree wherever their
+  indices do.
+
+### Changed
+- `select(store(a,i,v), j)` now lowers to `ite(i = j, v, select(a,j))` when the
+  aliasing is not statically decidable. **No new solver theory and no new
+  trusted operation** — `Ite` and `Eq` were already in the closed fragment with
+  proven rules, so `term.rs` is untouched.
+- **The concrete fast path is preserved.** When both indices are constants the
+  aliasing is settled statically: no `ite`, and no congruence clause (distinct
+  constants never alias). A fully concrete query lowers to exactly its
+  assertions, as before.
+
+### Evidence
+The read-over-write law under a symbolic index: `select(store(a,i,v),i) = v` is
+UNSAT to refute; with `i ≠ j` the store is transparent; and **without** `i ≠ j`
+the same equality stays **SAT** — so the encoding does not silently assume
+non-aliasing. Congruence is **mutation-checked**: deleting it makes
+`i = 5 ⇒ a[i] = a[5]` fail with the spurious model
+`Sat([("$sel:a:#0",0), ("$sel:a:5",128), ("i",5)])` — i.e. `i = 5` while
+`a[i] ≠ a[5]`. loom's own two-byte LE chain over a symbolic base round-trips.
+Every `Unsat` runs the full certificate-checked pipeline. The Z3 differential
+now draws concrete / symbolic / symbolic+offset indices and agrees with Z3's
+**native array theory**, which performs neither the read-over-write elimination
+nor the congruence: 165 oracle-feature tests, 0 failed.
+
+### Falsification
+Wrong if: a symbolic-index query disagrees with Z3's array theory; a model
+satisfies `i = j` while `a[i] ≠ a[j]` for the same base array; a fully concrete
+query gains an `Ite` or a congruence clause; or loom reports a memory-touching
+function still reverting to `Unknown` for a symbolic base address.
+
 ## [0.10.0] - 2026-07-16
 
 **P7 — layout & arithmetic completeness** (FEAT-008 / TR-021 + TR-022). The
