@@ -755,3 +755,52 @@ artifacts:
     fields:
       verdict: pass
       evidence: "layout:: 4/4; exhaustive width-8 derived div/rem vs SMT-LIB ref; multiplier-free structural check; muldiv exhaustive width-8 native urem; Kani urem_8 SUCCESSFUL (1117 checks, 0 failed)"
+  - id: VE-012
+    type: verification-execution
+    title: v0.11.0 — symbolic-index select/store (TR-028)
+    description: >
+      Ran the v0.11.0 oracle set locally on the implementation branch. 145 lib
+      tests pass (138 before + 7 new), clippy 0 under BOTH the default and
+      --features oracle configurations, fmt clean. The seven new measures cover
+      the read-over-write law under a symbolic index (same-index validity,
+      non-aliasing transparency, and the deliberately-SAT undetermined case
+      that proves non-vacuity), array congruence, loom's little-endian chain
+      over a symbolic base, and the preserved concrete fast path.
+      The congruence measure was MUTATION-CHECKED: with the array_congruence
+      emission deleted it fails with Sat([("$sel:a:#0",0),("$sel:a:5",128),
+      ("i",5)]) — i = 5 while a[i] != a[5] — and passes again once restored.
+      LIMITATION, stated rather than papered over: the Z3 differential
+      (UV-014b) compiles locally but CANNOT RUN on this machine — `ld: library
+      'z3' not found` — so that half is executed by CI's Z3 Oracle job, and
+      this execution record does not claim it.
+    status: implemented
+    fields:
+      version: v0.11.0
+      timestamp: "2026-07-16T18:05:00Z"
+      executor: local
+      environment:
+        note: >-
+          cargo test -p ordeal --lib (145 pass); cargo clippy --all-targets and
+          --features oracle --all-targets (0/0); cargo fmt --check clean.
+          Z3 differential deferred to CI (no local z3 library to link).
+
+  - id: VV-034
+    type: verification-verdict
+    title: "VER-021 pass — symbolic-index select/store"
+    description: >
+      Executed pass on the local half. The read-over-write law holds under a
+      symbolic index with certificate-checked Unsat verdicts; the encoding does
+      not assume non-aliasing (the undetermined case is SAT); congruence forces
+      a[i] = a[5] when i = 5 and is mutation-checked to fail without it; loom's
+      symbolic-base LE chain round-trips; the concrete fast path emits neither
+      an Ite nor a congruence clause. term.rs is UNCHANGED — no new trusted op.
+      The Z3-differential half is pending CI.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-021
+      - type: part-of-execution
+        target: VE-012
+    fields:
+      verdict: pass
+      evidence: "145 lib tests; mutation check on array_congruence; clippy 0 default+oracle; Z3 differential pending CI"

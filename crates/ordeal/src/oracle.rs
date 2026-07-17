@@ -309,7 +309,7 @@ fn gen_ext_bv(rng: &mut XorShift64, depth: u32) -> ExtBvTerm {
                 let arr = gen_ext_array(rng, d);
                 ExtBvTerm::Select {
                     array: Box::new(arr),
-                    index: Box::new(concrete_index(rng)),
+                    index: Box::new(any_index(rng)),
                 }
             }
             _ => {
@@ -351,6 +351,38 @@ fn concrete_index(rng: &mut XorShift64) -> ExtBvTerm {
     })
 }
 
+/// The BV32 index names the symbolic corpus draws from. A *small* pool is
+/// deliberate: it forces aliasing and non-aliasing between distinct reads to
+/// both be reachable, which is what array congruence has to get right.
+const INDICES: [&str; 2] = ["i", "j"];
+
+/// A BV32 index that is concrete, symbolic, or symbolic+offset (TR-028).
+///
+/// The mix matters. `loom` addresses are `local.get`-derived symbolic BV32
+/// bases, and its multi-byte accesses are `base + k` chains — so a corpus of
+/// only constants would never exercise the read-over-write mux, the
+/// congruence clauses, or the concrete/symbolic aliasing cases at all.
+fn any_index(rng: &mut XorShift64) -> ExtBvTerm {
+    match rng.below(3) {
+        0 => concrete_index(rng),
+        1 => ExtBvTerm::Core(BvTerm::Var {
+            name: INDICES[rng.below(2) as usize].into(),
+            sort: Sort::new(32),
+        }),
+        // A symbolic base plus a small concrete offset: loom's exact shape.
+        _ => ExtBvTerm::Op(Box::new(ExtOp::Add(
+            ExtBvTerm::Core(BvTerm::Var {
+                name: INDICES[rng.below(2) as usize].into(),
+                sort: Sort::new(32),
+            }),
+            ExtBvTerm::Core(BvTerm::Const {
+                value: rng.below(3) as u128,
+                sort: Sort::new(32),
+            }),
+        ))),
+    }
+}
+
 /// Build a store chain of the given depth over a random base array.
 fn gen_ext_array(rng: &mut XorShift64, depth: u32) -> ArrayTerm {
     let base = ArrayTerm::Var {
@@ -358,7 +390,7 @@ fn gen_ext_array(rng: &mut XorShift64, depth: u32) -> ArrayTerm {
     };
     (0..depth).fold(base, |acc, _| ArrayTerm::Store {
         array: Box::new(acc),
-        index: Box::new(concrete_index(rng)),
+        index: Box::new(any_index(rng)),
         value: Box::new(gen_ext_bv(rng, 1)),
     })
 }
@@ -1153,7 +1185,11 @@ mod sliver_oracle_tests {
         assert!(unsats > 0, "corpus produced no UNSAT verdicts");
     }
 
-    /// UV-014: symbolic index and bad sorts are rejected out of the sliver.
+    /// UV-014: bad sorts are rejected out of the sliver.
+    ///
+    /// A symbolic BV32 index is no longer rejected — that is TR-028, and it
+    /// is covered by `sliver_diff_symbolic_index` below. What remains out of
+    /// the sliver is a sort violation: the array is fixed at BV32 → BV8.
     #[test]
     fn sliver_diff_rejects_out_of_sliver() {
         let sym = ExtBoolTerm::Eq(
@@ -1163,27 +1199,60 @@ mod sliver_oracle_tests {
             },
             c8(0),
         );
-        // BV8 index is caught as a bad sort first.
+        // BV8 index is caught as a bad sort.
         assert_eq!(
             crate::sliver::lower(&[sym]).err(),
             Some(SliverError::BadArraySort)
         );
-        let sym32 = ExtBoolTerm::Eq(
-            ExtBvTerm::Select {
-                array: Box::new(ArrayTerm::Var { name: "a".into() }),
-                index: Box::new(ExtBvTerm::Core(BvTerm::Var {
-                    name: "i".into(),
-                    sort: Sort::new(32),
-                })),
-            },
-            c8(0),
+    }
+
+    /// UV-014b / TR-028: a SYMBOLIC BV32 index now lowers, and the lowered
+    /// core must agree with Z3's native array theory.
+    ///
+    /// This is the load-bearing differential for #70. Z3 does not perform
+    /// ordeal's read-over-write elimination or Ackermann congruence — it
+    /// decides `select`/`store` in its own array theory — so agreement here
+    /// is independent evidence that the elimination preserves semantics,
+    /// including the concrete/symbolic aliasing cases congruence exists for.
+    #[test]
+    fn sliver_diff_symbolic_index() {
+        let q = sym32_query();
+        assert!(
+            crate::sliver::lower(std::slice::from_ref(&q)).is_ok(),
+            "a symbolic BV32 index must lower (TR-028)"
         );
-        assert_eq!(
-            crate::sliver::lower(&[sym32]).err(),
-            Some(SliverError::NonConcreteIndex)
+        assert!(
+            sliver_differential(&[q]).is_none(),
+            "symbolic-index select must agree with Z3's array theory"
         );
-        // Skipped by the differential (returns None, not a disagreement).
-        assert!(sliver_differential(&[sym32_query()]).is_none());
+
+        // i = 5 → a[i] = a[5]: the congruence case, cross-checked against Z3
+        // rather than against our own encoding.
+        let i = ExtBvTerm::Core(BvTerm::Var {
+            name: "i".into(),
+            sort: Sort::new(32),
+        });
+        let five = ExtBvTerm::Core(BvTerm::Const {
+            value: 5,
+            sort: Sort::new(32),
+        });
+        let congruence = vec![
+            ExtBoolTerm::Eq(i.clone(), five.clone()),
+            ExtBoolTerm::Not(Box::new(ExtBoolTerm::Eq(
+                ExtBvTerm::Select {
+                    array: Box::new(ArrayTerm::Var { name: "a".into() }),
+                    index: Box::new(i),
+                },
+                ExtBvTerm::Select {
+                    array: Box::new(ArrayTerm::Var { name: "a".into() }),
+                    index: Box::new(five),
+                },
+            ))),
+        ];
+        assert!(
+            sliver_differential(&congruence).is_none(),
+            "aliasing congruence must agree with Z3"
+        );
     }
 
     fn sym32_query() -> ExtBoolTerm {
