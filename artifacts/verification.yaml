@@ -181,7 +181,7 @@ artifacts:
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
     status: draft
-    release: v0.8.0
+    release: v0.16.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
       - type: verifies
@@ -259,7 +259,7 @@ artifacts:
 
   - id: VER-012
     type: sw-verification
-    title: Roadmap phase acceptance gates (P0–P5)
+    title: Roadmap phase acceptance gates (P0–P7)
     description: >
       Per-phase acceptance gate that confirms each roadmap phase's deliverable
       is complete before the phase is considered done: P0 the skeleton compiles
@@ -269,8 +269,14 @@ artifacts:
       the array/UF sliver reduces and agrees with Z3 and loom/synth verify
       against ordeal by default, P4 op-by-op bit-blaster proofs discharge and
       Z3 is out of the soundness argument, and P5 per-op integration latency
-      meets the CI budget. Each gate is satisfied by the phase's underlying
-      verification measures.
+      meets the CI budget, P6 the WASM trap-condition library matches the spec
+      for every partial op, and P7 the byte-layout helpers round-trip under a
+      re-checkable certificate and the div/rem family is multiplier-free. Each
+      gate is satisfied by the phase's underlying verification measures —
+      P6 by VER-018 (verified) and P7 by VER-020 (verified), both executed with
+      their releases green. Extended P5→P7 on 2026-07-16: P6/P7 shipped (v0.9.0,
+      v0.10.0) while this gate still stopped at P5, leaving FEAT-007 and FEAT-008
+      with no incoming `verifies` — so `rivet verify` correctly refused them.
     status: verified
     tags: [roadmap, acceptance, milestone, gate]
     links:
@@ -286,6 +292,10 @@ artifacts:
         target: FEAT-004
       - type: verifies
         target: FEAT-005
+      - type: verifies
+        target: FEAT-007
+      - type: verifies
+        target: FEAT-008
     fields:
       method: review
       steps:

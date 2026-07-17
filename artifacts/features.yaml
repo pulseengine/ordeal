@@ -141,7 +141,7 @@ artifacts:
       `verification` feature) and carries no certificate — a genuine adoption
       opportunity. Those cross-repo adoptions are owned by their teams and are
       tracked via field-report issues, not asserted here.
-    status: implemented
+    status: verified
     release: v0.7.0
     tags: [roadmap, p3, array, uf, loom, synth, integration]
     links:
@@ -175,7 +175,7 @@ artifacts:
       soundness story no longer contains the words "trust Z3"; removing the
       oracle feature removes Z3 completely with no effect on correctness
       guarantees.
-    status: implemented
+    status: verified
     release: v0.6.0
     tags: [roadmap, p4, soundness, bit-blaster, formal-verification]
     links:
@@ -209,7 +209,7 @@ artifacts:
       already shipped (v0.2.0). DEFERRED to a follow-up (tracked as #57):
       LRAT-proof trimming, cross-pass incremental term-graph caching, and a
       full criterion benchmark harness vs Z3 — none are on the soundness path.
-    status: implemented
+    status: verified
     release: v0.8.0
     tags: [roadmap, p5, performance, benchmark]
     links:
@@ -248,7 +248,7 @@ artifacts:
       (exhaustive 2^32 for f32→i32; structured+ULP for the rest) incl. synth's
       #709 boundaries. Out of scope by design: FP-value arithmetic equivalence
       (QF_FP), which stays consumer-side differential.
-    status: implemented
+    status: verified
     release: v0.9.0
     tags: [roadmap, p6, trap, partiality, wasm, loom, synth, shared-checker]
     links:
