@@ -43,7 +43,7 @@
 use crate::eval::bv_sort;
 use crate::lowering;
 use crate::{BoolTerm, BvTerm, CheckResult, Solver, Sort};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Why reading or solving an SMT-LIB2 script failed.
 ///
@@ -196,6 +196,19 @@ fn parse_one(toks: &[String], pos: usize) -> Result<(Sexp, usize), SmtError> {
 /// Reader state: the declared variables (name → bit width) accumulated so far.
 struct Ctx {
     decls: HashMap<String, u32>,
+    /// Names declared with the `Bool` sort (TR-029).
+    ///
+    /// The core has no boolean variable — [`BoolTerm`] is built from
+    /// comparisons, so there is nothing to bind a free `Bool` to. A `Bool`
+    /// declaration therefore becomes a **BV1 variable**, and a use of that
+    /// name in boolean position becomes `name = #b1`. This mirrors how the
+    /// reader already encodes the `true`/`false` literals (as trivial
+    /// equalities) and keeps the fragment closed: no new operation, no
+    /// `term.rs` change.
+    ///
+    /// Verus emits exactly this shape for every `by (bit_vector)` obligation
+    /// — `(declare-const %%location_label%%0 Bool)` guarding the goal.
+    bool_decls: HashSet<String>,
 }
 
 impl Ctx {
@@ -414,6 +427,16 @@ impl Ctx {
                     Box::new(const_bv(0, 1)),
                     Box::new(const_bv(1, 1)),
                 )),
+                // A `Bool`-declared name reads as `name = #b1` (see
+                // `Ctx::bool_decls`). Verus guards every by(bit_vector) goal
+                // with `(declare-const %%location_label%%N Bool)`.
+                name if self.bool_decls.contains(name) => Ok(BoolTerm::Eq(
+                    Box::new(BvTerm::Var {
+                        name: name.to_string(),
+                        sort: Sort::new(1),
+                    }),
+                    Box::new(const_bv(1, 1)),
+                )),
                 other => Err(SmtError::Unsupported(format!("boolean atom '{other}'"))),
             },
             Sexp::List(items) => {
@@ -424,6 +447,23 @@ impl Ctx {
                 let args = &items[1..];
                 match op {
                     "=" => self.chain_eq(args),
+                    // SMT-LIB `=>` is n-ary and RIGHT-associative:
+                    // (=> a b c) == (=> a (=> b c)). Expressed with the core's
+                    // existing Not/Or — no new operation enters the fragment.
+                    "=>" => {
+                        if args.is_empty() {
+                            return Err(SmtError::Parse("'=>' needs arguments".into()));
+                        }
+                        let mut terms = args
+                            .iter()
+                            .map(|a| self.parse_bool(a))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let mut acc = terms.pop().expect("non-empty");
+                        while let Some(p) = terms.pop() {
+                            acc = BoolTerm::Or(Box::new(BoolTerm::Not(Box::new(p))), Box::new(acc));
+                        }
+                        Ok(acc)
+                    }
                     "distinct" => self.all_distinct(args),
                     "bvult" => self.cmp(args, BoolTerm::Ult),
                     "bvule" => self.cmp(args, BoolTerm::Ule),
@@ -599,6 +639,13 @@ fn parse_sort(s: &Sexp) -> Result<u32, SmtError> {
             .and_then(|w| w.parse::<u32>().ok())
             .ok_or_else(|| SmtError::Parse("bad BitVec width".into()));
     }
+    // `Bool` is admitted as a 1-bit variable (see `Ctx::bool_decls`): the core
+    // has no boolean variable, so a `Bool` declaration becomes a BV1 whose
+    // boolean reading is `name = #b1`. Verus guards every `by (bit_vector)`
+    // goal with one, so refusing it would reject the real VCs outright.
+    if as_atom(s) == Some("Bool") {
+        return Ok(1);
+    }
     Err(SmtError::Unsupported("non-BitVec sort".into()))
 }
 
@@ -614,6 +661,7 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
 
     let mut ctx = Ctx {
         decls: HashMap::new(),
+        bool_decls: HashSet::new(),
     };
     let mut declared: Vec<(String, u32)> = Vec::new();
     let mut solver = Solver::new();
@@ -630,9 +678,13 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
             "set-logic" | "set-info" | "set-option" => {}
 
             "declare-const" => {
-                // (declare-const name (_ BitVec N))
+                // (declare-const name (_ BitVec N))  |  (declare-const name Bool)
                 let name = decl_name(items, 1)?;
-                let width = parse_sort(item(items, 2, "declare-const")?)?;
+                let sort = item(items, 2, "declare-const")?;
+                let width = parse_sort(sort)?;
+                if as_atom(sort) == Some("Bool") {
+                    ctx.bool_decls.insert(name.clone());
+                }
                 ctx.decls.insert(name.clone(), width);
                 declared.push((name, width));
             }
@@ -690,6 +742,77 @@ fn decl_name(items: &[Sexp], n: usize) -> Result<String, SmtError> {
 
 #[cfg(test)]
 mod tests {
+    // ── TR-029: the Verus VC dialect (issue #65) ─────────────────────────
+    //
+    // Verus emits `(declare-const %%location_label%%N Bool)` + `(=> label goal)`
+    // around EVERY `by (bit_vector)` obligation. Without both, its VCs are
+    // rejected outright — which is the whole gap between "gale hand-transcribes
+    // 64 obligations" and "the obligation Verus actually checked is discharged
+    // with a re-checkable certificate".
+
+    #[test]
+    fn bool_declared_const_reads_as_bv1_equality() {
+        // The core has no boolean variable, so a Bool decl becomes BV1 and its
+        // boolean use is `name = #b1`. Satisfiable: pick label = 1.
+        let src = "(set-logic QF_BV)(declare-const p Bool)(assert p)(check-sat)";
+        match solve_str(src).unwrap().result.unwrap() {
+            CheckResult::Sat(_) => {}
+            other => panic!("a free Bool must be satisfiable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn bool_const_is_falsifiable_too() {
+        // Not vacuous: `p AND NOT p` must be UNSAT.
+        let src = "(set-logic QF_BV)(declare-const p Bool)(assert p)(assert (not p))(check-sat)";
+        match solve_str(src).unwrap().result.unwrap() {
+            CheckResult::Unsat(_) => {}
+            other => panic!("p AND NOT p must be UNSAT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn implication_is_right_associative() {
+        // (=> a b c) == (=> a (=> b c)). With a=1, b=1, c=0 the formula is
+        // false, so asserting it alongside those values must be UNSAT.
+        let src = "(set-logic QF_BV)\
+                   (declare-const a Bool)(declare-const b Bool)(declare-const c Bool)\
+                   (assert a)(assert b)(assert (not c))(assert (=> a b c))(check-sat)";
+        match solve_str(src).unwrap().result.unwrap() {
+            CheckResult::Unsat(_) => {}
+            other => panic!("(=> a b c) with a,b true and c false must be UNSAT, got {other:?}"),
+        }
+        // And it is satisfiable when the chain is respected.
+        let ok = "(set-logic QF_BV)\
+                  (declare-const a Bool)(declare-const b Bool)(declare-const c Bool)\
+                  (assert (=> a b c))(check-sat)";
+        match solve_str(ok).unwrap().result.unwrap() {
+            CheckResult::Sat(_) => {}
+            other => panic!("(=> a b c) alone must be satisfiable, got {other:?}"),
+        }
+    }
+
+    /// THE #65 test: a REAL Verus VC, emitted by verus 0.2026.02.15.61aa1bf
+    /// (sha256-identical to the toolchain rules_verus pins, i.e. the exact
+    /// binary gale verifies with) for gale's `cpu_mask.rs:179` obligation.
+    ///
+    /// This is not a hand-written approximation of the dialect — it is the
+    /// bit-blast sub-query Verus itself sent to Z3, and it must discharge to a
+    /// checker-validated UNSAT. gale's hand-transcription of the same lemma
+    /// (`proofs/ordeal-bv/cpu_mask_pot.smt2`) also returns unsat, which is the
+    /// cross-check that the automated path agrees with the human one.
+    #[test]
+    fn real_verus_by_bit_vector_vc_discharges() {
+        let src = include_str!("../tests/fixtures/verus_cpu_mask_pot.smt2");
+        match solve_str(src).unwrap().result.unwrap() {
+            CheckResult::Unsat(cert) => {
+                cert.recheck()
+                    .expect("Verus's own VC must yield a re-checkable certificate");
+            }
+            other => panic!("Verus's cpu_mask by(bit_vector) VC must be UNSAT, got {other:?}"),
+        }
+    }
+
     use super::*;
     use crate::Model;
 
