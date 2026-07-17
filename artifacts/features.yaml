@@ -326,7 +326,7 @@ artifacts:
       evidence — this converts that into an independently re-checkable,
       Lean-checker-backed certificate. Also serves relay's ~30 Verus escape
       hatches and any Verus consumer.
-    status: implemented
+    status: verified
     release: v0.12.0
     tags: [roadmap, p9, smtlib, verus, gale, relay, asil-d, certificate]
     links:
