@@ -868,3 +868,49 @@ artifacts:
     fields:
       verdict: pass
       evidence: "62/62 gale obligations discharged + 62 re-checked .lrat certs; 157 lib tests; gale's hand-encoding agrees (28210 vs 28250 B); gale's 3 mutants still sat"
+  - id: VE-014
+    type: verification-execution
+    title: v0.13.0 — prove_valid API + consumer recipes (TR-024)
+    description: >
+      Ran the v0.13.0 oracle set locally. 161 lib tests pass (157 before + 4
+      new prove_valid tests), clippy 0 under BOTH default and --features oracle
+      (LIBRARY_PATH=/opt/homebrew/lib), fmt clean, and
+      examples/consumer_recipes.rs runs with all five recipes behaving as
+      expected (3 valid with re-checked certs, 2 refuted with counterexamples).
+      Refactor verified: trap.rs's two gates now delegate to
+      Solver::prove_valid and its 22 tests still pass, so promoting the private
+      helper to public changed no behaviour.
+      PREMISE CORRECTED BY CHECKING: #66's consumer issue refs are loose
+      (relay#4 is e2e-chain, spar#319 WIT-codegen friction, sigil#88 Kani
+      harnesses, scry#95 WasmCert-Coq) and meld#338 — its one "live" miscompile
+      — was CLOSED 2026-07-15. Recipes are labelled by area, and the meld case
+      is framed as a regression guard, not a live catch.
+    status: implemented
+    fields:
+      version: v0.13.0
+      timestamp: "2026-07-17T17:20:00Z"
+      executor: local
+      environment:
+        note: >-
+          cargo test -p ordeal --lib (161 pass); clippy default + oracle (0/0);
+          fmt clean; cargo run --example consumer_recipes (5/5 as expected).
+
+  - id: VV-036
+    type: verification-verdict
+    title: "VER-023 pass — prove_valid + recipes"
+    description: >
+      Executed pass. prove_valid decides validity with a re-checkable
+      certificate or a counterexample; the dual with prove_equiv is exact and
+      tested; trap.rs delegates to it with no behaviour change; the five
+      consumer recipes run, with the meld#338 offset-fold and sigil varint
+      guards refuted by genuine witnesses. No new trusted op — prove_valid is
+      check() over the negated goal.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-023
+      - type: part-of-execution
+        target: VE-014
+    fields:
+      verdict: pass
+      evidence: "161 lib tests; prove_valid dual test; trap 22/22 after refactor; consumer_recipes example 5/5"

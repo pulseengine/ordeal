@@ -566,3 +566,31 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib verus:: smtlib::; ordeal verus <verus --log-all dir> --cert-out <dir>"
         coverage: "Slicer boundary (prelude excluded, config dropped, location reported, non-BV refused), Bool consts, =>, boolean = (iff), real gale obligations end-to-end"
+  - id: VER-023
+    type: sw-verification
+    title: prove_valid primitive + consumer recipes discharge with certificates
+    description: >
+      Confirms TR-024. `Solver::prove_valid(goal)` proves a QF_BV goal valid
+      (Unsat+recheckable cert) or returns a counterexample (Sat), and is the
+      shared primitive behind prove_equiv and the trap gates — a test pins the
+      dual (prove_equiv(a,b) == prove_valid(Eq a b), both UNSAT, both re-check).
+      The five consumer recipes in examples/consumer_recipes.rs run: relay
+      byteswap round-trip, spar packed-field extract, scry zext/trunc transfer
+      (all valid, certs re-checked), and the sigil varint-overflow and meld
+      offset-fold guards (both refuted with real counterexamples,
+      x=0x8000000000000000 and base=0x0). The meld case is the exact,
+      root-caused meld#338 fold, kept as a REGRESSION GUARD (meld fixed it
+      2026-07-15) — not a claim of a live catch.
+    status: draft
+    release: v0.13.0
+    tags: [prove-valid, equivalence, relay, spar, scry, sigil, meld, recipe]
+    links:
+      - type: verifies
+        target: TR-024
+      - type: verifies
+        target: FEAT-010
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib prove_valid meld_offset; cargo run -p ordeal --example consumer_recipes"
+        coverage: "prove_valid valid/invalid/dual, meld#338 guard, 5 consumer recipes"
