@@ -516,6 +516,33 @@ impl Solver {
         Self::verdict(self.solve_pipeline(Some(max_conflicts)))
     }
 
+    /// Prove a boolean **goal valid** — true for *every* assignment to its free
+    /// variables — via the standard validity-as-UNSAT encoding (assert the
+    /// negation, refute it). This is the general primitive behind
+    /// [`Solver::prove_equiv`] and the `trap` module's gates, exposed for
+    /// callers that need to prove an arbitrary QF_BV predicate rather than a
+    /// bare term equivalence (relay codec/CRC laws, scry transfer soundness,
+    /// sigil overflow rejection, meld offset-fold guards; issue #66).
+    ///
+    /// - [`CheckResult::Unsat`] ⟹ the goal holds for **every** input; the
+    ///   carried LRAT certificate was validated by `ordeal-lrat` before return,
+    ///   so a consumer can `cert.recheck()` and re-establish validity with zero
+    ///   trust in the solver.
+    /// - [`CheckResult::Sat`] ⟹ the goal is **not** valid, and the model is a
+    ///   **counterexample**: a concrete input on which the goal is false.
+    /// - [`CheckResult::Unknown`] ⟹ conservative — **no** validity claim
+    ///   (out-of-fragment, ill-sorted, or resource-bounded). Never optimize on
+    ///   it.
+    ///
+    /// Only a `Unsat` authorizes relying on the goal. The dual is exact:
+    /// `prove_equiv(a, b)` is `prove_valid(Eq(a, b))`, and a `prove_valid`
+    /// counterexample is the witness a translation validator reports.
+    pub fn prove_valid(goal: BoolTerm) -> CheckResult {
+        let mut solver = Solver::new();
+        solver.assert(BoolTerm::Not(Box::new(goal)));
+        solver.check()
+    }
+
     /// Prove two same-width bitvector terms **equivalent** — the standard
     /// equivalence-as-UNSAT encoding, for callers (e.g. spar layout codegen,
     /// issue #38) that want a one-call `a ≡ b` oracle rather than assembling
@@ -836,6 +863,103 @@ mod tests {
         match Solver::prove_equiv(var("a", 32), var("b", 32)) {
             CheckResult::Sat(_) => {}
             other => panic!("distinct terms are not equivalent, got {other:?}"),
+        }
+    }
+
+    // ── TR-024: the public prove_valid primitive (issue #66) ─────────────
+
+    /// A valid goal proves UNSAT with a re-checkable certificate. `x | 0 == x`
+    /// holds for every 32-bit `x`.
+    #[test]
+    fn prove_valid_tautology_is_unsat_and_rechecks() {
+        let x = var("x", 32);
+        let goal = BoolTerm::Eq(
+            b(BvTerm::Or(
+                b(x.clone()),
+                b(BvTerm::Const {
+                    value: 0,
+                    sort: crate::term::Sort::new(32),
+                }),
+            )),
+            b(x),
+        );
+        match Solver::prove_valid(goal) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("valid goal's cert must re-check"),
+            other => panic!("x | 0 == x must be valid, got {other:?}"),
+        }
+    }
+
+    /// An invalid goal is `Sat` with a counterexample — the witness a
+    /// translation validator reports.
+    #[test]
+    fn prove_valid_falsifiable_goal_yields_a_counterexample() {
+        // `x + 1 == x` is false for every x; certainly not valid.
+        let x = var("x", 32);
+        let goal = BoolTerm::Eq(
+            b(BvTerm::Add(
+                b(x.clone()),
+                b(BvTerm::Const {
+                    value: 1,
+                    sort: crate::term::Sort::new(32),
+                }),
+            )),
+            b(x),
+        );
+        match Solver::prove_valid(goal) {
+            CheckResult::Sat(_) => {}
+            other => panic!("x + 1 == x must be falsifiable, got {other:?}"),
+        }
+    }
+
+    /// The documented dual is exact: `prove_equiv(a, b)` == `prove_valid(Eq a b)`
+    /// on the same query, both verdicts and (for UNSAT) both re-checkable.
+    #[test]
+    fn prove_valid_is_the_dual_of_prove_equiv() {
+        let mk = || {
+            let hi = var("hi", 32);
+            let flags = var("flags", 8);
+            let packed = BvTerm::Concat(b(hi), b(flags.clone()));
+            let low8 = BvTerm::Extract {
+                hi: 7,
+                lo: 0,
+                arg: b(packed),
+            };
+            (low8, flags)
+        };
+        let (a, bt) = mk();
+        let via_equiv = Solver::prove_equiv(a, bt);
+        let (a2, b2) = mk();
+        let via_valid = Solver::prove_valid(BoolTerm::Eq(b(a2), b(b2)));
+        assert!(
+            matches!(via_equiv, CheckResult::Unsat(_))
+                && matches!(via_valid, CheckResult::Unsat(_)),
+            "prove_equiv and prove_valid(Eq) must agree: {via_equiv:?} vs {via_valid:?}"
+        );
+    }
+
+    /// meld#338 REGRESSION GUARD (issue #66): meld's `fuse` truncated a
+    /// `global.get`-first extended-const expr, folding `base + N` down to
+    /// `base` and corrupting PIE data/element offsets. meld FIXED this
+    /// (closed 2026-07-15); this is the check that would have caught it and
+    /// now guards against its return. `base + N == base` must NOT be valid.
+    #[test]
+    fn meld_offset_fold_regression_guard() {
+        let base = var("base", 32);
+        let n = BvTerm::Const {
+            value: 16,
+            sort: crate::term::Sort::new(32),
+        };
+        let folded = BoolTerm::Eq(b(BvTerm::Add(b(base.clone()), b(n))), b(base));
+        match Solver::prove_valid(folded) {
+            // Sat ⟹ the fold is unsound (there is a `base` making base+16 ≠ base);
+            // that counterexample is exactly what flags the miscompile.
+            CheckResult::Sat(model) => {
+                assert!(
+                    model.assignments.iter().any(|(name, _)| name == "base"),
+                    "counterexample must bind `base`"
+                );
+            }
+            other => panic!("base + 16 == base must be falsifiable, got {other:?}"),
         }
     }
 
