@@ -221,6 +221,35 @@ impl Ctx {
             .map_err(|e| SmtError::Solver(format!("ill-sorted subterm: {e:?}")))
     }
 
+    /// Whether an s-expression is boolean-shaped, so `=` can tell `iff` from
+    /// bitvector equality. Structural on purpose: the core has no boolean
+    /// sort to consult, and a `Bool`-declared name is the only atom that can
+    /// be a boolean leaf.
+    fn is_bool_sexp(&self, s: &Sexp) -> bool {
+        match s {
+            Sexp::Atom(a) => a == "true" || a == "false" || self.bool_decls.contains(a.as_str()),
+            Sexp::List(items) => matches!(
+                items.first().and_then(as_atom),
+                Some(
+                    "and"
+                        | "or"
+                        | "not"
+                        | "=>"
+                        | "="
+                        | "distinct"
+                        | "bvult"
+                        | "bvule"
+                        | "bvugt"
+                        | "bvuge"
+                        | "bvslt"
+                        | "bvsle"
+                        | "bvsgt"
+                        | "bvsge"
+                )
+            ),
+        }
+    }
+
     /// Parse a bitvector-sorted term.
     fn parse_bv(&self, s: &Sexp) -> Result<BvTerm, SmtError> {
         match s {
@@ -446,6 +475,29 @@ impl Ctx {
                     .ok_or_else(|| SmtError::Parse("bad predicate".into()))?;
                 let args = &items[1..];
                 match op {
+                    // SMT-LIB `=` is polymorphic. On bitvectors it is the
+                    // core's Eq; on BOOLEANS it is `iff`, which is how Verus
+                    // encodes `<==>` — and gale's mpu.rs power-of-two lemma is
+                    // a biconditional, so this is not a corner case.
+                    "=" if args.iter().all(|a| self.is_bool_sexp(a)) => {
+                        if args.len() < 2 {
+                            return Err(SmtError::Parse("'=' needs two arguments".into()));
+                        }
+                        let terms = args
+                            .iter()
+                            .map(|a| self.parse_bool(a))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        // Chain, as SMT-LIB does: (= a b c) == (and (= a b) (= b c)).
+                        let mut acc: Option<BoolTerm> = None;
+                        for w in terms.windows(2) {
+                            let e = iff(&w[0], &w[1]);
+                            acc = Some(match acc {
+                                None => e,
+                                Some(p) => BoolTerm::And(Box::new(p), Box::new(e)),
+                            });
+                        }
+                        Ok(acc.expect("len >= 2"))
+                    }
                     "=" => self.chain_eq(args),
                     // SMT-LIB `=>` is n-ary and RIGHT-associative:
                     // (=> a b c) == (=> a (=> b c)). Expressed with the core's
@@ -740,6 +792,21 @@ fn decl_name(items: &[Sexp], n: usize) -> Result<String, SmtError> {
         .ok_or_else(|| SmtError::Parse("declaration name must be a symbol".into()))
 }
 
+/// `a <-> b`, expressed with the core's Not/Or/And — no new operation.
+/// Mirrors `trap::iff`; SMT-LIB spells it `=` over Bool, Verus spells it `<==>`.
+fn iff(a: &BoolTerm, b: &BoolTerm) -> BoolTerm {
+    BoolTerm::And(
+        Box::new(BoolTerm::Or(
+            Box::new(BoolTerm::Not(Box::new(a.clone()))),
+            Box::new(b.clone()),
+        )),
+        Box::new(BoolTerm::Or(
+            Box::new(BoolTerm::Not(Box::new(b.clone()))),
+            Box::new(a.clone()),
+        )),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     // ── TR-029: the Verus VC dialect (issue #65) ─────────────────────────
@@ -803,7 +870,7 @@ mod tests {
     /// cross-check that the automated path agrees with the human one.
     #[test]
     fn real_verus_by_bit_vector_vc_discharges() {
-        let src = include_str!("../tests/fixtures/verus_cpu_mask_pot.smt2");
+        let src = include_str!("../tests/fixtures/verus_gale_cpu_mask_slice.smt2");
         match solve_str(src).unwrap().result.unwrap() {
             CheckResult::Unsat(cert) => {
                 cert.recheck()

@@ -531,3 +531,38 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib sliver:: solver::tests::symbolic_ solver::tests::loom_; cargo test -p ordeal --features oracle --lib sliver_diff"
         coverage: "Read-over-write law (alias/non-alias/undetermined), congruence, loom LE chain, concrete fast path, Z3 differential"
+  - id: VER-022
+    type: sw-verification
+    title: Verus by(bit_vector) VC ingestion — gale's real obligations discharge
+    description: >
+      Confirms TR-023. Measured against the REAL toolchain, not a reproduction:
+      verus 0.2026.02.15.61aa1bf (sha256 185ac063…, identical to the release
+      rules_verus pins — the exact binary gale verifies with) ran a full
+      verification of gale's crate (1159 verified, 0 errors) with --log-all,
+      emitting 62 `by (bit_vector)` obligations. `ordeal verus` lifts each out
+      of its log and discharges it: 62 discharged, 0 failed, every certificate
+      re-checked by the trusted checker before the verdict is printed, spread
+      across fault_decode.rs (17), work.rs (13), executor.rs (10),
+      userspace.rs (7), event.rs (6), spinlock_validate.rs (4), atomic.rs (3),
+      mpu.rs and cpu_mask.rs. The 53 non-bitvector queries in the same log are
+      SKIPPED, not failed — only queries Verus itself marks
+      `;; query spun off because: bitvector` are in the fragment.
+      Two of gale's own obligations are pinned as fixtures (its cpu_mask.rs
+      and the mpu.rs:98 `<==>` biconditional, the latter carrying 240 prelude
+      quantifiers the slicer must exclude). Cross-check: gale's hand-encoded
+      transcription of cpu_mask returns the same UNSAT (28210 vs 28250 bytes of
+      LRAT), and gale's three *_mutant.smt2 discrimination files still return
+      sat, so the pipeline is not vacuously proving everything.
+    status: implemented
+    release: v0.12.0
+    tags: [verus, smtlib, gale, asil-d, certificate, bridge]
+    links:
+      - type: verifies
+        target: TR-023
+      - type: verifies
+        target: FEAT-009
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib verus:: smtlib::; ordeal verus <verus --log-all dir> --cert-out <dir>"
+        coverage: "Slicer boundary (prelude excluded, config dropped, location reported, non-BV refused), Bool consts, =>, boolean = (iff), real gale obligations end-to-end"

@@ -16,6 +16,7 @@ use std::process::ExitCode;
 
 use ordeal::CheckResult;
 use ordeal::smtlib::{self, Outcome};
+use ordeal::verus;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -25,6 +26,7 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Some("check") => run_check(args.get(2).map(String::as_str)),
+        Some("verus") => run_verus(&args[2..]),
         Some("-h" | "--help") => {
             banner();
             ExitCode::SUCCESS
@@ -32,6 +34,7 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!("usage: ordeal check [FILE | -]   (reads stdin if FILE is '-' or omitted)");
+            eprintln!("       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR]");
             ExitCode::from(2)
         }
     }
@@ -155,4 +158,150 @@ fn banner() {
     println!("did not accept is never reported. The checker's formal soundness");
     println!("proof (Aeneas -> Lean 4) is the remaining P2 obligation.");
     println!("See ROADMAP.md (phases P0-P5) for status.");
+}
+
+/// `ordeal verus <log|dir> [--cert-out DIR]` — discharge the `by (bit_vector)`
+/// obligations Verus emitted (TR-023, issue #65).
+///
+/// Point it at a `--log-all` file or directory. Prelude dumps (`root.smt2`) and
+/// ordinary quantified queries are **skipped, not failed**: only queries Verus
+/// itself marked as spun off for bitvector reasoning are in the QF_BV fragment.
+///
+/// Exit code is non-zero if any obligation fails to discharge, so this can gate
+/// a build: `unsat` means the obligation holds and the certificate re-checked.
+fn run_verus(args: &[String]) -> ExitCode {
+    let mut path: Option<&str> = None;
+    let mut cert_out: Option<&str> = None;
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--cert-out" => match args.get(i + 1) {
+                Some(d) => {
+                    cert_out = Some(d.as_str());
+                    i += 2;
+                }
+                None => {
+                    eprintln!("ordeal: --cert-out needs a directory");
+                    return ExitCode::from(2);
+                }
+            },
+            other => {
+                path = Some(other);
+                i += 1;
+            }
+        }
+    }
+    let Some(path) = path else {
+        eprintln!("usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR]");
+        return ExitCode::from(2);
+    };
+
+    let mut files: Vec<std::path::PathBuf> = Vec::new();
+    let p = std::path::Path::new(path);
+    if p.is_dir() {
+        match std::fs::read_dir(p) {
+            Ok(rd) => {
+                for e in rd.flatten() {
+                    let f = e.path();
+                    if f.extension().and_then(|x| x.to_str()) == Some("smt2") {
+                        files.push(f);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("ordeal: cannot read directory '{path}': {e}");
+                return ExitCode::from(2);
+            }
+        }
+        files.sort();
+    } else {
+        files.push(p.to_path_buf());
+    }
+
+    if let Some(dir) = cert_out
+        && let Err(e) = std::fs::create_dir_all(dir)
+    {
+        eprintln!("ordeal: cannot create '{dir}': {e}");
+        return ExitCode::from(2);
+    }
+
+    let (mut discharged, mut skipped, mut failed) = (0usize, 0usize, 0usize);
+    for f in &files {
+        let log = match std::fs::read_to_string(f) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("ordeal: cannot read '{}': {e}", f.display());
+                failed += 1;
+                continue;
+            }
+        };
+        if !verus::is_bitvector_query(&log) {
+            skipped += 1;
+            continue;
+        }
+        let ob = match verus::extract(&log) {
+            Ok(o) => o,
+            Err(e) => {
+                eprintln!("{}: {e}", f.display());
+                failed += 1;
+                continue;
+            }
+        };
+        let who = ob
+            .location
+            .clone()
+            .unwrap_or_else(|| f.display().to_string());
+        match smtlib::solve_str(&ob.script) {
+            Ok(outcome) => match outcome.result {
+                Some(CheckResult::Unsat(cert)) => {
+                    // The verdict is only worth as much as the re-check.
+                    if let Err(e) = cert.recheck() {
+                        println!("FAIL {who}: certificate did not re-check: {e}");
+                        failed += 1;
+                        continue;
+                    }
+                    println!("unsat  {who}  ({} bytes of checked LRAT)", cert.lrat.len());
+                    discharged += 1;
+                    if let Some(dir) = cert_out {
+                        let name = f
+                            .file_stem()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("obligation");
+                        let out = std::path::Path::new(dir).join(format!("{name}.lrat"));
+                        if let Err(e) = std::fs::write(&out, &cert.lrat) {
+                            eprintln!("ordeal: cannot write '{}': {e}", out.display());
+                            failed += 1;
+                        }
+                    }
+                }
+                // Verus posed the obligation as `premises AND NOT goal`, so a
+                // model means the lemma does NOT hold as stated.
+                Some(CheckResult::Sat(_)) => {
+                    println!("SAT    {who}  — obligation does NOT hold (counterexample exists)");
+                    failed += 1;
+                }
+                Some(CheckResult::Unknown) => {
+                    println!("unknown {who} — undecided; treat conservatively");
+                    failed += 1;
+                }
+                None => {
+                    println!("FAIL   {who}: no (check-sat) in the sliced obligation");
+                    failed += 1;
+                }
+            },
+            Err(e) => {
+                println!("FAIL   {who}: {e}");
+                failed += 1;
+            }
+        }
+    }
+
+    println!(
+        "\n{discharged} discharged, {failed} failed, {skipped} skipped (not bitvector queries)"
+    );
+    if failed > 0 || discharged == 0 {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
