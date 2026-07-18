@@ -489,20 +489,14 @@ pub fn trap_equivalence_vc(orig: &DefineOrTrap, opt: &DefineOrTrap) -> BoolTerm 
     BoolTerm::And(bb(trap_eq), bb(guarded_value))
 }
 
-/// Decide a goal produced by this module by proving it **valid**: assert its
-/// negation and run the certificate-checked pipeline. `Unsat(cert)` ⟹ the goal
-/// holds for every input (and `cert.recheck()` re-validates it); `Sat(model)` ⟹
-/// a counterexample input; `Unknown` ⟹ conservative, do **not** accept.
-fn prove_valid(goal: BoolTerm) -> CheckResult {
-    let mut s = Solver::new();
-    s.assert(BoolTerm::Not(bb(goal)));
-    s.check()
-}
-
 /// One-call trap-preservation gate over the full VC ([`trap_equivalence_vc`]).
 /// `Unsat` ⟹ the lowering preserves traps and values.
+///
+/// Delegates to the public [`Solver::prove_valid`] (issue #66): this module's
+/// gate *is* "prove the trap-equivalence VC valid", so it uses the shared
+/// primitive rather than its own copy.
 pub fn prove_trap_equivalence(orig: &DefineOrTrap, opt: &DefineOrTrap) -> CheckResult {
-    prove_valid(trap_equivalence_vc(orig, opt))
+    Solver::prove_valid(trap_equivalence_vc(orig, opt))
 }
 
 /// One-call trap-drop gate over conjunct 1 only ([`trap_condition_equivalence`]).
@@ -512,7 +506,7 @@ pub fn prove_trap_condition_equivalence(
     orig_may_trap: &BoolTerm,
     opt_may_trap: &BoolTerm,
 ) -> CheckResult {
-    prove_valid(trap_condition_equivalence(orig_may_trap, opt_may_trap))
+    Solver::prove_valid(trap_condition_equivalence(orig_may_trap, opt_may_trap))
 }
 
 #[cfg(test)]

@@ -351,7 +351,7 @@ artifacts:
       round-trip + CRC per-step (relay#4/#253), spar AADL↔WIT↔ABI layout (#319),
       scry-bits transfer soundness at 32/64 (scry#95, DO-333), with sigil varint
       overflow (#88) and meld const-expr fold (#338) as fast-follows.
-    status: draft
+    status: implemented
     release: v0.13.0
     tags: [roadmap, p10, prove-valid, equivalence, soundness, relay, spar, scry]
     links:
