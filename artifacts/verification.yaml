@@ -594,3 +594,28 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib prove_valid meld_offset; cargo run -p ordeal --example consumer_recipes"
         coverage: "prove_valid valid/invalid/dual, meld#338 guard, 5 consumer recipes"
+  - id: VER-024
+    type: sw-verification
+    title: Propositional SAT front-end — certified CNF decisions
+    description: >
+      Confirms TR-026. `Solver::check_cnf(&CnfFormula)` runs the certified SAT
+      core below the bit-blaster: solve, emit_lrat, and ordeal_lrat::check
+      BEFORE returning Unsat. An inconsistent clause set is UNSAT with a
+      certificate over EXACTLY the submitted clauses (re-checked); a consistent
+      one is SAT with a self-checked v1..vN configuration; the propositional
+      path agrees with the bit-blaster path on a shared p AND NOT p query; and a
+      feature-model mutual-exclusion conflict (core+tls+nomalloc) is certified
+      UNSAT while dropping the conflict is SAT. No bit-blaster, no new op.
+    status: draft
+    release: v0.14.0
+    tags: [sat, cnf, certificate, feature-model, variant, rivet]
+    links:
+      - type: verifies
+        target: TR-026
+      - type: verifies
+        target: FEAT-014
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib check_cnf"
+        coverage: "inconsistent/consistent/cert-matches-clauses/bitblaster-agreement/feature-model-conflict"

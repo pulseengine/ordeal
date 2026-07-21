@@ -914,3 +914,42 @@ artifacts:
     fields:
       verdict: pass
       evidence: "161 lib tests; prove_valid dual test; trap 22/22 after refactor; consumer_recipes example 5/5"
+  - id: VE-015
+    type: verification-execution
+    title: v0.14.0 piece 1 — propositional SAT front-end (TR-026)
+    description: >
+      Ran the SAT front-end oracle set locally. 166 lib tests pass (161 before +
+      5 new check_cnf tests), clippy 0 under default AND --features oracle
+      (LIBRARY_PATH=/opt/homebrew/lib), fmt clean. check_cnf reuses the exact
+      certified path solve_pipeline uses for the BV case, so the soundness gate
+      is unchanged. PREMISE CORRECTED: #67 frames this as unblocking rivet#128;
+      checking rivet origin/main showed #128 is CLOSED and rivet-core already
+      has its own constraint-propagation resolver with no SAT/ordeal dependency
+      — so this is an upgrade path (certificate-backed variant verdicts), not an
+      unblock. Pieces 2 (the rivet cert schema) and 3 (rules_ordeal, a new
+      repo) are cross-repo and out of this ordeal change.
+    status: implemented
+    fields:
+      version: v0.14.0
+      timestamp: "2026-07-21T12:00:00Z"
+      executor: local
+      environment:
+        note: "cargo test -p ordeal --lib (166 pass); clippy default + oracle (0/0); fmt clean."
+
+  - id: VV-037
+    type: verification-verdict
+    title: "VER-024 pass — check_cnf certified decisions"
+    description: >
+      Executed pass. Propositional UNSAT carries a certificate over the
+      submitted clauses and re-checks; SAT returns a self-checked configuration;
+      the path agrees with the bit-blaster; a feature-model conflict is certified
+      UNSAT. No new trusted op.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-024
+      - type: part-of-execution
+        target: VE-015
+    fields:
+      verdict: pass
+      evidence: "166 lib tests incl. 5 check_cnf; cert-over-submitted-clauses recheck; bit-blaster agreement"
