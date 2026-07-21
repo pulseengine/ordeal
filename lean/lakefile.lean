@@ -28,3 +28,8 @@ lean_lib «Sound» {}
 -- `sorry`-free; every theorem's axioms are only propext / Classical.choice /
 -- Quot.sound (no sorryAx, no native_decide).
 @[default_target] lean_lib «BlasterProof» {}
+
+-- Correctness of the ripple-carry arithmetic blaster family (issue #68):
+-- ripple_carry / blast_add / blast_sub / blast_ult, unbounded width.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterArith» {}
