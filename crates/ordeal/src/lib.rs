@@ -39,6 +39,14 @@
 
 pub mod aig;
 pub mod blast;
+/// The Aeneas translation target for the bit-blaster's correctness proof
+/// (issue #68, v0.15.0). Not the production blaster — a self-contained,
+/// Charon-translatable *model* whose Aeneas-generated Lean (`lean/Blaster.lean`)
+/// is proven equal to the formal `BitVec` semantics for all widths, replacing
+/// the Kani-bounded evidence with an unbounded proof. Kept out of the public
+/// API surface: it exists to be translated, not called.
+#[doc(hidden)]
+pub mod blast_kernel;
 pub mod canon;
 pub mod cnf;
 pub mod eval;
