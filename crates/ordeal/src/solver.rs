@@ -1048,7 +1048,13 @@ mod tests {
         };
         match Solver::check_cnf(&f) {
             CheckResult::Sat(model) => {
-                let get = |n: &str| model.assignments.iter().find(|(k, _)| k == n).map(|(_, v)| *v);
+                let get = |n: &str| {
+                    model
+                        .assignments
+                        .iter()
+                        .find(|(k, _)| k == n)
+                        .map(|(_, v)| *v)
+                };
                 assert_eq!(get("v1"), Some(1), "a is required");
                 assert_eq!(get("v2"), Some(1), "a → b forces b");
             }
@@ -1067,7 +1073,10 @@ mod tests {
         };
         match Solver::check_cnf(&f) {
             CheckResult::Unsat(cert) => {
-                assert_eq!(cert.cnf, f.clauses, "certificate must carry the submitted CNF");
+                assert_eq!(
+                    cert.cnf, f.clauses,
+                    "certificate must carry the submitted CNF"
+                );
                 cert.recheck().expect("must re-check against those clauses");
             }
             other => panic!("expected UNSAT, got {other:?}"),
@@ -1086,8 +1095,14 @@ mod tests {
         });
         // BV form: (p == 1) ∧ (p == 0) over a 1-bit p.
         let p = var("p", 1);
-        let one = BvTerm::Const { value: 1, sort: crate::term::Sort::new(1) };
-        let zero = BvTerm::Const { value: 0, sort: crate::term::Sort::new(1) };
+        let one = BvTerm::Const {
+            value: 1,
+            sort: crate::term::Sort::new(1),
+        };
+        let zero = BvTerm::Const {
+            value: 0,
+            sort: crate::term::Sort::new(1),
+        };
         let mut s = Solver::new();
         s.assert(BoolTerm::Eq(b(p.clone()), b(one)));
         s.assert(BoolTerm::Eq(b(p), b(zero)));
