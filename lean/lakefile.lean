@@ -19,3 +19,12 @@ package «ordeal-lrat-proof» {}
 -- like the mathematical core `pure_check_sound`.
 -- Scope + trust boundary: docs/formal-verification.md. Build: `lake build Sound`.
 lean_lib «Sound» {}
+
+-- The generated bit-blaster model (regen-blaster.sh) — must elaborate.
+@[default_target] lean_lib «BlastKernel» {}
+
+-- Correctness of the bitwise blaster family against BitVec semantics
+-- (issue #68): blast_and / blast_or / blast_xor, unbounded width.
+-- `sorry`-free; every theorem's axioms are only propext / Classical.choice /
+-- Quot.sound (no sorryAx, no native_decide).
+@[default_target] lean_lib «BlasterProof» {}
