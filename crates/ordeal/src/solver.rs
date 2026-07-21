@@ -570,6 +570,62 @@ impl Solver {
         solver.check()
     }
 
+    /// Decide a **propositional** CNF directly — the certified SAT core
+    /// exposed *below* the bit-blaster (TR-026, issue #67). This is the
+    /// front-end rivet's feature-model / variant consistency needs
+    /// (rivet#128): a Boolean consistency query whose `Unsat` is a portable,
+    /// re-checkable certificate, without going through a QF_BV encoding.
+    ///
+    /// Same soundness gate as [`Solver::check`]: on `Unsat` the LRAT proof is
+    /// emitted from the CDCL trace and **validated by `ordeal-lrat` before**
+    /// the verdict is returned, so a returned [`Certificate`] is
+    /// `recheck()`-able with zero trust in the solver.
+    ///
+    /// - [`CheckResult::Unsat`] ⟹ the clause set is unsatisfiable (the
+    ///   feature model is inconsistent), with a checked certificate over
+    ///   *exactly* `formula.clauses`.
+    /// - [`CheckResult::Sat`] ⟹ satisfiable; the model binds `"v1".."vN"` to
+    ///   `0`/`1` (a consistent configuration). The assignment is self-checked
+    ///   against the formula before return, exactly as [`Solver::check`] does.
+    /// - [`CheckResult::Unknown`] ⟹ conservative — only if the checker
+    ///   rejects ordeal's own certificate (an ordeal bug, never a wrong
+    ///   verdict).
+    ///
+    /// Variables are `1..=formula.num_vars`; a literal `±v` refers to variable
+    /// `v`. No bit-blaster, no term graph — the caller supplies clauses.
+    pub fn check_cnf(formula: &crate::cnf::CnfFormula) -> CheckResult {
+        let mut sat_solver = SatSolver::new();
+        match sat_solver.solve(formula) {
+            SatResult::Unsat => {
+                let cert = crate::lrat::emit_lrat(formula.clauses.len(), sat_solver.proof_trace());
+                match ordeal_lrat::check(&formula.clauses, &cert) {
+                    Ok(()) => CheckResult::Unsat(Certificate {
+                        lrat: cert.into_bytes(),
+                        cnf: formula.clauses.clone(),
+                    }),
+                    Err(_) => {
+                        debug_assert!(false, "checker rejected our certificate — ordeal bug");
+                        CheckResult::Unknown
+                    }
+                }
+            }
+            SatResult::Sat(assignment) => {
+                // Self-check the model against the formula, mirroring the
+                // guarantee `check` makes for BV models.
+                debug_assert!(
+                    formula.eval(&assignment),
+                    "SAT model must satisfy the formula — ordeal bug"
+                );
+                let assignments = assignment
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &b)| (format!("v{}", i + 1), b as u128))
+                    .collect();
+                CheckResult::Sat(Model { assignments })
+            }
+        }
+    }
+
     /// Map an internal pipeline outcome to the caller-facing verdict, applying
     /// the soundness gate uniformly for `check` and `check_with_limit`.
     fn verdict(outcome: Pipeline) -> CheckResult {
@@ -961,6 +1017,132 @@ mod tests {
             }
             other => panic!("base + 16 == base must be falsifiable, got {other:?}"),
         }
+    }
+
+    // ── TR-026: propositional SAT front-end (issue #67, rivet#128) ───────
+
+    /// An inconsistent feature model → UNSAT with a re-checkable certificate.
+    /// Shape: a feature `a` both required (`a`) and excluded (`¬a`) — the
+    /// simplest inconsistency rivet's variant checker must catch.
+    #[test]
+    fn check_cnf_inconsistent_model_is_unsat_and_rechecks() {
+        let f = crate::cnf::CnfFormula {
+            num_vars: 1,
+            clauses: vec![vec![1], vec![-1]],
+        };
+        match Solver::check_cnf(&f) {
+            CheckResult::Unsat(cert) => cert
+                .recheck()
+                .expect("propositional UNSAT must carry a re-checkable certificate"),
+            other => panic!("a ∧ ¬a must be UNSAT, got {other:?}"),
+        }
+    }
+
+    /// A consistent feature model → SAT with a configuration the model
+    /// satisfies. Shape: `a → b` (¬a ∨ b) plus `a` required, so `b` is forced.
+    #[test]
+    fn check_cnf_consistent_model_yields_a_configuration() {
+        let f = crate::cnf::CnfFormula {
+            num_vars: 2,
+            clauses: vec![vec![-1, 2], vec![1]],
+        };
+        match Solver::check_cnf(&f) {
+            CheckResult::Sat(model) => {
+                let get = |n: &str| {
+                    model
+                        .assignments
+                        .iter()
+                        .find(|(k, _)| k == n)
+                        .map(|(_, v)| *v)
+                };
+                assert_eq!(get("v1"), Some(1), "a is required");
+                assert_eq!(get("v2"), Some(1), "a → b forces b");
+            }
+            other => panic!("consistent model must be SAT, got {other:?}"),
+        }
+    }
+
+    /// The certificate is over EXACTLY the caller's clauses — a consumer can
+    /// re-check it against the formula it submitted, not a bit-blasted proxy.
+    #[test]
+    fn check_cnf_certificate_matches_the_submitted_clauses() {
+        // Pigeonhole-ish tiny UNSAT: (x∨y) ∧ ¬x ∧ ¬y.
+        let f = crate::cnf::CnfFormula {
+            num_vars: 2,
+            clauses: vec![vec![1, 2], vec![-1], vec![-2]],
+        };
+        match Solver::check_cnf(&f) {
+            CheckResult::Unsat(cert) => {
+                assert_eq!(
+                    cert.cnf, f.clauses,
+                    "certificate must carry the submitted CNF"
+                );
+                cert.recheck().expect("must re-check against those clauses");
+            }
+            other => panic!("expected UNSAT, got {other:?}"),
+        }
+    }
+
+    /// The propositional path agrees with the bit-blaster path on a query
+    /// expressible both ways: a single boolean variable `p`, asserted as
+    /// `p ∧ ¬p`, is UNSAT whether encoded as CNF or as a BV1 equality.
+    #[test]
+    fn check_cnf_agrees_with_the_bitblaster_on_a_shared_query() {
+        // CNF form: p ∧ ¬p.
+        let via_cnf = Solver::check_cnf(&crate::cnf::CnfFormula {
+            num_vars: 1,
+            clauses: vec![vec![1], vec![-1]],
+        });
+        // BV form: (p == 1) ∧ (p == 0) over a 1-bit p.
+        let p = var("p", 1);
+        let one = BvTerm::Const {
+            value: 1,
+            sort: crate::term::Sort::new(1),
+        };
+        let zero = BvTerm::Const {
+            value: 0,
+            sort: crate::term::Sort::new(1),
+        };
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(b(p.clone()), b(one)));
+        s.assert(BoolTerm::Eq(b(p), b(zero)));
+        let via_bv = s.check();
+        assert!(
+            matches!(via_cnf, CheckResult::Unsat(_)) && matches!(via_bv, CheckResult::Unsat(_)),
+            "propositional and bit-blaster paths must agree: {via_cnf:?} vs {via_bv:?}"
+        );
+    }
+
+    /// A feature-model-shaped consistency query (the rivet variant use case,
+    /// #67): features core(1), tls(2), nomalloc(3); constraints "core
+    /// required", "tls requires malloc" (¬tls ∨ ¬nomalloc). Selecting BOTH tls
+    /// and nomalloc is inconsistent → UNSAT with a certificate a tool can
+    /// re-check, turning "this config is invalid" into audit-grade evidence
+    /// rather than an internal solver's say-so.
+    #[test]
+    fn check_cnf_feature_model_conflict_is_certified_unsat() {
+        let f = crate::cnf::CnfFormula {
+            num_vars: 3,
+            clauses: vec![
+                vec![1],      // core required
+                vec![-2, -3], // tls → ¬nomalloc  (mutual exclusion)
+                vec![2],      // tls selected
+                vec![3],      // nomalloc selected  → conflict
+            ],
+        };
+        match Solver::check_cnf(&f) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("conflict cert must re-check"),
+            other => panic!("tls ∧ nomalloc must be inconsistent, got {other:?}"),
+        }
+        // Drop the conflicting selection and it is consistent (SAT).
+        let ok = crate::cnf::CnfFormula {
+            num_vars: 3,
+            clauses: vec![vec![1], vec![-2, -3], vec![2]],
+        };
+        assert!(
+            matches!(Solver::check_cnf(&ok), CheckResult::Sat(_)),
+            "core+tls without nomalloc must be a valid configuration"
+        );
     }
 
     #[test]
