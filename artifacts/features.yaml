@@ -467,7 +467,7 @@ artifacts:
       The cross-repo pieces (the rivet certificate artifact schema and the
       rules_ordeal hermetic Bazel rule) remain in the umbrella, moved to
       v0.17.0.
-    status: implemented
+    status: verified
     release: v0.14.0
     tags: [roadmap, p11a, sat, cnf, certificate, feature-model, rivet]
     links:

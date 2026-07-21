@@ -606,7 +606,7 @@ artifacts:
       path agrees with the bit-blaster path on a shared p AND NOT p query; and a
       feature-model mutual-exclusion conflict (core+tls+nomalloc) is certified
       UNSAT while dropping the conflict is SAT. No bit-blaster, no new op.
-    status: draft
+    status: verified
     release: v0.14.0
     tags: [sat, cnf, certificate, feature-model, variant, rivet]
     links:

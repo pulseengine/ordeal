@@ -676,7 +676,7 @@ artifacts:
       propositional-SAT front-end, so a consumer (rivet feature-model / variant
       solve) can decide config validity / model consistency and emit a
       cert.recheck()-able artifact — the EU AI Act per-configuration trace ask.
-    status: implemented
+    status: verified
     release: v0.14.0
     tags: [sat, propositional, rivet, feature-model, eu-ai-act, certificate]
     links:

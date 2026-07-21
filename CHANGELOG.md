@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-21
+
+**P11a — propositional SAT front-end** (FEAT-014 / TR-026, issue #67). The
+certificate-as-evidence thesis at the Boolean level: decide a caller's CNF
+through the same certified path as the bit-blaster, so a consistency verdict is
+offline-re-checkable evidence rather than an internal solver's say-so.
+
+### Added
+- **`Solver::check_cnf(&CnfFormula) -> CheckResult`** — solve a propositional
+  clause set directly, below the bit-blaster. On `Unsat` the LRAT proof is
+  emitted from the CDCL trace and validated by `ordeal-lrat` **before** the
+  verdict returns; the certificate is over **exactly** the submitted clauses, so
+  a consumer re-checks against the formula it sent. On `Sat`, a self-checked
+  `v1..vN` configuration. No term graph, no new solver theory, no new trusted op.
+
+### Use case
+A feature-model / variant consistency query (a mutual-exclusion or requires
+conflict) becomes a certified `Unsat` a tool can re-validate — audit-grade
+evidence for DO-178C / ISO-26262 / EU-AI-Act, the differentiator none of the
+unchecked-Z3 or Kani/CBMC paths can deliver.
+
+### Scope
+This ships **piece 1 of three** from #67. The cross-repo pieces — the rivet
+`ordeal-certificate` evidence artifact schema and the `rules_ordeal` hermetic
+Bazel rule (a new repo) — are tracked separately in #91, scoped to v0.17.0.
+
+### Corrections (premises that contact with the tracker falsified)
+- #67 frames this as unblocking rivet#128. That issue is **closed** — rivet
+  already ships its own constraint-propagation feature-model resolver with no
+  SAT/ordeal dependency — so this is an *upgrade path* to certificate-backed
+  variant verdicts, not an unblock.
+
+### Falsification
+Wrong if: `check_cnf` and the bit-blaster path disagree on a query expressible
+both ways; a returned `Unsat` certificate fails `recheck()` against the
+submitted clauses; or a `Sat` model fails to satisfy the formula.
+
 ## [0.13.0] - 2026-07-21
 
 **P10 — equivalence & soundness toolkit** (FEAT-010 / TR-024, issue #66). A
