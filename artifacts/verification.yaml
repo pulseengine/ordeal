@@ -581,7 +581,7 @@ artifacts:
       x=0x8000000000000000 and base=0x0). The meld case is the exact,
       root-caused meld#338 fold, kept as a REGRESSION GUARD (meld fixed it
       2026-07-15) — not a claim of a live catch.
-    status: draft
+    status: verified
     release: v0.13.0
     tags: [prove-valid, equivalence, relay, spar, scry, sigil, meld, recipe]
     links:

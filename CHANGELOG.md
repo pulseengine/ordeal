@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-21
+
+**P10 — equivalence & soundness toolkit** (FEAT-010 / TR-024, issue #66). A
+public `prove_valid` primitive plus runnable consumer recipes, so a
+certificate-checked equivalence/validity check lives in the toolchain instead of
+being re-derived per incident.
+
+### Added
+- **`Solver::prove_valid(goal) -> CheckResult`** — prove a QF_BV predicate valid
+  (assert its negation, run the certificate-checked pipeline). `Unsat(cert)` ⟹
+  valid for every input and `cert.recheck()`-able; `Sat(model)` ⟹ a
+  counterexample input; `Unknown` ⟹ conservative. Mirrors `prove_equiv`, which
+  is now exactly `prove_valid(Eq a b)`.
+- **`examples/consumer_recipes.rs`** — the recurring consumer shapes as one
+  certificate-checked call each: a relay codec round-trip, a spar packed-field
+  layout extract, a scry zext/trunc abstraction transfer (all proven valid,
+  certificates re-checked), plus the sigil 64-bit varint-overflow and meld
+  offset-fold **regression guards** (both refuted with real counterexamples).
+
+### Changed
+- The `trap` module's two gates now delegate to the public `Solver::prove_valid`
+  rather than a private copy — one primitive, no duplication. No behaviour
+  change (trap's suite is unchanged).
+
+### Corrections (premises that contact with the tracker falsified)
+- Issue #66 lists meld#338 as "a live silent miscompile". It was **closed
+  2026-07-15** — meld fixed it — so its recipe is a *regression guard*, not a
+  live catch. #66's other consumer references are loose pointers to the consumer
+  *area*, not a specific obligation; the recipes are labelled accordingly.
+
+### Falsification
+Wrong if: `prove_valid(goal)` and `prove_equiv`/`check` disagree on the same
+query; a recipe proven valid fails `cert.recheck()`; or a regression-guard
+recipe (meld offset-fold, sigil varint overflow) stops producing a
+counterexample.
+
 ## [0.12.0] - 2026-07-17
 
 **P9 — Verus-VC bridge** (FEAT-009 / TR-023, issue #65). Discharge the

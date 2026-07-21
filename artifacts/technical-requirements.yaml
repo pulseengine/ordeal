@@ -625,7 +625,7 @@ artifacts:
       codec round-trip (relay), ABI-layout equivalence (spar), abstract-domain
       transfer soundness per concrete input (scry-bits), overflow rejection
       (sigil), and const-expr fold validation (meld).
-    status: implemented
+    status: verified
     release: v0.13.0
     tags: [prove-valid, equivalence, soundness, relay, spar, scry, sigil, meld]
     links:
