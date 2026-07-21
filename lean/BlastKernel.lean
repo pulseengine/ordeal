@@ -77,32 +77,32 @@ structure Aig where
   nodes : alloc.vec.Vec Node
 
 /-- [blast_kernel::lit_false]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 42:0-44:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 42:0-47:1
     Visibility: public -/
 def lit_false : Result Lit := do
   ok { node := 0#usize, neg := false }
 
 /-- [blast_kernel::lit_true]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 47:0-49:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 50:0-52:1
     Visibility: public -/
 def lit_true : Result Lit := do
   ok { node := 0#usize, neg := true }
 
 /-- [blast_kernel::lit_not]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 52:0-57:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 55:0-60:1
     Visibility: public -/
 def lit_not (l : Lit) : Result Lit := do
   ok { l with neg := (¬ l.neg) }
 
 /-- [blast_kernel::aig_new]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 60:0-64:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 68:0-72:1
     Visibility: public -/
 def aig_new : Result Aig := do
   let nodes ← alloc.vec.Vec.push (alloc.vec.Vec.new Node) Node.False
   ok { nodes }
 
 /-- [blast_kernel::push_input]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 67:0-74:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 75:0-82:1
     Visibility: public -/
 def push_input (aig : Aig) (k : Std.Usize) : Result (Lit × Aig) := do
   let idx := alloc.vec.Vec.len aig.nodes
@@ -110,7 +110,7 @@ def push_input (aig : Aig) (k : Std.Usize) : Result (Lit × Aig) := do
   ok ({ node := idx, neg := false }, { nodes := v })
 
 /-- [blast_kernel::push_and]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 78:0-85:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 86:0-93:1
     Visibility: public -/
 def push_and (aig : Aig) (x : Lit) (y : Lit) : Result (Lit × Aig) := do
   let idx := alloc.vec.Vec.len aig.nodes
@@ -118,7 +118,7 @@ def push_and (aig : Aig) (x : Lit) (y : Lit) : Result (Lit × Aig) := do
   ok ({ node := idx, neg := false }, { nodes := v })
 
 /-- [blast_kernel::push_or]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 88:0-91:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 96:0-99:1
     Visibility: public -/
 def push_or (aig : Aig) (x : Lit) (y : Lit) : Result (Lit × Aig) := do
   let l ← lit_not x
@@ -128,7 +128,7 @@ def push_or (aig : Aig) (x : Lit) (y : Lit) : Result (Lit × Aig) := do
   ok (l2, aig1)
 
 /-- [blast_kernel::push_xor]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 94:0-98:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 102:0-106:1
     Visibility: public -/
 def push_xor (aig : Aig) (x : Lit) (y : Lit) : Result (Lit × Aig) := do
   let (o, aig1) ← push_or aig x y
@@ -137,7 +137,7 @@ def push_xor (aig : Aig) (x : Lit) (y : Lit) : Result (Lit × Aig) := do
   push_and aig2 o l
 
 /-- [blast_kernel::eval_lit]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 102:0-109:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 110:0-113:1
     Visibility: public -/
 def eval_lit (vals : Slice Bool) (l : Lit) : Result Bool := do
   let v ← Slice.index_usize vals l.node
@@ -146,7 +146,7 @@ def eval_lit (vals : Slice Bool) (l : Lit) : Result Bool := do
   else ok v
 
 /-- [blast_kernel::simulate]: loop body 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 118:4-131:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 122:4-135:5
     Visibility: public -/
 @[rust_loop_body]
 def simulate_loop.body
@@ -177,7 +177,7 @@ def simulate_loop.body
   else ok (done vals)
 
 /-- [blast_kernel::simulate]: loop 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 118:4-131:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 122:4-135:5
     Visibility: public -/
 @[rust_loop]
 def simulate_loop
@@ -190,7 +190,7 @@ def simulate_loop
     (vals, i)
 
 /-- [blast_kernel::simulate]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 114:0-133:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 118:0-137:1
     Visibility: public -/
 def simulate
   (aig : Aig) (inputs : Slice Bool) : Result (alloc.vec.Vec Bool) := do
@@ -198,7 +198,7 @@ def simulate
   simulate_loop aig.nodes inputs (alloc.vec.Vec.new Bool) n 0#usize
 
 /-- [blast_kernel::blast_and]: loop body 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 141:4-145:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 145:4-149:5
     Visibility: public -/
 @[rust_loop_body]
 def blast_and_loop.body
@@ -218,7 +218,7 @@ def blast_and_loop.body
   else ok (done (out, aig))
 
 /-- [blast_kernel::blast_and]: loop 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 141:4-145:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 145:4-149:5
     Visibility: public -/
 @[rust_loop]
 def blast_and_loop
@@ -231,7 +231,7 @@ def blast_and_loop
     (aig, out, i)
 
 /-- [blast_kernel::blast_and]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 137:0-147:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 141:0-151:1
     Visibility: public -/
 def blast_and
   (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
@@ -241,7 +241,7 @@ def blast_and
   blast_and_loop aig a b (alloc.vec.Vec.new Lit) w 0#usize
 
 /-- [blast_kernel::blast_or]: loop body 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 154:4-158:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 158:4-162:5
     Visibility: public -/
 @[rust_loop_body]
 def blast_or_loop.body
@@ -261,7 +261,7 @@ def blast_or_loop.body
   else ok (done (out, aig))
 
 /-- [blast_kernel::blast_or]: loop 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 154:4-158:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 158:4-162:5
     Visibility: public -/
 @[rust_loop]
 def blast_or_loop
@@ -274,7 +274,7 @@ def blast_or_loop
     (aig, out, i)
 
 /-- [blast_kernel::blast_or]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 150:0-160:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 154:0-164:1
     Visibility: public -/
 def blast_or
   (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
@@ -284,7 +284,7 @@ def blast_or
   blast_or_loop aig a b (alloc.vec.Vec.new Lit) w 0#usize
 
 /-- [blast_kernel::blast_xor]: loop body 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 167:4-171:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 171:4-175:5
     Visibility: public -/
 @[rust_loop_body]
 def blast_xor_loop.body
@@ -304,7 +304,7 @@ def blast_xor_loop.body
   else ok (done (out, aig))
 
 /-- [blast_kernel::blast_xor]: loop 0:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 167:4-171:5
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 171:4-175:5
     Visibility: public -/
 @[rust_loop]
 def blast_xor_loop
@@ -317,7 +317,7 @@ def blast_xor_loop
     (aig, out, i)
 
 /-- [blast_kernel::blast_xor]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 163:0-173:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 167:0-177:1
     Visibility: public -/
 def blast_xor
   (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
@@ -325,5 +325,127 @@ def blast_xor
   := do
   let w := Slice.len a
   blast_xor_loop aig a b (alloc.vec.Vec.new Lit) w 0#usize
+
+/-- [blast_kernel::ripple_carry]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 187:4-195:5
+    Visibility: public -/
+@[rust_loop_body]
+def ripple_carry_loop.body
+  (a : Slice Lit) (b : Slice Lit) (w : Std.Usize) (aig : Aig) (carry : Lit)
+  (sum : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × Lit × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    Lit × (alloc.vec.Vec Lit)))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize a i
+    let l1 ← Slice.index_usize b i
+    let (p, aig1) ← push_xor aig l l1
+    let (s, aig2) ← push_xor aig1 p carry
+    let sum1 ← alloc.vec.Vec.push sum s
+    let (g, aig3) ← push_and aig2 l l1
+    let (t, aig4) ← push_and aig3 p carry
+    let (carry1, aig5) ← push_or aig4 g t
+    let i1 ← i + 1#usize
+    ok (cont (aig5, carry1, sum1, i1))
+  else ok (done (aig, carry, sum))
+
+/-- [blast_kernel::ripple_carry]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 187:4-195:5
+    Visibility: public -/
+@[rust_loop]
+def ripple_carry_loop
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (carry : Lit)
+  (sum : alloc.vec.Vec Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (Aig × Lit × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, carry1, sum1, i1) => ripple_carry_loop.body a b w aig1 carry1
+      sum1 i1)
+    (aig, carry, sum, i)
+
+/-- [blast_kernel::ripple_carry]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 182:0-197:1
+    Visibility: public -/
+def ripple_carry
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (carry_in : Lit) :
+  Result (((alloc.vec.Vec Lit) × Lit) × Aig)
+  := do
+  let w := Slice.len a
+  let (aig1, carry, sum) ←
+    ripple_carry_loop aig a b carry_in (alloc.vec.Vec.new Lit) w 0#usize
+  ok ((sum, carry), aig1)
+
+/-- [blast_kernel::blast_add]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 200:0-203:1
+    Visibility: public -/
+def blast_add
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let l ← lit_false
+  let ((sum, _), aig1) ← ripple_carry aig a b l
+  ok (sum, aig1)
+
+/-- [blast_kernel::word_not]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 210:4-213:5
+    Visibility: public -/
+@[rust_loop_body]
+def word_not_loop.body
+  (a : Slice Lit) (w : Std.Usize) (out : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × Std.Usize) (alloc.vec.Vec Lit))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize a i
+    let l1 ← lit_not l
+    let out1 ← alloc.vec.Vec.push out l1
+    let i1 ← i + 1#usize
+    ok (cont (out1, i1))
+  else ok (done out)
+
+/-- [blast_kernel::word_not]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 210:4-213:5
+    Visibility: public -/
+@[rust_loop]
+def word_not_loop
+  (a : Slice Lit) (out : alloc.vec.Vec Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Lit)
+  := do
+  loop
+    (fun (out1, i1) => word_not_loop.body a w out1 i1)
+    (out, i)
+
+/-- [blast_kernel::word_not]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 206:0-215:1
+    Visibility: public -/
+def word_not (a : Slice Lit) : Result (alloc.vec.Vec Lit) := do
+  let w := Slice.len a
+  word_not_loop a (alloc.vec.Vec.new Lit) w 0#usize
+
+/-- [blast_kernel::blast_sub]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 218:0-222:1
+    Visibility: public -/
+def blast_sub
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let not_b ← word_not b
+  let s := alloc.vec.Vec.deref not_b
+  let l ← lit_true
+  let ((sum, _), aig1) ← ripple_carry aig a s l
+  ok (sum, aig1)
+
+/-- [blast_kernel::blast_ult]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 226:0-230:1
+    Visibility: public -/
+def blast_ult
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) : Result (Lit × Aig) := do
+  let not_b ← word_not b
+  let s := alloc.vec.Vec.deref not_b
+  let l ← lit_true
+  let ((_, carry), aig1) ← ripple_carry aig a s l
+  let l1 ← lit_not carry
+  ok (l1, aig1)
 
 end blast_kernel

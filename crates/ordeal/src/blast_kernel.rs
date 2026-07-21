@@ -175,3 +175,56 @@ pub fn blast_xor(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     }
     out
 }
+
+/// Ripple-carry chain over equal-width words: returns the truncated sum and
+/// the final carry-out. Mirrors `blast/arith.rs::ripple_carry`. Per bit:
+/// `sum_i = a_i ^ b_i ^ carry`, `carry' = (a_i & b_i) | (carry & (a_i ^ b_i))`.
+pub fn ripple_carry(aig: &mut Aig, a: &[Lit], b: &[Lit], carry_in: Lit) -> (Vec<Lit>, Lit) {
+    let mut carry = carry_in;
+    let mut sum: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        let p = push_xor(aig, a[i], b[i]);
+        let s = push_xor(aig, p, carry);
+        sum.push(s);
+        let g = push_and(aig, a[i], b[i]);
+        let t = push_and(aig, p, carry);
+        carry = push_or(aig, g, t);
+        i += 1;
+    }
+    (sum, carry)
+}
+
+/// `bvadd` — ripple-carry adder, carry-in 0. Mirrors `blast/arith.rs::blast_add`.
+pub fn blast_add(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let (sum, _carry) = ripple_carry(aig, a, b, lit_false());
+    sum
+}
+
+/// The word with every literal complemented (for two's-complement subtract).
+pub fn word_not(a: &[Lit]) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        out.push(lit_not(a[i]));
+        i += 1;
+    }
+    out
+}
+
+/// `bvsub` — two's complement: `a + !b + 1`. Mirrors `blast/arith.rs::blast_sub`.
+pub fn blast_sub(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let not_b = word_not(b);
+    let (sum, _carry) = ripple_carry(aig, a, &not_b, lit_true());
+    sum
+}
+
+/// `bvult` — unsigned less-than: the borrow of `a - b`, i.e. the complement
+/// of the carry-out of `a + !b + 1`. Mirrors `blast/arith.rs::blast_ult`.
+pub fn blast_ult(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let not_b = word_not(b);
+    let (_sum, carry) = ripple_carry(aig, a, &not_b, lit_true());
+    lit_not(carry)
+}
