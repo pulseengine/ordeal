@@ -537,6 +537,141 @@ pub fn blast_rotr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit
     cur
 }
 
+/// Full adder: `(sum, carry_out)` for one bit column. Mirrors
+/// `blast/muldiv.rs::full_adder`.
+pub fn full_adder(aig: &mut Aig, a: Lit, b: Lit, cin: Lit) -> (Lit, Lit) {
+    let a_xor_b = push_xor(aig, a, b);
+    let sum = push_xor(aig, a_xor_b, cin);
+    let and_ab = push_and(aig, a, b);
+    let and_prop = push_and(aig, a_xor_b, cin);
+    let cout = push_or(aig, and_ab, and_prop);
+    (sum, cout)
+}
+
+/// Ripple subtraction `a - b` as `a + !b + 1`: returns the w-bit difference
+/// and the final carry, which is 1 iff `a >= b` (no borrow). Mirrors
+/// `blast/muldiv.rs::sub_with_uge`.
+pub fn sub_with_uge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> (Vec<Lit>, Lit) {
+    let mut carry = lit_true();
+    let mut diff: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        let nb = lit_not(b[i]);
+        let (s, c) = full_adder(aig, a[i], nb, carry);
+        diff.push(s);
+        carry = c;
+        i += 1;
+    }
+    (diff, carry)
+}
+
+/// `bvmul` — truncated shift-add partial-product sum. Row `i` adds
+/// `(a << i) & b[i]` into the accumulator; only bits `i..w` are touched and
+/// the carry out of bit `w-1` is dropped (modular semantics). Mirrors
+/// `blast/muldiv.rs::blast_mul`.
+pub fn blast_mul(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let w = a.len();
+    let mut acc: Vec<Lit> = Vec::new();
+    let mut k = 0usize;
+    while k < w {
+        acc.push(lit_false());
+        k += 1;
+    }
+    let mut i = 0usize;
+    while i < w {
+        let mut carry = lit_false();
+        let mut j = i;
+        while j < w {
+            let pp = push_and(aig, a[j - i], b[i]);
+            let (sum, cout) = full_adder(aig, acc[j], pp, carry);
+            acc[j] = sum;
+            carry = cout;
+            j += 1;
+        }
+        i += 1;
+    }
+    acc
+}
+
+/// `bvudiv`/`bvurem` — restoring long division, both results, each with its
+/// SMT-LIB divide-by-zero case (quotient all-ones, remainder = dividend).
+/// Mirrors `blast/muldiv.rs::blast_udivrem`, including the w-bit trick: the
+/// shifted-out top bit alone decides the (w+1)-bit compare, and the w-bit
+/// modular difference is correct because the loop invariant `rem < divisor`
+/// bounds the true difference below 2^w.
+pub fn blast_udivrem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> (Vec<Lit>, Vec<Lit>) {
+    let w = a.len();
+    let mut rem: Vec<Lit> = Vec::new();
+    let mut quo: Vec<Lit> = Vec::new();
+    let mut k = 0usize;
+    while k < w {
+        rem.push(lit_false());
+        quo.push(lit_false());
+        k += 1;
+    }
+    let mut step = 0usize;
+    while step < w {
+        let i = w - 1 - step;
+        // Shift the remainder left, bringing in dividend bit i; `top` is the
+        // bit shifted into the conceptual (w+1)-th position.
+        let top = rem[w - 1];
+        let mut j = w - 1;
+        while j > 0 {
+            rem[j] = rem[j - 1];
+            j -= 1;
+        }
+        rem[0] = a[i];
+        let (diff, low_ge) = sub_with_uge(aig, &rem, b);
+        let ge = push_or(aig, top, low_ge);
+        quo[i] = ge;
+        // Restoring step: keep the difference only when it did not borrow.
+        let mut m = 0usize;
+        while m < w {
+            let sel = push_mux(aig, ge, diff[m], rem[m]);
+            rem[m] = sel;
+            m += 1;
+        }
+        step += 1;
+    }
+    // SMT-LIB divide-by-zero: quotient all-ones, remainder = dividend.
+    let mut nz = lit_false();
+    let mut n = 0usize;
+    while n < w {
+        nz = push_or(aig, nz, b[n]);
+        n += 1;
+    }
+    let b_zero = lit_not(nz);
+    let t = lit_true();
+    let mut quo_out: Vec<Lit> = Vec::new();
+    let mut q = 0usize;
+    while q < w {
+        let sel = push_mux(aig, b_zero, t, quo[q]);
+        quo_out.push(sel);
+        q += 1;
+    }
+    let mut rem_out: Vec<Lit> = Vec::new();
+    let mut r = 0usize;
+    while r < w {
+        let sel = push_mux(aig, b_zero, a[r], rem[r]);
+        rem_out.push(sel);
+        r += 1;
+    }
+    (quo_out, rem_out)
+}
+
+/// `bvudiv` — the quotient half.
+pub fn blast_udiv(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let (quo, _rem) = blast_udivrem(aig, a, b);
+    quo
+}
+
+/// `bvurem` — the remainder half.
+pub fn blast_urem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let (_quo, rem) = blast_udivrem(aig, a, b);
+    rem
+}
+
 #[cfg(test)]
 mod tests {
     //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68).
@@ -615,6 +750,8 @@ mod tests {
         let r_lshr = crate::blast::shift::blast_lshr(&mut raig, &ra, &rb);
         let r_ashr = crate::blast::shift::blast_ashr(&mut raig, &ra, &rb);
         let r_rotr = crate::blast::shift::blast_rotr(&mut raig, &ra, &rb);
+        let r_mul = crate::blast::muldiv::blast_mul(&mut raig, &ra, &rb);
+        let (r_quo, r_rem) = crate::blast::muldiv::blast_udivrem(&mut raig, &ra, &rb);
 
         // Model side: same shape.
         let mut maig = aig_new();
@@ -631,6 +768,8 @@ mod tests {
         let m_lshr = blast_lshr(&mut maig, &ma, &mb, 3);
         let m_ashr = blast_ashr(&mut maig, &ma, &mb, 3);
         let m_rotr = blast_rotr(&mut maig, &ma, &mb, 3);
+        let m_mul = blast_mul(&mut maig, &ma, &mb);
+        let (m_quo, m_rem) = blast_udivrem(&mut maig, &ma, &mb);
 
         for av in 0..=255u32 {
             for bv in 0..=255u32 {
@@ -707,6 +846,21 @@ mod tests {
                     word(&r_rotr),
                     model_word_value(&maig, &inputs, &m_rotr),
                     "rotr {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_mul),
+                    model_word_value(&maig, &inputs, &m_mul),
+                    "mul {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_quo),
+                    model_word_value(&maig, &inputs, &m_quo),
+                    "udiv {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_rem),
+                    model_word_value(&maig, &inputs, &m_rem),
+                    "urem {av} {bv}"
                 );
             }
         }
