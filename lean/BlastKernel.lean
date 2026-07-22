@@ -1388,4 +1388,462 @@ def blast_rotr
   let cur ← blast_rotr_loop0 a (alloc.vec.Vec.new Lit) w 0#usize
   blast_rotr_loop1 aig b stages cur 0#usize
 
+/-- [blast_kernel::full_adder]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 542:0-549:1
+    Visibility: public -/
+def full_adder
+  (aig : Aig) (a : Lit) (b : Lit) (cin : Lit) :
+  Result ((Lit × Lit) × Aig)
+  := do
+  let (a_xor_b, aig1) ← push_xor aig a b
+  let (sum, aig2) ← push_xor aig1 a_xor_b cin
+  let (and_ab, aig3) ← push_and aig2 a b
+  let (and_prop, aig4) ← push_and aig3 a_xor_b cin
+  let (cout, aig5) ← push_or aig4 and_ab and_prop
+  ok ((sum, cout), aig5)
+
+/-- [blast_kernel::sub_with_uge]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 559:4-565:5
+    Visibility: public -/
+@[rust_loop_body]
+def sub_with_uge_loop.body
+  (a : Slice Lit) (b : Slice Lit) (w : Std.Usize) (aig : Aig) (carry : Lit)
+  (diff : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × Lit × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    Lit × (alloc.vec.Vec Lit)))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize b i
+    let nb ← lit_not l
+    let l1 ← Slice.index_usize a i
+    let ((s, c), aig1) ← full_adder aig l1 nb carry
+    let diff1 ← alloc.vec.Vec.push diff s
+    let i1 ← i + 1#usize
+    ok (cont (aig1, c, diff1, i1))
+  else ok (done (aig, carry, diff))
+
+/-- [blast_kernel::sub_with_uge]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 559:4-565:5
+    Visibility: public -/
+@[rust_loop]
+def sub_with_uge_loop
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (carry : Lit)
+  (diff : alloc.vec.Vec Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (Aig × Lit × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, carry1, diff1, i1) => sub_with_uge_loop.body a b w aig1 carry1
+      diff1 i1)
+    (aig, carry, diff, i)
+
+/-- [blast_kernel::sub_with_uge]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 554:0-567:1
+    Visibility: public -/
+def sub_with_uge
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result (((alloc.vec.Vec Lit) × Lit) × Aig)
+  := do
+  let carry ← lit_true
+  let w := Slice.len a
+  let (aig1, carry1, diff) ←
+    sub_with_uge_loop aig a b carry (alloc.vec.Vec.new Lit) w 0#usize
+  ok ((diff, carry1), aig1)
+
+/-- [blast_kernel::blast_mul]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 577:4-580:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_mul_loop0.body
+  (w : Std.Usize) (acc : alloc.vec.Vec Lit) (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × Std.Usize) (alloc.vec.Vec Lit))
+  := do
+  if k < w
+  then
+    let l ← lit_false
+    let acc1 ← alloc.vec.Vec.push acc l
+    let k1 ← k + 1#usize
+    ok (cont (acc1, k1))
+  else ok (done acc)
+
+/-- [blast_kernel::blast_mul]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 577:4-580:5
+    Visibility: public -/
+@[rust_loop]
+def blast_mul_loop0
+  (w : Std.Usize) (acc : alloc.vec.Vec Lit) (k : Std.Usize) :
+  Result (alloc.vec.Vec Lit)
+  := do
+  loop
+    (fun (acc1, k1) => blast_mul_loop0.body w acc1 k1)
+    (acc, k)
+
+/-- [blast_kernel::blast_mul]: loop body 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 585:8-591:9
+    Visibility: public -/
+@[rust_loop_body]
+def blast_mul_loop1_loop0.body
+  (a : Slice Lit) (b : Slice Lit) (w : Std.Usize) (i : Std.Usize) (aig : Aig)
+  (acc : alloc.vec.Vec Lit) (carry : Lit) (j : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Lit × Std.Usize) (Aig ×
+    (alloc.vec.Vec Lit)))
+  := do
+  if j < w
+  then
+    let i1 ← j - i
+    let l ← Slice.index_usize a i1
+    let l1 ← Slice.index_usize b i
+    let (pp, aig1) ← push_and aig l l1
+    let l2 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) acc j
+    let ((sum, cout), aig2) ← full_adder aig1 l2 pp carry
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Lit) acc j
+    let j1 ← j + 1#usize
+    let acc1 := index_mut_back sum
+    ok (cont (aig2, acc1, cout, j1))
+  else ok (done (aig, acc))
+
+/-- [blast_kernel::blast_mul]: loop 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 585:8-591:9
+    Visibility: public -/
+@[rust_loop]
+def blast_mul_loop1_loop0
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (w : Std.Usize)
+  (acc : alloc.vec.Vec Lit) (i : Std.Usize) (carry : Lit) (j : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, acc1, carry1, j1) => blast_mul_loop1_loop0.body a b w i aig1
+      acc1 carry1 j1)
+    (aig, acc, carry, j)
+
+/-- [blast_kernel::blast_mul]: loop body 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 582:4-593:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_mul_loop1.body
+  (a : Slice Lit) (b : Slice Lit) (w : Std.Usize) (aig : Aig)
+  (acc : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if i < w
+  then
+    let carry ← lit_false
+    let (aig1, acc1) ← blast_mul_loop1_loop0 aig a b w acc i carry i
+    let i1 ← i + 1#usize
+    ok (cont (aig1, acc1, i1))
+  else ok (done (acc, aig))
+
+/-- [blast_kernel::blast_mul]: loop 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 582:4-593:5
+    Visibility: public -/
+@[rust_loop]
+def blast_mul_loop1
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (w : Std.Usize)
+  (acc : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, acc1, i1) => blast_mul_loop1.body a b w aig1 acc1 i1)
+    (aig, acc, i)
+
+/-- [blast_kernel::blast_mul]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 573:0-595:1
+    Visibility: public -/
+def blast_mul
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len a
+  let acc ← blast_mul_loop0 w (alloc.vec.Vec.new Lit) 0#usize
+  blast_mul_loop1 aig a b w acc 0#usize
+
+/-- [blast_kernel::blast_udivrem]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 608:4-612:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop0.body
+  (w : Std.Usize) (rem : alloc.vec.Vec Lit) (quo : alloc.vec.Vec Lit)
+  (k : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × (alloc.vec.Vec Lit) × Std.Usize)
+    ((alloc.vec.Vec Lit) × (alloc.vec.Vec Lit)))
+  := do
+  if k < w
+  then
+    let l ← lit_false
+    let rem1 ← alloc.vec.Vec.push rem l
+    let quo1 ← alloc.vec.Vec.push quo l
+    let k1 ← k + 1#usize
+    ok (cont (rem1, quo1, k1))
+  else ok (done (rem, quo))
+
+/-- [blast_kernel::blast_udivrem]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 608:4-612:5
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop0
+  (w : Std.Usize) (rem : alloc.vec.Vec Lit) (quo : alloc.vec.Vec Lit)
+  (k : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (rem1, quo1, k1) => blast_udivrem_loop0.body w rem1 quo1 k1)
+    (rem, quo, k)
+
+/-- [blast_kernel::blast_udivrem]: loop body 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 620:8-623:9
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop1_loop0.body
+  (rem : alloc.vec.Vec Lit) (j : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × Std.Usize) (alloc.vec.Vec Lit))
+  := do
+  if j > 0#usize
+  then
+    let i ← j - 1#usize
+    let l ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) rem i
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Lit) rem j
+    let rem1 := index_mut_back l
+    ok (cont (rem1, i))
+  else ok (done rem)
+
+/-- [blast_kernel::blast_udivrem]: loop 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 620:8-623:9
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop1_loop0
+  (rem : alloc.vec.Vec Lit) (j : Std.Usize) : Result (alloc.vec.Vec Lit) := do
+  loop
+    (fun (rem1, j1) => blast_udivrem_loop1_loop0.body rem1 j1)
+    (rem, j)
+
+/-- [blast_kernel::blast_udivrem]: loop body 3:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 630:8-634:9
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop1_loop1.body
+  (w : Std.Usize) (diff : alloc.vec.Vec Lit) (ge : Lit) (aig : Aig)
+  (rem : alloc.vec.Vec Lit) (m : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    (alloc.vec.Vec Lit)))
+  := do
+  if m < w
+  then
+    let l ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) diff m
+    let l1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) rem m
+    let (sel, aig1) ← push_mux aig ge l l1
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Lit) rem m
+    let m1 ← m + 1#usize
+    let rem1 := index_mut_back sel
+    ok (cont (aig1, rem1, m1))
+  else ok (done (aig, rem))
+
+/-- [blast_kernel::blast_udivrem]: loop 3:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 630:8-634:9
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop1_loop1
+  (aig : Aig) (w : Std.Usize) (rem : alloc.vec.Vec Lit)
+  (diff : alloc.vec.Vec Lit) (ge : Lit) (m : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, rem1, m1) => blast_udivrem_loop1_loop1.body w diff ge aig1 rem1
+      m1)
+    (aig, rem, m)
+
+/-- [blast_kernel::blast_udivrem]: loop body 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 614:4-636:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop1.body
+  (a : Slice Lit) (b : Slice Lit) (w : Std.Usize) (aig : Aig)
+  (rem : alloc.vec.Vec Lit) (quo : alloc.vec.Vec Lit) (step : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × (alloc.vec.Vec Lit) ×
+    Std.Usize) (Aig × (alloc.vec.Vec Lit) × (alloc.vec.Vec Lit)))
+  := do
+  if step < w
+  then
+    let i ← w - 1#usize
+    let i1 ← i - step
+    let top ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) rem i
+    let rem1 ← blast_udivrem_loop1_loop0 rem i
+    let l ← Slice.index_usize a i1
+    let (_, index_mut_back) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Lit) rem1
+        0#usize
+    let rem2 := index_mut_back l
+    let s := alloc.vec.Vec.deref rem2
+    let ((diff, low_ge), aig1) ← sub_with_uge aig s b
+    let (ge, aig2) ← push_or aig1 top low_ge
+    let (_, index_mut_back1) ←
+      alloc.vec.Vec.index_mut (core.slice.index.SliceIndexUsizeSlice Lit) quo
+        i1
+    let quo1 := index_mut_back1 ge
+    let (aig3, rem3) ← blast_udivrem_loop1_loop1 aig2 w rem2 diff ge 0#usize
+    let step1 ← step + 1#usize
+    ok (cont (aig3, rem3, quo1, step1))
+  else ok (done (aig, rem, quo))
+
+/-- [blast_kernel::blast_udivrem]: loop 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 614:4-636:5
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop1
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (w : Std.Usize)
+  (rem : alloc.vec.Vec Lit) (quo : alloc.vec.Vec Lit) (step : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit) × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, rem1, quo1, step1) => blast_udivrem_loop1.body a b w aig1 rem1
+      quo1 step1)
+    (aig, rem, quo, step)
+
+/-- [blast_kernel::blast_udivrem]: loop body 4:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 640:4-643:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop2.body
+  (b : Slice Lit) (w : Std.Usize) (aig : Aig) (nz : Lit) (n : Std.Usize) :
+  Result (ControlFlow (Aig × Lit × Std.Usize) (Aig × Lit))
+  := do
+  if n < w
+  then
+    let l ← Slice.index_usize b n
+    let (nz1, aig1) ← push_or aig nz l
+    let n1 ← n + 1#usize
+    ok (cont (aig1, nz1, n1))
+  else ok (done (aig, nz))
+
+/-- [blast_kernel::blast_udivrem]: loop 4:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 640:4-643:5
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop2
+  (aig : Aig) (b : Slice Lit) (w : Std.Usize) (nz : Lit) (n : Std.Usize) :
+  Result (Aig × Lit)
+  := do
+  loop
+    (fun (aig1, nz1, n1) => blast_udivrem_loop2.body b w aig1 nz1 n1)
+    (aig, nz, n)
+
+/-- [blast_kernel::blast_udivrem]: loop body 5:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 648:4-652:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop3.body
+  (w : Std.Usize) (quo : alloc.vec.Vec Lit) (b_zero : Lit) (t : Lit)
+  (aig : Aig) (quo_out : alloc.vec.Vec Lit) (q : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    (alloc.vec.Vec Lit)))
+  := do
+  if q < w
+  then
+    let l ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) quo q
+    let (sel, aig1) ← push_mux aig b_zero t l
+    let quo_out1 ← alloc.vec.Vec.push quo_out sel
+    let q1 ← q + 1#usize
+    ok (cont (aig1, quo_out1, q1))
+  else ok (done (aig, quo_out))
+
+/-- [blast_kernel::blast_udivrem]: loop 5:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 648:4-652:5
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop3
+  (aig : Aig) (w : Std.Usize) (quo : alloc.vec.Vec Lit) (b_zero : Lit)
+  (t : Lit) (quo_out : alloc.vec.Vec Lit) (q : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, quo_out1, q1) => blast_udivrem_loop3.body w quo b_zero t aig1
+      quo_out1 q1)
+    (aig, quo_out, q)
+
+/-- [blast_kernel::blast_udivrem]: loop body 6:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 655:4-659:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_udivrem_loop4.body
+  (a : Slice Lit) (w : Std.Usize) (rem : alloc.vec.Vec Lit) (b_zero : Lit)
+  (aig : Aig) (rem_out : alloc.vec.Vec Lit) (r : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    (alloc.vec.Vec Lit)))
+  := do
+  if r < w
+  then
+    let l ← Slice.index_usize a r
+    let l1 ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) rem r
+    let (sel, aig1) ← push_mux aig b_zero l l1
+    let rem_out1 ← alloc.vec.Vec.push rem_out sel
+    let r1 ← r + 1#usize
+    ok (cont (aig1, rem_out1, r1))
+  else ok (done (aig, rem_out))
+
+/-- [blast_kernel::blast_udivrem]: loop 6:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 655:4-659:5
+    Visibility: public -/
+@[rust_loop]
+def blast_udivrem_loop4
+  (aig : Aig) (a : Slice Lit) (w : Std.Usize) (rem : alloc.vec.Vec Lit)
+  (b_zero : Lit) (rem_out : alloc.vec.Vec Lit) (r : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, rem_out1, r1) => blast_udivrem_loop4.body a w rem b_zero aig1
+      rem_out1 r1)
+    (aig, rem_out, r)
+
+/-- [blast_kernel::blast_udivrem]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 603:0-661:1
+    Visibility: public -/
+def blast_udivrem
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result (((alloc.vec.Vec Lit) × (alloc.vec.Vec Lit)) × Aig)
+  := do
+  let w := Slice.len a
+  let (rem, quo) ←
+    blast_udivrem_loop0 w (alloc.vec.Vec.new Lit) (alloc.vec.Vec.new Lit)
+      0#usize
+  let (aig1, rem1, quo1) ← blast_udivrem_loop1 aig a b w rem quo 0#usize
+  let nz ← lit_false
+  let (aig2, nz1) ← blast_udivrem_loop2 aig1 b w nz 0#usize
+  let b_zero ← lit_not nz1
+  let t ← lit_true
+  let (aig3, quo_out) ←
+    blast_udivrem_loop3 aig2 w quo1 b_zero t (alloc.vec.Vec.new Lit) 0#usize
+  let (aig4, rem_out) ←
+    blast_udivrem_loop4 aig3 a w rem1 b_zero (alloc.vec.Vec.new Lit) 0#usize
+  ok ((quo_out, rem_out), aig4)
+
+/-- [blast_kernel::blast_udiv]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 664:0-667:1
+    Visibility: public -/
+def blast_udiv
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let ((quo, _), aig1) ← blast_udivrem aig a b
+  ok (quo, aig1)
+
+/-- [blast_kernel::blast_urem]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 670:0-673:1
+    Visibility: public -/
+def blast_urem
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let ((_, rem), aig1) ← blast_udivrem aig a b
+  ok (rem, aig1)
+
 end blast_kernel
