@@ -47,3 +47,38 @@ externals:
     git: https://github.com/pulseengine/synth.git
     ref: main
     prefix: synth
+
+  gale:
+    git: https://github.com/pulseengine/gale.git
+    ref: main
+    prefix: gale
+
+  kiln:
+    git: https://github.com/pulseengine/kiln.git
+    ref: main
+    prefix: kiln
+
+  sigil:
+    git: https://github.com/pulseengine/sigil.git
+    ref: main
+    prefix: sigil
+
+  scry:
+    git: https://github.com/pulseengine/scry.git
+    ref: main
+    prefix: scry
+
+  jess:
+    git: https://github.com/pulseengine/jess.git
+    ref: main
+    prefix: jess
+
+  relay:
+    git: https://github.com/pulseengine/relay.git
+    ref: main
+    prefix: relay
+
+  witness:
+    git: https://github.com/pulseengine/witness.git
+    ref: main
+    prefix: witness
