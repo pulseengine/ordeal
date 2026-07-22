@@ -53,3 +53,10 @@ lean_lib «Sound» {}
 -- unbounded width. Same discipline as BlasterProof: `sorry`-free,
 -- axiom-clean.
 @[default_target] lean_lib «BlasterMul» {}
+
+-- Correctness of the restoring long divider (issue #68, v0.15.0, the LAST
+-- rule): sub_with_uge and blast_udivrem / blast_udiv / blast_urem against
+-- BitVec.smtUDiv (quotient, all-ones on /0) and BitVec.% (remainder —
+-- core's umod already has the SMT-LIB x%0 = x semantics), unbounded width.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterDiv» {}
