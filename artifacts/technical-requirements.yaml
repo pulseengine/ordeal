@@ -701,7 +701,7 @@ artifacts:
       Kani-BOUNDED evidence with an unbounded proof, so the whole pipeline is
       formally trusted, not only the checker. Optionally add a re-checkable Sat
       witness for parity with the Unsat certificate.
-    status: draft
+    status: implemented
     release: v0.15.0
     tags: [lean, aeneas, bit-blaster, trusted-core, assurance, sat-witness]
     links:
