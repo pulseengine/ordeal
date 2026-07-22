@@ -898,4 +898,494 @@ def blast_sign_ext
   let sign ← Slice.index_usize a i
   blast_sign_ext_loop1 by1 out sign 0#usize
 
+/-- [blast_kernel::out_of_range]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 402:4-405:5
+    Visibility: public -/
+@[rust_loop_body]
+def out_of_range_loop.body
+  (b : Slice Lit) (w : Std.Usize) (aig : Aig) (acc : Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × Lit × Std.Usize) (Lit × Aig))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize b i
+    let (acc1, aig1) ← push_or aig acc l
+    let i1 ← i + 1#usize
+    ok (cont (aig1, acc1, i1))
+  else ok (done (acc, aig))
+
+/-- [blast_kernel::out_of_range]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 402:4-405:5
+    Visibility: public -/
+@[rust_loop]
+def out_of_range_loop
+  (aig : Aig) (b : Slice Lit) (acc : Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (Lit × Aig)
+  := do
+  loop
+    (fun (aig1, acc1, i1) => out_of_range_loop.body b w aig1 acc1 i1)
+    (aig, acc, i)
+
+/-- [blast_kernel::out_of_range]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 398:0-407:1
+    Visibility: public -/
+def out_of_range
+  (aig : Aig) (b : Slice Lit) (stages : Std.Usize) : Result (Lit × Aig) := do
+  let acc ← lit_false
+  let w := Slice.len b
+  out_of_range_loop aig b acc w stages
+
+/-- [blast_kernel::barrel_right_stage]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 415:4-420:5
+    Visibility: public -/
+@[rust_loop_body]
+def barrel_right_stage_loop.body
+  (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (fill : Lit) (w : Std.Usize)
+  (aig : Aig) (next : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if i < w
+  then
+    let i1 ← i + s
+    let shifted ← if i1 < w
+                    then Slice.index_usize cur i1
+                    else ok fill
+    let l ← Slice.index_usize cur i
+    let (m, aig1) ← push_mux aig sel shifted l
+    let next1 ← alloc.vec.Vec.push next m
+    let i2 ← i + 1#usize
+    ok (cont (aig1, next1, i2))
+  else ok (done (next, aig))
+
+/-- [blast_kernel::barrel_right_stage]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 415:4-420:5
+    Visibility: public -/
+@[rust_loop]
+def barrel_right_stage_loop
+  (aig : Aig) (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (fill : Lit)
+  (w : Std.Usize) (next : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, next1, i1) => barrel_right_stage_loop.body cur sel s fill w
+      aig1 next1 i1)
+    (aig, next, i)
+
+/-- [blast_kernel::barrel_right_stage]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 411:0-422:1
+    Visibility: public -/
+def barrel_right_stage
+  (aig : Aig) (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (fill : Lit) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len cur
+  barrel_right_stage_loop aig cur sel s fill w (alloc.vec.Vec.new Lit) 0#usize
+
+/-- [blast_kernel::barrel_right]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 432:4-435:5
+    Visibility: public -/
+@[rust_loop_body]
+def barrel_right_loop0.body
+  (a : Slice Lit) (w : Std.Usize) (cur : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × Std.Usize) (alloc.vec.Vec Lit))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize a i
+    let cur1 ← alloc.vec.Vec.push cur l
+    let i1 ← i + 1#usize
+    ok (cont (cur1, i1))
+  else ok (done cur)
+
+/-- [blast_kernel::barrel_right]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 432:4-435:5
+    Visibility: public -/
+@[rust_loop]
+def barrel_right_loop0
+  (a : Slice Lit) (cur : alloc.vec.Vec Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Lit)
+  := do
+  loop
+    (fun (cur1, i1) => barrel_right_loop0.body a w cur1 i1)
+    (cur, i)
+
+/-- [blast_kernel::barrel_right]: loop body 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 437:4-441:5
+    Visibility: public -/
+@[rust_loop_body]
+def barrel_right_loop1.body
+  (b : Slice Lit) (stages : Std.Usize) (fill : Lit) (aig : Aig)
+  (cur : alloc.vec.Vec Lit) (k : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    (alloc.vec.Vec Lit)))
+  := do
+  if k < stages
+  then
+    let s ← 1#usize <<< k
+    let s1 := alloc.vec.Vec.deref cur
+    let l ← Slice.index_usize b k
+    let (cur1, aig1) ← barrel_right_stage aig s1 l s fill
+    let k1 ← k + 1#usize
+    ok (cont (aig1, cur1, k1))
+  else ok (done (aig, cur))
+
+/-- [blast_kernel::barrel_right]: loop 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 437:4-441:5
+    Visibility: public -/
+@[rust_loop]
+def barrel_right_loop1
+  (aig : Aig) (b : Slice Lit) (stages : Std.Usize) (fill : Lit)
+  (cur : alloc.vec.Vec Lit) (k : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, cur1, k1) => barrel_right_loop1.body b stages fill aig1 cur1
+      k1)
+    (aig, cur, k)
+
+/-- [blast_kernel::barrel_right]: loop body 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 445:4-449:5
+    Visibility: public -/
+@[rust_loop_body]
+def barrel_right_loop2.body
+  (fill : Lit) (cur : alloc.vec.Vec Lit) (w : Std.Usize) (oor : Lit)
+  (aig : Aig) (out : alloc.vec.Vec Lit) (j : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if j < w
+  then
+    let l ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) cur j
+    let (m, aig1) ← push_mux aig oor fill l
+    let out1 ← alloc.vec.Vec.push out m
+    let j1 ← j + 1#usize
+    ok (cont (aig1, out1, j1))
+  else ok (done (out, aig))
+
+/-- [blast_kernel::barrel_right]: loop 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 445:4-449:5
+    Visibility: public -/
+@[rust_loop]
+def barrel_right_loop2
+  (aig : Aig) (fill : Lit) (cur : alloc.vec.Vec Lit) (w : Std.Usize)
+  (oor : Lit) (out : alloc.vec.Vec Lit) (j : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, out1, j1) => barrel_right_loop2.body fill cur w oor aig1 out1
+      j1)
+    (aig, out, j)
+
+/-- [blast_kernel::barrel_right]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 428:0-451:1
+    Visibility: public -/
+def barrel_right
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (stages : Std.Usize) (fill : Lit)
+  :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len a
+  let cur ← barrel_right_loop0 a (alloc.vec.Vec.new Lit) w 0#usize
+  let (aig1, cur1) ← barrel_right_loop1 aig b stages fill cur 0#usize
+  let (oor, aig2) ← out_of_range aig1 b stages
+  barrel_right_loop2 aig2 fill cur1 w oor (alloc.vec.Vec.new Lit) 0#usize
+
+/-- [blast_kernel::barrel_left_stage]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 459:4-464:5
+    Visibility: public -/
+@[rust_loop_body]
+def barrel_left_stage_loop.body
+  (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (w : Std.Usize) (aig : Aig)
+  (next : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if i < w
+  then
+    let shifted ←
+      if i >= s
+      then do
+           let i1 ← i - s
+           Slice.index_usize cur i1
+      else lit_false
+    let l ← Slice.index_usize cur i
+    let (m, aig1) ← push_mux aig sel shifted l
+    let next1 ← alloc.vec.Vec.push next m
+    let i1 ← i + 1#usize
+    ok (cont (aig1, next1, i1))
+  else ok (done (next, aig))
+
+/-- [blast_kernel::barrel_left_stage]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 459:4-464:5
+    Visibility: public -/
+@[rust_loop]
+def barrel_left_stage_loop
+  (aig : Aig) (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (w : Std.Usize)
+  (next : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, next1, i1) => barrel_left_stage_loop.body cur sel s w aig1
+      next1 i1)
+    (aig, next, i)
+
+/-- [blast_kernel::barrel_left_stage]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 455:0-466:1
+    Visibility: public -/
+def barrel_left_stage
+  (aig : Aig) (cur : Slice Lit) (sel : Lit) (s : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len cur
+  barrel_left_stage_loop aig cur sel s w (alloc.vec.Vec.new Lit) 0#usize
+
+/-- [blast_kernel::blast_shl]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 473:4-476:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_shl_loop0.body
+  (a : Slice Lit) (w : Std.Usize) (cur : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × Std.Usize) (alloc.vec.Vec Lit))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize a i
+    let cur1 ← alloc.vec.Vec.push cur l
+    let i1 ← i + 1#usize
+    ok (cont (cur1, i1))
+  else ok (done cur)
+
+/-- [blast_kernel::blast_shl]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 473:4-476:5
+    Visibility: public -/
+@[rust_loop]
+def blast_shl_loop0
+  (a : Slice Lit) (cur : alloc.vec.Vec Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Lit)
+  := do
+  loop
+    (fun (cur1, i1) => blast_shl_loop0.body a w cur1 i1)
+    (cur, i)
+
+/-- [blast_kernel::blast_shl]: loop body 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 478:4-482:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_shl_loop1.body
+  (b : Slice Lit) (stages : Std.Usize) (aig : Aig) (cur : alloc.vec.Vec Lit)
+  (k : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) (Aig ×
+    (alloc.vec.Vec Lit)))
+  := do
+  if k < stages
+  then
+    let s ← 1#usize <<< k
+    let s1 := alloc.vec.Vec.deref cur
+    let l ← Slice.index_usize b k
+    let (cur1, aig1) ← barrel_left_stage aig s1 l s
+    let k1 ← k + 1#usize
+    ok (cont (aig1, cur1, k1))
+  else ok (done (aig, cur))
+
+/-- [blast_kernel::blast_shl]: loop 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 478:4-482:5
+    Visibility: public -/
+@[rust_loop]
+def blast_shl_loop1
+  (aig : Aig) (b : Slice Lit) (stages : Std.Usize) (cur : alloc.vec.Vec Lit)
+  (k : Std.Usize) :
+  Result (Aig × (alloc.vec.Vec Lit))
+  := do
+  loop
+    (fun (aig1, cur1, k1) => blast_shl_loop1.body b stages aig1 cur1 k1)
+    (aig, cur, k)
+
+/-- [blast_kernel::blast_shl]: loop body 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 487:4-491:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_shl_loop2.body
+  (cur : alloc.vec.Vec Lit) (w : Std.Usize) (oor : Lit) (f : Lit) (aig : Aig)
+  (out : alloc.vec.Vec Lit) (j : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if j < w
+  then
+    let l ←
+      alloc.vec.Vec.index (core.slice.index.SliceIndexUsizeSlice Lit) cur j
+    let (m, aig1) ← push_mux aig oor f l
+    let out1 ← alloc.vec.Vec.push out m
+    let j1 ← j + 1#usize
+    ok (cont (aig1, out1, j1))
+  else ok (done (out, aig))
+
+/-- [blast_kernel::blast_shl]: loop 2:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 487:4-491:5
+    Visibility: public -/
+@[rust_loop]
+def blast_shl_loop2
+  (aig : Aig) (cur : alloc.vec.Vec Lit) (w : Std.Usize) (oor : Lit) (f : Lit)
+  (out : alloc.vec.Vec Lit) (j : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, out1, j1) => blast_shl_loop2.body cur w oor f aig1 out1 j1)
+    (aig, out, j)
+
+/-- [blast_kernel::blast_shl]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 469:0-493:1
+    Visibility: public -/
+def blast_shl
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (stages : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len a
+  let cur ← blast_shl_loop0 a (alloc.vec.Vec.new Lit) w 0#usize
+  let (aig1, cur1) ← blast_shl_loop1 aig b stages cur 0#usize
+  let (oor, aig2) ← out_of_range aig1 b stages
+  let f ← lit_false
+  blast_shl_loop2 aig2 cur1 w oor f (alloc.vec.Vec.new Lit) 0#usize
+
+/-- [blast_kernel::blast_lshr]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 496:0-498:1
+    Visibility: public -/
+def blast_lshr
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (stages : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let l ← lit_false
+  barrel_right aig a b stages l
+
+/-- [blast_kernel::blast_ashr]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 501:0-504:1
+    Visibility: public -/
+def blast_ashr
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (stages : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let i := Slice.len a
+  let i1 ← i - 1#usize
+  let sign ← Slice.index_usize a i1
+  barrel_right aig a b stages sign
+
+/-- [blast_kernel::rotr_stage]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 512:4-517:5
+    Visibility: public -/
+@[rust_loop_body]
+def rotr_stage_loop.body
+  (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (w : Std.Usize) (aig : Aig)
+  (next : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if i < w
+  then
+    let i1 ← i + s
+    let src ← i1 % w
+    let l ← Slice.index_usize cur src
+    let l1 ← Slice.index_usize cur i
+    let (m, aig1) ← push_mux aig sel l l1
+    let next1 ← alloc.vec.Vec.push next m
+    let i2 ← i + 1#usize
+    ok (cont (aig1, next1, i2))
+  else ok (done (next, aig))
+
+/-- [blast_kernel::rotr_stage]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 512:4-517:5
+    Visibility: public -/
+@[rust_loop]
+def rotr_stage_loop
+  (aig : Aig) (cur : Slice Lit) (sel : Lit) (s : Std.Usize) (w : Std.Usize)
+  (next : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, next1, i1) => rotr_stage_loop.body cur sel s w aig1 next1 i1)
+    (aig, next, i)
+
+/-- [blast_kernel::rotr_stage]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 508:0-519:1
+    Visibility: public -/
+def rotr_stage
+  (aig : Aig) (cur : Slice Lit) (sel : Lit) (s : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len cur
+  rotr_stage_loop aig cur sel s w (alloc.vec.Vec.new Lit) 0#usize
+
+/-- [blast_kernel::blast_rotr]: loop body 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 527:4-530:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_rotr_loop0.body
+  (a : Slice Lit) (w : Std.Usize) (cur : alloc.vec.Vec Lit) (i : Std.Usize) :
+  Result (ControlFlow ((alloc.vec.Vec Lit) × Std.Usize) (alloc.vec.Vec Lit))
+  := do
+  if i < w
+  then
+    let l ← Slice.index_usize a i
+    let cur1 ← alloc.vec.Vec.push cur l
+    let i1 ← i + 1#usize
+    ok (cont (cur1, i1))
+  else ok (done cur)
+
+/-- [blast_kernel::blast_rotr]: loop 0:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 527:4-530:5
+    Visibility: public -/
+@[rust_loop]
+def blast_rotr_loop0
+  (a : Slice Lit) (cur : alloc.vec.Vec Lit) (w : Std.Usize) (i : Std.Usize) :
+  Result (alloc.vec.Vec Lit)
+  := do
+  loop
+    (fun (cur1, i1) => blast_rotr_loop0.body a w cur1 i1)
+    (cur, i)
+
+/-- [blast_kernel::blast_rotr]: loop body 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 532:4-536:5
+    Visibility: public -/
+@[rust_loop_body]
+def blast_rotr_loop1.body
+  (b : Slice Lit) (stages : Std.Usize) (aig : Aig) (cur : alloc.vec.Vec Lit)
+  (k : Std.Usize) :
+  Result (ControlFlow (Aig × (alloc.vec.Vec Lit) × Std.Usize) ((alloc.vec.Vec
+    Lit) × Aig))
+  := do
+  if k < stages
+  then
+    let s ← 1#usize <<< k
+    let s1 := alloc.vec.Vec.deref cur
+    let l ← Slice.index_usize b k
+    let (cur1, aig1) ← rotr_stage aig s1 l s
+    let k1 ← k + 1#usize
+    ok (cont (aig1, cur1, k1))
+  else ok (done (cur, aig))
+
+/-- [blast_kernel::blast_rotr]: loop 1:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 532:4-536:5
+    Visibility: public -/
+@[rust_loop]
+def blast_rotr_loop1
+  (aig : Aig) (b : Slice Lit) (stages : Std.Usize) (cur : alloc.vec.Vec Lit)
+  (k : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  loop
+    (fun (aig1, cur1, k1) => blast_rotr_loop1.body b stages aig1 cur1 k1)
+    (aig, cur, k)
+
+/-- [blast_kernel::blast_rotr]:
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 523:0-538:1
+    Visibility: public -/
+def blast_rotr
+  (aig : Aig) (a : Slice Lit) (b : Slice Lit) (stages : Std.Usize) :
+  Result ((alloc.vec.Vec Lit) × Aig)
+  := do
+  let w := Slice.len a
+  let cur ← blast_rotr_loop0 a (alloc.vec.Vec.new Lit) w 0#usize
+  blast_rotr_loop1 aig b stages cur 0#usize
+
 end blast_kernel
