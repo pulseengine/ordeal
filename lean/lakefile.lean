@@ -33,3 +33,10 @@ lean_lib «Sound» {}
 -- ripple_carry / blast_add / blast_sub / blast_ult, unbounded width.
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterArith» {}
+
+-- Correctness of the comparison / equality / ite / structural blaster
+-- families (issue #68): blast_ule/ugt/uge, flip_sign + blast_slt/sle/sgt/sge,
+-- blast_eq/ne, push_mux + blast_ite, blast_extract / blast_concat /
+-- blast_zero_ext / blast_sign_ext, unbounded width.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterCmp» {}
