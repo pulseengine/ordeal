@@ -392,3 +392,203 @@ pub fn blast_sign_ext(a: &[Lit], by: usize) -> Vec<Lit> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68).
+    //!
+    //! The Lean proof (`lean/Blaster*.lean`) establishes: MODEL = BitVec
+    //! semantics, unbounded. These tests establish: REAL BLASTER = MODEL, by
+    //! differential simulation — the same operand values through the real
+    //! `blast::*` rules (with structural hashing) and through this model
+    //! (without), asserting equal outputs. Exhaustive at width 8; the chain
+    //!   real blaster =(this differential)= model =(Lean, all widths)= BitVec
+    //! is what replaces "trust the mirroring was faithful". This link is
+    //! test evidence (bounded), stated as such — not smuggled into the
+    //! unbounded claim.
+
+    use super::*;
+
+    /// Simulate a model word under a concrete input assignment -> u128.
+    fn model_word_value(aig: &Aig, inputs: &[bool], word: &[Lit]) -> u128 {
+        let vals = simulate(aig, inputs);
+        let mut out = 0u128;
+        let mut i = 0usize;
+        while i < word.len() {
+            if eval_lit(&vals, word[i]) {
+                out |= 1u128 << i;
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Simulate a single model literal -> bool.
+    fn model_lit_value(aig: &Aig, inputs: &[bool], l: Lit) -> bool {
+        let vals = simulate(aig, inputs);
+        eval_lit(&vals, l)
+    }
+
+    /// Build two w-bit input words in the model, mirroring `word_input`.
+    fn model_inputs(aig: &mut Aig, w: usize) -> (Vec<Lit>, Vec<Lit>) {
+        let mut a: Vec<Lit> = Vec::new();
+        let mut b: Vec<Lit> = Vec::new();
+        let mut i = 0usize;
+        while i < w {
+            a.push(push_input(aig, i));
+            i += 1;
+        }
+        let mut j = 0usize;
+        while j < w {
+            b.push(push_input(aig, w + j));
+            j += 1;
+        }
+        (a, b)
+    }
+
+    /// Exhaustive width-8 differential: every (a, b) pair through the real
+    /// blaster and the model; word-valued rules must agree bit-for-bit and
+    /// predicate rules literal-for-literal.
+    #[test]
+    fn model_matches_real_blaster_exhaustively_at_width_8() {
+        use crate::aig as real;
+        use crate::blast::{arith, bitwise};
+        const W: usize = 8;
+
+        // Real side: one AIG, all rules blasted over shared inputs.
+        let mut raig = real::Aig::new();
+        let ra = real::word_input(&mut raig, W as u32);
+        let rb = real::word_input(&mut raig, W as u32);
+        let r_and = bitwise::blast_and(&mut raig, &ra, &rb);
+        let r_or = bitwise::blast_or(&mut raig, &ra, &rb);
+        let r_xor = bitwise::blast_xor(&mut raig, &ra, &rb);
+        let r_add = arith::blast_add(&mut raig, &ra, &rb);
+        let r_sub = arith::blast_sub(&mut raig, &ra, &rb);
+        let r_ult = arith::blast_ult(&mut raig, &ra, &rb);
+        let r_slt = arith::blast_slt(&mut raig, &ra, &rb);
+        let r_eq = bitwise::blast_eq(&mut raig, &ra, &rb);
+
+        // Model side: same shape.
+        let mut maig = aig_new();
+        let (ma, mb) = model_inputs(&mut maig, W);
+        let m_and = blast_and(&mut maig, &ma, &mb);
+        let m_or = blast_or(&mut maig, &ma, &mb);
+        let m_xor = blast_xor(&mut maig, &ma, &mb);
+        let m_add = blast_add(&mut maig, &ma, &mb);
+        let m_sub = blast_sub(&mut maig, &ma, &mb);
+        let m_ult = blast_ult(&mut maig, &ma, &mb);
+        let m_slt = blast_slt(&mut maig, &ma, &mb);
+        let m_eq = blast_eq(&mut maig, &ma, &mb);
+
+        for av in 0..=255u32 {
+            for bv in 0..=255u32 {
+                let mut inputs = [false; 2 * W];
+                let mut k = 0usize;
+                while k < W {
+                    inputs[k] = (av >> k) & 1 == 1;
+                    inputs[W + k] = (bv >> k) & 1 == 1;
+                    k += 1;
+                }
+                let rvals = raig.simulate(&inputs);
+                let word = |wd: &real::Word| real::word_value(&raig, &rvals, wd);
+                let lit = |l: real::Lit| {
+                    let v = rvals[l.var() as usize];
+                    if l.is_complement() { !v } else { v }
+                };
+
+                assert_eq!(
+                    word(&r_and),
+                    model_word_value(&maig, &inputs, &m_and),
+                    "and {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_or),
+                    model_word_value(&maig, &inputs, &m_or),
+                    "or {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_xor),
+                    model_word_value(&maig, &inputs, &m_xor),
+                    "xor {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_add),
+                    model_word_value(&maig, &inputs, &m_add),
+                    "add {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_sub),
+                    model_word_value(&maig, &inputs, &m_sub),
+                    "sub {av} {bv}"
+                );
+                assert_eq!(
+                    lit(r_ult),
+                    model_lit_value(&maig, &inputs, m_ult),
+                    "ult {av} {bv}"
+                );
+                assert_eq!(
+                    lit(r_slt),
+                    model_lit_value(&maig, &inputs, m_slt),
+                    "slt {av} {bv}"
+                );
+                assert_eq!(
+                    lit(r_eq),
+                    model_lit_value(&maig, &inputs, m_eq),
+                    "eq {av} {bv}"
+                );
+            }
+        }
+    }
+
+    /// Structural rules are gate-free plumbing; check them on sampled values
+    /// against the real rules (same extraction/concat/extension semantics).
+    #[test]
+    fn model_structural_matches_real_blaster() {
+        use crate::aig as real;
+        use crate::blast::structural;
+        const W: usize = 8;
+
+        let mut raig = real::Aig::new();
+        let ra = real::word_input(&mut raig, W as u32);
+        let r_ex = structural::blast_extract(&ra, 6, 2);
+        let r_ze = structural::blast_zero_ext(&ra, 4);
+        let r_se = structural::blast_sign_ext(&ra, 4);
+
+        let mut maig = aig_new();
+        let mut ma: Vec<Lit> = Vec::new();
+        let mut i = 0usize;
+        while i < W {
+            ma.push(push_input(&mut maig, i));
+            i += 1;
+        }
+        let m_ex = blast_extract(&ma, 6, 2);
+        let m_ze = blast_zero_ext(&ma, 4);
+        let m_se = blast_sign_ext(&ma, 4);
+
+        for av in 0..=255u32 {
+            let mut inputs = [false; W];
+            let mut k = 0usize;
+            while k < W {
+                inputs[k] = (av >> k) & 1 == 1;
+                k += 1;
+            }
+            let rvals = raig.simulate(&inputs);
+            let word = |wd: &real::Word| real::word_value(&raig, &rvals, wd);
+            assert_eq!(
+                word(&r_ex),
+                model_word_value(&maig, &inputs, &m_ex),
+                "extract {av}"
+            );
+            assert_eq!(
+                word(&r_ze),
+                model_word_value(&maig, &inputs, &m_ze),
+                "zero_ext {av}"
+            );
+            assert_eq!(
+                word(&r_se),
+                model_word_value(&maig, &inputs, &m_se),
+                "sign_ext {av}"
+            );
+        }
+    }
+}
