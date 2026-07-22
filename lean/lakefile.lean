@@ -47,3 +47,9 @@ lean_lib «Sound» {}
 -- semantics (<<<' / >>> / sshiftRight / rotateRight), width w = 2^stages.
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterShift» {}
+
+-- Correctness of the shift-add multiplier (issue #68, v0.15.0 capstone):
+-- full_adder (9-gate gadget) and blast_mul against BitVec multiplication,
+-- unbounded width. Same discipline as BlasterProof: `sorry`-free,
+-- axiom-clean.
+@[default_target] lean_lib «BlasterMul» {}
