@@ -19,3 +19,44 @@ package «ordeal-lrat-proof» {}
 -- like the mathematical core `pure_check_sound`.
 -- Scope + trust boundary: docs/formal-verification.md. Build: `lake build Sound`.
 lean_lib «Sound» {}
+
+-- The generated bit-blaster model (regen-blaster.sh) — must elaborate.
+@[default_target] lean_lib «BlastKernel» {}
+
+-- Correctness of the bitwise blaster family against BitVec semantics
+-- (issue #68): blast_and / blast_or / blast_xor, unbounded width.
+-- `sorry`-free; every theorem's axioms are only propext / Classical.choice /
+-- Quot.sound (no sorryAx, no native_decide).
+@[default_target] lean_lib «BlasterProof» {}
+
+-- Correctness of the ripple-carry arithmetic blaster family (issue #68):
+-- ripple_carry / blast_add / blast_sub / blast_ult, unbounded width.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterArith» {}
+
+-- Correctness of the comparison / equality / ite / structural blaster
+-- families (issue #68): blast_ule/ugt/uge, flip_sign + blast_slt/sle/sgt/sge,
+-- blast_eq/ne, push_mux + blast_ite, blast_extract / blast_concat /
+-- blast_zero_ext / blast_sign_ext, unbounded width.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterCmp» {}
+
+-- Correctness of the barrel-shifter blaster family (issue #68):
+-- out_of_range, barrel_right/left/rotr stages, barrel_right, and
+-- blast_shl / blast_lshr / blast_ashr / blast_rotr against BitVec
+-- semantics (<<<' / >>> / sshiftRight / rotateRight), width w = 2^stages.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterShift» {}
+
+-- Correctness of the shift-add multiplier (issue #68, v0.15.0 capstone):
+-- full_adder (9-gate gadget) and blast_mul against BitVec multiplication,
+-- unbounded width. Same discipline as BlasterProof: `sorry`-free,
+-- axiom-clean.
+@[default_target] lean_lib «BlasterMul» {}
+
+-- Correctness of the restoring long divider (issue #68, v0.15.0, the LAST
+-- rule): sub_with_uge and blast_udivrem / blast_udiv / blast_urem against
+-- BitVec.smtUDiv (quotient, all-ones on /0) and BitVec.% (remainder —
+-- core's umod already has the SMT-LIB x%0 = x semantics), unbounded width.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterDiv» {}

@@ -162,6 +162,12 @@ jobs:
       - name: Build the soundness proof (elaborates, fully; zero sorries)
         working-directory: lean
         run: lake build Sound
+      - name: Build the bit-blaster model + correctness proofs (issue #68)
+        working-directory: lean
+        # Plain `lake build` compiles every @[default_target] lib — the Aeneas-
+        # generated BlastKernel and all Blaster* proof developments — so a rule
+        # proof that regresses (or a regen that breaks a proof) fails CI here.
+        run: lake build
       - name: Guard the sorry budget (the soundness proof must stay complete)
         working-directory: lean
         run: |
@@ -176,6 +182,23 @@ jobs:
           echo "sorry-bearing declarations in Sound.lean: $count (expected $expected)"
           if [ "$count" -ne "$expected" ]; then
             echo "::error file=lean/Sound.lean::Expected the soundness proof to be sorry-free (kernel_refines_pure, #12, is discharged), found $count sorry-bearing declaration(s) — a proven leaf regressed or a new gap was introduced."
+            exit 1
+          fi
+      - name: Guard the blaster proofs' sorry budget (issue #68)
+        working-directory: lean
+        run: |
+          # Same elaborator-based count as the Sound guard, over every blaster
+          # proof development. The generated BlastKernel.lean is definitions
+          # only; the Blaster* files carry the theorems and must stay sorry-free.
+          total=0
+          for f in BlasterProof.lean BlasterArith.lean BlasterCmp.lean BlasterShift.lean BlasterMul.lean BlasterDiv.lean; do
+            [ -f "$f" ] || continue
+            c=$(lake env lean "$f" 2>&1 | grep -cE 'declaration uses .sorry.' || true)
+            echo "sorry-bearing declarations in $f: $c"
+            total=$((total + c))
+          done
+          if [ "$total" -ne 0 ]; then
+            echo "::error::Blaster correctness proofs must stay sorry-free (issue #68); found $total sorry-bearing declaration(s)."
             exit 1
           fi
       - name: Guard lean/README.md against status drift (issue #53)

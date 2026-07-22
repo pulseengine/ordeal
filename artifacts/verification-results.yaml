@@ -953,3 +953,55 @@ artifacts:
     fields:
       verdict: pass
       evidence: "166 lib tests incl. 5 check_cnf; cert-over-submitted-clauses recheck; bit-blaster agreement"
+  - id: VE-016
+    type: verification-execution
+    title: v0.15.0 — Lean-verified bit-blaster, all rules (TR-027)
+    description: >
+      Ran the capstone oracle set locally, clean-room after each delegated
+      proof batch (five fable subagents; NONE of their reports were taken on
+      faith): cold `lake build` after every batch (final: 1707 jobs, success;
+      the only sorry warnings are the pre-existing UPSTREAM Aeneas/Std ones,
+      confirmed outside every theorem's dependency cone), escape-grep
+      (sorry/admit/axiom/native_decide/implemented_by) empty on all six proof
+      files, INDEPENDENT #print axioms on every headline theorem =
+      [propext, Classical.choice, Quot.sound], and each headline statement
+      read cold — including the three classic trap spots: concat bit-order
+      (pinned against getLsbD_append), shift >=width semantics
+      (#eval-confirmed against core), and division-by-zero (smtUDiv vs
+      core udiv, #eval-confirmed to differ). Rust side: 168 lib tests incl.
+      the exhaustive width-8 fidelity differential over every modeled rule
+      (34.5 s), clippy 0 default+oracle, fmt clean. Two subagent corrections
+      of MY briefs are recorded because they are fidelity signals: the
+      full-adder is 9 gates not 8, and one loop body is 9 not my estimated 8
+      — both counts are now proven as length equalities.
+    status: implemented
+    fields:
+      version: v0.15.0
+      timestamp: "2026-07-22T14:30:00Z"
+      executor: local
+      environment:
+        note: >-
+          cd lean && lake build (1707 jobs); per-batch clean-room protocol;
+          cargo test -p ordeal --lib (168 pass); verus/charon/aeneas pinned
+          revs per regen-blaster.sh.
+
+  - id: VV-038
+    type: verification-verdict
+    title: "VER-025 pass — 27/27 rules proven unbounded"
+    description: >
+      Executed pass. Every bit-blasting rule in the closed fragment is proven
+      equal to the formal BitVec semantics for every width, over the
+      Aeneas-generated model; the model is exhaustively differentially
+      faithful to the shipped blaster at width 8; the whole development is
+      CI-gated with an elaborator-based sorry budget. The encoder no longer
+      leans on Kani-bounded evidence for its soundness argument — the
+      Kani harnesses remain as defense-in-depth, not as the claim.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-025
+      - type: part-of-execution
+        target: VE-016
+    fields:
+      verdict: pass
+      evidence: "six proof libs, ~7400 lines, zero sorry (elaborator-counted); axioms audit clean; exhaustive-8 fidelity differential; CI sorry-budget guard"

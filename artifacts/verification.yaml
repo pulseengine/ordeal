@@ -619,3 +619,41 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib check_cnf"
         coverage: "inconsistent/consistent/cert-matches-clauses/bitblaster-agreement/feature-model-conflict"
+  - id: VER-025
+    type: sw-verification
+    title: Lean-verified bit-blaster — every rule proven against BitVec, all widths
+    description: >
+      Confirms TR-027, the assurance capstone. All 27 bit-blasting rules of the
+      closed fragment carry UNBOUNDED Lean 4 proofs — and/or/xor, add/sub, all
+      eight comparisons, eq/ne, ite, extract/concat/zero_ext/sign_ext,
+      shl/lshr/ashr/rotr, mul, and udiv/urem — each stated about the
+      Aeneas-GENERATED monadic code (BlastKernel.lean, the pinned
+      Charon+Aeneas translation of blast_kernel.rs), with total-correctness
+      WP (no panic, no divergence) and the BitVec headline for every width.
+      Highlights: the multiplier's shift-add invariant (acc = A*(B mod 2^i)
+      mod 2^w) and the divider's w-bit trick — the Rust comment's soundness
+      argument (top bit decides the (w+1)-bit compare; the modular difference
+      is exact because rem < divisor bounds it below 2^w) is now machine-
+      checked. SMT-LIB /0 semantics proven precisely: quotient = smtUDiv
+      (allOnes), remainder = umod (dividend). Gate counts proven as exact
+      length equalities per rule. Six proof developments, ~7,400 lines, every
+      batch clean-room verified (cold lake build, escape-grep, independent
+      #print axioms = [propext, Classical.choice, Quot.sound] only, specs
+      read cold). The blast_kernel <-> aig.rs fidelity link is the exhaustive
+      width-8 differential (all rule entry points, all 65536 pairs, model vs
+      the shipped strashed blaster), stated as bounded test evidence. CI
+      gates the whole development like the checker proof: full lake build +
+      an elaborator-based sorry budget over every Blaster*.lean.
+    status: draft
+    release: v0.15.0
+    tags: [lean, aeneas, bit-blaster, unbounded-proof, trusted-core, capstone]
+    links:
+      - type: verifies
+        target: TR-027
+      - type: verifies
+        target: FEAT-012
+    fields:
+      method: formal-verification
+      steps:
+        run: "cd lean && lake build  # all @[default_target] libs; sorry budget guarded in CI"
+        coverage: "27/27 rules unbounded; fidelity via exhaustive-8 differential (bounded, labeled)"
