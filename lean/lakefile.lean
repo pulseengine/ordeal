@@ -40,3 +40,10 @@ lean_lib «Sound» {}
 -- blast_zero_ext / blast_sign_ext, unbounded width.
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterCmp» {}
+
+-- Correctness of the barrel-shifter blaster family (issue #68):
+-- out_of_range, barrel_right/left/rotr stages, barrel_right, and
+-- blast_shl / blast_lshr / blast_ashr / blast_rotr against BitVec
+-- semantics (<<<' / >>> / sshiftRight / rotateRight), width w = 2^stages.
+-- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterShift» {}
