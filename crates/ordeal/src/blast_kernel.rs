@@ -228,3 +228,167 @@ pub fn blast_ult(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
     let (_sum, carry) = ripple_carry(aig, a, &not_b, lit_true());
     lit_not(carry)
 }
+
+/// `bvule` — `a <= b` iff not `b < a`. Mirrors `blast/arith.rs::blast_ule`.
+pub fn blast_ule(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let lt = blast_ult(aig, b, a);
+    lit_not(lt)
+}
+
+/// `bvugt` — `a > b` iff `b < a`.
+pub fn blast_ugt(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    blast_ult(aig, b, a)
+}
+
+/// `bvuge` — `a >= b` iff not `a < b`.
+pub fn blast_uge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let lt = blast_ult(aig, a, b);
+    lit_not(lt)
+}
+
+/// The word with its most significant (sign) bit complemented. Mirrors
+/// `blast/arith.rs::flip_sign`.
+pub fn flip_sign(a: &[Lit]) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        if i + 1 == w {
+            out.push(lit_not(a[i]));
+        } else {
+            out.push(a[i]);
+        }
+        i += 1;
+    }
+    out
+}
+
+/// `bvslt` — signed: unsigned compare with both sign bits flipped (the
+/// order-embedding of two's complement into unsigned).
+pub fn blast_slt(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let fa = flip_sign(a);
+    let fb = flip_sign(b);
+    blast_ult(aig, &fa, &fb)
+}
+
+/// `bvsle` — `a <=s b` iff not `b <s a`.
+pub fn blast_sle(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let lt = blast_slt(aig, b, a);
+    lit_not(lt)
+}
+
+/// `bvsgt` — `a >s b` iff `b <s a`.
+pub fn blast_sgt(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    blast_slt(aig, b, a)
+}
+
+/// `bvsge` — `a >=s b` iff not `a <s b`.
+pub fn blast_sge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let lt = blast_slt(aig, a, b);
+    lit_not(lt)
+}
+
+/// `=` — conjunction of per-bit XNORs. Mirrors `blast/bitwise.rs::blast_eq`.
+pub fn blast_eq(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let mut acc = lit_true();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        let x = push_xor(aig, a[i], b[i]);
+        let bit_eq = lit_not(x);
+        acc = push_and(aig, acc, bit_eq);
+        i += 1;
+    }
+    acc
+}
+
+/// `distinct` — negation of equality.
+pub fn blast_ne(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
+    let eq = blast_eq(aig, a, b);
+    lit_not(eq)
+}
+
+/// Per-bit mux: `sel ? t : e = (sel & t) | (!sel & e)`. Mirrors `aig::mux`.
+pub fn push_mux(aig: &mut Aig, sel: Lit, t: Lit, e: Lit) -> Lit {
+    let then_b = push_and(aig, sel, t);
+    let else_b = push_and(aig, lit_not(sel), e);
+    push_or(aig, then_b, else_b)
+}
+
+/// `ite` (bool -> BV bridge) — per-bit mux on the condition literal.
+pub fn blast_ite(aig: &mut Aig, cond: Lit, then_: &[Lit], else_: &[Lit]) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let w = then_.len();
+    let mut i = 0usize;
+    while i < w {
+        let m = push_mux(aig, cond, then_[i], else_[i]);
+        out.push(m);
+        i += 1;
+    }
+    out
+}
+
+/// `extract[hi:lo]` (inclusive) — slice of the LSB-first word. No gates.
+pub fn blast_extract(a: &[Lit], hi: usize, lo: usize) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let mut i = lo;
+    while i <= hi {
+        out.push(a[i]);
+        i += 1;
+    }
+    out
+}
+
+/// `concat` — SMT-LIB: the FIRST operand becomes the high bits; LSB-first
+/// words, so the low part comes first. No gates.
+pub fn blast_concat(hi_part: &[Lit], lo_part: &[Lit]) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let wl = lo_part.len();
+    let mut i = 0usize;
+    while i < wl {
+        out.push(lo_part[i]);
+        i += 1;
+    }
+    let wh = hi_part.len();
+    let mut j = 0usize;
+    while j < wh {
+        out.push(hi_part[j]);
+        j += 1;
+    }
+    out
+}
+
+/// `zero_ext` — append `by` FALSE literals above the MSB. No gates.
+pub fn blast_zero_ext(a: &[Lit], by: usize) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j = 0usize;
+    while j < by {
+        out.push(lit_false());
+        j += 1;
+    }
+    out
+}
+
+/// `sign_ext` — replicate the sign (MSB) literal `by` times. No gates.
+pub fn blast_sign_ext(a: &[Lit], by: usize) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        out.push(a[i]);
+        i += 1;
+    }
+    let sign = a[w - 1];
+    let mut j = 0usize;
+    while j < by {
+        out.push(sign);
+        j += 1;
+    }
+    out
+}
