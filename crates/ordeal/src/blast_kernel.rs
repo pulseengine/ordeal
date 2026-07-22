@@ -393,6 +393,150 @@ pub fn blast_sign_ext(a: &[Lit], by: usize) -> Vec<Lit> {
     out
 }
 
+/// `amount >= width`: OR of the amount bits at position `log2 w` and above
+/// (width is a power of two). Mirrors `blast/shift.rs::out_of_range`.
+pub fn out_of_range(aig: &mut Aig, b: &[Lit], stages: usize) -> Lit {
+    let mut acc = lit_false();
+    let w = b.len();
+    let mut i = stages;
+    while i < w {
+        acc = push_or(aig, acc, b[i]);
+        i += 1;
+    }
+    acc
+}
+
+/// One barrel stage of a RIGHT shift by `2^k` gated on `sel`: bit i becomes
+/// `mux(sel, cur[i + 2^k] (or fill), cur[i])`.
+pub fn barrel_right_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize, fill: Lit) -> Vec<Lit> {
+    let w = cur.len();
+    let mut next: Vec<Lit> = Vec::new();
+    let mut i = 0usize;
+    while i < w {
+        let shifted = if i + s < w { cur[i + s] } else { fill };
+        let m = push_mux(aig, sel, shifted, cur[i]);
+        next.push(m);
+        i += 1;
+    }
+    next
+}
+
+/// Barrel right-shifter with SMT-LIB out-of-range semantics: `stages`
+/// mux-stages then an all-`fill` mux on out-of-range. Mirrors
+/// `blast/shift.rs::barrel_right`. Width must be a power of two with
+/// `stages = log2 w` (the Lean spec hypothesizes it).
+pub fn barrel_right(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize, fill: Lit) -> Vec<Lit> {
+    let mut cur: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        cur.push(a[i]);
+        i += 1;
+    }
+    let mut k = 0usize;
+    while k < stages {
+        let s = 1usize << k;
+        cur = barrel_right_stage(aig, &cur, b[k], s, fill);
+        k += 1;
+    }
+    let oor = out_of_range(aig, b, stages);
+    let mut out: Vec<Lit> = Vec::new();
+    let mut j = 0usize;
+    while j < w {
+        let m = push_mux(aig, oor, fill, cur[j]);
+        out.push(m);
+        j += 1;
+    }
+    out
+}
+
+/// One barrel stage of a LEFT shift by `2^k` gated on `sel`: bit i becomes
+/// `mux(sel, cur[i - 2^k] (or FALSE), cur[i])`.
+pub fn barrel_left_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize) -> Vec<Lit> {
+    let w = cur.len();
+    let mut next: Vec<Lit> = Vec::new();
+    let mut i = 0usize;
+    while i < w {
+        let shifted = if i >= s { cur[i - s] } else { lit_false() };
+        let m = push_mux(aig, sel, shifted, cur[i]);
+        next.push(m);
+        i += 1;
+    }
+    next
+}
+
+/// `bvshl` — barrel left-shifter; zero when the amount is >= width.
+pub fn blast_shl(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+    let mut cur: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        cur.push(a[i]);
+        i += 1;
+    }
+    let mut k = 0usize;
+    while k < stages {
+        let s = 1usize << k;
+        cur = barrel_left_stage(aig, &cur, b[k], s);
+        k += 1;
+    }
+    let oor = out_of_range(aig, b, stages);
+    let f = lit_false();
+    let mut out: Vec<Lit> = Vec::new();
+    let mut j = 0usize;
+    while j < w {
+        let m = push_mux(aig, oor, f, cur[j]);
+        out.push(m);
+        j += 1;
+    }
+    out
+}
+
+/// `bvlshr` — zero-fill right shift.
+pub fn blast_lshr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+    barrel_right(aig, a, b, stages, lit_false())
+}
+
+/// `bvashr` — sign-fill right shift; all sign when the amount is >= width.
+pub fn blast_ashr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+    let sign = a[a.len() - 1];
+    barrel_right(aig, a, b, stages, sign)
+}
+
+/// One rotate-right stage by `2^k` gated on `sel`: bit i becomes
+/// `mux(sel, cur[(i + 2^k) mod w], cur[i])`.
+pub fn rotr_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize) -> Vec<Lit> {
+    let w = cur.len();
+    let mut next: Vec<Lit> = Vec::new();
+    let mut i = 0usize;
+    while i < w {
+        let src = (i + s) % w;
+        let m = push_mux(aig, sel, cur[src], cur[i]);
+        next.push(m);
+        i += 1;
+    }
+    next
+}
+
+/// `bvrotr` — rotate right by amount mod width; only the low `log2 w` amount
+/// bits matter (power-of-two width).
+pub fn blast_rotr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+    let mut cur: Vec<Lit> = Vec::new();
+    let w = a.len();
+    let mut i = 0usize;
+    while i < w {
+        cur.push(a[i]);
+        i += 1;
+    }
+    let mut k = 0usize;
+    while k < stages {
+        let s = 1usize << k;
+        cur = rotr_stage(aig, &cur, b[k], s);
+        k += 1;
+    }
+    cur
+}
+
 #[cfg(test)]
 mod tests {
     //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68).
@@ -467,6 +611,10 @@ mod tests {
         let r_ult = arith::blast_ult(&mut raig, &ra, &rb);
         let r_slt = arith::blast_slt(&mut raig, &ra, &rb);
         let r_eq = bitwise::blast_eq(&mut raig, &ra, &rb);
+        let r_shl = crate::blast::shift::blast_shl(&mut raig, &ra, &rb);
+        let r_lshr = crate::blast::shift::blast_lshr(&mut raig, &ra, &rb);
+        let r_ashr = crate::blast::shift::blast_ashr(&mut raig, &ra, &rb);
+        let r_rotr = crate::blast::shift::blast_rotr(&mut raig, &ra, &rb);
 
         // Model side: same shape.
         let mut maig = aig_new();
@@ -479,6 +627,10 @@ mod tests {
         let m_ult = blast_ult(&mut maig, &ma, &mb);
         let m_slt = blast_slt(&mut maig, &ma, &mb);
         let m_eq = blast_eq(&mut maig, &ma, &mb);
+        let m_shl = blast_shl(&mut maig, &ma, &mb, 3);
+        let m_lshr = blast_lshr(&mut maig, &ma, &mb, 3);
+        let m_ashr = blast_ashr(&mut maig, &ma, &mb, 3);
+        let m_rotr = blast_rotr(&mut maig, &ma, &mb, 3);
 
         for av in 0..=255u32 {
             for bv in 0..=255u32 {
@@ -535,6 +687,26 @@ mod tests {
                     lit(r_eq),
                     model_lit_value(&maig, &inputs, m_eq),
                     "eq {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_shl),
+                    model_word_value(&maig, &inputs, &m_shl),
+                    "shl {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_lshr),
+                    model_word_value(&maig, &inputs, &m_lshr),
+                    "lshr {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_ashr),
+                    model_word_value(&maig, &inputs, &m_ashr),
+                    "ashr {av} {bv}"
+                );
+                assert_eq!(
+                    word(&r_rotr),
+                    model_word_value(&maig, &inputs, &m_rotr),
+                    "rotr {av} {bv}"
                 );
             }
         }
