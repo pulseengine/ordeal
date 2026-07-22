@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-22
+
+**P12 — the assurance capstone: Lean-verified bit-blaster** (FEAT-012 /
+TR-027, issue #68). Every bit-blasting rule in the closed fragment now
+carries an **unbounded Lean 4 proof** — the encoder joins the checker in the
+formally-verified core, and the pipeline's soundness argument no longer leans
+on Kani-bounded evidence.
+
+### Added
+- **All 27 rules proven against `BitVec` semantics for every width**, stated
+  about the Aeneas-generated translation of the blaster model
+  (`lean/BlastKernel.lean`, pinned Charon+Aeneas via `regen-blaster.sh`):
+  bitwise, add/sub, all eight comparisons, eq/ne, ite, the four structural
+  rules, the four shifts, the multiplier, and the divider. Six proof
+  developments (~7,400 lines), total-correctness WP (no panic, no
+  divergence), exact gate counts proven as length equalities.
+- **The divider's w-bit trick is now a theorem.** The Rust comment's
+  soundness argument — the shifted-out top bit alone decides the (w+1)-bit
+  compare, and the w-bit modular difference is exact because `rem < divisor`
+  bounds it below `2^w` — is machine-checked (`pDivGeStep_eq_decide`,
+  `pDivRemStep_denotesBits`). Division-by-zero is proven precisely:
+  quotient = `smtUDiv` (all-ones; core's `udiv` differs, `#eval`-confirmed),
+  remainder = core `%` (already SMT-LIB-conformant).
+- **`crates/ordeal/src/blast_kernel.rs`** — the Charon-translatable model,
+  plus the **fidelity differential**: every one of the 65,536 width-8 input
+  pairs through the real (strashed) blaster and the model, bit-for-bit,
+  across every rule family.
+- **CI gates the capstone like the checker**: the lean job builds all seven
+  proof libraries and enforces an elaborator-based zero-`sorry` budget over
+  every `Blaster*.lean`.
+
+### The assurance chain (each link labeled with its actual strength)
+```
+shipped blaster =(exhaustive width-8 differential; bounded, test evidence)= model
+model           =(Lean 4, ALL widths, zero sorry, three standard axioms)=  BitVec
+```
+The Kani harnesses remain as defense-in-depth; they are no longer the claim.
+
+### Falsification
+Wrong if: any `Blaster*.lean` theorem acquires a `sorry`/`sorryAx` (the CI
+budget catches this); the fidelity differential finds any input where the
+model and the shipped blaster disagree; a regenerated `BlastKernel.lean`
+breaks a proof (CI `lake build`); or any proven rule disagrees with the Z3
+differential on any query.
+
 ## [0.14.0] - 2026-07-21
 
 **P11a — propositional SAT front-end** (FEAT-014 / TR-026, issue #67). The

@@ -644,7 +644,7 @@ artifacts:
       the shipped strashed blaster), stated as bounded test evidence. CI
       gates the whole development like the checker proof: full lake build +
       an elaborator-based sorry budget over every Blaster*.lean.
-    status: draft
+    status: verified
     release: v0.15.0
     tags: [lean, aeneas, bit-blaster, unbounded-proof, trusted-core, capstone]
     links:
