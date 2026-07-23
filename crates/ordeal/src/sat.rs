@@ -222,7 +222,7 @@ impl SatSolver {
 
     /// Decide satisfiability of the formula (unbounded — always a verdict).
     pub fn solve(&mut self, formula: &CnfFormula) -> SatResult {
-        self.run(formula, None)
+        self.run(formula, None, None)
             .expect("an unbounded solve always reaches a verdict")
     }
 
@@ -240,7 +240,27 @@ impl SatSolver {
         formula: &CnfFormula,
         max_conflicts: u64,
     ) -> Option<SatResult> {
-        self.run(formula, Some(max_conflicts))
+        self.run(formula, Some(max_conflicts), None)
+    }
+
+    /// Decide satisfiability under a wall-clock deadline (TR-029, issue #71).
+    ///
+    /// The consumer-facing twin of [`solve_with_budget`]: a translation
+    /// validator degrades a slow solve to a fast, safe revert on a
+    /// *millisecond* budget, which a conflict count does not map to. Search is
+    /// abandoned once `deadline` passes, returning `None` — no verdict. Any
+    /// decided verdict is identical to [`solve`], proof trace intact. The
+    /// deadline is checked at the same per-conflict site as the budget, so a
+    /// query decided by pure propagation is never abandoned.
+    ///
+    /// [`solve_with_budget`]: SatSolver::solve_with_budget
+    /// [`solve`]: SatSolver::solve
+    pub fn solve_with_deadline(
+        &mut self,
+        formula: &CnfFormula,
+        deadline: std::time::Instant,
+    ) -> Option<SatResult> {
+        self.run(formula, None, Some(deadline))
     }
 
     /// Shared solve entry: `budget` of `None` is unbounded (never `None`
@@ -248,7 +268,12 @@ impl SatSolver {
     /// exhaustion. On any decided path the behaviour is bit-for-bit that of
     /// the original `solve`, so determinism and the proof-trace hook are
     /// unaffected.
-    fn run(&mut self, formula: &CnfFormula, budget: Option<u64>) -> Option<SatResult> {
+    fn run(
+        &mut self,
+        formula: &CnfFormula,
+        budget: Option<u64>,
+        deadline: Option<std::time::Instant>,
+    ) -> Option<SatResult> {
         // Tolerate literals above `num_vars` by sizing to whichever is larger.
         let n = formula
             .clauses
@@ -266,7 +291,7 @@ impl SatSolver {
             self.record_root_conflict(confl);
             return Some(SatResult::Unsat);
         }
-        self.search(budget)
+        self.search(budget, deadline)
     }
 
     /// The resolution proof recorded so far: one step per learned clause,
@@ -349,7 +374,11 @@ impl SatSolver {
     /// The CDCL search loop. `budget` bounds the number of search conflicts:
     /// once it is exceeded the search yields `None` (no verdict), otherwise a
     /// verdict is always returned as `Some`. `None` budget is unbounded.
-    fn search(&mut self, budget: Option<u64>) -> Option<SatResult> {
+    fn search(
+        &mut self,
+        budget: Option<u64>,
+        deadline: Option<std::time::Instant>,
+    ) -> Option<SatResult> {
         let mut conflicts = 0u64;
         loop {
             if let Some(confl) = self.propagate() {
@@ -362,6 +391,12 @@ impl SatSolver {
                 // Budget check before conflict analysis: on exhaustion we
                 // abandon search without touching the proof trace.
                 if budget.is_some_and(|max| conflicts > max) {
+                    return None;
+                }
+                // Deadline check at the same site: cheap (vDSO clock read)
+                // relative to conflict analysis, and never abandons a query
+                // decided by propagation alone.
+                if deadline.is_some_and(|d| std::time::Instant::now() >= d) {
                     return None;
                 }
                 let (learnt, bt_level, antecedents) = self.analyze(confl);
