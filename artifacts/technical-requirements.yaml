@@ -746,3 +746,32 @@ artifacts:
         differential over randomized store-chains and aliasing/non-aliasing
         index pairs; a read-over-write with a symbolic index no longer returns
         NonConcreteIndex/Unknown; Unsat certificates re-check.
+  - id: TR-029
+    type: sw-req
+    title: Migration ergonomics — wall-clock deadline, sliver prove_equiv, eval-constant helper
+    description: >
+      Three small, non-fragment API asks from loom's validator migration
+      (issue #71), none on the soundness path: (a) a wall-clock deadline on
+      check (the consumer degrades a slow solve to a fast, safe revert;
+      check_with_limit bounds CONFLICTS, which does not map to a millisecond
+      budget) — deadline exhaustion must surface as Unknown, preserving the
+      conservative contract; (b) prove_equiv over the SLIVER's extended terms
+      (select/store/pure_call), mirroring Solver::prove_equiv for consumers
+      whose operands live in the extended language; (c) an evaluate-to-constant
+      helper for ground extended terms. All three keep the closed fragment
+      closed — API surface only.
+    status: draft
+    release: v0.16.0
+    tags: [ergonomics, api, deadline, sliver, loom, migration]
+    links:
+      - type: derives-from
+        target: SYS-006
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        A deadline-bounded check returns Unknown (never a wrong verdict) when
+        exhausted and the normal verdict otherwise; sliver prove_equiv agrees
+        with lowering + core prove_equiv on shared queries; the constant helper
+        agrees with the sliver evaluator. loom's migration checklist items (a)
+        to (c) each demonstrable against a loom-shaped example.
