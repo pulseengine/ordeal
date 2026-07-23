@@ -1005,3 +1005,46 @@ artifacts:
     fields:
       verdict: pass
       evidence: "six proof libs, ~7400 lines, zero sorry (elaborator-counted); axioms audit clean; exhaustive-8 fidelity differential; CI sorry-budget guard"
+  - id: VE-017
+    type: verification-execution
+    title: v0.16.0 — ergonomics + #97 fix + LRAT trimming
+    description: >
+      Ran the v0.16.0 oracle set locally. 180 lib tests pass, clippy 0
+      (default and --features oracle), fmt clean. The #97 fix was driven by
+      MEASUREMENT end to end: the synth VC shape reproduced as UNKNOWN at a
+      15 s deadline on the urem-based lowering and decides UNSAT in 5.3 ms
+      multiplicative; the old multiplier-free test (which enshrined the
+      regression) is inverted to pin the deliberate shape in both directions.
+      Trimming measured honestly: PHP(4,3) trims NOTHING, PHP(5,4) 2%, random
+      corpus 1%; a real-BV measurement was abandoned when width-8 multiplier
+      EQUIVALENCE exceeded 10 minutes (the documented reason the deadline API
+      exists). One process note: the v0.10.0 release gate could not see the
+      #97 class by construction (constants do not search; the differential
+      checks verdicts, not time) — the VC-shape regression guard closes that
+      hole.
+    status: implemented
+    fields:
+      version: v0.16.0
+      timestamp: "2026-07-23T11:30:00Z"
+      executor: local
+      environment:
+        note: "cargo test -p ordeal --lib (180); clippy 0/0; fmt clean; repro measured via check_with_deadline"
+
+  - id: VV-039
+    type: verification-verdict
+    title: "VER-026 pass — ergonomics + srem re-verification"
+    description: >
+      Executed pass. All TR-029 semantics hold; the #97 regression is fixed
+      with the consumer VC shape at 5.3 ms and guarded at a 10 s deadline;
+      TR-022 remains verified with its multiplier-free claim PARTIALLY
+      RETRACTED for bvsrem (deliberate, documented in the lowering and the
+      changelog); trimming invariants hold with honest 1-2% measurements.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-026
+      - type: part-of-execution
+        target: VE-017
+    fields:
+      verdict: pass
+      evidence: "180 lib tests; 15s-UNKNOWN -> 5.3ms measurement; inverted shape test + deadline guard; trim corpus numbers"

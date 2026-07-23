@@ -181,7 +181,7 @@ artifacts:
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
     status: draft
-    release: v0.16.0
+    release: v0.17.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
       - type: verifies
@@ -222,7 +222,7 @@ artifacts:
       theory combination) against the CI budget. Confirms AIG structural hashing
       and LRAT trimming measurably reduce work.
     status: draft
-    release: v0.16.0
+    release: v0.17.0
     tags: [benchmark, performance, latency, z3-rival]
     links:
       - type: verifies
@@ -657,3 +657,35 @@ artifacts:
       steps:
         run: "cd lean && lake build  # all @[default_target] libs; sorry budget guarded in CI"
         coverage: "27/27 rules unbounded; fidelity via exhaustive-8 differential (bounded, labeled)"
+  - id: VER-026
+    type: sw-verification
+    title: Migration ergonomics verified; srem lowering re-verified after #97
+    description: >
+      Confirms TR-029: check_with_deadline returns a conservative Unknown on
+      exhaustion (never a wrong verdict; a fast decide is accepted only if the
+      certificate re-checks), decides normally inside a generous deadline, and
+      never abandons a propagation-decided query (A5 root-decides at 0 ms);
+      prove_equiv_sliver proves the read-over-write law with a re-checkable
+      certificate and is non-vacuous (independent base reads are Sat);
+      eval_const evaluates ground terms and REFUSES interpretation-dependent
+      ones (dual-fill detection; the base-miss case has its own test).
+      Additionally RE-VERIFIES TR-022 after the #97 regression fix: bvsrem is
+      deliberately multiplicative again (consumer VC shape decides in 5.3 ms
+      vs UNKNOWN at a 15 s deadline on the urem-based form), bvurem stays
+      native and bvsdiv multiplier-free, correctness pinned by the exhaustive
+      width-8/16 SMT-LIB-reference suites and the shape by
+      div_rem_derivation_shapes_are_deliberate + the 10 s-deadline regression
+      guard. LRAT trimming (TR-009 item 1, delivered this release) is
+      invariant-tested: trimmed certificates always re-check, never grow;
+      measured 1-2% on current trace shapes and recorded as such.
+    status: verified
+    release: v0.16.0
+    tags: [ergonomics, deadline, sliver, srem, regression, trimming]
+    links:
+      - type: verifies
+        target: TR-029
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --lib deadline_ prove_equiv_sliver eval_const srem_vc lrat"
+        coverage: "TR-029 all three APIs; #97 VC-shape guard; trim invariants"

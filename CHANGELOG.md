@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-23
+
+**The #97 regression fix + migration ergonomics** (TR-029, issues #97/#71/#57).
+Anchored by a real consumer report: synth's srem trap VCs went <1 s (0.9.1) to
+>240 s (0.12.0), turning a 41 s CI suite into a 6 h hang.
+
+### Fixed
+- **`bvsrem` VCs against multiplicative consumer models hung** (#97). v0.10.0
+  rewired `lowering::bvsrem` through the restoring divider's remainder;
+  consumers model `rem_s` multiplicatively (synth's `Sdiv+Mls`, loom's
+  WASM-spec form), so every srem equivalence VC became a divider-vs-multiplier
+  cross-circuit proof. Measured: UNKNOWN at a 15 s deadline → **UNSAT in
+  5.3 ms** with the multiplicative form restored. `bvurem` stays native and
+  `bvsdiv` multiplier-free; **TR-022's "no derivation instantiates a Mul"
+  claim is partially retracted for `bvsrem`, deliberately** — the shape is now
+  pinned in both directions by `div_rem_derivation_shapes_are_deliberate`,
+  plus a VC-shape regression guard under a 10 s deadline.
+  *Why the v0.10.0 gate missed it: exhaustive value tests drive constants
+  (which never search) and the Z3 differential checks verdicts, not time.*
+
+### Added
+- **`Solver::check_with_deadline(timeout_ms)`** — wall-clock twin of
+  `check_with_limit`; exhaustion is a conservative `Unknown`, checked at the
+  per-conflict site so propagation-decided queries never abandon (#71a).
+- **`Solver::prove_equiv_sliver(a, b)`** — one-call equivalence over extended
+  terms with the sliver's congruence in force (#71b).
+- **`sliver::eval_const(t)`** — ground-term evaluation that *refuses*
+  interpretation-dependent terms via dual-fill detection, rather than silently
+  returning the total-model fill (#71c). `SliverModel` gains `base_fill`.
+- **LRAT-proof trimming** (#57 item 1): refutation-unreachable steps dropped at
+  emission; certificates still checker-validated before `Unsat` returns.
+  Measured honestly: 1–2% on current trace shapes (PHP(4,3) trims nothing) —
+  real, safe, small; bigger wins await clause-DB churn or bulk re-checking.
+
+### Moved (logged scope decisions)
+Term-graph caching + the criterion benchmark (TR-009 remainder), and the
+CaDiCaL-parity + Z3-benchmark measures → v0.17.0.
+
+### Falsification
+Wrong if: the srem VC-shape guard exceeds its 10 s deadline (the cross-circuit
+regression returned); a deadline-bounded check ever returns a wrong verdict
+instead of `Unknown`; `eval_const` returns a value for a base-array-dependent
+read; or a trimmed certificate fails `recheck()` or exceeds its raw size.
+
 ## [0.15.0] - 2026-07-22
 
 **P12 — the assurance capstone: Lean-verified bit-blaster** (FEAT-012 /
