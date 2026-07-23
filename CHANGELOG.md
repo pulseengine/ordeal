@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-07-23
+
+**Patch: the unsigned twin of #97** (issue #101, synth). v0.16.0 fixed the
+derived `bvsrem` lowering; direct users of the native `BvTerm::Urem` enum
+still hit the restoring divider's remainder, so a urem-vs-multiplicative VC
+stayed exponential (synth's `verify_i32_rem_u`: over 7 m 48 s, killed).
+
+### Fixed
+- **The native `Urem` blast rule is multiplicative**: `a − (a udiv b)·b` at
+  the circuit level — exact for all inputs including /0 with no special case
+  (`a udiv 0` is all-ones; `all-ones · 0 = 0`). Measured on synth's VC shape:
+  over 7 m 48 s → **UNSAT in 5.2 ms**. The term-level op stays native.
+- **The Lean proof moved with the encoding**: `blast_urem_bitvec` re-proven
+  against the new composition, same headline (`denotes A % B`, all widths),
+  via the new `umod_eq_sub_smtUDiv_mul` identity (all divisors, including 0).
+  The capstone's proof-coupling held: the encoding change broke exactly the
+  changed rule's proof, and shipped only re-proven.
+- #101 regression guard added beside the #97 one (the VC shape under a 10 s
+  deadline, ~2000x headroom).
+
+### Falsification
+Wrong if: either VC-shape guard (#97 signed, #101 unsigned) exceeds its
+deadline; or any `Blaster*.lean` theorem acquires a `sorry` (CI budget).
+
 ## [0.16.0] - 2026-07-23
 
 **The #97 regression fix + migration ergonomics** (TR-029, issues #97/#71/#57).
