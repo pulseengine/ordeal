@@ -666,10 +666,12 @@ pub fn blast_udiv(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     quo
 }
 
-/// `bvurem` — the remainder half.
+/// `bvurem` — MULTIPLICATIVE: `a - (a udiv b) * b` (issue #101), mirroring
+/// the production rule. Exact including /0 (all-ones * 0 = 0, so a - 0 = a).
 pub fn blast_urem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
-    let (_quo, rem) = blast_udivrem(aig, a, b);
-    rem
+    let q = blast_udiv(aig, a, b);
+    let prod = blast_mul(aig, &q, b);
+    blast_sub(aig, a, &prod)
 }
 
 #[cfg(test)]

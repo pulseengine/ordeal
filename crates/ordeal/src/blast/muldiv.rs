@@ -108,9 +108,29 @@ pub fn blast_udiv(aig: &mut Aig, a: &Word, b: &Word) -> Word {
     blast_udivrem(aig, a, b).0
 }
 
-/// `bvurem` — the remainder half of [`blast_udivrem`].
+/// `bvurem` — MULTIPLICATIVE: `a - (a udiv b) * b` at the circuit level
+/// (issue #101; the unsigned twin of the #97 fix).
+///
+/// The divider's remainder output computes the same function, but a consumer
+/// equivalence VC pits it against a multiplicative model (`a - (a/b)*b` —
+/// synth's rem_u, loom's WASM form), and a divider-remainder-vs-multiplier
+/// cross-circuit proof is exponential: under 1 s on the 0.9.1 derived form
+/// became over 7 m 48 s (killed) on the divider form, per synth's #101
+/// measurements.
+/// This shape aligns structurally with those models (the shared `udiv`
+/// sub-circuit strashes), restoring propagation-speed VCs.
+///
+/// Exact for ALL inputs including division by zero, with no special case:
+/// SMT-LIB `a udiv 0` is all-ones, and `all-ones * 0 = 0`, so the result is
+/// `a - 0 = a` — precisely SMT-LIB `bvurem` by zero.
+///
+/// The term-level op stays native (`BvTerm::Urem`); only its circuit changed.
+/// Kani harnesses (urem_8/32/64) and the exhaustive width-8 evaluator
+/// differential re-verify the new circuit against the same reference.
 pub fn blast_urem(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    blast_udivrem(aig, a, b).1
+    let q = blast_udiv(aig, a, b);
+    let prod = blast_mul(aig, &q, b);
+    crate::blast::arith::blast_sub(aig, a, &prod)
 }
 
 // The SIGNED forms (`bvsdiv`/`bvsrem`) are deliberately NOT blasted here: they

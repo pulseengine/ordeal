@@ -297,6 +297,29 @@ mod tests {
         );
     }
 
+    /// #101 regression guard: the UNSIGNED twin of #97 — native `Urem`
+    /// against the multiplicative model `a - (a udiv b) * b`, 32-bit
+    /// symbolic. On the divider-remainder blast this exceeded 7 m 48 s
+    /// (synth, killed); multiplicative it is ~5 ms. Same 10 s-deadline
+    /// headroom logic as the #97 guard.
+    #[test]
+    fn urem_vc_against_multiplicative_model_decides_fast() {
+        use crate::{BoolTerm, CheckResult, Solver};
+        let (a, b) = (var("a", 32), var("b", 32));
+        let ours = BvTerm::Urem(Box::new(a.clone()), Box::new(b.clone()));
+        let q = BvTerm::Udiv(Box::new(a.clone()), Box::new(b.clone()));
+        let theirs = BvTerm::Sub(Box::new(a), Box::new(BvTerm::Mul(Box::new(q), Box::new(b))));
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(Box::new(ours), Box::new(theirs)));
+        match s.check_with_deadline(10_000) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("cert must re-check"),
+            other => panic!(
+                "urem VC must decide fast against the multiplicative model; got {other:?} — \
+                 the #101 cross-circuit regression is back"
+            ),
+        }
+    }
+
     /// #97 regression guard: the synth-shaped VC — this crate's srem value
     /// model vs a consumer's multiplicative model (Sdiv + Mls) — must decide
     /// fast at width 32. On the urem-based lowering it exceeded any sane

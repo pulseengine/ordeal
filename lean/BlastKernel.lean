@@ -1837,13 +1837,16 @@ def blast_udiv
   ok (quo, aig1)
 
 /-- [blast_kernel::blast_urem]:
-    Source: 'crates/ordeal/src/blast_kernel.rs', lines 670:0-673:1
+    Source: 'crates/ordeal/src/blast_kernel.rs', lines 671:0-675:1
     Visibility: public -/
 def blast_urem
   (aig : Aig) (a : Slice Lit) (b : Slice Lit) :
   Result ((alloc.vec.Vec Lit) × Aig)
   := do
-  let ((_, rem), aig1) ← blast_udivrem aig a b
-  ok (rem, aig1)
+  let (q, aig1) ← blast_udiv aig a b
+  let s := alloc.vec.Vec.deref q
+  let (prod, aig2) ← blast_mul aig1 s b
+  let s1 := alloc.vec.Vec.deref prod
+  blast_sub aig2 a s1
 
 end blast_kernel
