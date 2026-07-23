@@ -186,13 +186,19 @@ pub fn bvsdiv(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
 /// - `INT_MIN % -1`: `|INT_MIN|` overflows back to `INT_MIN`, `|-1| = 1`, so
 ///   `r = 0` and the result is `0`, matching SMT-LIB.
 pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
-    let sa = sign_mask(a.clone(), width);
-    let r = BvTerm::Urem(Box::new(abs_bv(a, width)), Box::new(abs_bv(b, width)));
-    // (r ^ sa) - sa  — negate the remainder iff the dividend is negative.
-    BvTerm::Sub(
-        Box::new(BvTerm::Xor(Box::new(r), Box::new(sa.clone()))),
-        Box::new(sa),
-    )
+    // MULTIPLICATIVE on purpose — reverted from the v0.10.0 urem-based form
+    // (issue #97). Consumers' rem_s value models are multiplicative
+    // (`a - (a sdiv b) * b`: synth's Sdiv+Mls, loom's WASM-spec form), and an
+    // equivalence VC between THIS lowering and such a model must be
+    // structurally similar to solve fast. The urem-based form routed through
+    // the restoring divider's remainder, turning every such VC into a
+    // divider-vs-multiplier cross-circuit proof: <1 s queries became >240 s
+    // hangs in synth's CI (0.9.1 -> 0.12.0). The extra multiplier costs
+    // gates; the cross-circuit equivalence costs consumers HOURS. Native
+    // `BvTerm::Urem` remains for direct remainder queries.
+    let q = bvsdiv(a.clone(), b.clone(), width);
+    let prod = BvTerm::Mul(Box::new(q), Box::new(b));
+    BvTerm::Sub(Box::new(a), Box::new(prod))
 }
 
 #[cfg(test)]
@@ -260,25 +266,59 @@ mod tests {
     }
 
     #[test]
-    fn div_rem_derivations_are_multiplier_free() {
-        // The measured point of making bvurem native (TR-021/TR-022): the
-        // div/rem family no longer needs the `a - (a/b)*b` identity, so no
-        // derivation instantiates a multiplier circuit. Before: bvurem and
-        // bvsrem each contained one Mul; bvsrem also nested a whole bvsdiv.
+    fn div_rem_derivation_shapes_are_deliberate() {
+        // The shape of each derivation is a DESIGN DECISION, revised by #97:
+        //   - bvurem / bvsdiv: multiplier-free (native Urem; sign-corrected
+        //     Udiv) — the v0.10.0 gate-count win stands where it is free.
+        //   - bvsrem: MULTIPLICATIVE on purpose (a - (a sdiv b) * b).
+        //     Consumers' rem_s value models are multiplicative (synth's
+        //     Sdiv+Mls, loom's WASM-spec form); the v0.10.0 urem-based form
+        //     made every such equivalence VC a divider-vs-multiplier
+        //     cross-circuit proof — <1 s queries became >240 s hangs (#97).
+        //     This test pins the shape so a future "cleanup" cannot silently
+        //     reintroduce the regression in either direction.
         let w = 32u32;
         let (a, b) = (var("a", w), var("b", w));
-        let muls = |t: BvTerm| format!("{t:?}").matches("Mul(").count();
+        let muls = |t: &BvTerm| format!("{t:?}").matches("Mul(").count();
         assert_eq!(
-            muls(bvurem(a.clone(), b.clone(), w)),
+            muls(&bvurem(a.clone(), b.clone(), w)),
             0,
-            "bvurem must be multiplier-free"
+            "bvurem must stay multiplier-free (native Urem)"
         );
         assert_eq!(
-            muls(bvsrem(a.clone(), b.clone(), w)),
+            muls(&bvsdiv(a.clone(), b.clone(), w)),
             0,
-            "bvsrem must be multiplier-free"
+            "bvsdiv must stay multiplier-free (sign-corrected Udiv)"
         );
-        assert_eq!(muls(bvsdiv(a, b, w)), 0, "bvsdiv must be multiplier-free");
+        assert_eq!(
+            muls(&bvsrem(a.clone(), b.clone(), w)),
+            1,
+            "bvsrem must stay MULTIPLICATIVE (one Mul) — see #97"
+        );
+    }
+
+    /// #97 regression guard: the synth-shaped VC — this crate's srem value
+    /// model vs a consumer's multiplicative model (Sdiv + Mls) — must decide
+    /// fast at width 32. On the urem-based lowering it exceeded any sane
+    /// deadline (>240 s reported, >15 s measured here); multiplicative, it is
+    /// milliseconds. The 10 s deadline is three orders of magnitude of head-
+    /// room, not a tight timing assertion.
+    #[test]
+    fn srem_vc_against_multiplicative_model_decides_fast() {
+        use crate::{BoolTerm, CheckResult, Solver};
+        let (a, b) = (var("a", 32), var("b", 32));
+        let ours = bvsrem(a.clone(), b.clone(), 32);
+        let q = bvsdiv(a.clone(), b.clone(), 32);
+        let theirs = BvTerm::Sub(Box::new(a), Box::new(BvTerm::Mul(Box::new(q), Box::new(b))));
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(Box::new(ours), Box::new(theirs)));
+        match s.check_with_deadline(10_000) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("cert must re-check"),
+            other => panic!(
+                "srem VC must decide (fast) against the multiplicative model; got {other:?} — \
+                 the #97 cross-circuit regression is back"
+            ),
+        }
     }
 
     #[test]
