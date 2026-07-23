@@ -274,7 +274,7 @@ artifacts:
       and a criterion benchmark harness vs Z3. None of the remainder is on the
       soundness path — it is all untrusted-side or measurement.
     status: draft
-    release: v0.16.0
+    release: v0.17.0
     tags: [performance, structural-hashing, rewrites, trimming, benchmark, deferred]
     links:
       - type: derives-from
@@ -760,7 +760,7 @@ artifacts:
       whose operands live in the extended language; (c) an evaluate-to-constant
       helper for ground extended terms. All three keep the closed fragment
       closed — API surface only.
-    status: draft
+    status: verified
     release: v0.16.0
     tags: [ergonomics, api, deadline, sliver, loom, migration]
     links:
