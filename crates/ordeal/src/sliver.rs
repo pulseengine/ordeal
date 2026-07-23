@@ -639,6 +639,10 @@ pub struct SliverModel {
     pub arrays: BTreeMap<String, BTreeMap<u32, u8>>,
     /// Uninterpreted-function graph: `(name, arg_values) → result`; default `0`.
     pub calls: BTreeMap<(String, Vec<u128>), u128>,
+    /// The byte an unlisted base-array cell reads as (default `0`). Lets a
+    /// caller probe interpretation-dependence by evaluating under two fills
+    /// (see [`eval_const`]).
+    pub base_fill: u8,
 }
 
 fn mask(width: u32) -> u128 {
@@ -759,7 +763,7 @@ fn eval_array(array: &ArrayTerm, idx: u32, model: &SliverModel) -> Result<u8, Ev
             .get(name)
             .and_then(|m| m.get(&idx))
             .copied()
-            .unwrap_or(0)),
+            .unwrap_or(model.base_fill)),
         ArrayTerm::Store {
             array,
             index,
@@ -843,6 +847,118 @@ pub fn eval_ext_bool(t: &ExtBoolTerm, model: &SliverModel) -> Result<bool, EvalE
 }
 
 /// Evaluate an [`ExtBvTerm`] directly under a concrete [`SliverModel`].
+/// Evaluate a **ground** extended term to its constant value (TR-029, issue
+/// #71): the term must contain no free core variables, no base-array reads
+/// that reach evaluation, and no `pure_call`s — anything whose value depends
+/// on an interpretation makes the term non-constant and yields `None`.
+///
+/// This is deliberately stricter than [`eval_ext_bv`] under a default
+/// [`SliverModel`]: the model is *total* (unbound cells and call tuples read
+/// as 0), so evaluating a non-ground term there would silently return a
+/// value that is only correct for one arbitrary interpretation. A constant
+/// helper must refuse instead.
+pub fn eval_const(t: &ExtBvTerm) -> Option<u128> {
+    fn ground_bv(t: &ExtBvTerm) -> bool {
+        match t {
+            ExtBvTerm::Core(bv) => ground_core(bv),
+            ExtBvTerm::Op(op) => ground_op(op),
+            // A select is syntactically ground when every index/value in its
+            // chain is; whether the read actually resolves to a STORE (vs
+            // consulting the base array, which has no fixed contents) is
+            // decided semantically by the dual-fill check below.
+            ExtBvTerm::Select { array, index } => ground_array(array) && ground_bv(index),
+            ExtBvTerm::PureCall { .. } => false,
+        }
+    }
+    fn ground_array(a: &ArrayTerm) -> bool {
+        match a {
+            ArrayTerm::Var { .. } => true, // reads may still miss; see dual-fill check
+            ArrayTerm::Store {
+                array,
+                index,
+                value,
+            } => ground_array(array) && ground_bv(index) && ground_bv(value),
+        }
+    }
+    fn ground_core(t: &BvTerm) -> bool {
+        use crate::term::BvTerm as B;
+        match t {
+            B::Const { .. } => true,
+            B::Var { .. } => false,
+            B::Add(a, b)
+            | B::Sub(a, b)
+            | B::Mul(a, b)
+            | B::Udiv(a, b)
+            | B::Urem(a, b)
+            | B::And(a, b)
+            | B::Or(a, b)
+            | B::Xor(a, b)
+            | B::Shl(a, b)
+            | B::Lshr(a, b)
+            | B::Ashr(a, b)
+            | B::Rotr(a, b)
+            | B::Concat(a, b) => ground_core(a) && ground_core(b),
+            B::Extract { arg, .. } | B::ZeroExt { arg, .. } | B::SignExt { arg, .. } => {
+                ground_core(arg)
+            }
+            B::Ite { cond, then_, else_ } => {
+                ground_bool_core(cond) && ground_core(then_) && ground_core(else_)
+            }
+        }
+    }
+    fn ground_bool_core(t: &BoolTerm) -> bool {
+        use crate::term::BoolTerm as T;
+        match t {
+            T::Eq(a, b)
+            | T::Ne(a, b)
+            | T::Ult(a, b)
+            | T::Ule(a, b)
+            | T::Ugt(a, b)
+            | T::Uge(a, b)
+            | T::Slt(a, b)
+            | T::Sle(a, b)
+            | T::Sgt(a, b)
+            | T::Sge(a, b) => ground_core(a) && ground_core(b),
+            T::Not(x) => ground_bool_core(x),
+            T::And(a, b) | T::Or(a, b) => ground_bool_core(a) && ground_bool_core(b),
+        }
+    }
+    fn ground_op(op: &ExtOp) -> bool {
+        match op {
+            ExtOp::Add(a, b)
+            | ExtOp::Sub(a, b)
+            | ExtOp::Mul(a, b)
+            | ExtOp::Udiv(a, b)
+            | ExtOp::And(a, b)
+            | ExtOp::Or(a, b)
+            | ExtOp::Xor(a, b)
+            | ExtOp::Shl(a, b)
+            | ExtOp::Lshr(a, b)
+            | ExtOp::Ashr(a, b)
+            | ExtOp::Rotr(a, b)
+            | ExtOp::Concat(a, b) => ground_bv(a) && ground_bv(b),
+            ExtOp::Extract { arg, .. }
+            | ExtOp::ZeroExt { by: _, arg }
+            | ExtOp::SignExt { by: _, arg } => ground_bv(arg),
+        }
+    }
+
+    if !ground_bv(t) {
+        return None;
+    }
+    // Dual-fill check: evaluate under two different total base fills; a read
+    // that misses every store (i.e. actually consults the base array) will
+    // disagree between them, and the term is not constant.
+    let zero = SliverModel::default();
+    let ones = SliverModel {
+        base_fill: 0xFF,
+        ..Default::default()
+    };
+    let v0 = eval_ext_bv(t, &zero).ok()?;
+    let v1 = eval_ext_bv(t, &ones).ok()?;
+    if v0 == v1 { Some(v0) } else { None }
+}
+
 pub fn eval_ext_bv(t: &ExtBvTerm, model: &SliverModel) -> Result<u128, EvalError> {
     eval::eval_bv(&concretize_bv(t, model)?, &model.env)
 }
@@ -986,6 +1102,41 @@ mod array {
     // encoded the limitation this requirement removes (#70: loom's base
     // address is a symbolic BV32, so that limitation reverted every loom
     // function touching memory).
+
+    // ── TR-029: eval_const (issue #71 ask c) ────────────────────────────
+
+    /// A ground read that HITS a store is a constant.
+    #[test]
+    fn eval_const_ground_store_hit() {
+        let a = store(arr("m"), i32c(4), c8(0x5A));
+        let t = select(a, i32c(4));
+        assert_eq!(eval_const(&t), Some(0x5A));
+    }
+
+    /// A read that MISSES every store consults the base array — not constant.
+    /// This is the case a naive total-model evaluation would silently get
+    /// wrong (returning the arbitrary fill); the dual-fill check refuses.
+    #[test]
+    fn eval_const_base_read_is_not_constant() {
+        let a = store(arr("m"), i32c(4), c8(1));
+        let t = select(a, i32c(7)); // misses the store at 4
+        assert_eq!(eval_const(&t), None);
+    }
+
+    /// Free variables anywhere make the term non-constant.
+    #[test]
+    fn eval_const_free_var_is_not_constant() {
+        let t = select(store(arr("m"), v32("i"), c8(1)), i32c(0));
+        assert_eq!(eval_const(&t), None);
+        assert_eq!(eval_const(&v32("x")), None);
+    }
+
+    /// Pure ground arithmetic evaluates.
+    #[test]
+    fn eval_const_ground_arith() {
+        let t = ExtBvTerm::Op(Box::new(ExtOp::Add(i32c(40), i32c(2))));
+        assert_eq!(eval_const(&t), Some(42));
+    }
 
     #[test]
     fn symbolic_index_on_select_lowers() {

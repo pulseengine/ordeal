@@ -463,6 +463,24 @@ impl Solver {
     /// returns [`CheckResult::Unknown`]: conservative by construction, never
     /// a guess. Soundness is unchanged from `check` — no array/UF construct
     /// ever reaches the bit-blaster; only the lowered core does.
+    /// Prove two **extended** (sliver) terms equivalent — the sliver twin of
+    /// [`Solver::prove_equiv`] (TR-029, issue #71), for consumers whose
+    /// operands live in the extended language (`select`/`store`/`pure_call`)
+    /// rather than the closed core.
+    ///
+    /// Asserts `Ne(a, b)`, lowers through the sliver (read-over-write
+    /// elimination + array/UF congruence), and decides:
+    /// [`CheckResult::Unsat`] ⟹ equal for every input, array contents, and
+    /// uninterpreted-function interpretation — certificate re-checkable;
+    /// [`CheckResult::Sat`] ⟹ a counterexample; [`CheckResult::Unknown`] ⟹
+    /// conservative (incl. out-of-sliver input).
+    pub fn prove_equiv_sliver(
+        a: crate::sliver::ExtBvTerm,
+        b: crate::sliver::ExtBvTerm,
+    ) -> CheckResult {
+        Self::check_sliver(&[crate::sliver::ExtBoolTerm::Ne(a, b)])
+    }
+
     pub fn check_sliver(assertions: &[crate::sliver::ExtBoolTerm]) -> CheckResult {
         match crate::sliver::lower(assertions) {
             Ok(core) => {
@@ -496,7 +514,7 @@ impl Solver {
     /// an `Unsat` the checker did not accept is never reported (it degrades
     /// to `Unknown`, which is always sound).
     pub fn check(&self) -> CheckResult {
-        Self::verdict(self.solve_pipeline(None))
+        Self::verdict(self.solve_pipeline(Bound::None))
     }
 
     /// Decide satisfiability under a conflict budget (DES-019 / TR-016).
@@ -513,7 +531,24 @@ impl Solver {
     /// model self-check are untouched, so an exhausted budget yields `Unknown`
     /// and never a wrong or unchecked verdict.
     pub fn check_with_limit(&self, max_conflicts: u64) -> CheckResult {
-        Self::verdict(self.solve_pipeline(Some(max_conflicts)))
+        Self::verdict(self.solve_pipeline(Bound::Conflicts(max_conflicts)))
+    }
+
+    /// Decide under a **wall-clock deadline** (TR-029, issue #71): the
+    /// consumer-facing twin of [`Solver::check_with_limit`], for validators
+    /// that drive a per-check *millisecond* budget — which a conflict count
+    /// does not map to — and degrade a slow solve to a fast, safe revert.
+    ///
+    /// Semantics are identical to [`Solver::check`] except that once
+    /// `timeout_ms` elapses the search is abandoned and the result is
+    /// [`CheckResult::Unknown`] — never a wrong or unchecked verdict, per the
+    /// module-level soundness contract. `timeout_ms == 0` admits only queries
+    /// decided before the first search conflict (like a zero conflict
+    /// budget). Blasting/canonicalization time is not bounded — the deadline
+    /// governs the SAT search, which dominates on hard queries.
+    pub fn check_with_deadline(&self, timeout_ms: u64) -> CheckResult {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        Self::verdict(self.solve_pipeline(Bound::Deadline(deadline)))
     }
 
     /// Prove a boolean **goal valid** — true for *every* assignment to its free
@@ -653,7 +688,7 @@ impl Solver {
     /// The engine's raw verdict — crate-internal, differential oracle only.
     #[cfg(any(test, feature = "oracle"))]
     pub(crate) fn check_raw(&self) -> RawVerdict {
-        match self.solve_pipeline(None) {
+        match self.solve_pipeline(Bound::None) {
             Pipeline::Sat(env) => RawVerdict::Sat(env),
             Pipeline::Unsat { .. } => RawVerdict::Unsat,
             Pipeline::Unknown => RawVerdict::Unknown,
@@ -663,7 +698,7 @@ impl Solver {
     /// Run the full pipeline once, producing the internal outcome. `budget`
     /// bounds the CDCL core's search conflicts (`None` is unbounded); an
     /// exhausted budget surfaces as [`Pipeline::Unknown`].
-    fn solve_pipeline(&self, budget: Option<u64>) -> Pipeline {
+    fn solve_pipeline(&self, bound: Bound) -> Pipeline {
         if self.assertions.is_empty() {
             // An empty conjunction is trivially satisfiable by the empty model.
             return Pipeline::Sat(Env::new());
@@ -693,14 +728,19 @@ impl Solver {
         }
         let (cnf, map) = tseitin(&blaster.aig, &roots);
         let mut sat_solver = SatSolver::new();
-        let verdict = match budget {
-            // Bounded solve: budget exhaustion ⇒ no verdict ⇒ conservative
-            // Unknown (soundness contract preserved).
-            Some(max) => match sat_solver.solve_with_budget(&cnf, max) {
+        let verdict = match bound {
+            // Bounded solve: exhaustion ⇒ no verdict ⇒ conservative Unknown
+            // (soundness contract preserved) — identically for a conflict
+            // budget and a wall-clock deadline.
+            Bound::Conflicts(max) => match sat_solver.solve_with_budget(&cnf, max) {
                 Some(v) => v,
                 None => return Pipeline::Unknown,
             },
-            None => sat_solver.solve(&cnf),
+            Bound::Deadline(d) => match sat_solver.solve_with_deadline(&cnf, d) {
+                Some(v) => v,
+                None => return Pipeline::Unknown,
+            },
+            Bound::None => sat_solver.solve(&cnf),
         };
         match verdict {
             SatResult::Unsat => {
@@ -758,6 +798,15 @@ impl Solver {
 
 /// Internal pipeline outcome: like [`RawVerdict`] but carrying the
 /// checker-validated certificate on UNSAT (None = checker rejected it).
+/// How a solve is bounded (crate-internal): unbounded, a conflict budget
+/// (DES-019), or a wall-clock deadline (TR-029). Exhaustion of either bound
+/// surfaces uniformly as a conservative `Unknown`.
+enum Bound {
+    None,
+    Conflicts(u64),
+    Deadline(std::time::Instant),
+}
+
 enum Pipeline {
     Sat(Env),
     Unsat {
@@ -1143,6 +1192,70 @@ mod tests {
             matches!(Solver::check_cnf(&ok), CheckResult::Sat(_)),
             "core+tls without nomalloc must be a valid configuration"
         );
+    }
+
+    // ── TR-029: wall-clock deadline + sliver prove_equiv (issue #71) ─────
+
+    /// A hard query under a ~zero deadline abandons to Unknown — the safe
+    /// revert loom's validator wants — never a wrong verdict.
+    #[test]
+    fn deadline_exhaustion_is_conservative_unknown() {
+        let s = hard_mul_equivalence();
+        match s.check_with_deadline(0) {
+            CheckResult::Unknown => {}
+            // A fast machine may legitimately decide before the first
+            // conflict-site check; any DECIDED verdict must then be correct
+            // (this query is UNSAT), never wrong.
+            CheckResult::Unsat(cert) => cert.recheck().expect("decided-in-time cert must check"),
+            CheckResult::Sat(m) => panic!("deadline must never yield a wrong verdict: {m:?}"),
+        }
+    }
+
+    /// An easy query decides well inside a generous deadline, identically to
+    /// plain check.
+    #[test]
+    fn deadline_generous_decides_normally() {
+        let mut s = Solver::new();
+        let x = var("x", 32);
+        s.assert(BoolTerm::Ne(b(x.clone()), b(x)));
+        match s.check_with_deadline(60_000) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("cert must re-check"),
+            other => panic!("x != x must be UNSAT, got {other:?}"),
+        }
+    }
+
+    /// Root-decided queries never hit the deadline site: A5 decides at a
+    /// zero-millisecond deadline exactly as at a zero conflict budget.
+    #[test]
+    fn deadline_zero_still_root_decides() {
+        match a5_mul_commutativity().check_with_deadline(0) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("root-decided cert must check"),
+            other => panic!("canonicalized A5 must root-decide under any deadline, got {other:?}"),
+        }
+    }
+
+    /// prove_equiv_sliver: the read-over-write law as a one-call equivalence
+    /// over EXTENDED terms — Unsat with a re-checkable certificate.
+    #[test]
+    fn prove_equiv_sliver_read_over_write() {
+        let (i, v) = (sym_bv32("i"), sym_bv8("v"));
+        let read = sel(st(base("m"), i.clone(), v.clone()), i);
+        match Solver::prove_equiv_sliver(read, v) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("cert must re-check"),
+            other => panic!("select(store(m,i,v),i) ≡ v must prove, got {other:?}"),
+        }
+    }
+
+    /// ...and it is not vacuous: two independent base reads are NOT
+    /// equivalent (Sat with a witness).
+    #[test]
+    fn prove_equiv_sliver_distinct_reads_differ() {
+        let r1 = sel(base("m"), sym_bv32("i"));
+        let r2 = sel(base("m"), sym_bv32("j"));
+        match Solver::prove_equiv_sliver(r1, r2) {
+            CheckResult::Sat(_) => {}
+            other => panic!("m[i] ≢ m[j] in general, got {other:?}"),
+        }
     }
 
     #[test]
