@@ -69,7 +69,16 @@
        `BitVec.udiv` returns 0 there, hence `smtUDiv`), remainder word
        denotes `A % B` (core's `umod` ALREADY has the SMT-LIB `x % 0 = x`
        semantics: `BitVec.umod_zero`).
-     - `blast_udiv_bitvec` / `blast_urem_bitvec` : the projections.
+     - `blast_udiv_bitvec` : the quotient projection.
+     - `blast_urem_bitvec` : since issue #101 NOT a projection but the
+       multiplicative composition `a - (a bvudiv b) * b`
+       (`blast_sub(a, blast_mul(blast_udiv(a,b), b))`), exact including
+       `/0`: SMT-LIB `a udiv 0 = allOnes` and `allOnes * 0 = 0`, so the
+       result is `a - 0 = a` — precisely core's `BitVec.umod_zero`. Glued
+       by the new BitVec identity `umod_eq_sub_smtUDiv_mul` and the
+       structural "frame" specs (`blast_udivrem_frame`, `blast_mul_frame`,
+       `blast_sub_frame`) that expose prefix / gate-count / WF-preservation
+       / literal-range facts the simulate-wrapped headlines elide.
 -/
 import BlasterMul
 
@@ -1839,13 +1848,339 @@ theorem blast_udiv_bitvec (aig : Aig) (a b : Slice Lit)
   intro vals h hA hB
   exact (h hA hB).1
 
-/-- **`blast_urem` implements SMT-LIB `bvurem`, for every width `w`**:
-    the remainder projection (core's `%` — `x % 0 = x` as SMT-LIB
-    demands). -/
+/- ════════ #101: THE MULTIPLICATIVE `blast_urem` COMPOSITION ════════ -/
+
+/-- Conjunction of two proven specs on the SAME computation. -/
+theorem spec_and {α : Type} {m : Result α} {P Q : α → Prop}
+    (hP : WP.spec m P) (hQ : WP.spec m Q) :
+    WP.spec m (fun x => P x ∧ Q x) := by
+  cases m with
+  | ok x =>
+    simp only [WP.spec_ok] at hP hQ ⊢
+    exact ⟨hP, hQ⟩
+  | fail e => simp only [WP.spec_fail] at hP
+  | div => simp only [WP.spec_div] at hP
+
+/-- Harvesting a simulate-wrapped fact at the pure level: on a well-formed
+    aig the (deterministic, total) monadic simulation is `pSim`, so any
+    proven post of `simulate` holds of a value list EQUAL to `pSim`. -/
+theorem simulate_spec_pSim (aig' : Aig) (inputs : Slice Bool)
+    {P : alloc.vec.Vec Bool → Prop}
+    (hwf : AigWF aig'.nodes.val inputs.val.length)
+    (h : WP.spec (simulate aig' inputs) P) :
+    ∃ vals : alloc.vec.Vec Bool,
+      vals.val = pSim inputs.val aig'.nodes.val ∧ P vals := by
+  have h2 := simulate_spec aig' inputs hwf
+  cases hm : simulate aig' inputs with
+  | ok vals =>
+    rw [hm] at h h2
+    simp only [WP.spec_ok] at h h2
+    exact ⟨vals, h2, h⟩
+  | fail e =>
+    rw [hm] at h2
+    simp only [WP.spec_fail] at h2
+  | div =>
+    rw [hm] at h2
+    simp only [WP.spec_div] at h2
+
+/-- Transporting `Denotes` FORWARD along append-monotonicity (converse of
+    `Denotes.of_prefix`): a word whose literals all live in the smaller aig
+    keeps its denotation under the extended aig's simulation. -/
+theorem Denotes.up {ns ns' : List Node} (hpre : ns <+: ns')
+    {word : List Lit} {w : Nat} {V : BitVec w}
+    (hrng : ∀ l ∈ word, l.node.val < ns.length) (inp : List Bool)
+    (h : Denotes (pSim inp ns) word w V) :
+    Denotes (pSim inp ns') word w V := by
+  obtain ⟨hlen, hj⟩ := h
+  refine ⟨hlen, fun j hjl => ?_⟩
+  rw [pEvalLit_stable hpre _ (hrng _ (List.getElem_mem _)) inp]
+  exact hj j hjl
+
+/-- **The multiplicative remainder identity** (issue #101, the one new
+    mathematical fact): over `BitVec w`, `A % B = A - A.smtUDiv B * B` for
+    ALL `B` INCLUDING `B = 0` — there `A.smtUDiv 0 = allOnes` and
+    `allOnes * 0 = 0`, so the right side is `A - 0 = A = A % 0`
+    (`BitVec.umod_zero`). For `B ≠ 0` it is the Euclidean identity
+    `A % B = A - A / B * B`, which survives the w-bit truncation because
+    `A / B * B ≤ A < 2^w` (`Nat.div_mul_le_self`). -/
+theorem umod_eq_sub_smtUDiv_mul {w : Nat} (A B : BitVec w) :
+    A % B = A - A.smtUDiv B * B := by
+  by_cases hB : B = 0#w
+  · subst hB
+    rw [BitVec.umod_zero, BitVec.smtUDiv_zero, BitVec.mul_zero,
+      BitVec.sub_zero]
+  · rw [BitVec.smtUDiv_eq, if_neg hB]
+    apply BitVec.eq_of_toNat_eq
+    have hle : A.toNat / B.toNat * B.toNat ≤ A.toNat :=
+      Nat.div_mul_le_self A.toNat B.toNat
+    have hA := A.isLt
+    have hd := Nat.div_add_mod A.toNat B.toNat
+    have hcomm : B.toNat * (A.toNat / B.toNat)
+        = A.toNat / B.toNat * B.toNat := Nat.mul_comm _ _
+    rw [BitVec.toNat_umod, BitVec.toNat_sub, BitVec.toNat_mul,
+      BitVec.toNat_udiv,
+      Nat.mod_eq_of_lt
+        (show A.toNat / B.toNat * B.toNat < 2 ^ w by omega),
+      show 2 ^ w - A.toNat / B.toNat * B.toNat + A.toNat
+          = A.toNat - A.toNat / B.toNat * B.toNat + 2 ^ w by omega,
+      Nat.add_mod_right,
+      Nat.mod_eq_of_lt
+        (show A.toNat - A.toNat / B.toNat * B.toNat < 2 ^ w by omega)]
+    omega
+
+/-- **Structural frame of `blast_udivrem`**: exactly `12·w² + 8·w` gates
+    are appended, nothing existing is touched, well-formedness is
+    preserved, and the quotient word has width `w` with every literal in
+    range. Companion to `blast_udivrem_bitvec`, whose simulate-wrapped
+    statement elides these plumbing facts; the #101 composition needs both
+    (glued by `spec_and`). -/
+theorem blast_udivrem_frame (aig : Aig) (a b : Slice Lit)
+    (hab : a.val.length ≤ b.val.length)
+    (hcap : aig.nodes.val.length
+      + (12 * a.val.length * a.val.length + 8 * a.val.length)
+      ≤ Usize.max)
+    (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
+    (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False) :
+    blast_udivrem aig a b ⦃ p =>
+      p.1.1.val.length = a.val.length ∧
+      aig.nodes.val <+: p.2.nodes.val ∧
+      p.2.nodes.val.length = aig.nodes.val.length
+        + (12 * a.val.length * a.val.length + 8 * a.val.length) ∧
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
+      (∀ l ∈ p.1.1.val, l.node.val < p.2.nodes.val.length) ⦄ := by
+  unfold blast_udivrem
+  have hlen : (Slice.len a).val = a.val.length := by scalar_tac
+  have hprod : divGates a.val.length a.val.length
+      = 12 * a.val.length * a.val.length + a.val.length := by
+    rw [divGates_eq]
+    ring
+  step with (blast_udivrem_loop0_spec (Slice.len a)) as
+    ⟨rem0, quo0, hrem0, hquo0⟩
+  rw [hlen] at hrem0 hquo0
+  step with (blast_udivrem_loop1_spec aig a b (Slice.len a) rem0 quo0 hlen
+    hab (by omega) ha hb hne h0 hrem0 hquo0) as ⟨aig1, rem1, quo1, hinv⟩
+  obtain ⟨_, hlen1, hpre1, hwf1, hrlen, hqlen, hrrng, hqrng, _, _⟩ := hinv
+  step with lit_false_spec as ⟨nz0, hnz0⟩
+  have hne1 : 0 < aig1.nodes.val.length := by
+    have := hpre1.length_le
+    omega
+  have h01 : aig1.nodes.val[0]'hne1 = Node.False :=
+    node0_of_prefix hpre1 hne h0 hne1
+  have hb1 : ∀ l ∈ b.val, l.node.val < aig1.nodes.val.length := by
+    intro l hl
+    have h1 := hb l hl
+    have h2 := hpre1.length_le
+    omega
+  have hnz0r : nz0.node.val < aig1.nodes.val.length := by
+    rw [hnz0]
+    scalar_tac
+  have hnz0v : ∀ inp : List Bool,
+      pEvalLit (pSim inp aig1.nodes.val) nz0 = false := by
+    intro inp
+    rw [hnz0]
+    exact pEvalLit_node_zero hne1 h01 inp false
+  step with (udivrem_nz_loop_spec aig1 b (Slice.len a) nz0
+    (by omega) (by omega) hb1 hnz0r hnz0v) as
+    ⟨aig2, nzL, hz1, hz2, hz3, hz4, _⟩
+  step with (lit_not_spec nzL) as ⟨bz, hbz⟩
+  step with lit_true_spec as ⟨tl, htl⟩
+  simp only [htl]
+  have hbznode : bz.node = nzL.node := by rw [hbz]
+  have hbz2 : bz.node.val < aig2.nodes.val.length := by
+    rw [hbznode]
+    exact hz4
+  have hne2 : 0 < aig2.nodes.val.length := by omega
+  have htl2 : ({ node := 0#usize, neg := true } : Lit).node.val
+      < aig2.nodes.val.length := by scalar_tac
+  have hq2 : ∀ l ∈ quo1.val, l.node.val < aig2.nodes.val.length := by
+    intro l hl
+    have h1 := hqrng l hl
+    have h2 := hz2.length_le
+    omega
+  step with (udivrem_quo_mux_spec aig2 (Slice.len a) quo1 bz
+    { node := 0#usize, neg := true } (by omega) (by omega) hq2 hbz2 htl2)
+    as ⟨aig3, quoOut, hQ1, hQ2, hQ3, hQ4, hQ5, _⟩
+  have ha3 : ∀ l ∈ a.val, l.node.val < aig3.nodes.val.length := by
+    intro l hl
+    have h1 := ha l hl
+    have h2 := (hpre1.trans (hz2.trans hQ2)).length_le
+    omega
+  have hr3 : ∀ l ∈ rem1.val, l.node.val < aig3.nodes.val.length := by
+    intro l hl
+    have h1 := hrrng l hl
+    have h2 := (hz2.trans hQ2).length_le
+    omega
+  have hbz3 : bz.node.val < aig3.nodes.val.length := by omega
+  step with (udivrem_rem_mux_spec aig3 a (Slice.len a) rem1 bz
+    (by omega) (by omega) (by omega) ha3 hr3 hbz3) as
+    ⟨aig4, remOut, hM1, hM2, hM3, _, _, _⟩
+  refine ⟨by omega, hpre1.trans (hz2.trans (hQ2.trans hM2)), by omega,
+    fun L hL => hM3 L (hQ3 L (hz3 L (hwf1 L hL))), ?_⟩
+  intro l hl
+  have h1 := hQ5 l hl
+  have h2 := hM2.length_le
+  omega
+
+/-- Structural frame of `blast_udiv`: the quotient projection of
+    `blast_udivrem_frame`. -/
+theorem blast_udiv_frame (aig : Aig) (a b : Slice Lit)
+    (hab : a.val.length ≤ b.val.length)
+    (hcap : aig.nodes.val.length
+      + (12 * a.val.length * a.val.length + 8 * a.val.length)
+      ≤ Usize.max)
+    (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
+    (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False) :
+    blast_udiv aig a b ⦃ p =>
+      p.1.val.length = a.val.length ∧
+      aig.nodes.val <+: p.2.nodes.val ∧
+      p.2.nodes.val.length = aig.nodes.val.length
+        + (12 * a.val.length * a.val.length + 8 * a.val.length) ∧
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
+      (∀ l ∈ p.1.val, l.node.val < p.2.nodes.val.length) ⦄ := by
+  unfold blast_udiv
+  step with (blast_udivrem_frame aig a b hab hcap ha hb hne h0) as
+    ⟨quo, rem, aig1, h1, h2, h3, h4, h5⟩
+  exact ⟨h1, h2, h3, h4, h5⟩
+
+/-- Structural frame of `blast_mul`: at most `10·w²` gates appended
+    (exactly `mulGates w w`), prefix / WF-preservation / output ranges. -/
+theorem blast_mul_frame (aig : Aig) (a b : Slice Lit)
+    (hab : a.val.length ≤ b.val.length)
+    (hcap : aig.nodes.val.length + 10 * a.val.length * a.val.length
+      ≤ Usize.max)
+    (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
+    (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False) :
+    blast_mul aig a b ⦃ p =>
+      p.1.val.length = a.val.length ∧
+      aig.nodes.val <+: p.2.nodes.val ∧
+      p.2.nodes.val.length ≤ aig.nodes.val.length
+        + 10 * a.val.length * a.val.length ∧
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
+      (∀ l ∈ p.1.val, l.node.val < p.2.nodes.val.length) ⦄ := by
+  unfold blast_mul
+  have hlen : (Slice.len a).val = a.val.length := by scalar_tac
+  step with (blast_mul_loop0_spec (Slice.len a)) as ⟨acc0, hacc0⟩
+  rw [hlen] at hacc0
+  apply WP.spec_mono (blast_mul_loop1_spec aig a b (Slice.len a) acc0 hlen
+    hab hcap ha hb hne h0 hacc0)
+  rintro ⟨out, aigF⟩ ⟨_, hlenF, hpre, hwf, holen, horng, _⟩
+  have hmg := mulGates_le a.val.length a.val.length
+  exact ⟨holen, hpre, by omega, hwf, horng⟩
+
+/-- Structural frame of `blast_sub`: exactly `9·w` gates appended, prefix
+    and WF-preservation (`word_not` and `lit_true` are gate-free). -/
+theorem blast_sub_frame (aig : Aig) (a b : Slice Lit)
+    (hab : a.val.length ≤ b.val.length)
+    (hcap : aig.nodes.val.length + 9 * a.val.length ≤ Usize.max)
+    (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
+    (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
+    (hne : 0 < aig.nodes.val.length) :
+    blast_sub aig a b ⦃ p =>
+      p.1.val.length = a.val.length ∧
+      aig.nodes.val <+: p.2.nodes.val ∧
+      p.2.nodes.val.length = aig.nodes.val.length + 9 * a.val.length ∧
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ⦄ := by
+  unfold blast_sub
+  step with (word_not_spec b) as ⟨nb, hnb⟩
+  have hderef : (alloc.vec.Vec.deref nb).val = nb.val := rfl
+  step with lit_true_spec as ⟨l, hl⟩
+  simp only [hl]
+  have hnblen : (alloc.vec.Vec.deref nb).val.length = b.val.length := by
+    rw [hderef, hnb]
+    simp
+  have hnbrng : ∀ l ∈ (alloc.vec.Vec.deref nb).val,
+      l.node.val < aig.nodes.val.length := by
+    rw [hderef, hnb]
+    intro l' hl'
+    rw [List.mem_map] at hl'
+    obtain ⟨l'', hl'', rfl⟩ := hl'
+    exact hb l'' hl''
+  have hcin : ({ node := 0#usize, neg := true } : Lit).node.val
+      < aig.nodes.val.length := by scalar_tac
+  step with (ripple_carry_spec aig a (alloc.vec.Vec.deref nb) _
+    (by omega) hcap ha hnbrng hcin) as
+    ⟨sum, carry, aig1, h1, h2, h3, h4, _, _, _, _⟩
+  exact ⟨h1, h2, h3, h4⟩
+
+/-- `blast_udiv`, frame AND semantics in one spec (via `spec_and`): the
+    #101 composition needs the structural facts to thread the later
+    `blast_mul` / `blast_sub` stages and the semantic fact to name the
+    quotient. -/
+theorem blast_udiv_full (aig : Aig) (a b : Slice Lit)
+    (hab : a.val.length ≤ b.val.length)
+    (hcap : aig.nodes.val.length
+      + (12 * a.val.length * a.val.length + 8 * a.val.length)
+      ≤ Usize.max)
+    (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
+    (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False)
+    {w : Nat} (A B : BitVec w) :
+    blast_udiv aig a b ⦃ p =>
+      p.1.val.length = a.val.length ∧
+      aig.nodes.val <+: p.2.nodes.val ∧
+      p.2.nodes.val.length = aig.nodes.val.length
+        + (12 * a.val.length * a.val.length + 8 * a.val.length) ∧
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
+      (∀ l ∈ p.1.val, l.node.val < p.2.nodes.val.length) ∧
+      ∀ (inputs : Slice Bool), AigWF aig.nodes.val inputs.val.length →
+        simulate p.2 inputs ⦃ vals =>
+          Denotes vals.val a.val w A → Denotes vals.val b.val w B →
+          Denotes vals.val p.1.val w (A.smtUDiv B) ⦄ ⦄ := by
+  apply WP.spec_mono (spec_and
+    (blast_udiv_frame aig a b hab hcap ha hb hne h0)
+    (blast_udiv_bitvec aig a b hab hcap ha hb hne h0 A B))
+  rintro ⟨quo, aig1⟩ ⟨⟨h1, h2, h3, h4, h5⟩, h6⟩
+  exact ⟨h1, h2, h3, h4, h5, h6⟩
+
+/-- `blast_mul`, frame AND semantics in one spec (via `spec_and`). -/
+theorem blast_mul_full (aig : Aig) (a b : Slice Lit)
+    (hab : a.val.length ≤ b.val.length)
+    (hcap : aig.nodes.val.length + 10 * a.val.length * a.val.length
+      ≤ Usize.max)
+    (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
+    (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False)
+    {w : Nat} (A B : BitVec w) :
+    blast_mul aig a b ⦃ p =>
+      p.1.val.length = a.val.length ∧
+      aig.nodes.val <+: p.2.nodes.val ∧
+      p.2.nodes.val.length ≤ aig.nodes.val.length
+        + 10 * a.val.length * a.val.length ∧
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
+      (∀ l ∈ p.1.val, l.node.val < p.2.nodes.val.length) ∧
+      ∀ (inputs : Slice Bool), AigWF aig.nodes.val inputs.val.length →
+        simulate p.2 inputs ⦃ vals =>
+          Denotes vals.val a.val w A → Denotes vals.val b.val w B →
+          Denotes vals.val p.1.val w (A * B) ⦄ ⦄ := by
+  apply WP.spec_mono (spec_and
+    (blast_mul_frame aig a b hab hcap ha hb hne h0)
+    (blast_mul_bitvec aig a b hab hcap ha hb hne h0 A B))
+  rintro ⟨out, aig1⟩ ⟨⟨h1, h2, h3, h4, h5⟩, h6⟩
+  exact ⟨h1, h2, h3, h4, h5, h6⟩
+
+/-- **`blast_urem` implements SMT-LIB `bvurem`, for every width `w`**
+    (issue #101): since the consumer-perf rework the remainder is blasted
+    MULTIPLICATIVELY as `a - (a bvudiv b) * b` — the composition
+    `blast_sub(a, blast_mul(blast_udiv(a,b), b))` — which agrees with
+    core's `%` on ALL divisors: at `B = 0` SMT-LIB gives
+    `A udiv 0 = allOnes` and `allOnes * 0 = 0`, so the output is
+    `A - 0 = A`, exactly `BitVec.umod_zero`
+    (`umod_eq_sub_smtUDiv_mul`). Gate count, summed stage by stage:
+    `12·w² + 8·w` (udiv) `+ 10·w²` (mul) `+ 9·w` (sub). -/
 theorem blast_urem_bitvec (aig : Aig) (a b : Slice Lit)
     (hab : a.val.length ≤ b.val.length)
     (hcap : aig.nodes.val.length
       + (12 * a.val.length * a.val.length + 8 * a.val.length)
+      + 10 * a.val.length * a.val.length
+      + 9 * a.val.length
       ≤ Usize.max)
     (ha : ∀ l ∈ a.val, l.node.val < aig.nodes.val.length)
     (hb : ∀ l ∈ b.val, l.node.val < aig.nodes.val.length)
@@ -1858,11 +2193,95 @@ theorem blast_urem_bitvec (aig : Aig) (a b : Slice Lit)
           Denotes vals.val a.val w A → Denotes vals.val b.val w B →
           Denotes vals.val p.1.val w (A % B) ⦄ ⦄ := by
   unfold blast_urem
-  step with (blast_udivrem_bitvec aig a b hab hcap ha hb hne h0 A B) as
-    ⟨quo, rem, aig1, hsim⟩
-  intro inputs hwf
-  apply WP.spec_mono (hsim inputs hwf)
-  intro vals h hA hB
-  exact (h hA hB).2
+  -- stage 1: the quotient word `q` denotes `A.smtUDiv B` (under aig1)
+  step with (blast_udiv_full aig a b hab (by omega) ha hb hne h0 A B) as
+    ⟨q, aig1, hql, hpre1, hlen1, hwf1, hqrng, hsimQ⟩
+  have hderefq : (alloc.vec.Vec.deref q).val = q.val := rfl
+  have hqlen' : (alloc.vec.Vec.deref q).val.length = a.val.length := by
+    rw [hderefq, hql]
+  have hne1 : 0 < aig1.nodes.val.length := by
+    have := hpre1.length_le
+    omega
+  have h01 : aig1.nodes.val[0]'hne1 = Node.False :=
+    node0_of_prefix hpre1 hne h0 hne1
+  have hb1 : ∀ l ∈ b.val, l.node.val < aig1.nodes.val.length := by
+    intro l hl
+    have h1 := hb l hl
+    have h2 := hpre1.length_le
+    omega
+  have hqrng' : ∀ l ∈ (alloc.vec.Vec.deref q).val,
+      l.node.val < aig1.nodes.val.length := by
+    rw [hderefq]
+    exact hqrng
+  -- stage 2: the product word denotes `A.smtUDiv B * B` (under aig2)
+  step with (blast_mul_full aig1 (alloc.vec.Vec.deref q) b
+    (by omega) (by rw [hqlen']; omega) hqrng' hb1 hne1 h01
+    (A.smtUDiv B) B) as
+    ⟨prod, aig2, hpl, hpre2, hlen2, hwf2, hprng, hsimM⟩
+  rw [hqlen'] at hpl hlen2
+  have hderefp : (alloc.vec.Vec.deref prod).val = prod.val := rfl
+  have hplen' : (alloc.vec.Vec.deref prod).val.length = a.val.length := by
+    rw [hderefp]
+    exact hpl
+  have hne2 : 0 < aig2.nodes.val.length := by
+    have := hpre2.length_le
+    omega
+  have h02 : aig2.nodes.val[0]'hne2 = Node.False :=
+    node0_of_prefix hpre2 hne1 h01 hne2
+  have ha2 : ∀ l ∈ a.val, l.node.val < aig2.nodes.val.length := by
+    intro l hl
+    have h1 := ha l hl
+    have h2 := hpre1.length_le
+    have h3 := hpre2.length_le
+    omega
+  have hprng' : ∀ l ∈ (alloc.vec.Vec.deref prod).val,
+      l.node.val < aig2.nodes.val.length := by
+    rw [hderefp]
+    exact hprng
+  -- stage 3: subtract, then rewrite with the umod identity
+  apply WP.spec_mono (spec_and
+    (blast_sub_frame aig2 a (alloc.vec.Vec.deref prod)
+      (by omega) (by omega) ha2 hprng' hne2)
+    (blast_sub_bitvec aig2 a (alloc.vec.Vec.deref prod)
+      (by omega) (by omega) ha2 hprng' hne2 h02 A (A.smtUDiv B * B)))
+  rintro ⟨out, aig3⟩ ⟨⟨_, hpre3, _, hwf3⟩, hsimS⟩
+  intro inputs hwfI
+  have hwfI1 : AigWF aig1.nodes.val inputs.val.length := hwf1 _ hwfI
+  have hwfI2 : AigWF aig2.nodes.val inputs.val.length := hwf2 _ hwfI1
+  have hwfI3 : AigWF aig3.nodes.val inputs.val.length := hwf3 _ hwfI2
+  apply WP.spec_mono (spec_and (simulate_spec aig3 inputs hwfI3)
+    (hsimS inputs hwfI2))
+  rintro vals ⟨hv, himp⟩
+  intro hA hB
+  rw [hv, hderefp] at himp
+  rw [hv] at hA hB ⊢
+  -- transport the operand denotations down to the ORIGINAL aig …
+  have hpre03 : aig.nodes.val <+: aig3.nodes.val :=
+    hpre1.trans (hpre2.trans hpre3)
+  have hA0 : Denotes (pSim inputs.val aig.nodes.val) a.val w A :=
+    hA.of_prefix hpre03 ha inputs.val
+  have hB0 : Denotes (pSim inputs.val aig.nodes.val) b.val w B :=
+    hB.of_prefix hpre03 hb inputs.val
+  -- … harvest the udiv semantics under aig1 …
+  obtain ⟨v1, hv1, hf1⟩ :=
+    simulate_spec_pSim aig1 inputs hwfI1 (hsimQ inputs hwfI)
+  rw [hv1] at hf1
+  have hQ1 : Denotes (pSim inputs.val aig1.nodes.val) q.val w
+      (A.smtUDiv B) :=
+    hf1 (hA0.up hpre1 ha inputs.val) (hB0.up hpre1 hb inputs.val)
+  -- … the mul semantics under aig2 …
+  obtain ⟨v2, hv2, hf2⟩ :=
+    simulate_spec_pSim aig2 inputs hwfI2 (hsimM inputs hwfI1)
+  rw [hv2, hderefq] at hf2
+  have hP2 : Denotes (pSim inputs.val aig2.nodes.val) prod.val w
+      (A.smtUDiv B * B) :=
+    hf2 (hQ1.up hpre2 hqrng inputs.val)
+      (hB0.up (hpre1.trans hpre2) hb inputs.val)
+  -- … lift the product to the final aig and conclude via the identity
+  have hP3 : Denotes (pSim inputs.val aig3.nodes.val) prod.val w
+      (A.smtUDiv B * B) :=
+    hP2.up hpre3 hprng inputs.val
+  rw [umod_eq_sub_smtUDiv_mul A B]
+  exact himp hA hP3
 
 end blast_kernel.spec
