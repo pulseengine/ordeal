@@ -632,7 +632,8 @@ impl Solver {
         let mut sat_solver = SatSolver::new();
         match sat_solver.solve(formula) {
             SatResult::Unsat => {
-                let cert = crate::lrat::emit_lrat(formula.clauses.len(), sat_solver.proof_trace());
+                let cert =
+                    crate::lrat::emit_lrat_trimmed(formula.clauses.len(), sat_solver.proof_trace());
                 match ordeal_lrat::check(&formula.clauses, &cert) {
                     Ok(()) => CheckResult::Unsat(Certificate {
                         lrat: cert.into_bytes(),
@@ -746,7 +747,8 @@ impl Solver {
             SatResult::Unsat => {
                 // Emit the LRAT certificate from the proof trace and have the
                 // trusted checker validate it BEFORE asserting UNSAT.
-                let cert = crate::lrat::emit_lrat(cnf.clauses.len(), sat_solver.proof_trace());
+                let cert =
+                    crate::lrat::emit_lrat_trimmed(cnf.clauses.len(), sat_solver.proof_trace());
                 match ordeal_lrat::check(&cnf.clauses, &cert) {
                     Ok(()) => Pipeline::Unsat {
                         certificate: Some(cert.into_bytes()),
