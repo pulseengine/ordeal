@@ -46,6 +46,23 @@ impl Sort {
 /// This is the *entire* set of bitvector operations `ordeal` decides. Every
 /// variant maps to a well-defined bit-blasting rule (see `ARCHITECTURE.md`).
 #[derive(Clone, Debug)]
+/// # Variant-addition policy (issue #104)
+///
+/// This enum is `#[non_exhaustive]`: the closed fragment grows only with a
+/// proven blasting rule, and when it does, downstream crates must not break
+/// on a 0.x bump (it broke synth's build twice). Consumers therefore need a
+/// `_ =>` arm — for a verification consumer the safe catch-all maps an
+/// unknown term kind to a conservative `Unknown`/error, never a guess.
+///
+/// In exchange, EVERY variant addition is called out in the CHANGELOG under
+/// a "New `BvTerm`/`BoolTerm` variant" heading (the `non_exhaustive_omitted_
+/// patterns` lint is still nightly-only, so the changelog callout — not a
+/// lint — is how stable-toolchain consumers discover new ops to handle
+/// explicitly). Ordeal's own internal matches remain exhaustive: the
+/// attribute binds only across crate boundaries, so adding an op still
+/// forces every in-crate site (evaluator, blaster, canonicalizer, oracle)
+/// to handle it.
+#[non_exhaustive]
 pub enum BvTerm {
     /// A concrete bitvector constant of the given sort.
     Const { value: u128, sort: Sort },
@@ -133,6 +150,7 @@ pub enum BvTerm {
 /// A solver query is a conjunction of asserted `BoolTerm`s; `check` decides
 /// whether that conjunction is satisfiable.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum BoolTerm {
     // --- Bitvector comparisons ---
     /// Equality (`=`).
