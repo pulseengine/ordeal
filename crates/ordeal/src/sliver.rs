@@ -32,6 +32,7 @@ use std::collections::BTreeMap;
 
 /// An array-sorted term: `Array(BV32 → BV8)`, non-extensional.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum ArrayTerm {
     /// A free array variable (base linear memory).
     Var { name: String },
@@ -49,6 +50,7 @@ pub enum ArrayTerm {
 /// A bitvector-sorted term in the extended (sliver) language: the closed
 /// core plus `select` and uninterpreted `pure_call`.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum ExtBvTerm {
     /// A pure-core term (no sliver constructs beneath it), embedded verbatim.
     Core(BvTerm),
@@ -81,6 +83,7 @@ pub enum ExtBvTerm {
 /// leaves — `Const`/`Var` — use [`ExtBvTerm::Core`].)
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
+#[non_exhaustive]
 pub enum ExtOp {
     Add(ExtBvTerm, ExtBvTerm),
     Sub(ExtBvTerm, ExtBvTerm),
@@ -102,6 +105,7 @@ pub enum ExtOp {
 /// A boolean-sorted term in the extended language.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
+#[non_exhaustive]
 pub enum ExtBoolTerm {
     Eq(ExtBvTerm, ExtBvTerm),
     Ne(ExtBvTerm, ExtBvTerm),
