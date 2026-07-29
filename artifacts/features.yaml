@@ -486,3 +486,34 @@ artifacts:
         configuration for a consistent one; a feature-model mutual-exclusion
         conflict is certified UNSAT; the propositional path agrees with the
         bit-blaster on a shared query.
+
+  - id: FEAT-015
+    type: sw-req
+    title: "P15 — consumer scale-out: BMC practical-k, measured caching, rivet ingestion (v0.18.0)"
+    description: >
+      The release shaped by the 2026-07-29 asks sweep: spar#350 (native
+      certificate-checked BMC, sequenced behind the spar#327 layout edge)
+      needs the practical-k envelope measured (TR-031); TR-009's deferred
+      term-graph caching finally has its measure-first workload (the BMC
+      corpus) and is decided BY that measurement; TR-030 lands when
+      rivet#693's Part-2 ingestion (unblocked by v0.17.0's ordeal-cert/v1)
+      reaches a consumable state. Approach explorations #47/#48 ride along
+      as stretch. Everything here is consumer-pulled, nothing speculative.
+    status: draft
+    release: v0.18.0
+    tags: [roadmap, p12, bmc, caching, rivet, consumer]
+    links:
+      - type: derives-from
+        target: SYS-006
+      - type: satisfies
+        target: TR-031
+      - type: satisfies
+        target: TR-030
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        TR-031's measured envelope published; the TR-009 caching decision is
+        made from the BMC-corpus measurement (implemented or explicitly
+        rejected with numbers); TR-030 verified once rivet ingestion ships,
+        or explicitly re-scoped with the blocking state recorded.

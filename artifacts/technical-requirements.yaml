@@ -807,3 +807,41 @@ artifacts:
         A rivet build ingests a bundle produced by `ordeal verus --cert-out`
         (or the API), validates it as an artifact, and its recheck() passes;
         a tampered bundle is rejected at ingestion.
+
+  - id: TR-031
+    type: sw-req
+    title: BMC-shaped workloads — measured practical-depth guidance
+    description: >
+      spar#350 proposes certificate-checked bounded model checking of
+      concurrent AADL behaviour discharged through ordeal, and its spike's
+      second acceptance measurement is "at what unrolling depth k does ordeal
+      stop being practical on a realistic gale-sized model". Ordeal shall
+      answer that with data it owns: a benchmark corpus of BMC-shaped QF_BV
+      queries (bounded transition-relation unrollings over small-bit-vector
+      state — thread states, queue counters, lock owners — in the shapes of
+      spar#350's four canned properties), measured end-to-end certified
+      (blast + solve + LRAT + verified check) on BOTH backends (own CDCL core
+      and the cadical accelerator), with the practical-k envelope published
+      in the consumer docs. One-shot-per-k stays deliberate (TR-002: no
+      incremental API) — each depth re-solves and re-certifies, which is the
+      certifying-algorithm story; the accelerator and TR-009's deferred
+      caching are the levers if the envelope disappoints, and this corpus is
+      exactly the measure-first workload that caching decision was waiting
+      for.
+    status: draft
+    release: v0.18.0
+    tags: [bmc, spar, benchmark, practical-k, cadical, consumer]
+    links:
+      - type: derives-from
+        target: SYS-006
+      - type: allocated-to
+        target: ARC-005
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        The BMC corpus exists with at least deadlock- and queue-overflow-
+        shaped instances; certified latency vs k is measured on both
+        backends and published; the k where certified latency crosses 1s and
+        10s is stated per shape; a seeded-defect instance (undersized queue)
+        goes SAT with a decodable counterexample model.
