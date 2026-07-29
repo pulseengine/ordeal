@@ -180,7 +180,7 @@ artifacts:
       CaDiCaL optional native accelerator) agree with Z3 on the corpus, that
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
-    status: draft
+    status: verified
     release: v0.17.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
@@ -189,8 +189,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal-sat && wasm32 backend smoke test"
-        coverage: "CaDiCaL + varisat vs Z3 parity; wasm32 build"
+        run: "cargo test -p ordeal --features 'cadical oracle' --release -- cadical && cargo build --target wasm32-wasip2 --release"
+        coverage: "own core vs CaDiCaL vs Z3 three-way parity; checker-accepted LRAT from both backends; wasm32 build"
 
   - id: VER-009
     type: sw-verification
@@ -221,7 +221,7 @@ artifacts:
       per-operation integration latency (in-process, no SMT-LIB parsing, no
       theory combination) against the CI budget. Confirms AIG structural hashing
       and LRAT trimming measurably reduce work.
-    status: implemented
+    status: verified
     release: v0.17.0
     tags: [benchmark, performance, latency, z3-rival]
     links:
@@ -689,3 +689,27 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --lib deadline_ prove_equiv_sliver eval_const srem_vc lrat"
         coverage: "TR-029 all three APIs; #97 VC-shape guard; trim invariants"
+
+  - id: VER-027
+    type: sw-verification
+    title: Certificate-as-evidence gates (rules_ordeal + ordeal-cert/v1 bundle)
+    description: >
+      Confirms the ordeal-side TR-025 legs: (1) rules_ordeal invokes a
+      sha256-pinned ordeal release hermetically and its ordeal_check rule
+      fails on any non-UNSAT verdict (positive + negative example tests, CI
+      on ubuntu + macos); (2) an ordeal-cert/v1 bundle re-checks offline via
+      the verified checker and rejects tampered proof/problem content before
+      the checker runs (cert_bundle round-trip + structural-tamper tests).
+    status: verified
+    release: v0.17.0
+    tags: [rules_ordeal, bazel, cert-bundle, evidence, tamper]
+    links:
+      - type: verifies
+        target: TR-025
+      - type: verifies
+        target: FEAT-011
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --features cert-bundle cert_bundle && (cd rules_ordeal/examples && bazel test //...)"
+        coverage: "hermetic gate pass/fail both demonstrated; bundle recheck + 2 tamper rejections"

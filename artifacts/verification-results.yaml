@@ -1088,3 +1088,87 @@ artifacts:
     fields:
       verdict: pass
       evidence: "benches/latency.rs, 13 measurements, both lanes; table in PR #106 and the commit"
+  - id: VE-019
+    type: verification-execution
+    title: v0.17.0 — three-way SAT-backend parity executed (VER-008)
+    description: >
+      Implemented the optional CaDiCaL accelerator (TR-004: cfg-gated
+      `cadical` feature, native-only, never load-bearing; cadical-sys 0.7.0
+      vendoring CaDiCaL 2.1.3, hermetic build) and ran the parity suite.
+      CNF is fed via a temporary DIMACS file so CaDiCaL's parser reserves ids
+      1..=n for the originals — the incremental add() API interleaves derived
+      ids with original ids, producing proofs in CaDiCaL's private numbering
+      that the checker correctly rejects (found and root-caused during this
+      execution; documented in src/sat_cadical.rs). Executed: (1) 200 seeded
+      random CNFs, CaDiCaL vs own core verdict parity, every CaDiCaL UNSAT
+      proof accepted by ordeal_lrat::check, every SAT model self-checked;
+      (2) three-way parity own core (deadline 10s) vs CaDiCaL (200k-conflict
+      limit) vs Z3 (2s timeout) on 150 generated corpus queries — zero
+      disagreements, both verdicts exercised, skip budget <15 enforced;
+      (3) full default-feature suite (181 tests) and wasm32-wasip2 release
+      build still green with a dependency tree of exactly ordeal-lrat.
+    status: implemented
+    fields:
+      version: v0.17.0
+      timestamp: "2026-07-29T12:55:00Z"
+      executor: local
+      environment:
+        note: "macOS arm64; cargo test -p ordeal --features 'cadical oracle' --release; Z3 via LIBRARY_PATH=/opt/homebrew/lib"
+
+  - id: VV-041
+    type: verification-verdict
+    title: "VER-008 pass — both backends agree with Z3 and emit checker-accepted LRAT"
+    description: >
+      Executed pass. The own pure-Rust core and the optional CaDiCaL
+      accelerator agree on every decided query, both emit LRAT proofs the
+      verified checker accepts (CaDiCaL's via the DIMACS-reservation dialect),
+      the own core remains the only engine on wasm32-wasip2, and the default
+      build remains dependency-free. Z3 parity closes the triangle on the
+      same corpus the standing differential uses.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-008
+      - type: part-of-execution
+        target: VE-019
+    fields:
+      verdict: pass
+      evidence: "sat_cadical::tests (2) + solver::cadical_parity_tests::three_way_backend_parity_on_corpus; 3 passed, 0 failed, 111s; /tmp/cadical_test.log exit=0"
+  - id: VE-020
+    type: verification-execution
+    title: v0.17.0 — certificate-as-evidence gates executed (VER-027)
+    description: >
+      rules_ordeal v0.1.0 (pulseengine/rules_ordeal@6e0a5ab): bazel test //...
+      green locally (aarch64-apple-darwin, real downloaded v0.16.1 binary,
+      sha256-verified against SHA256SUMS.txt) and in CI run 30444081859 on
+      main (ubuntu + macos) — positive gate PASS on unsat.smt2, negative gate
+      demonstrated (sat.smt2 fails with "expected verdict 'unsat', got 'sat'"
+      and the wrapper test passes only on that failure), plus a real Verus
+      log fixture discharged with cert_out. ordeal-cert/v1: the five
+      cert_bundle tests (PR #107) — round-trip, recheck, wrong-format,
+      tampered-proof and tampered-problem rejection before checker entry.
+    status: implemented
+    fields:
+      version: v0.17.0
+      timestamp: "2026-07-29T13:40:00Z"
+      executor: local+ci
+      environment:
+        note: "rules_ordeal CI run 30444081859 (main, success); cargo test --features cert-bundle"
+
+  - id: VV-042
+    type: verification-verdict
+    title: "VER-027 pass — the hermetic gate and the offline re-check both hold"
+    description: >
+      Executed pass. rules_ordeal fails a non-UNSAT gate and passes a
+      checker-validated UNSAT hermetically from a pinned release; the
+      ordeal-cert/v1 bundle re-checks offline and integrity-rejects tampered
+      content. The rivet-ingestion leg is TR-030 (v0.18.0, rivet#693).
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-027
+      - type: part-of-execution
+        target: VE-020
+    fields:
+      verdict: pass
+      evidence: "rules_ordeal CI 30444081859 success on 6e0a5ab; cert_bundle tests in PR #107 CI"

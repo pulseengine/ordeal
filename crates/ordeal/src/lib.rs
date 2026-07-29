@@ -68,5 +68,8 @@ pub mod verus;
 #[cfg(feature = "oracle")]
 pub mod oracle;
 
+#[cfg(all(feature = "cadical", not(target_family = "wasm")))]
+pub mod sat_cadical;
+
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};

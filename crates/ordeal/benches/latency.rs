@@ -1,3 +1,4 @@
+// rivet: verifies VER-010
 //! Per-op integration-latency benchmarks (TR-009 item 3 / VER-010, issue #57).
 //!
 //! The honest performance claim these benches quantify: **amortized

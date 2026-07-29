@@ -219,11 +219,35 @@ jobs:
           fi
           echo "lean/README.md status wording is consistent with the proved, gated state."
 
+  # ── Optional CaDiCaL accelerator backend (TR-004 / VER-008) ────────────
+  # The off-by-default `cadical` feature builds CaDiCaL 2.1.3 hermetically
+  # from the source vendored in the cadical-sys crate (no network, no system
+  # solver), so unlike the Z3 job this one has no packaging fragility and is
+  # a real gate: it proves the accelerator's UNSAT proofs pass the verified
+  # LRAT checker and that it agrees with the own pure-Rust core.
+  cadical:
+    name: CaDiCaL backend (cadical feature)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cadical
+      - name: Clippy (cadical feature)
+        run: |
+          rustup component add clippy
+          cargo clippy --all-targets --features cadical -- -D warnings
+      - name: Run cadical backend tests
+        run: cargo test -p ordeal --features cadical --release
+
   # ── Optional Z3 differential oracle (non-blocking) ────────────────────
   # `ordeal` is a self-contained QF_BV solver; the `oracle` cargo feature
   # cross-checks its answers against Z3. This job installs system Z3 and runs
   # the oracle tests, but is NOT required for merge (continue-on-error): a Z3
   # packaging hiccup on the runner must never block the core cargo gate.
+  # With `cadical` enabled too it also runs the three-way VER-008 parity
+  # (own core vs CaDiCaL vs Z3) in solver::cadical_parity_tests.
   oracle:
     name: Z3 Oracle (optional)
     runs-on: ubuntu-latest
@@ -239,6 +263,6 @@ jobs:
       - name: Clippy (oracle feature)
         run: |
           rustup component add clippy
-          cargo clippy --all-targets --features oracle -- -D warnings
-      - name: Run oracle tests
-        run: cargo test --all --features oracle
+          cargo clippy --all-targets --features "oracle cadical" -- -D warnings
+      - name: Run oracle tests (incl. three-way backend parity)
+        run: cargo test --all --features "oracle cadical" --release

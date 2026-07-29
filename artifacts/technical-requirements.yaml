@@ -645,15 +645,18 @@ artifacts:
 
   - id: TR-025
     type: sw-req
-    title: Certificate as evidence — rules_ordeal + rivet artifact type
+    title: Certificate as evidence — rules_ordeal gate + stable bundle
     description: >
-      Ordeal certificates shall be consumable as audit-grade evidence: a
-      hermetic rules_ordeal Bazel rule (paralleling rules_verus/rules_lean) to
-      invoke ordeal as a build/CI verification gate, an ordeal-certificate rivet
-      evidence artifact type, and a stable certificate serialization/bundle so a
-      verified transform's UNSAT becomes a machine-re-checkable DO-178C /
-      ISO-26262 / EU-AI-Act artifact rivet ingests.
-    status: draft
+      Ordeal certificates shall be consumable as audit-grade evidence on the
+      ordeal side: a hermetic rules_ordeal Bazel rule (paralleling
+      rules_verus/rules_lean) to invoke ordeal as a build/CI verification
+      gate, and a stable certificate serialization/bundle (ordeal-cert/v1)
+      that re-checks offline, so a verified transform's UNSAT becomes a
+      machine-re-checkable DO-178C / ISO-26262 / EU-AI-Act artifact. The
+      consumer-side leg — rivet ingesting the bundle as an evidence artifact
+      type — is split to TR-030 (v0.18.0), blocked on pulseengine/rivet#693
+      landing against the pinned envelope (logged scope split, 2026-07-29).
+    status: verified
     release: v0.17.0
     tags: [rules_ordeal, bazel, rivet, evidence, certificate, cross-cutting]
     links:
@@ -665,8 +668,9 @@ artifacts:
       req-type: functional
       priority: should
       verification-criteria: >
-        rules_ordeal runs ordeal hermetically and fails on a non-UNSAT gate; a
-        produced certificate validates as a rivet artifact and re-checks offline.
+        rules_ordeal runs ordeal hermetically and fails on a non-UNSAT gate;
+        a produced ordeal-cert/v1 bundle re-checks offline and rejects
+        tampered proof or problem content before the checker runs.
 
   - id: TR-026
     type: sw-req
@@ -775,3 +779,31 @@ artifacts:
         with lowering + core prove_equiv on shared queries; the constant helper
         agrees with the sliver evaluator. loom's migration checklist items (a)
         to (c) each demonstrable against a loom-shaped example.
+
+  - id: TR-030
+    type: sw-req
+    title: rivet ingests ordeal-cert/v1 as an evidence artifact type
+    description: >
+      The consumer-side leg split from TR-025 (2026-07-29): rivet shall
+      ingest an ordeal-cert/v1 bundle as a first-class evidence artifact
+      type, so a checker-validated UNSAT certificate participates in the
+      traceability graph like any other verification evidence. Blocked on
+      pulseengine/rivet#693 (rivet's certified feature-model work, built
+      against the envelope pinned on ordeal#67); ordeal's obligations are the
+      stable format (shipped, TR-025) and parity support when rivet's
+      integration surfaces gaps.
+    status: draft
+    release: v0.18.0
+    tags: [rivet, evidence, certificate, cross-repo]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: allocated-to
+        target: ARC-006
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        A rivet build ingests a bundle produced by `ordeal verus --cert-out`
+        (or the API), validates it as an artifact, and its recheck() passes;
+        a tampered bundle is rejected at ingestion.
