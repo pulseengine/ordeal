@@ -108,6 +108,32 @@ reproducible on your side or in a separate audit step. See the runnable
 (`cargo run -p ordeal --example translation_validation`) for correct rules being
 proven and a buggy `i32.mul(x,3) ⇒ LSL x,#1` being caught with a counterexample.
 
+## Parallelize across queries, not inside them
+
+Real workloads are many *independent* queries — synth validates many VCs,
+loom checks many rewrite rules, a BMC gate asks one query per unrolling
+depth and per property. That independence is where your speedup lives:
+
+- `Solver` is one-shot and self-contained, and every API type (`Solver`,
+  `BvTerm`, `BoolTerm`, `CheckResult`, `Certificate`, `Model`) is
+  `Send + Sync` — guaranteed by a compile-time assertion in ordeal's test
+  suite, so it cannot silently regress. Build one solver per query and fan
+  the queries out over your thread pool (e.g. `rayon`'s `par_iter`); there
+  is no shared state and no ordering requirement between checks.
+- For BMC-style use: race all depths `k = 1..N` and all properties
+  concurrently. Any SAT is your counterexample; all-UNSAT clears the depth.
+  Measured single-query envelope to plan around (macOS arm64, certified
+  end-to-end incl. the checker): a queue-overflow-shaped unrolling crosses
+  1 s around k ≈ 90 and sits at ~2.5 s at k = 128; deadlock-shaped
+  instances stay under ~275 ms through k = 96 (`benches/bmc.rs`).
+- Blast/Tseitin are microseconds; the SAT search is the whole cost on hard
+  queries. Parallelizing *inside* one solve is therefore deliberately not
+  offered today: a seed portfolio would make certificates run-to-run
+  nondeterministic (different proof bytes → different bundle hashes), and
+  proof-carrying parallel CDCL is a research problem. If you hit a
+  single-query latency wall that the `cadical` accelerator does not clear,
+  report it — that measurement is what activates the parked portfolio work.
+
 ## The soundness contract (read this)
 
 - **`Unknown` is conservative.** It means "not proven" — the solver could

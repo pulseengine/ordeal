@@ -1172,3 +1172,46 @@ artifacts:
     fields:
       verdict: pass
       evidence: "rules_ordeal CI 30444081859 success on 6e0a5ab; cert_bundle tests in PR #107 CI"
+  - id: VE-021
+    type: verification-execution
+    title: v0.18.0 — BMC practical-k envelope executed (VER-028)
+    description: >
+      Corpus (src/bmc_corpus.rs) + two-lane criterion bench (benches/bmc.rs)
+      executed on macOS arm64, release. Certified end-to-end medians:
+      queue-overflow k=16/32/64/128 at 15.4ms / 86.3ms / 522ms / 2.53s (own
+      core) vs 15.9ms / 82.5ms / 404ms / 2.00s (cadical); deadlock
+      k=24/48/96 at 16.5ms / 34.3ms / 205ms (own) vs 33.4ms / 99.2ms /
+      274ms (cadical). Reading: certified 1s crossed at k~90 on the queue
+      shape; 10s beyond every measured k; the accelerator wins ~20% on the
+      big arithmetic unrollings and LOSES on cheap deadlock instances
+      (fixed DIMACS/proof-file overhead) — a lever, not a default. Tests:
+      seeded-defect queue (cap=3, k=8) SAT with schedule replayed to the
+      overflow outside the solver's own self-check; sized queue and
+      ordered locks UNSAT with recheck()-validated certificates; cadical
+      agrees on all four shapes; Send+Sync compile-time assertion added.
+    status: implemented
+    fields:
+      version: v0.18.0
+      timestamp: "2026-07-29T18:20:00Z"
+      executor: local
+      environment:
+        note: "cargo bench -p ordeal --features cadical --bench bmc; sample_size 10; macOS arm64"
+
+  - id: VV-043
+    type: verification-verdict
+    title: "VER-028 pass — the envelope is measured, published, and falsifiable"
+    description: >
+      Executed pass. spar#350's open measurement ("at what k does ordeal
+      stop being practical") now has data on both backends, the corpus can
+      go red (seeded defects SAT with replayable traces), and every UNSAT
+      leg carries an offline-recheckable certificate. TR-009's caching
+      decision now has its measure-first workload.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-028
+      - type: part-of-execution
+        target: VE-021
+    fields:
+      verdict: pass
+      evidence: "benches/bmc.rs table; bmc_corpus tests 5 passed (incl. cadical parity); criterion log /tmp/bmc_bench.log exit=0"

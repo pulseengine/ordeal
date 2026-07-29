@@ -807,3 +807,78 @@ artifacts:
         A rivet build ingests a bundle produced by `ordeal verus --cert-out`
         (or the API), validates it as an artifact, and its recheck() passes;
         a tampered bundle is rejected at ingestion.
+
+  - id: TR-031
+    type: sw-req
+    title: BMC-shaped workloads — measured practical-depth guidance
+    description: >
+      spar#350 proposes certificate-checked bounded model checking of
+      concurrent AADL behaviour discharged through ordeal, and its spike's
+      second acceptance measurement is "at what unrolling depth k does ordeal
+      stop being practical on a realistic gale-sized model". Ordeal shall
+      answer that with data it owns: a benchmark corpus of BMC-shaped QF_BV
+      queries (bounded transition-relation unrollings over small-bit-vector
+      state — thread states, queue counters, lock owners — in the shapes of
+      spar#350's four canned properties), measured end-to-end certified
+      (blast + solve + LRAT + verified check) on BOTH backends (own CDCL core
+      and the cadical accelerator), with the practical-k envelope published
+      in the consumer docs. One-shot-per-k stays deliberate (TR-002: no
+      incremental API) — each depth re-solves and re-certifies, which is the
+      certifying-algorithm story; the accelerator and TR-009's deferred
+      caching are the levers if the envelope disappoints, and this corpus is
+      exactly the measure-first workload that caching decision was waiting
+      for.
+    status: verified
+    release: v0.18.0
+    tags: [bmc, spar, benchmark, practical-k, cadical, consumer]
+    links:
+      - type: derives-from
+        target: SYS-006
+      - type: allocated-to
+        target: ARC-005
+    fields:
+      req-type: functional
+      priority: should
+      verification-criteria: >
+        The BMC corpus exists with at least deadlock- and queue-overflow-
+        shaped instances; certified latency vs k is measured on both
+        backends and published; the k where certified latency crosses 1s and
+        10s is stated per shape; a seeded-defect instance (undersized queue)
+        goes SAT with a decodable counterexample model.
+
+  - id: TR-032
+    type: sw-req
+    title: Seed-portfolio parallel solve — parked until a measured wall
+    description: >
+      A native-only, cfg-gated seed portfolio for the own CDCL core (N lanes
+      with different decision seeds / restart schedules racing on
+      std::thread; first verdict wins; the winner's LRAT goes through the
+      verified checker exactly as today). Deliberately PARKED: ordeal's
+      measured bottlenecks are query-parallel at the consumer level
+      (documented in docs/consuming-ordeal.md), a portfolio makes the
+      winning certificate run-to-run nondeterministic (different proof
+      bytes, different ordeal-cert/v1 hashes — an audit-reproducibility
+      cost), and clause-sharing parallel CDCL is out of scope outright
+      (proof emission from sharing solvers is a research problem).
+      Activation condition, per the measure-first rule: a consumer reports
+      a single-query latency wall that consumer-side fan-out, the cadical
+      accelerator, and TR-009 caching do not clear — with the measurement.
+      Wasm is never affected (threads unavailable; the own sequential core
+      remains the only engine there, TR-004).
+    status: draft
+    release: v0.19.0
+    tags: [parallel, portfolio, parked, measure-first, native-only]
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-005
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Only meaningful once activated: N-lane portfolio agrees with the
+        sequential core on the differential corpus; every winning UNSAT
+        proof is checker-accepted; wasm build unaffected; measured speedup
+        on the activating consumer's workload is reported honestly,
+        including the certificate-nondeterminism concession.

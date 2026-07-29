@@ -713,3 +713,28 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --features cert-bundle cert_bundle && (cd rules_ordeal/examples && bazel test //...)"
         coverage: "hermetic gate pass/fail both demonstrated; bundle recheck + 2 tamper rejections"
+
+  - id: VER-028
+    type: sw-verification
+    title: BMC practical-k envelope measured and published (TR-031)
+    description: >
+      Confirms the TR-031 corpus exists in both demanded shapes (queue
+      overflow, two-lock deadlock), that certified end-to-end latency vs k
+      is measured on both backends (own core and the cadical accelerator)
+      with the envelope published in benches/bmc.rs and the consumer guide,
+      that seeded-defect instances go SAT with a replayable counterexample
+      (the kill-criterion mirror), and that correct instances yield
+      offline-recheckable certificates. Also covers the consumer
+      parallelism guarantee the envelope doc leans on: the compile-time
+      Send+Sync assertion over the API types.
+    status: implemented
+    release: v0.18.0
+    tags: [bmc, benchmark, practical-k, cadical, spar]
+    links:
+      - type: verifies
+        target: TR-031
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --features cadical --release bmc && cargo bench -p ordeal --features cadical --bench bmc"
+        coverage: "both shapes; both verdict directions; both backends; envelope table; Send+Sync assert"

@@ -40,7 +40,7 @@
 
 use crate::aig::{Aig, Lit, Word, word_input};
 use crate::blast::{arith, bitwise, muldiv, shift, structural};
-use crate::cnf::tseitin;
+use crate::cnf::{CnfFormula, TseitinMap, tseitin};
 use crate::eval::{self, Env, EvalError};
 use crate::sat::{SatResult, SatSolver};
 use crate::term::{BoolTerm, BvTerm};
@@ -704,30 +704,9 @@ impl Solver {
             // An empty conjunction is trivially satisfiable by the empty model.
             return Pipeline::Sat(Env::new());
         }
-        if self.assertions.iter().any(bool_uses_disabled) {
+        let Some((blaster, cnf, map)) = self.lower() else {
             return Pipeline::Unknown;
-        }
-        // Ill-sorted input never reaches a blast rule: conservative Unknown
-        // (callers get the diagnosis from `validate`).
-        if self.validate().is_err() {
-            return Pipeline::Unknown;
-        }
-        let mut blaster = Blaster::new();
-        let mut roots = Vec::with_capacity(self.assertions.len());
-        for a in &self.assertions {
-            // Untrusted canonicalization above the AIG (issue #35 / TR-009):
-            // commutative-operand ordering + const-folding so equal-but-
-            // structurally-different terms share a node. Soundness is unaffected
-            // — Unsat stays LRAT-checked, and the SAT model self-check below
-            // re-evaluates against the ORIGINAL assertions.
-            let a = crate::canon::canonicalize_bool(a);
-            match blaster.blast_bool(&a) {
-                Ok(lit) => roots.push(lit),
-                // Ill-sorted input: conservative. `validate()` diagnoses.
-                Err(_) => return Pipeline::Unknown,
-            }
-        }
-        let (cnf, map) = tseitin(&blaster.aig, &roots);
+        };
         let mut sat_solver = SatSolver::new();
         let verdict = match bound {
             // Bounded solve: exhaustion ⇒ no verdict ⇒ conservative Unknown
@@ -765,35 +744,109 @@ impl Solver {
                     }
                 }
             }
-            SatResult::Sat(assignment) => {
-                // Decode: each variable's word reads its input literals'
-                // CNF variables out of the assignment.
-                let mut env = Env::new();
-                for (name, _width) in &blaster.var_order {
-                    let word = &blaster.vars[name];
-                    let mut value = 0u128;
-                    for (i, lit) in word.iter().enumerate() {
-                        let cnf_lit = map.cnf_lit(*lit);
-                        let v = assignment[(cnf_lit.unsigned_abs() - 1) as usize];
-                        let bit = if cnf_lit > 0 { v } else { !v };
-                        value |= (bit as u128) << i;
-                    }
-                    env.insert(name.clone(), value);
-                }
-                // Self-check: the model must make every assertion true under
-                // the concrete evaluator. A failure means an ordeal bug; we
-                // return Unknown rather than a wrong Sat.
-                let ok = self
-                    .assertions
-                    .iter()
-                    .all(|a| eval::eval_bool(a, &env) == Ok(true));
-                if ok {
-                    Pipeline::Sat(env)
-                } else {
-                    debug_assert!(false, "SAT model failed self-check — ordeal bug");
-                    Pipeline::Unknown
-                }
+            SatResult::Sat(assignment) => self.decode_and_check(&blaster, &map, &assignment),
+        }
+    }
+
+    /// The pipeline's front half — validation, canonicalization, blasting,
+    /// Tseitin — shared by every backend. `None` means conservative Unknown
+    /// (disabled ops or ill-sorted input; `validate()` diagnoses).
+    fn lower(&self) -> Option<(Blaster, CnfFormula, TseitinMap)> {
+        if self.assertions.iter().any(bool_uses_disabled) {
+            return None;
+        }
+        // Ill-sorted input never reaches a blast rule: conservative Unknown.
+        if self.validate().is_err() {
+            return None;
+        }
+        let mut blaster = Blaster::new();
+        let mut roots = Vec::with_capacity(self.assertions.len());
+        for a in &self.assertions {
+            // Untrusted canonicalization above the AIG (issue #35 / TR-009):
+            // commutative-operand ordering + const-folding so equal-but-
+            // structurally-different terms share a node. Soundness is unaffected
+            // — Unsat stays LRAT-checked, and the SAT model self-check
+            // re-evaluates against the ORIGINAL assertions.
+            let a = crate::canon::canonicalize_bool(a);
+            match blaster.blast_bool(&a) {
+                Ok(lit) => roots.push(lit),
+                Err(_) => return None,
             }
+        }
+        let (cnf, map) = tseitin(&blaster.aig, &roots);
+        Some((blaster, cnf, map))
+    }
+
+    /// Decode a SAT assignment into a model and self-check it against the
+    /// ORIGINAL assertions — shared by every backend. A failing self-check
+    /// means an ordeal bug; the outcome degrades to Unknown, never a wrong
+    /// Sat.
+    fn decode_and_check(
+        &self,
+        blaster: &Blaster,
+        map: &TseitinMap,
+        assignment: &[bool],
+    ) -> Pipeline {
+        let mut env = Env::new();
+        for (name, _width) in &blaster.var_order {
+            let word = &blaster.vars[name];
+            let mut value = 0u128;
+            for (i, lit) in word.iter().enumerate() {
+                let cnf_lit = map.cnf_lit(*lit);
+                let v = assignment[(cnf_lit.unsigned_abs() - 1) as usize];
+                let bit = if cnf_lit > 0 { v } else { !v };
+                value |= (bit as u128) << i;
+            }
+            env.insert(name.clone(), value);
+        }
+        let ok = self
+            .assertions
+            .iter()
+            .all(|a| eval::eval_bool(a, &env) == Ok(true));
+        if ok {
+            Pipeline::Sat(env)
+        } else {
+            debug_assert!(false, "SAT model failed self-check — ordeal bug");
+            Pipeline::Unknown
+        }
+    }
+
+    /// Decide with the optional CaDiCaL accelerator (TR-004's "benchmark
+    /// yardstick" role) — identical pipeline and identical soundness gates,
+    /// only the SAT engine differs: `sat_cadical::solve` returns Unsat solely
+    /// with an LRAT proof the verified checker already accepted, and Sat
+    /// models pass the same evaluator self-check as [`Solver::check`].
+    ///
+    /// Hidden from docs on purpose: the production entry point is `check` on
+    /// the pure-Rust core (TR-004 — CaDiCaL is never load-bearing). This
+    /// exists for the benchmark lanes and parity tests.
+    #[doc(hidden)]
+    #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
+    pub fn check_with_cadical(&self) -> CheckResult {
+        Self::verdict(self.solve_pipeline_cadical())
+    }
+
+    #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
+    fn solve_pipeline_cadical(&self) -> Pipeline {
+        use crate::sat_cadical::{self, CadicalVerdict};
+        if self.assertions.is_empty() {
+            return Pipeline::Sat(Env::new());
+        }
+        let Some((blaster, cnf, map)) = self.lower() else {
+            return Pipeline::Unknown;
+        };
+        match sat_cadical::solve(&cnf) {
+            // `solve` already fed the proof to `ordeal_lrat::check`; carry the
+            // validated pair so the caller's Certificate re-checks offline.
+            Ok(CadicalVerdict::Unsat { lrat }) => Pipeline::Unsat {
+                certificate: Some(lrat.into_bytes()),
+                cnf: cnf.clauses,
+            },
+            Ok(CadicalVerdict::Sat(assignment)) => {
+                self.decode_and_check(&blaster, &map, &assignment)
+            }
+            // Every CaDiCaL error is conservative no-verdict.
+            Err(_) => Pipeline::Unknown,
         }
     }
 }
@@ -871,6 +924,24 @@ mod tests {
     }
     fn b(t: BvTerm) -> Box<BvTerm> {
         Box::new(t)
+    }
+
+    /// The consumer-facing parallelism guarantee (docs/consuming-ordeal.md
+    /// "Parallelize across queries"): every API type is Send + Sync, so
+    /// callers may fan independent queries out over a thread pool. A
+    /// compile-time assertion — if a future field (Rc, RefCell, raw ptr)
+    /// breaks it, this stops building rather than silently regressing the
+    /// documented contract.
+    #[test]
+    fn api_types_are_send_and_sync() {
+        fn assert_send_sync<T: Send + Sync>() {}
+        assert_send_sync::<Solver>();
+        assert_send_sync::<BvTerm>();
+        assert_send_sync::<crate::term::BoolTerm>();
+        assert_send_sync::<CheckResult>();
+        assert_send_sync::<Certificate>();
+        assert_send_sync::<Model>();
+        assert_send_sync::<CertificateError>();
     }
 
     #[test]
