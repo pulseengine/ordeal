@@ -221,7 +221,7 @@ artifacts:
       per-operation integration latency (in-process, no SMT-LIB parsing, no
       theory combination) against the CI budget. Confirms AIG structural hashing
       and LRAT trimming measurably reduce work.
-    status: draft
+    status: implemented
     release: v0.17.0
     tags: [benchmark, performance, latency, z3-rival]
     links:
@@ -232,7 +232,7 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo bench -p ordeal-oracle"
+        run: "LIBRARY_PATH=/opt/homebrew/lib cargo bench -p ordeal --bench latency --features oracle"
         coverage: "Per-op integration latency vs CI budget; structural-hashing/trimming impact"
 
   - id: VER-011

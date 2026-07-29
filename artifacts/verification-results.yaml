@@ -1048,3 +1048,43 @@ artifacts:
     fields:
       verdict: pass
       evidence: "180 lib tests; 15s-UNKNOWN -> 5.3ms measurement; inverted shape test + deadline guard; trim corpus numbers"
+  - id: VE-018
+    type: verification-execution
+    title: v0.17.0 — criterion latency benchmark executed (VER-010)
+    description: >
+      Ran benches/latency.rs (PR #106), both lanes: ordeal end-to-end
+      CERTIFIED (blast + solve + LRAT + checker + recheck) vs oracle::z3_check
+      (raw verdict, no certificate). macOS arm64. Results: layout round-trip
+      3.3 us vs 105 us; trap VC 13.8 us vs 105 us; shl identity 5.0 us vs
+      623 us; ult cycle 4.5 ms vs 7.5 ms; propositional conflict 0.96 us;
+      srem VC 5.2 ms vs 123 us (Z3's search wins 42x — the concession TR-009
+      states); urem VC 4.8 ms vs Z3's OWN 2 s TIMEOUT (verdict Unknown — NOT
+      an ordeal win over a solve, flagged as such). The honest claim is
+      quantified: on propagation-class integration queries ordeal WITH the
+      certificate beats raw Z3 by 7-124x; on genuine search Z3 wins.
+    status: implemented
+    fields:
+      version: v0.17.0
+      timestamp: "2026-07-29T13:00:00Z"
+      executor: local
+      environment:
+        note: "macOS arm64; criterion --measurement-time 2; oracle feature via LIBRARY_PATH=/opt/homebrew/lib"
+
+  - id: VV-040
+    type: verification-verdict
+    title: "VER-010 pass — the per-op latency claim holds, with its concession"
+    description: >
+      Executed pass. Amortized per-op integration latency measured and
+      favorable by 7-124x on the consumer-shaped propagation class, WITH
+      certification included in ordeal's lane; Z3's SAT engine wins genuine
+      search (srem VC, 42x) exactly as TR-009 concedes. Certificate-size
+      trimming and its 1-2% measurement were recorded at v0.16.0 (VE-017).
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-010
+      - type: part-of-execution
+        target: VE-018
+    fields:
+      verdict: pass
+      evidence: "benches/latency.rs, 13 measurements, both lanes; table in PR #106 and the commit"
