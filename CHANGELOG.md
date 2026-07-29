@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-29
+
+**Certificate as evidence + the optional CaDiCaL accelerator** (FEAT-011,
+TR-025, TR-004/VER-008; issues #91, #57-adjacent). The certificate becomes
+audit-grade evidence consumable outside this repo, and TR-004's reserved
+CaDiCaL option is real — held to the identical soundness contract.
+
+### Added
+- **`cadical` feature — the optional CaDiCaL accelerator** (TR-004,
+  VER-008). `sat_cadical::solve` runs CaDiCaL 2.1.3 (vendored hermetically
+  by cadical-sys; native-only, never load-bearing, never on the wasm path)
+  and returns `Unsat` **only** with an LRAT proof the verified checker
+  accepted, `Sat` only with a self-checked model. The load-bearing detail:
+  CaDiCaL emits standard LRAT numbering only via DIMACS input (its parser
+  reserves ids 1..=n for the originals; the incremental add() API interleaves
+  derived ids and the checker rightly rejects those proofs), so the CNF goes
+  in through a temp DIMACS file. Three-way parity executed (VE-019/VV-041):
+  own core vs CaDiCaL vs Z3 on 150 corpus queries + 200 random CNFs — zero
+  disagreements. CI gains a blocking `cadical` job; the oracle job runs the
+  three-way parity.
+- **`ordeal-cert/v1` bundle serialization** (`cert-bundle` feature, #107):
+  `Certificate::to_cert_v1`/`from_cert_v1` with both content sha256s
+  verified before parsing returns (integrity before mathematics), and
+  `UnsatBundle::recheck()` for offline re-validation.
+- **rules_ordeal v0.1.0** (separate repo, pulseengine/rules_ordeal):
+  hermetic `ordeal_check`/`ordeal_verus_check` Bazel test rules over a
+  sha256-pinned ordeal release download; a non-`unsat` verdict fails the
+  gate. The rivet-ingestion leg of TR-025 is split to TR-030 (v0.18.0),
+  blocked on rivet#693.
+- **Criterion latency benchmarks** (#106, VER-010/VE-018): the honest
+  two-lane numbers — certified ordeal vs unchecked Z3 — including the
+  concessions (Z3 wins genuine search 42x on the srem VC).
+
+### Falsification
+This release is wrong if: the `cadical` feature can surface an `Unsat` whose
+LRAT proof `ordeal_lrat::check` did not accept; or the default build's
+dependency tree contains anything beyond `ordeal-lrat`; or an `ordeal_check`
+Bazel gate passes on a file whose verdict is not `unsat`; or a tampered
+ordeal-cert/v1 bundle (proof or problem) survives `from_cert_v1`.
+
 ## [0.16.1] - 2026-07-23
 
 **Patch: the unsigned twin of #97** (issue #101, synth). v0.16.0 fixed the

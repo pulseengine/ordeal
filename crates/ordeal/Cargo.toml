@@ -23,7 +23,7 @@ path = "src/main.rs"
 # wasip2-clean). The solver depends on the checker to validate certificates;
 # the checker never depends on the solver (the trust boundary, enforced by
 # ordeal-lrat's empty dependency table).
-ordeal-lrat = { path = "../ordeal-lrat", version = "0.16.1" }
+ordeal-lrat = { path = "../ordeal-lrat", version = "0.17.0" }
 
 # `ordeal-cert/v1` bundle serialization (issue #91 / TR-025 ordeal half).
 # Optional: the default build stays dependency-free; rivet (the consumer)
