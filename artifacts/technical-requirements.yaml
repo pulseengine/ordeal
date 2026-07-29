@@ -266,14 +266,19 @@ artifacts:
       (v0.2.0); commutative-operand canonicalization + const-folding above the
       AIG (v0.8.0), which is the refining requirement TR-018 (verified) and
       closed synth's A5 cliff — Ne(Mul(a,b),Mul(b,a)) @ 32 went from not
-      finishing in 590 s to root-decided (issue #35, now closed). Deferred and
-      still open (issue #57, with its benchmark measure moved alongside it):
-      LRAT-proof trimming so
-      cert.lrat and consumers' recheck() do less work; cross-pass incremental
-      term-graph caching across the related queries one loom/synth pass emits;
-      and a criterion benchmark harness vs Z3. None of the remainder is on the
-      soundness path — it is all untrusted-side or measurement.
-    status: draft
+      finishing in 590 s to root-decided (issue #35, now closed).
+      RESOLVED 2026-07-29 (issue #57): LRAT-proof trimming shipped v0.16.0
+      (1–2 percent, measured honestly, VE-017); the criterion benchmark
+      harness vs Z3 shipped v0.17.0 (VER-010, VE-018/VV-040); and cross-pass
+      incremental term-graph caching is REJECTED with measurement — on the
+      hardest consumer-shaped workload available (TR-031's BMC queue-overflow
+      at k=128) the entire frontend (canonicalize + blast + Tseitin) is
+      7.6 ms of a 2,555 ms certified solve, 0.3 percent, so caching addresses
+      work that is not where the time goes. Closed as not-worth-building
+      unless a future workload shows a frontend-dominated profile. None of
+      this is on the soundness path — it is all untrusted-side or
+      measurement.
+    status: verified
     release: v0.18.0
     tags: [performance, structural-hashing, rewrites, trimming, benchmark, deferred]
     links:
