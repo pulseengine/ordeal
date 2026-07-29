@@ -828,7 +828,7 @@ artifacts:
       caching are the levers if the envelope disappoints, and this corpus is
       exactly the measure-first workload that caching decision was waiting
       for.
-    status: draft
+    status: verified
     release: v0.18.0
     tags: [bmc, spar, benchmark, practical-k, cadical, consumer]
     links:
@@ -845,3 +845,40 @@ artifacts:
         backends and published; the k where certified latency crosses 1s and
         10s is stated per shape; a seeded-defect instance (undersized queue)
         goes SAT with a decodable counterexample model.
+
+  - id: TR-032
+    type: sw-req
+    title: Seed-portfolio parallel solve — parked until a measured wall
+    description: >
+      A native-only, cfg-gated seed portfolio for the own CDCL core (N lanes
+      with different decision seeds / restart schedules racing on
+      std::thread; first verdict wins; the winner's LRAT goes through the
+      verified checker exactly as today). Deliberately PARKED: ordeal's
+      measured bottlenecks are query-parallel at the consumer level
+      (documented in docs/consuming-ordeal.md), a portfolio makes the
+      winning certificate run-to-run nondeterministic (different proof
+      bytes, different ordeal-cert/v1 hashes — an audit-reproducibility
+      cost), and clause-sharing parallel CDCL is out of scope outright
+      (proof emission from sharing solvers is a research problem).
+      Activation condition, per the measure-first rule: a consumer reports
+      a single-query latency wall that consumer-side fan-out, the cadical
+      accelerator, and TR-009 caching do not clear — with the measurement.
+      Wasm is never affected (threads unavailable; the own sequential core
+      remains the only engine there, TR-004).
+    status: draft
+    release: v0.19.0
+    tags: [parallel, portfolio, parked, measure-first, native-only]
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-005
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        Only meaningful once activated: N-lane portfolio agrees with the
+        sequential core on the differential corpus; every winning UNSAT
+        proof is checker-accepted; wasm build unaffected; measured speedup
+        on the activating consumer's workload is reported honestly,
+        including the certificate-nondeterminism concession.

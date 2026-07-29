@@ -47,6 +47,10 @@ pub mod blast;
 /// API surface: it exists to be translated, not called.
 #[doc(hidden)]
 pub mod blast_kernel;
+/// The TR-031 BMC-shaped benchmark corpus (spar#350). Not API — exists for
+/// benches/bmc.rs and its tests; spar owns the real encoding.
+#[doc(hidden)]
+pub mod bmc_corpus;
 pub mod canon;
 /// `ordeal-cert/v1` bundle serialization (issue #91 / TR-025). Behind the
 /// `cert-bundle` feature: the default build stays dependency-free.
