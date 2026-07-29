@@ -82,7 +82,7 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 # Benchmarks only (dev-dependency: the default build stays dependency-free
 # for downstream consumers — dev-deps never propagate).
 [dev-dependencies]
-criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
 name = "latency"
