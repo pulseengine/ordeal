@@ -727,7 +727,7 @@ artifacts:
       offline-recheckable certificates. Also covers the consumer
       parallelism guarantee the envelope doc leans on: the compile-time
       Send+Sync assertion over the API types.
-    status: implemented
+    status: verified
     release: v0.18.0
     tags: [bmc, benchmark, practical-k, cadical, spar]
     links:
