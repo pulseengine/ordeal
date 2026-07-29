@@ -1692,6 +1692,7 @@ mod cadical_parity_tests {
     use crate::oracle::{OracleVerdict, gen_corpus, z3_check};
     use crate::sat_cadical::{self, CadicalVerdict};
 
+    // rivet: verifies VER-008
     #[test]
     fn three_way_backend_parity_on_corpus() {
         let corpus = gen_corpus(0x5EED_0008, 150);

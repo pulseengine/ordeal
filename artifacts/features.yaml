@@ -372,13 +372,14 @@ artifacts:
     description: >
       Turn the portable certificate into audit-grade evidence the whole org
       consumes: a hermetic rules_ordeal Bazel gate (paralleling
-      rules_verus/rules_lean), an ordeal-certificate rivet evidence artifact type
-      + serialization, and a propositional-SAT front-end for rivet feature-model
-      consistency (EU AI Act). ordeal's real differentiator over Z3 (loom/synth)
+      rules_verus/rules_lean), the stable ordeal-cert/v1 serialization (the
+      rivet evidence-artifact-type ingestion leg is split to TR-030 / v0.18.0,
+      blocked on rivet#693), and a propositional-SAT front-end for rivet
+      feature-model consistency (EU AI Act). ordeal's real differentiator over Z3 (loom/synth)
       and Kani/CBMC (sigil/spar/kiln) is the offline-re-checkable certificate;
       this makes every verified transform a machine-re-checkable DO-178C /
       ISO-26262 / EU-AI-Act artifact.
-    status: draft
+    status: verified
     release: v0.17.0
     tags: [roadmap, p11, rules_ordeal, rivet, evidence, sat, cross-cutting]
     links:
@@ -390,9 +391,10 @@ artifacts:
       req-type: functional
       priority: should
       verification-criteria: >
-        rules_ordeal gates a build hermetically; a produced certificate is a
-        valid rivet artifact that re-checks offline; a rivet feature-model
-        instance decides with a re-checkable certificate.
+        rules_ordeal gates a build hermetically; a produced ordeal-cert/v1
+        bundle re-checks offline and integrity-rejects tampering (rivet-side
+        ingestion: TR-030); a rivet feature-model instance decides with a
+        re-checkable certificate (TR-026, verified v0.14.0).
 
   - id: FEAT-012
     type: sw-req

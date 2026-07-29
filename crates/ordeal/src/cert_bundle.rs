@@ -285,6 +285,7 @@ pub fn model_to_cert_v1(model: &Model, attests: &Attests) -> String {
     serde_json::to_string_pretty(&env).expect("own-struct serialization")
 }
 
+// rivet: verifies VER-027
 #[cfg(test)]
 mod tests {
     use super::*;
