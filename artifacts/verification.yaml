@@ -180,7 +180,7 @@ artifacts:
       CaDiCaL optional native accelerator) agree with Z3 on the corpus, that
       each emits a valid LRAT proof on UNSAT, and that the own core builds and
       runs on wasm32-wasip2.
-    status: draft
+    status: implemented
     release: v0.17.0
     tags: [sat, cdcl, pure-rust, cadical, wasm32, parity]
     links:
@@ -189,8 +189,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal-sat && wasm32 backend smoke test"
-        coverage: "CaDiCaL + varisat vs Z3 parity; wasm32 build"
+        run: "cargo test -p ordeal --features 'cadical oracle' --release -- cadical && cargo build --target wasm32-wasip2 --release"
+        coverage: "own core vs CaDiCaL vs Z3 three-way parity; checker-accepted LRAT from both backends; wasm32 build"
 
   - id: VER-009
     type: sw-verification

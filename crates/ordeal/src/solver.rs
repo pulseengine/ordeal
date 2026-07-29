@@ -1675,3 +1675,90 @@ mod tests {
         }
     }
 }
+
+/// VER-008 — three-way SAT-backend parity: own pure-Rust CDCL core vs the
+/// optional CaDiCaL accelerator vs the Z3 differential oracle, on the same
+/// generated corpus the own-vs-Z3 differential uses. Lives here (not in
+/// `sat_cadical`) because reproducing the pipeline's CNF for CaDiCaL needs
+/// the private `Blaster`.
+#[cfg(all(
+    test,
+    feature = "cadical",
+    feature = "oracle",
+    not(target_family = "wasm")
+))]
+mod cadical_parity_tests {
+    use super::*;
+    use crate::oracle::{OracleVerdict, gen_corpus, z3_check};
+    use crate::sat_cadical::{self, CadicalVerdict};
+
+    #[test]
+    fn three_way_backend_parity_on_corpus() {
+        let corpus = gen_corpus(0x5EED_0008, 150);
+        let (mut agree_sat, mut agree_unsat, mut skipped) = (0u32, 0u32, 0u32);
+        for (i, assertions) in corpus.iter().enumerate() {
+            // Own core: the full production pipeline (Unsat is checker-gated),
+            // deadline-bounded — a generated query can be genuinely hard
+            // (the #97/#101 cross-circuit lesson), and parity over the
+            // decided set is what this test claims.
+            let mut solver = Solver::new();
+            for a in assertions {
+                solver.assert(a.clone());
+            }
+            let own = solver.check_with_deadline(10_000);
+            if matches!(own, CheckResult::Unknown) {
+                skipped += 1;
+                continue;
+            }
+
+            // CaDiCaL: the identical CNF the pipeline solves, rebuilt through
+            // the same canonicalize → blast → Tseitin steps.
+            let mut blaster = Blaster::new();
+            let mut roots = Vec::new();
+            let mut blast_ok = true;
+            for a in assertions {
+                match blaster.blast_bool(&crate::canon::canonicalize_bool(a)) {
+                    Ok(lit) => roots.push(lit),
+                    Err(_) => blast_ok = false,
+                }
+            }
+            assert!(blast_ok, "corpus query {i} failed to blast");
+            let (cnf, _map) = tseitin(&blaster.aig, &roots);
+            let cadical = match sat_cadical::solve_with_conflict_limit(&cnf, 200_000) {
+                Ok(v) => v,
+                Err(sat_cadical::CadicalError::Inconclusive) => {
+                    skipped += 1;
+                    continue;
+                }
+                Err(e) => panic!("CaDiCaL error on query {i}: {e:?}"),
+            };
+
+            // Z3: term-level differential oracle (Unknown never disagrees).
+            let z3 = z3_check(assertions);
+
+            match (&own, &cadical) {
+                (CheckResult::Sat(_), CadicalVerdict::Sat(_)) => agree_sat += 1,
+                (CheckResult::Unsat(_), CadicalVerdict::Unsat { .. }) => agree_unsat += 1,
+                (own, cadical) => {
+                    panic!("own vs CaDiCaL disagree on query {i}: own={own:?} cadical={cadical:?}")
+                }
+            }
+            match (&own, &z3) {
+                (CheckResult::Sat(_), OracleVerdict::Unsat)
+                | (CheckResult::Unsat(_), OracleVerdict::Sat(_)) => {
+                    panic!("own vs Z3 disagree on query {i}")
+                }
+                _ => {}
+            }
+        }
+        // Parity over a one-sided or mostly-skipped corpus would be vacuous.
+        assert!(
+            agree_sat > 0 && agree_unsat > 0,
+            "one-sided corpus: {agree_sat} sat / {agree_unsat} unsat ({skipped} skipped)"
+        );
+        assert!(
+            skipped < 15,
+            "too many undecided queries for the parity to mean anything: {skipped}/150"
+        );
+    }
+}
