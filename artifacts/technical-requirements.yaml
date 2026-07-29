@@ -274,7 +274,7 @@ artifacts:
       and a criterion benchmark harness vs Z3. None of the remainder is on the
       soundness path — it is all untrusted-side or measurement.
     status: draft
-    release: v0.17.0
+    release: v0.18.0
     tags: [performance, structural-hashing, rewrites, trimming, benchmark, deferred]
     links:
       - type: derives-from
