@@ -83,7 +83,10 @@ fn corpus() -> Vec<(&'static str, Vec<BoolTerm>)> {
                 Box::new(BoolTerm::Not(Box::new(t1.clone()))),
                 Box::new(t2.clone()),
             )),
-            Box::new(BoolTerm::Or(Box::new(BoolTerm::Not(Box::new(t2))), Box::new(t1))),
+            Box::new(BoolTerm::Or(
+                Box::new(BoolTerm::Not(Box::new(t2))),
+                Box::new(t1),
+            )),
         );
         out.push(("trap_vc_32", vec![BoolTerm::Not(Box::new(iff))]));
     }
