@@ -165,11 +165,11 @@ fn solve_inner(
         cleanup();
         return Err(CadicalError::ProofIo(format!("DIMACS parse: {parse_err}")));
     }
-    if let Some(conflicts) = max_conflicts {
-        if !solver.limit("conflicts".to_string(), conflicts) {
-            cleanup();
-            return Err(CadicalError::Configuration("conflicts limit rejected"));
-        }
+    if let Some(conflicts) = max_conflicts
+        && !solver.limit("conflicts".to_string(), conflicts)
+    {
+        cleanup();
+        return Err(CadicalError::Configuration("conflicts limit rejected"));
     }
     let status = solver.solve();
     match status {
@@ -247,7 +247,7 @@ mod tests {
     /// LRAT proof (enforced inside `solve`), every SAT a self-checked model.
     #[test]
     fn cadical_agrees_with_own_core_on_random_cnfs() {
-        let mut rng = Rng(0x0DEA1_5EED);
+        let mut rng = Rng(0xDEA1_5EED);
         let (mut sats, mut unsats) = (0u32, 0u32);
         for round in 0..200 {
             let num_vars = 4 + (round % 12) as u32;
