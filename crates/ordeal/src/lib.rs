@@ -48,6 +48,10 @@ pub mod blast;
 #[doc(hidden)]
 pub mod blast_kernel;
 pub mod canon;
+/// `ordeal-cert/v1` bundle serialization (issue #91 / TR-025). Behind the
+/// `cert-bundle` feature: the default build stays dependency-free.
+#[cfg(feature = "cert-bundle")]
+pub mod cert_bundle;
 pub mod cnf;
 pub mod eval;
 pub mod layout;
