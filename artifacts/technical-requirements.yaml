@@ -906,7 +906,7 @@ artifacts:
       the v0.18.0 cut; verification necessarily runs against the first
       published signed release, so this artifact's verified milestone is
       v0.19.0 (the same pattern as any release-tail evidence).
-    status: implemented
+    status: verified
     release: v0.19.0
     tags: [release, cosign, sigstore, supply-chain, varve, field-report]
     links:

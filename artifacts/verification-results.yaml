@@ -1261,3 +1261,43 @@ artifacts:
     fields:
       verdict: pass
       evidence: "example 4/4 PASS exit 0; rivet validate positive exit 0 (PASS, 0 warnings); negative exit 1 naming the recheck gate on OC-1"
+
+  - id: VE-023
+    type: verification-execution
+    title: v0.18.0 release verification — signed sums on published assets (VER-030)
+    description: >
+      Executed 2026-08-08 against the live GitHub Release v0.18.0 (tag on
+      4695e85, own main CI run success; release run 31242177937 success):
+      8 assets present (4 archives + SHA256SUMS.txt + .cosign.bundle/.sig/
+      .pem); shasum -a 256 -c OK on all four downloaded archives; cosign
+      verify-blob Verified OK (exit 0) against the release.yml workflow
+      identity and GitHub OIDC issuer; crates.io queried directly reports
+      ordeal 0.18.0 and ordeal-lrat 0.18.0 as max versions; the published
+      aarch64-apple-darwin binary reports ordeal 0.18.0, answers a sat
+      query with a correct model (a=0x80 for a%5==3) and an unsat query
+      with a checker-validated LRAT certificate.
+    status: implemented
+    fields:
+      version: v0.18.0
+      timestamp: "2026-08-08T05:53:00Z"
+      executor: local
+      environment:
+        note: "cosign v2 (homebrew) on macOS arm64; assets downloaded fresh via gh release download"
+
+  - id: VV-045
+    type: verification-verdict
+    title: "VER-030 pass — v0.18.0 is the first cosign-signed ordeal release"
+    description: >
+      Executed pass. The org Track-A gap (#116) is closed on real
+      published artifacts; varve's re-add of ordeal to its toolchain-layer
+      roster is unblocked. Falsified if varve's fail-closed deposit
+      verification rejects the release.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-030
+      - type: part-of-execution
+        target: VE-023
+    fields:
+      verdict: pass
+      evidence: "shasum -c 4/4 OK; cosign verify-blob 'Verified OK' exit 0; crates.io max_version 0.18.0 both crates; published binary smoke incl. certified unsat"

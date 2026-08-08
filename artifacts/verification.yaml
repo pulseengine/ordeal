@@ -769,3 +769,28 @@ artifacts:
       steps:
         run: "cargo run -p ordeal --features cert-bundle --example rivet_ingestion -- <out> \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" && rivet --project <out>/rivet-project validate"
         coverage: "ingest+recheck pass; proof and problem tamper both rejected; rivet-side positive (exit 0) and negative (recheck gate error) both demonstrated"
+
+  - id: VER-030
+    type: sw-verification
+    title: Release checksums cosign-signed and verified on published assets (TR-033)
+    description: >
+      Confirms TR-033 against the first signed release (v0.18.0), on the
+      published bytes rather than the workflow log: all four platform
+      archives shasum -c OK against the downloaded SHA256SUMS.txt, and
+      cosign verify-blob over the downloaded sums + .cosign.bundle returns
+      Verified OK for certificate identity
+      https://github.com/pulseengine/ordeal/.github/workflows/release.yml@*
+      with the GitHub Actions OIDC issuer. The remaining field check —
+      varve's fail-closed deposit verification accepting the release — is
+      the standing falsification hook recorded on the tag.
+    status: verified
+    release: v0.19.0
+    tags: [release, cosign, sigstore, supply-chain, varve]
+    links:
+      - type: verifies
+        target: TR-033
+    fields:
+      method: automated-test
+      steps:
+        run: "gh release download v0.18.0 && shasum -a 256 -c SHA256SUMS.txt && cosign verify-blob --certificate-identity-regexp 'https://github.com/pulseengine/ordeal/.github/workflows/release.yml@.*' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt"
+        coverage: "4/4 archives checksum OK; keyless signature verified against the workflow identity on downloaded assets"
