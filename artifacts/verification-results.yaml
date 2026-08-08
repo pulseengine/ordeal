@@ -1215,3 +1215,49 @@ artifacts:
     fields:
       verdict: pass
       evidence: "benches/bmc.rs table; bmc_corpus tests 5 passed (incl. cadical parity); criterion log /tmp/bmc_bench.log exit=0"
+
+  - id: VE-022
+    type: verification-execution
+    title: v0.18.0 — rivet v0.32.0 ingestion of a live ordeal-cert/v1 bundle (VER-029)
+    description: >
+      rivet_ingestion example run 2026-08-08 (rechecked-at
+      2026-08-08T04:58:13Z, timestamp from date -u): live prove_equiv solve,
+      to_cert_v1 serialization, from_cert_v1 hash-verified re-ingestion,
+      recheck() pass, structural proof-tamper and problem-tamper both
+      rejected as HashMismatch before any recheck — 4/4 PASS lines, exit 0.
+      Fixture project then validated with the RELEASED rivet binary: rivet
+      0.32.0 (ec436b89, tag v0.32.0 contains the ordeal-certificate landing
+      3d03ee3) reports "No issues found … Result: PASS (0 warnings)" with
+      embedded schema ordeal-certificate@0.1.0, exit 0. Negative control:
+      deleting the verification-result: pass line flips rivet validate to
+      exit 1 with "[OC-1] … sources `verifies` links but its recheck" —
+      the never-re-checked certificate cannot count as evidence.
+    status: implemented
+    fields:
+      version: v0.18.0
+      timestamp: "2026-08-08T04:58:13Z"
+      executor: local
+      environment:
+        note: "rivet 0.32.0 (ec436b89) installed binary; example built from workspace at ordeal 0.17.0+"
+
+  - id: VV-044
+    type: verification-verdict
+    title: "VER-029 pass — TR-030's blocking condition is discharged by a shipped rivet"
+    description: >
+      Executed pass. The consumer-side leg split from TR-025 is now
+      demonstrated against a released rivet (v0.31.0 was the first release
+      containing the type; v0.32.0 used for the run): a bundle produced by
+      ordeal's API is ingested as a first-class evidence artifact, its
+      recheck gates the verifies link (positive and negative both shown),
+      and tampered bundles are rejected at ingestion. rivet#693 Part 2 is
+      consumable; Part 1 (--certify wiring) remains rivet-side future work
+      and is out of TR-030's scope.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-029
+      - type: part-of-execution
+        target: VE-022
+    fields:
+      verdict: pass
+      evidence: "example 4/4 PASS exit 0; rivet validate positive exit 0 (PASS, 0 warnings); negative exit 1 naming the recheck gate on OC-1"

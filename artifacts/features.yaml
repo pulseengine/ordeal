@@ -499,7 +499,7 @@ artifacts:
       rivet#693's Part-2 ingestion (unblocked by v0.17.0's ordeal-cert/v1)
       reaches a consumable state. Approach explorations #47/#48 ride along
       as stretch. Everything here is consumer-pulled, nothing speculative.
-    status: draft
+    status: verified
     release: v0.18.0
     tags: [roadmap, p12, bmc, caching, rivet, consumer]
     links:

@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-08
+
+**Consumer scale-out: the BMC practical-k envelope, the measured caching
+rejection, and rivet ingestion demonstrated** (FEAT-015; TR-030, TR-031,
+TR-009 closure; issues #112, #57, #116; rivet#693 Part 2, spar#350). The
+release shaped by the 2026-07-29 asks sweep — everything consumer-pulled.
+
+### Added
+- **BMC practical-k envelope** (TR-031/VER-028, #111, spar#350): a
+  `#[doc(hidden)]` BMC corpus (`bmc_corpus.rs` — queue-overflow and
+  two-lock-deadlock shapes over the closed fragment) plus the two-lane
+  criterion bench `benches/bmc.rs`. Measured certified end-to-end (macOS
+  arm64): queue shape crosses 1 s around k ≈ 90, 2.53 s at k = 128 (own
+  core) vs 2.00 s (cadical accelerator); deadlock shapes stay under
+  ~275 ms through k = 96 — where the accelerator LOSES on fixed
+  DIMACS/proof-file overhead. Seeded defects go SAT with replayable
+  schedules; every UNSAT leg re-checks offline.
+- **rivet ingestion demonstrated against a released rivet** (TR-030/
+  VER-029): rivet v0.31.0+ ships the `ordeal-certificate` artifact type
+  (rivet#693 Part 2, rivet PR #743). The new
+  `examples/rivet_ingestion.rs` produces a bundle from a live solve,
+  re-ingests it the way rivet does (hash-verified parse + `recheck()`),
+  proves structurally tampered proof/problem payloads are rejected at
+  ingestion, and emits a fixture that released rivet 0.32.0 validates
+  clean — with the never-re-checked negative failing the
+  recheck-gates-verifies rule. The TR-025 evidence spine is closed
+  end-to-end.
+- **Keyless cosign signing of release checksums** (#116, TR-033, varve):
+  the release workflow now signs `SHA256SUMS.txt` via Sigstore keyless
+  OIDC, publishing `.cosign.bundle`/`.sig`/`.pem` — the org Track-A
+  standard, unblocking ordeal's re-entry into varve toolchain layers.
+  This release is the first signed one.
+- **Consumer parallelism guidance + compile-time `Send + Sync`
+  guarantee** (#111): `docs/consuming-ordeal.md` documents the
+  parallelize-across-queries model with the measured envelope; a
+  compile-time assertion pins every API type `Send + Sync` so the
+  guarantee cannot silently regress.
+
+### Changed
+- **TR-009 term-graph caching: REJECTED with data** (#113, closing #57's
+  remainder): at BMC k = 128 the entire frontend (canon + blast +
+  Tseitin) is 7.6 ms of a 2,555 ms certified solve (0.3 %) — caching
+  addresses work that is not where the time goes. Recorded in the rivet
+  graph; re-openable only with a workload where the frontend share is
+  material.
+- Seed-portfolio parallelism parked as TR-032 (measure-first activation;
+  certificate-nondeterminism concession documented in the consumer
+  guide).
+- `Solver` internals: shared `lower()` / `decode_and_check()` split, and
+  a `#[doc(hidden)]` `check_with_cadical` yardstick entry (TR-004 role
+  unchanged: never load-bearing).
+
 ## [0.17.0] - 2026-07-29
 
 **Certificate as evidence + the optional CaDiCaL accelerator** (FEAT-011,

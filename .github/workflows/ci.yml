@@ -263,6 +263,9 @@ jobs:
       - name: Clippy (oracle feature)
         run: |
           rustup component add clippy
-          cargo clippy --all-targets --features "oracle cadical" -- -D warnings
+          cargo clippy --all-targets --features "oracle cadical cert-bundle" -- -D warnings
+      # cert-bundle rides along so the cert_bundle test module and the
+      # required-features examples (rivet_ingestion) compile and run in CI —
+      # without it no job ever built them (caught 2026-08-08).
       - name: Run oracle tests (incl. three-way backend parity)
-        run: cargo test --all --features "oracle cadical" --release
+        run: cargo test --all --features "oracle cadical cert-bundle" --release

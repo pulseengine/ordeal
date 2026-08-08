@@ -792,12 +792,15 @@ artifacts:
       The consumer-side leg split from TR-025 (2026-07-29): rivet shall
       ingest an ordeal-cert/v1 bundle as a first-class evidence artifact
       type, so a checker-validated UNSAT certificate participates in the
-      traceability graph like any other verification evidence. Blocked on
-      pulseengine/rivet#693 (rivet's certified feature-model work, built
-      against the envelope pinned on ordeal#67); ordeal's obligations are the
-      stable format (shipped, TR-025) and parity support when rivet's
-      integration surfaces gaps.
-    status: draft
+      traceability graph like any other verification evidence. Was blocked
+      on pulseengine/rivet#693; UNBLOCKED 2026-08-05 — rivet#693 Part 2
+      (the ordeal-certificate artifact type, rivet PR #743) shipped in
+      rivet v0.31.0/v0.32.0 with the recheck-gates-verifies rule, the
+      v1 inline-only boundary, and the honest SAT warning. Ordeal's
+      obligations (the stable format, TR-025, plus the ingestion
+      demonstration) are discharged by the rivet_ingestion example and
+      VER-029's released-binary run.
+    status: verified
     release: v0.18.0
     tags: [rivet, evidence, certificate, cross-repo]
     links:
@@ -887,3 +890,35 @@ artifacts:
         proof is checker-accepted; wasm build unaffected; measured speedup
         on the activating consumer's workload is reported honestly,
         including the certificate-nondeterminism concession.
+
+  - id: TR-033
+    type: sw-req
+    title: Release checksums are cosign-signed (keyless Sigstore, org Track A)
+    description: >
+      Field ask #116 (varve, 2026-08-08): the release workflow shall sign
+      SHA256SUMS.txt with keyless cosign (GitHub OIDC / Fulcio / Rekor),
+      publishing SHA256SUMS.txt.cosign.bundle plus detached .sig/.pem next
+      to the sums — the org release-artifact standard's Track A, mirroring
+      synth/rivet/witness. Without it, varve's fail-closed deposit workflow
+      (which verifies sums against the repo's cosign identity, no TOFU)
+      excludes ordeal from toolchain layers; v0.17.0 shipped unsigned and
+      ordeal was dropped from layer 2026.08.1. The signing step ships with
+      the v0.18.0 cut; verification necessarily runs against the first
+      published signed release, so this artifact's verified milestone is
+      v0.19.0 (the same pattern as any release-tail evidence).
+    status: implemented
+    release: v0.19.0
+    tags: [release, cosign, sigstore, supply-chain, varve, field-report]
+    links:
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: non-functional
+      priority: must
+      verification-criteria: >
+        The v0.18.0 GitHub Release carries SHA256SUMS.txt.cosign.bundle,
+        .sig and .pem; `cosign verify-blob` passes against certificate
+        identity https://github.com/pulseengine/ordeal/.github/workflows/
+        release.yml@* and the GitHub Actions OIDC issuer on the downloaded
+        sums; the sums still `shasum -c` the archives. Falsified if varve's
+        deposit verification rejects the release.

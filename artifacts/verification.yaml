@@ -738,3 +738,34 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --features cadical --release bmc && cargo bench -p ordeal --features cadical --bench bmc"
         coverage: "both shapes; both verdict directions; both backends; envelope table; Send+Sync assert"
+
+  - id: VER-029
+    type: sw-verification
+    title: rivet ingestion of ordeal-cert/v1 demonstrated against a released rivet (TR-030)
+    description: >
+      Confirms TR-030 end-to-end with no synthetic hashes: the
+      rivet_ingestion example performs a live solve (mul-by-2 vs shl-1
+      equivalence), serializes the checker-validated certificate as an
+      ordeal-cert/v1 bundle, re-ingests it the way rivet does (content
+      hashes verified before parse returns, then recheck() re-runs the
+      trusted checker), and demonstrates that structurally tampered proof
+      and problem payloads are rejected at ingestion before any recheck.
+      The emitted fixture project — an ordeal-certificate artifact carrying
+      the bundle's own recorded sha256s and an actually-run
+      verification-result: pass — validates clean under released rivet
+      v0.32.0 (embedded schema ordeal-certificate@0.1.0), its verifies link
+      satisfying coverage; stripping the recheck record flips rivet
+      validate to a failing exit naming V-ordeal-cert-recheck-gates-verifies.
+    status: verified
+    release: v0.18.0
+    tags: [rivet, evidence, certificate, ingestion, cross-repo]
+    links:
+      - type: verifies
+        target: TR-030
+      - type: verifies
+        target: FEAT-015
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo run -p ordeal --features cert-bundle --example rivet_ingestion -- <out> \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" && rivet --project <out>/rivet-project validate"
+        coverage: "ingest+recheck pass; proof and problem tamper both rejected; rivet-side positive (exit 0) and negative (recheck gate error) both demonstrated"
