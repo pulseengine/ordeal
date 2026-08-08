@@ -23,7 +23,7 @@ path = "src/main.rs"
 # wasip2-clean). The solver depends on the checker to validate certificates;
 # the checker never depends on the solver (the trust boundary, enforced by
 # ordeal-lrat's empty dependency table).
-ordeal-lrat = { path = "../ordeal-lrat", version = "0.17.0" }
+ordeal-lrat = { path = "../ordeal-lrat", version = "0.18.0" }
 
 # `ordeal-cert/v1` bundle serialization (issue #91 / TR-025 ordeal half).
 # Optional: the default build stays dependency-free; rivet (the consumer)
@@ -83,6 +83,12 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 # for downstream consumers — dev-deps never propagate).
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+# TR-030 demonstration: real bundle → hash-verified ingestion + recheck +
+# tamper rejection + rivet fixture emission. Needs the cert-bundle feature.
+[[example]]
+name = "rivet_ingestion"
+required-features = ["cert-bundle"]
 
 [[bench]]
 name = "latency"

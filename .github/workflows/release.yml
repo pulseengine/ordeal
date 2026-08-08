@@ -141,6 +141,40 @@ jobs:
           sha256sum ./* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # ── Sigstore keyless signing (cosign) — issue #116 / TR-033 ────────
+      # Signs SHA256SUMS.txt so a consumer can verify the checksum file
+      # itself was produced by this workflow (closes the gap where an
+      # attacker who can replace a release asset could also replace the
+      # plain checksum file). Mirrors the org Track-A pattern (synth /
+      # rivet / witness); varve's deposit workflow consumes exactly this,
+      # fail-closed. The .cosign.bundle is the verifier-friendly artifact;
+      # .sig + .pem are the detached signature and Fulcio certificate.
+      # Verify with:
+      #   cosign verify-blob \
+      #     --certificate-identity-regexp \
+      #       'https://github.com/pulseengine/ordeal/.github/workflows/release.yml@.*' \
+      #     --certificate-oidc-issuer \
+      #       'https://token.actions.githubusercontent.com' \
+      #     --bundle SHA256SUMS.txt.cosign.bundle \
+      #     SHA256SUMS.txt
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Sign SHA256SUMS with cosign (keyless OIDC)
+        run: |
+          set -euo pipefail
+          cd release-assets
+          cosign sign-blob \
+            --yes \
+            --bundle SHA256SUMS.txt.cosign.bundle \
+            --output-signature SHA256SUMS.txt.sig \
+            --output-certificate SHA256SUMS.txt.pem \
+            SHA256SUMS.txt
+          echo "::notice::SHA256SUMS signed via Sigstore keyless flow."
+          ls -la ./*
+
       # ── SLSA build provenance (GitHub-native) ──────────────────────────
       # Generates an in-toto SLSA v1 provenance statement for every binary
       # archive, signed keyless via Sigstore and recorded in Rekor. Verify
