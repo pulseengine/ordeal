@@ -31,6 +31,13 @@ fn main() -> ExitCode {
             banner();
             ExitCode::SUCCESS
         }
+        // Machine-quotable version (issue #120 / org CLI baseline,
+        // pulseengine.eu#167): qualification evidence must cite tool
+        // versions without scraping the help banner. Exit 0, one line.
+        Some("-V" | "--version" | "version") => {
+            println!("ordeal {}", env!("CARGO_PKG_VERSION"));
+            ExitCode::SUCCESS
+        }
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!("usage: ordeal check [FILE | -]   (reads stdin if FILE is '-' or omitted)");
@@ -147,7 +154,7 @@ fn banner() {
     println!("ordeal {version}");
     println!("certificate-checked QF_BV SMT solver for the PulseEngine toolchain");
     println!();
-    println!("usage:");
+    println!("Usage:");
     println!("  ordeal check <file.smt2>   solve a QF_BV SMT-LIB2 script");
     println!("  ordeal check -             solve a script read from stdin");
     println!();

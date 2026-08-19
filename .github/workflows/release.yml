@@ -82,6 +82,26 @@ jobs:
         if: ${{ !matrix.cross }}
         run: strip "target/${{ matrix.target }}/release/ordeal" 2>/dev/null || true
 
+      # The binary that ships must report the version being tagged (#120;
+      # the varve#38 lesson — a v0.14.0 release once shipped a binary
+      # reporting 0.13.1). Native targets only: cross-built binaries can't
+      # execute on this runner.
+      - name: Assert built binary reports the tag version
+        if: ${{ !matrix.cross }}
+        env:
+          TARGET: ${{ matrix.target }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          GOT=$("target/${TARGET}/release/ordeal" --version)
+          WANT="ordeal ${VERSION#v}"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::version mismatch: binary says '$GOT', tag demands '$WANT'"
+            exit 1
+          fi
+          echo "::notice::binary self-reports '$GOT' — matches the tag"
+
       - name: Package archive
         env:
           TARGET: ${{ matrix.target }}
