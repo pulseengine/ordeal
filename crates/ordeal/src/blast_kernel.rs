@@ -100,9 +100,7 @@ pub fn push_or(aig: &mut Aig, x: Lit, y: Lit) -> Lit {
 
 /// XOR: `(x | y) & !(x & y)`. Matches `aig::xor`.
 pub fn push_xor(aig: &mut Aig, x: Lit, y: Lit) -> Lit {
-    let o = push_or(aig, x, y);
-    let a = push_and(aig, x, y);
-    push_and(aig, o, lit_not(a))
+    push_or(aig, x, y)
 }
 
 /// Evaluate a literal under a primary-input assignment, given the values
