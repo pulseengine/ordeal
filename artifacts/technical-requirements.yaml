@@ -936,9 +936,10 @@ artifacts:
       proving, the Charon/Aeneas pins are single-sourced, and the drift
       workflow retires without the gate ever weakening. Full analysis,
       options (O1..O4), migration order, and open questions in
-      docs/design/checker-single-sourcing.md — code starts only after that
-      design is approved.
-    status: draft
+      docs/design/checker-single-sourcing.md — approved 2026-08-19 (O1;
+      nix-once accepted; drift workflow retired via ordered swap; one-time
+      recorded mutation demonstration).
+    status: implemented
     release: v0.19.0
     tags: [tcb, lean, aeneas, generation, drift, design-gated]
     links:

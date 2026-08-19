@@ -1,8 +1,11 @@
 # Design: single-source the trusted models — drift becomes unrepresentable
 
-**Issue:** #48 · **Release:** v0.19.0 · **rivet:** TR-034 (draft until this
-design is approved) · **Status: PROPOSED — no code lands until this doc is
-reviewed.**
+**Issue:** #48 · **Release:** v0.19.0 · **rivet:** TR-034 ·
+**Status: APPROVED 2026-08-19** — all four open questions decided by the
+maintainer (via review dialogue): **O1** (models are build products);
+**nix-once local bar accepted**; **drift workflow retired fully** (ordered
+gate swap); **mutation demonstration one-time, recorded** as TR-034
+verification evidence.
 
 ## The claim being protected
 

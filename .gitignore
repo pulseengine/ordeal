@@ -41,3 +41,10 @@ result-*
 # Bazel output symlinks
 bazel-*
 lean/.lake/
+
+# TR-034 (issue #48): the Aeneas-generated Lean models are BUILD PRODUCTS —
+# regenerated from the Rust sources by lean/regen.sh (locally) and by the
+# Lean CI job (every run). Committing them would reintroduce the stale-model
+# drift class the design retired. See docs/design/checker-single-sourcing.md.
+lean/Kernel.lean
+lean/BlastKernel.lean
