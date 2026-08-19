@@ -133,16 +133,35 @@ jobs:
   #      leaf may silently regress to `sorry` and no new gap may appear.
   # This is a real gate (no continue-on-error): a broken proof or a widened
   # sorry budget fails CI.
-  # NOTE: this does NOT re-run Aeneas (regen.sh) to check that Kernel.lean is
-  # the current translation of kernel.rs — that drift guard is a known gap
-  # (see docs/formal-verification.md, issue #44). The proof's trusted axioms are
-  # ONLY propext / Classical.choice / Quot.sound (no sorryAx, no native_decide);
-  # `#print axioms kernel.spec.lrat_check_sound` is the check.
+  # TR-034 (issue #48): the models (Kernel.lean, BlastKernel.lean) are BUILD
+  # PRODUCTS — this job regenerates them from the Rust sources (pinned
+  # Charon/Aeneas via nix, lean/toolchain-pins.env) before every proof
+  # build, so the proofs always certify the translation of the code that
+  # ships; a stale committed model is unrepresentable (none is committed).
+  # This absorbs and retires the #44 drift guard. The proof's trusted axioms
+  # are ONLY propext / Classical.choice / Quot.sound (no sorryAx, no
+  # native_decide); `#print axioms kernel.spec.lrat_check_sound` is the check.
   lean:
     name: Lean model + soundness proof
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - name: Install Nix (flakes)
+        uses: DeterminateSystems/nix-installer-action@v22
+      # Cache the /nix/store so the cold Charon(OCaml)+Aeneas build (~15+ min)
+      # only happens when the pinned toolchain revisions change.
+      - name: Cache nix store (Charon/Aeneas)
+        uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-charon-aeneas-${{ runner.os }}-${{ hashFiles('lean/toolchain-pins.env') }}
+          restore-prefixes-first-match: nix-charon-aeneas-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+      - name: Regenerate the Lean models from the Rust sources (timed)
+        run: |
+          start=$(date +%s)
+          bash lean/regen.sh all
+          echo "regen.sh all wall time: $(( $(date +%s) - start ))s"
+          test -f lean/Kernel.lean && test -f lean/BlastKernel.lean
       - name: Install elan
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \

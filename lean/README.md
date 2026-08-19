@@ -38,9 +38,12 @@ theorem lrat_check_sound
 translation of `crates/ordeal-lrat/src/kernel.rs` (the string-free checking
 core) — generated with ZERO translation errors after the kernel was written
 in the Aeneas-friendly fragment (index loops, no early returns inside loops,
-owned step in the main loop; see the kernel's module docs). Regenerate with
-`lean/regen.sh` (pinned Charon/Aeneas via nix) after any kernel change and
-commit the result. `lake build Kernel` — a CI gate — is green: **zero
+owned step in the main loop; see the kernel's module docs). The model is a
+**build product** (TR-034): it is `.gitignore`d, and both models come from
+`lean/regen.sh all` (pinned Charon/Aeneas via nix, pins single-sourced in
+`toolchain-pins.env`) — run it once before proof development; the Lean CI
+job runs it before every proof build, so the proofs always certify the
+current translation. `lake build Kernel` — a CI gate — is green: **zero
 axioms** (both former externals were eliminated at the Rust source) and zero
 sorries in the model.
 

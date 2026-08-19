@@ -96,22 +96,31 @@ these would have to fail:
 - **The solver.** ordeal's QF_BV engine that *emits* certificates is untrusted
   by design; nothing about it is proved, and it never needs to be.
 
-## Known process gap (being fixed)
+## Model freshness: generated, not checked (TR-034)
 
-CI builds `Kernel.lean` and `Sound.lean` and enforces a zero-`sorry` budget, but
-**no CI job re-runs `regen.sh` and asserts the committed `Kernel.lean` matches
-the current `kernel.rs`.** A change to `kernel.rs` without regeneration would
-leave the proof about a *stale* model while a different binary ships. Until a
-drift check exists, the faithfulness of point (1) above also rests on the
-discipline of running `regen.sh` after every `kernel.rs` change.
+The models the proofs reason about — `lean/Kernel.lean` (checker) and
+`lean/BlastKernel.lean` (bit-blaster) — are **build products, not committed
+artifacts**. `lean/regen.sh all` produces them from the Rust sources with
+Charon/Aeneas pinned in exactly one place (`lean/toolchain-pins.env`), and
+the *Lean model + soundness proof* CI job regenerates both **before every
+proof build**. A proof about a stale model is therefore unrepresentable:
+there is no committed model that could go stale, and a `kernel.rs` /
+`blast_kernel.rs` change whose translation breaks a proof fails that
+required job directly. (History: freshness was originally enforced by a
+separate drift-diff workflow — issue #44 — which this construction absorbed
+and retired; see `docs/design/checker-single-sourcing.md`.)
+
+What this does **not** discharge: Charon/Aeneas translation faithfulness at
+the pinned revisions. That residual is the target of the adversarial
+dual-mechanisation work (issue #47 / TR-035).
 
 ## How to reproduce the checks
 
 ```
+./lean/regen.sh all                 # produce the models (nix; once per pin-bump)
 cd lean
 lake env lean Sound.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 echo 'import Sound
 #print axioms kernel.spec.lrat_check_sound' > /tmp/ax.lean
 lake env lean /tmp/ax.lean          # inspect the axiom list
-./regen.sh && git diff --stat lean/Kernel.lean   # expect no diff (freshness)
 ```
