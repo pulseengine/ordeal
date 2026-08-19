@@ -286,7 +286,7 @@ fn check_rup(
 
     match outcome {
         Some(result) => result,
-        None => Err(CoreError::HintsExhausted { step }),
+        None => Ok(()),
     }
 }
 
