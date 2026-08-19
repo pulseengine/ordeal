@@ -794,3 +794,27 @@ artifacts:
       steps:
         run: "gh release download v0.18.0 && shasum -a 256 -c SHA256SUMS.txt && cosign verify-blob --certificate-identity-regexp 'https://github.com/pulseengine/ordeal/.github/workflows/release.yml@.*' --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt"
         coverage: "4/4 archives checksum OK; keyless signature verified against the workflow identity on downloaded assets"
+
+  - id: VER-032
+    type: sw-verification
+    title: CLI version baseline verified (TR-036)
+    description: >
+      Confirms TR-036 via the cli_baseline integration test run against
+      the built binary: --version/-V/version each exit 0 printing exactly
+      `ordeal <semver>` with clean stderr; an unknown flag exits 2 with
+      the diagnosis and usage on stderr and nothing on stdout; --help
+      retains the pinned honesty phrases (soundness property, checker
+      name) and the aligned Usage: header. The release-workflow tag assert
+      is verified structurally here and empirically by the first release
+      run that executes it (v0.19.0).
+    status: verified
+    release: v0.19.0
+    tags: [cli, baseline, version]
+    links:
+      - type: verifies
+        target: TR-036
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --test cli_baseline"
+        coverage: "3 version spellings; unknown-flag contract; help honesty pin"

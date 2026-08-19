@@ -985,3 +985,34 @@ artifacts:
         disagreement (mutated certificate accepted by one path) is
         demonstrated to fail the gate; any real disagreement found is
         triaged to translation gap vs spec ambiguity and recorded.
+
+  - id: TR-036
+    type: sw-req
+    title: CLI version is machine-quotable; strict unknown-flag behaviour preserved
+    description: >
+      Org CLI-baseline ask #120 (pulseengine.eu#167, filed from the varve
+      layer survey 2026-08-18): `ordeal --version` / `-V` / `version` print
+      `ordeal <semver>` on stdout and exit 0, because qualification
+      evidence must cite tool versions without scraping help banners (the
+      rivet 0.19.0-vs-0.32.0 verdict flip made versionless evidence
+      unusable). Unknown flags keep the exit-2-with-usage-on-stderr shape
+      the survey named as the toolchain reference; the help banner keeps
+      its honesty text (soundness property + outstanding obligation) and
+      aligns on `Usage:`. The release workflow asserts the freshly built
+      native binaries self-report exactly the tagged version (varve#38
+      pattern), so a version/tag mismatch cannot ship.
+    status: verified
+    release: v0.19.0
+    tags: [cli, baseline, version, evidence, field-report]
+    links:
+      - type: derives-from
+        target: SYS-006
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        cli_baseline integration test: all three version spellings exit 0
+        printing exactly `ordeal <semver>`; unknown flag exits 2 with
+        usage on stderr and clean stdout; help retains the pinned honesty
+        phrases. Release-side: the tag-version assert step is present for
+        both native targets and the next release run passes it.
