@@ -150,10 +150,15 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@v22
       # Cache the /nix/store so the cold Charon(OCaml)+Aeneas build (~15+ min)
       # only happens when the pinned toolchain revisions change.
+      # The key hashes the pins AND regen.sh: cache-nix-action skips saving
+      # on an exact primary-key hit, so a mechanism change in regen.sh (like
+      # the GC-roots fix) must mint a NEW key or the improved store never
+      # gets saved and every run restores the stale snapshot (learned on
+      # PR #126: its rooted store was never persisted under the old key).
       - name: Cache nix store (Charon/Aeneas)
         uses: nix-community/cache-nix-action@v7
         with:
-          primary-key: nix-charon-aeneas-${{ runner.os }}-${{ hashFiles('lean/toolchain-pins.env') }}
+          primary-key: nix-charon-aeneas-${{ runner.os }}-${{ hashFiles('lean/toolchain-pins.env', 'lean/regen.sh') }}
           restore-prefixes-first-match: nix-charon-aeneas-${{ runner.os }}-
           gc-max-store-size-linux: 5G
       - name: Regenerate the Lean models from the Rust sources (timed)
