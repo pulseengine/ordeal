@@ -818,3 +818,37 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --test cli_baseline"
         coverage: "3 version spellings; unknown-flag contract; help honesty pin"
+
+  - id: VER-031
+    type: sw-verification
+    title: Model drift is unrepresentable — generation by construction (TR-034)
+    description: >
+      Confirms all five TR-034 criteria. (1) No committed generated model:
+      git ls-files shows neither Kernel.lean nor BlastKernel.lean; both
+      gitignored. (2) The required Lean job regenerates both models from
+      the Rust sources before proving: green on main 3f0d1e5 (cold path,
+      regen 1431s first-population; proofs zero-sorry). (3) Mutation
+      demonstrations, one-time as approved: a fail-open check_rup mutation
+      (exhausted hint chains accepted) with NO manual model step turned
+      the required Lean job RED at the soundness proof (Sound.lean:1470
+      unsolved goals, run 32314572430); an xor-computes-or blast_kernel
+      mutation turned it RED at the blaster proofs (run 32314575631) —
+      each mutation broke exactly its own proof development, and the
+      previously unguarded blaster surface is now closed by construction.
+      (4) Drift workflow retired with the recorded branch-protection swap
+      (8→7 contexts, drift context removed only after main was green with
+      regeneration; before/after lists in PR #125). (5) Pins defined
+      exactly once in lean/toolchain-pins.env. Local cross-check:
+      regen.sh all reproduced both models byte-identical to the last
+      committed pair before removal.
+    status: verified
+    release: v0.19.0
+    tags: [tcb, lean, aeneas, generation, drift, mutation]
+    links:
+      - type: verifies
+        target: TR-034
+    fields:
+      method: automated-test
+      steps:
+        run: "bash lean/regen.sh all && (cd lean && lake build) — plus the recorded one-time mutation demonstrations (PRs #123/#124, closed unmerged)"
+        coverage: "all five design criteria; both kernels; both mutation directions red"
