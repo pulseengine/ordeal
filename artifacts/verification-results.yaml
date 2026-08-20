@@ -1314,10 +1314,12 @@ artifacts:
       required Lean job failed at exactly the mutated kernel's proof
       development (jobs 96264097349 / 96264106628). Both PRs closed
       unmerged, branches deleted. Branch protection swapped 8→7 after
-      main green; drift workflow deleted in PR #125. Watch item: the two
-      mutation-PR regens ran 1186s/1332s (expected warm-cache seconds) —
-      nix-store cache effectiveness under the new key to be confirmed on
-      the next lean run; not a soundness concern, a latency one.
+      main green; drift workflow deleted in PR #125. Watch item RESOLVED
+      2026-08-20: the ~20-min regens (1186s/1332s/1380s on PRs #123-125)
+      were `nix run` leaving no GC root, so the cache's store trim
+      evicted the tool closures every save; regen.sh now `nix build`s to
+      persistent out-links (lean/.nix-roots/) — measured warm regen 4s,
+      models byte-identical.
     status: implemented
     fields:
       version: v0.19.0

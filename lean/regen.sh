@@ -25,12 +25,22 @@ source lean/toolchain-pins.env
 LLBC_DIR=$(mktemp -d)
 trap 'rm -rf "$LLBC_DIR"' EXIT
 
+# Build the pinned tools to PERSISTENT GC ROOTS (lean/.nix-roots/, gitignored)
+# instead of `nix run`: a run leaves no root, so any store gc — notably the
+# CI nix-store cache's size trim — collects the built closures and every job
+# rebuilds them from source (~20 min, measured on PRs #123-#125). With roots
+# the cached store serves the binaries and a warm regen is seconds.
+ROOTS="lean/.nix-roots"
+mkdir -p "$ROOTS"
+nix build "github:AeneasVerif/charon/$CHARON_REV" --out-link "$ROOTS/charon"
+nix build "github:AeneasVerif/aeneas/$AENEAS_REV" --out-link "$ROOTS/aeneas"
+
 regen() { # $1 = rust source, $2 = llbc name, $3 = generated file (for the log)
-  nix run "github:AeneasVerif/charon/$CHARON_REV" -- rustc \
+  "$ROOTS/charon/bin/charon" rustc \
     --preset=aeneas \
     --dest-file "$LLBC_DIR/$2" \
     -- --crate-type=lib "$1"
-  nix run "github:AeneasVerif/aeneas/$AENEAS_REV" -- \
+  "$ROOTS/aeneas/bin/aeneas" \
     -backend lean "$LLBC_DIR/$2" -dest lean
   echo "regenerated $3"
 }
