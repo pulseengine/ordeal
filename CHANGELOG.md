@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-08-20
+
+**TCB deepening: drift made unrepresentable, and a second mechanisation
+run adversarially** (FEAT-scope: TR-034, TR-035, TR-036, TR-033
+verification; issues #48, #47, #120, #116 tail). The releases's theme is
+the verification-approach sweep: generation over checking, independence
+used adversarially.
+
+### Changed
+- **The trusted Lean models are build products, never committed**
+  (TR-034/VER-031, #48): `lean/Kernel.lean` and `lean/BlastKernel.lean`
+  left the tree; the required Lean CI job regenerates both from the Rust
+  sources (Charon/Aeneas pinned once, in `lean/toolchain-pins.env`)
+  before every proof build. A proof about a stale model is now
+  unrepresentable — and the previously UNGUARDED blaster model drift
+  surface is closed by construction. The #44 drift workflow retired via
+  an ordered branch-protection swap (never weaker at any commit).
+  One-time mutation demonstrations recorded: a fail-open `check_rup` and
+  an xor→or `blast_kernel` mutation — one line each, no manual model
+  step — each turned the required Lean job red at exactly its own proof
+  development.
+- CI: the regenerating Lean job runs warm in ~28 s (three stacked cache
+  defects found and fixed: `nix run` leaves no GC root; exact-key cache
+  hits skip saves; PR-branch caches are invisible to main).
+
+### Added
+- **Adversarial dual-mechanisation differential** (TR-035/VER-033, #47):
+  ordeal's Aeneas-proven checker differenced against Lean core's
+  independently verified `Std.Tactic.BVDecide.LRAT.check` on a
+  deterministic 48-pristine + 16-mutant corpus (`examples/
+  dump_lrat_corpus.rs`, `lake exe diffcheck`), gated in CI — any verdict
+  disagreement is a hard error. The differential immediately surfaced
+  two real LRAT spec ambiguities (Lean core resolves hints positionally,
+  ignoring declared step ids; its formula loader preloads original unit
+  clauses) — both sides sound, ordeal strictly stricter, both documented
+  in `lean/DiffCheck.lean` rather than papered over.
+- **CLI version baseline** (TR-036/VER-032, #120, org survey
+  pulseengine.eu#167): `--version`/`-V`/`version` print `ordeal <semver>`
+  and exit 0; unknown flags keep the strict exit-2 reference behaviour;
+  the help banner's honesty text is pinned by test; the release workflow
+  asserts each freshly built native binary self-reports exactly the
+  tagged version (first exercised by this release).
+- TR-033 (cosign-signed checksums, shipped v0.18.0) verified against the
+  published assets: `cosign verify-blob` Verified OK; varve layer
+  2026.08.2 re-added ordeal signed.
+
+### Scope
+- TR-032 (seed-portfolio parallelism) deferred to v0.20.0 by explicit
+  decision — its measure-first activation condition has not fired.
+
 ## [0.18.0] - 2026-08-08
 
 **Consumer scale-out: the BMC practical-k envelope, the measured caching

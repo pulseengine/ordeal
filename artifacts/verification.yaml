@@ -880,7 +880,7 @@ artifacts:
       CNF with a contradictory unit pair it accepts hint-weakened steps
       ordeal rejects (encounteredBoth → derivedEmpty) — such CNFs are
       excluded as hint-weakening mutation sources by construction.
-    status: implemented
+    status: verified
     release: v0.19.0
     tags: [tcb, lean, dual-mechanisation, differential, adversarial]
     links:
