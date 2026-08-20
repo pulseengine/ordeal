@@ -1301,3 +1301,46 @@ artifacts:
     fields:
       verdict: pass
       evidence: "shasum -c 4/4 OK; cosign verify-blob 'Verified OK' exit 0; crates.io max_version 0.18.0 both crates; published binary smoke incl. certified unsat"
+
+  - id: VE-024
+    type: verification-execution
+    title: v0.19.0 — TR-034 mutation demonstrations and gate swap executed (VER-031)
+    description: >
+      Executed 2026-08-19/20. Local: regen.sh all (cold nix) reproduced
+      both models byte-identically; lake build exit 0; Sound.lean and all
+      Blaster* at zero sorries. CI: main 3f0d1e5 green with in-job
+      regeneration (cold 1431s). Mutation PRs #123 (check_rup fail-open)
+      and #124 (push_xor→or), each one line, no manual model step: the
+      required Lean job failed at exactly the mutated kernel's proof
+      development (jobs 96264097349 / 96264106628). Both PRs closed
+      unmerged, branches deleted. Branch protection swapped 8→7 after
+      main green; drift workflow deleted in PR #125. Watch item: the two
+      mutation-PR regens ran 1186s/1332s (expected warm-cache seconds) —
+      nix-store cache effectiveness under the new key to be confirmed on
+      the next lean run; not a soundness concern, a latency one.
+    status: implemented
+    fields:
+      version: v0.19.0
+      timestamp: "2026-08-20T00:15:00Z"
+      executor: local+ci
+      environment:
+        note: "cache-nix-action keyed on lean/toolchain-pins.env; ubuntu-latest"
+
+  - id: VV-046
+    type: verification-verdict
+    title: "VER-031 pass — the stale-model state is unconstructible"
+    description: >
+      Executed pass. Every TR-034 criterion holds with recorded evidence;
+      the two catastrophic mutation classes (checker accepts without
+      proof; blaster miscompiles xor) cannot reach main behind a green
+      gate. The faithfulness residual is now exactly Charon/Aeneas at the
+      pinned revisions — TR-035's target.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-031
+      - type: part-of-execution
+        target: VE-024
+    fields:
+      verdict: pass
+      evidence: "runs 32314572430/32314575631 red at the right steps; main 3f0d1e5 green; gate 8→7 recorded; git ls-files clean of models"

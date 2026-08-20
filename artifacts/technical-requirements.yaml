@@ -939,7 +939,7 @@ artifacts:
       docs/design/checker-single-sourcing.md — approved 2026-08-19 (O1;
       nix-once accepted; drift workflow retired via ordered swap; one-time
       recorded mutation demonstration).
-    status: implemented
+    status: verified
     release: v0.19.0
     tags: [tcb, lean, aeneas, generation, drift, design-gated]
     links:
