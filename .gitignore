@@ -48,3 +48,6 @@ lean/.lake/
 # drift class the design retired. See docs/design/checker-single-sourcing.md.
 lean/Kernel.lean
 lean/BlastKernel.lean
+# nix GC roots for the pinned Charon/Aeneas builds (created by lean/regen.sh
+# so store gc — incl. the CI cache trim — keeps the tool closures).
+lean/.nix-roots/
