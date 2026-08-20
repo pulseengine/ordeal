@@ -874,7 +874,7 @@ artifacts:
       Wasm is never affected (threads unavailable; the own sequential core
       remains the only engine there, TR-004).
     status: draft
-    release: v0.19.0
+    release: v0.20.0
     tags: [parallel, portfolio, parked, measure-first, native-only]
     links:
       - type: derives-from
@@ -977,7 +977,7 @@ artifacts:
       hint-weakened steps ordeal rejects) — both divergences are sound on
       each side, documented in lean/DiffCheck.lean, and gated/visible in
       the adapter rather than papered over.
-    status: implemented
+    status: verified
     release: v0.19.0
     tags: [tcb, lean, dual-mechanisation, differential, adversarial]
     links:
