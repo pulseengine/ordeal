@@ -242,6 +242,24 @@ jobs:
             exit 1
           fi
           echo "lean/README.md status wording is consistent with the proved, gated state."
+      # ── TR-035 (issue #47): dual-mechanisation differential ─────────────
+      # Cross-check ordeal's own verified checker against Lean core's
+      # INDEPENDENTLY verified LRAT checker (Std.Tactic.BVDecide.LRAT.check,
+      # the absorbed leansat checker) on a shared, deterministic certificate
+      # corpus: every pristine pair must be accepted by both, every mutated
+      # pair rejected by both. Any disagreement localizes an Aeneas
+      # translation-faithfulness gap or a spec ambiguity and fails CI here.
+      # This job has no Rust toolchain of its own (everything above is
+      # nix/elan), so install one for the corpus dumper.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: diffcheck
+      - name: Dump the shared LRAT certificate corpus (TR-035)
+        run: cargo run -p ordeal --example dump_lrat_corpus -- /tmp/lrat-corpus
+      - name: Differential — Lean core LRAT.check vs ordeal-lrat (TR-035)
+        working-directory: lean
+        run: lake exe diffcheck /tmp/lrat-corpus
 
   # ── Optional CaDiCaL accelerator backend (TR-004 / VER-008) ────────────
   # The off-by-default `cadical` feature builds CaDiCaL 2.1.3 hermetically

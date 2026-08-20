@@ -60,3 +60,13 @@ lean_lib «Sound» {}
 -- core's umod already has the SMT-LIB x%0 = x semantics), unbounded width.
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterDiv» {}
+
+-- TR-035 (issue #47): the adversarial dual-mechanisation differential.
+-- Runs Lean core's INDEPENDENTLY verified LRAT checker
+-- (`Std.Tactic.BVDecide.LRAT.check`, the absorbed leansat checker) over the
+-- shared certificate corpus dumped by `cargo run -p ordeal --example
+-- dump_lrat_corpus`, and demands verdict agreement with ordeal's own
+-- verified checker on every pair. Usage: `lake exe diffcheck <corpus-dir>`.
+lean_exe «diffcheck» {
+  root := `DiffCheck
+}

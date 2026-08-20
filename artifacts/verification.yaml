@@ -852,3 +852,42 @@ artifacts:
       steps:
         run: "bash lean/regen.sh all && (cd lean && lake build) — plus the recorded one-time mutation demonstrations (PRs #123/#124, closed unmerged)"
         coverage: "all five design criteria; both kernels; both mutation directions red"
+
+  - id: VER-033
+    type: sw-verification
+    title: Dual-mechanisation differential — Lean core LRAT.check vs ordeal-lrat (TR-035)
+    description: >
+      Confirms TR-035: ordeal's own formally-verified checker (ordeal-lrat,
+      Aeneas → Lean, Sound.lean) and Lean core's INDEPENDENTLY verified
+      LRAT checker (Std.Tactic.BVDecide.LRAT.check, the absorbed leansat
+      checker, soundness theorem LRAT.check_sound) run over a shared,
+      deterministic certificate corpus with verdict agreement enforced in
+      the required Lean CI job. The corpus (examples/dump_lrat_corpus.rs,
+      fixed seeds, no timestamps) carries 48 pristine solver-emitted
+      certificates across widths 8/32/64 incl. BMC shapes (all must be
+      accepted by both) and 16 structurally corrupted certificates —
+      dropped hints, renumbered step ids, negated clause literals,
+      truncated empty-clause steps — each asserted rejected by ordeal-lrat
+      before being written (all must be rejected by both);
+      lean/DiffCheck.lean exits nonzero on any disagreement. Two real
+      strictness divergences were found, triaged to spec ambiguity (both
+      sides sound), and recorded in DiffCheck.lean's convention notes:
+      (1) Lean core ignores declared addition-step ids and resolves hints
+      positionally, so it accepts renumbered-id certificates ordeal
+      rejects — handled by the documented sequential-id dialect gate,
+      which still prints Lean core's raw verdict per file; (2) Lean core
+      preloads original unit clauses into its assignment vector, so on a
+      CNF with a contradictory unit pair it accepts hint-weakened steps
+      ordeal rejects (encounteredBoth → derivedEmpty) — such CNFs are
+      excluded as hint-weakening mutation sources by construction.
+    status: implemented
+    release: v0.19.0
+    tags: [tcb, lean, dual-mechanisation, differential, adversarial]
+    links:
+      - type: verifies
+        target: TR-035
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo run -p ordeal --example dump_lrat_corpus -- /tmp/lrat-corpus && (cd lean && lake exe diffcheck /tmp/lrat-corpus)"
+        coverage: "64/64 pairs in agreement (48 pristine accepted, 16 mutated rejected by both); seeded disagreements demonstrated red before the dialect gate / source exclusion were documented"
