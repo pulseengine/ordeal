@@ -1346,3 +1346,54 @@ artifacts:
     fields:
       verdict: pass
       evidence: "runs 32314572430/32314575631 red at the right steps; main 3f0d1e5 green; gate 8→7 recorded; git ls-files clean of models"
+
+  - id: VE-025
+    type: verification-execution
+    title: v0.19.0 — dual-mechanisation differential executed (VER-033)
+    description: >
+      Executed 2026-08-20, then clean-room re-executed cold by the
+      maintainer loop (fresh corpus dump, fresh diffcheck run): 48
+      pristine pairs (28 crafted fragment identities, 4 BMC shapes, 20
+      seeded-random UNSATs) + 16 mutated pairs (5 corruption classes),
+      every mutant's rejection asserted against ordeal_lrat::check before
+      writing; lake exe diffcheck over Std.Tactic.BVDecide.LRAT.check
+      (Lean v4.30.0-rc2): 64 pairs, 48 accepted / 16 rejected, 0
+      disagreements, exit 0 — twice (agent run and clean-room rerun on an
+      independently generated corpus; dumper double-run byte-identical).
+      TWO spec-ambiguity findings surfaced by the differential and
+      resolved as documented adapter gates, not suppressed: (1) Lean core
+      discards declared addition-step ids (positional hint resolution) —
+      renumbered-id certificates it accepts, ordeal rejects
+      (NonSequentialId); (2) eager unit preloading (DefaultFormula.ofArray)
+      lets Lean accept hint-weakened steps on CNFs with contradictory unit
+      pairs that ordeal rejects (HintsExhausted). Both sides sound; the
+      divergence is the spec of hint-chain justification.
+    status: implemented
+    fields:
+      version: v0.19.0
+      timestamp: "2026-08-20T04:30:00Z"
+      executor: local+agent-clean-room
+      environment:
+        note: "Lean core only (no new lake deps); dumper default features, no new cargo deps"
+
+  - id: VV-047
+    type: verification-verdict
+    title: "VER-033 pass — two independently verified checkers agree; ambiguities documented"
+    description: >
+      Executed pass, twice independently. The adversarial second
+      mechanisation is live as a CI gate and immediately produced the
+      bug-finding value #47 predicted: two concrete, evidenced divergences
+      in LRAT hint-chain semantics between Lean core's checker and
+      ordeal's — triaged to spec ambiguity (neither is a soundness gap;
+      ordeal is strictly stricter on both). The residual TR-034 left
+      (Aeneas faithfulness) now has an independent witness over the
+      shared corpus.
+    status: implemented
+    links:
+      - type: result-of
+        target: VER-033
+      - type: part-of-execution
+        target: VE-025
+    fields:
+      verdict: pass
+      evidence: "diffcheck 64/64 agree exit 0 (agent + clean-room reruns); mutant rejections ground-truthed pre-write; findings documented in DiffCheck.lean and gated visibly"
