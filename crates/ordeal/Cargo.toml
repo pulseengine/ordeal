@@ -68,7 +68,7 @@ cadical = ["dep:cadical-sys"]
 # bindings are scoped to non-wasm targets. Enabling `oracle` on a wasm target
 # is a no-op dependency-wise (and the oracle module compiles out there).
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-z3 = { version = "0.20.2", optional = true }
+z3 = { version = "0.21.0", optional = true }
 # CaDiCaL for the off-by-default `cadical` accelerator feature (TR-004).
 # Vendored C++ source, hermetic build; never on the wasm path.
 cadical-sys = { version = "0.7.0", optional = true }
