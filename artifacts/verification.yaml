@@ -891,3 +891,27 @@ artifacts:
       steps:
         run: "cargo run -p ordeal --example dump_lrat_corpus -- /tmp/lrat-corpus && (cd lean && lake exe diffcheck /tmp/lrat-corpus)"
         coverage: "64/64 pairs in agreement (48 pristine accepted, 16 mutated rejected by both); seeded disagreements demonstrated red before the dialect gate / source exclusion were documented"
+
+  - id: VER-034
+    type: sw-verification
+    title: Structured JSON verdicts verified — the JSON is itself evidence (TR-037)
+    description: >
+      Confirms TR-037 via the extended cli_baseline suite: --format json on
+      check emits one parseable object for all three verdicts; the unsat
+      object's cnf+lrat pair is re-checked by ordeal_lrat::check inside the
+      test (the JSON is evidence, not a claim); the sat model value is
+      re-evaluated against the script's constraint; JSON and text verdicts
+      and exit codes agree; the flag is advertised in top-level --help;
+      an unknown format value exits 2. verus gains the same flag with a
+      per-obligation array.
+    status: verified
+    release: v0.20.0
+    tags: [cli, json, baseline, evidence]
+    links:
+      - type: verifies
+        target: TR-037
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --test cli_baseline"
+        coverage: "3 verdict shapes; pair recheck; text/json agreement; help advertisement; bad-format exit 2"

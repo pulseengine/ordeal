@@ -1025,3 +1025,62 @@ artifacts:
         usage on stderr and clean stdout; help retains the pinned honesty
         phrases. Release-side: the tag-version assert step is present for
         both native targets and the next release run passes it.
+
+  - id: TR-037
+    type: sw-req
+    title: Structured verdicts — --format json for check/verus (org CLI-baseline rule 3)
+    description: >
+      Concretized from the #130 September review (issue #132; self-found
+      2026-09-03): ordeal offers no --format json, and rules_ordeal's gate
+      parses first-line verdict text — the gate-scrapes-human-output
+      pattern rule 3 exists to prevent. ordeal check/verus gain
+      --format json (one JSON object: verdict; model bindings on sat; the
+      full checkable pair — CNF clauses + LRAT text — on unsat, strictly
+      stronger than a hash and dependency-free; per-obligation array for
+      verus), advertised in top-level --help; text output and exit codes
+      unchanged; rules_ordeal switches its gate to the structured verdict
+      at its next pin bump.
+    status: verified
+    release: v0.20.0
+    tags: [cli, json, baseline, evidence, field-report]
+    links:
+      - type: derives-from
+        target: SYS-006
+    fields:
+      req-type: interface
+      priority: should
+      verification-criteria: >
+        cli_baseline integration test extended: --format json on check
+        (sat/unsat/unknown) and verus parses as JSON with the documented
+        keys, verdicts match text mode, exit codes unchanged; top-level
+        --help advertises the flag; the unsat object's cnf+lrat pair
+        re-checks via ordeal_lrat::check (the JSON is itself evidence).
+
+  - id: TR-038
+    type: sw-req
+    title: Independently re-checkable SAT witness (close the cert/v1 honest boundary)
+    description: >
+      Concretized from the #130 September review (issue #133): verdict:sat
+      bundles carry a self-checked model only, and rivet deliberately
+      flags SAT-sourced verifies links (V-ordeal-cert-sat-is-self-checked).
+      A re-checkable SAT witness needs a trusted evaluator (model +
+      constraint representation -> true) — a trust-boundary design
+      decision (what is the evaluator; over which representation; what
+      joins the TCB). DESIGN-GATED per the #48 precedent: design doc +
+      review before any implementation.
+    status: draft
+    release: v0.20.0
+    tags: [certificate, sat, witness, tcb, design-gated]
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: refines
+        target: TR-025
+    fields:
+      req-type: functional
+      priority: could
+      verification-criteria: >
+        To be pinned by the approved design; at minimum: a SAT verdict's
+        witness re-validates independently of the solver, a corrupted
+        witness is rejected, and rivet's SAT warning is retired or
+        downgraded only on the strength of that recheck.
