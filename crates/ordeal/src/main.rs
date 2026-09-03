@@ -25,7 +25,7 @@ fn main() -> ExitCode {
             banner();
             ExitCode::SUCCESS
         }
-        Some("check") => run_check(args.get(2).map(String::as_str)),
+        Some("check") => run_check(&args[2..]),
         Some("verus") => run_verus(&args[2..]),
         Some("-h" | "--help") => {
             banner();
@@ -40,18 +40,66 @@ fn main() -> ExitCode {
         }
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
-            eprintln!("usage: ordeal check [FILE | -]   (reads stdin if FILE is '-' or omitted)");
-            eprintln!("       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR]");
+            eprintln!(
+                "usage: ordeal check [FILE | -] [--format json]   (reads stdin if FILE is '-' or omitted)"
+            );
+            eprintln!(
+                "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]"
+            );
             ExitCode::from(2)
         }
     }
 }
 
-/// Read a script from `path` (a file, or stdin when `-`/omitted), solve it,
-/// and print the verdict. Returns the process exit code: 0 on a cleanly
-/// decided run (including `unknown`), non-zero on a read/parse/unsupported
-/// error.
-fn run_check(path: Option<&str>) -> ExitCode {
+/// Output format for verdicts (issue #132 / TR-037, org CLI-baseline rule 3:
+/// gates parse `--format json`, never scrape human output). Errors stay
+/// human-readable on stderr in both modes — an error is not a verdict.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Format {
+    Text,
+    Json,
+}
+
+/// Extract `--format <text|json>` from an argument list, returning the
+/// remaining positional arguments. `Err` carries the exit code for a
+/// malformed or unknown format value.
+fn parse_format(args: &[String]) -> Result<(Format, Vec<&str>), ExitCode> {
+    let mut format = Format::Text;
+    let mut rest: Vec<&str> = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--format" {
+            match args.get(i + 1).map(String::as_str) {
+                Some("json") => format = Format::Json,
+                Some("text") => format = Format::Text,
+                Some(other) => {
+                    eprintln!("ordeal: unknown format '{other}' (expected 'json' or 'text')");
+                    return Err(ExitCode::from(2));
+                }
+                None => {
+                    eprintln!("ordeal: --format needs a value ('json' or 'text')");
+                    return Err(ExitCode::from(2));
+                }
+            }
+            i += 2;
+        } else {
+            rest.push(args[i].as_str());
+            i += 1;
+        }
+    }
+    Ok((format, rest))
+}
+
+/// Read a script from the positional FILE (or stdin when `-`/omitted), solve
+/// it, and print the verdict in the selected format. Returns the process
+/// exit code: 0 on a cleanly decided run (including `unknown`), non-zero on
+/// a read/parse/unsupported error.
+fn run_check(args: &[String]) -> ExitCode {
+    let (format, rest) = match parse_format(args) {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    let path = rest.first().copied();
     let input = match path {
         None | Some("-") => {
             let mut buf = String::new();
@@ -71,13 +119,97 @@ fn run_check(path: Option<&str>) -> ExitCode {
     };
 
     match smtlib::solve_str(&input) {
-        Ok(outcome) => print_outcome(&outcome),
+        Ok(outcome) => match format {
+            Format::Text => print_outcome(&outcome),
+            Format::Json => print_outcome_json(&outcome),
+        },
         Err(e) => {
             // Prints `parse error: ...` / `unsupported: ...` / `solver error: ...`.
             eprintln!("{e}");
             ExitCode::from(2)
         }
     }
+}
+
+/// Minimal JSON string escaping (quotes, backslash, control characters).
+/// Hand-rolled on purpose: the default build stays dependency-free, and the
+/// values are verdicts, identifiers from the input script, and LRAT text.
+fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// One JSON object on stdout — the structured twin of [`print_outcome`].
+/// On `unsat` the object carries the FULL checkable pair (CNF clauses +
+/// LRAT text): strictly stronger than a content hash, and a consumer
+/// re-establishes the verdict with `ordeal_lrat::check` and zero trust in
+/// this process.
+fn print_outcome_json(outcome: &Outcome) -> ExitCode {
+    let Some(result) = &outcome.result else {
+        eprintln!("ordeal: script contained no (check-sat) command");
+        return ExitCode::from(2);
+    };
+    let head = format!(
+        "{{\"tool\":\"ordeal\",\"version\":\"{}\"",
+        env!("CARGO_PKG_VERSION")
+    );
+    match result {
+        CheckResult::Sat(model) => {
+            let value_of = |name: &str| -> u128 {
+                model
+                    .assignments
+                    .iter()
+                    .find(|(k, _)| k == name)
+                    .map(|(_, v)| *v)
+                    .unwrap_or(0)
+            };
+            let bindings: Vec<String> = outcome
+                .declared
+                .iter()
+                .map(|(name, width)| {
+                    format!(
+                        "{{\"name\":\"{}\",\"width\":{},\"value\":\"{}\"}}",
+                        json_escape(name),
+                        width,
+                        fmt_bv(*width, value_of(name))
+                    )
+                })
+                .collect();
+            println!(
+                "{head},\"verdict\":\"sat\",\"model\":[{}]}}",
+                bindings.join(",")
+            );
+        }
+        CheckResult::Unsat(cert) => {
+            let clauses: Vec<String> = cert
+                .cnf
+                .iter()
+                .map(|c| {
+                    let lits: Vec<String> = c.iter().map(|l| l.to_string()).collect();
+                    format!("[{}]", lits.join(","))
+                })
+                .collect();
+            let lrat = cert.lrat_text().unwrap_or_default();
+            println!(
+                "{head},\"verdict\":\"unsat\",\"certificate\":{{\"clauses\":[{}],\"lrat\":\"{}\"}}}}",
+                clauses.join(","),
+                json_escape(lrat)
+            );
+        }
+        CheckResult::Unknown => println!("{head},\"verdict\":\"unknown\"}}"),
+    }
+    ExitCode::SUCCESS
 }
 
 /// Print the verdict (and, on `sat`, the model) and return the exit code.
@@ -157,6 +289,9 @@ fn banner() {
     println!("Usage:");
     println!("  ordeal check <file.smt2>   solve a QF_BV SMT-LIB2 script");
     println!("  ordeal check -             solve a script read from stdin");
+    println!("  --format json              structured verdict on stdout (check and");
+    println!("                             verus); unsat carries the full checkable");
+    println!("                             pair (CNF clauses + LRAT text)");
     println!();
     println!("engine: certificate-checked pipeline (bit-blast -> AIG -> Tseitin ->");
     println!("own CDCL core -> LRAT). SAT verdicts carry self-checked models;");
@@ -177,14 +312,18 @@ fn banner() {
 /// Exit code is non-zero if any obligation fails to discharge, so this can gate
 /// a build: `unsat` means the obligation holds and the certificate re-checked.
 fn run_verus(args: &[String]) -> ExitCode {
+    let (format, rest) = match parse_format(args) {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
     let mut path: Option<&str> = None;
     let mut cert_out: Option<&str> = None;
     let mut i = 0;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--cert-out" => match args.get(i + 1) {
+    while i < rest.len() {
+        match rest[i] {
+            "--cert-out" => match rest.get(i + 1) {
                 Some(d) => {
-                    cert_out = Some(d.as_str());
+                    cert_out = Some(*d);
                     i += 2;
                 }
                 None => {
@@ -199,9 +338,12 @@ fn run_verus(args: &[String]) -> ExitCode {
         }
     }
     let Some(path) = path else {
-        eprintln!("usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR]");
+        eprintln!("usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]");
         return ExitCode::from(2);
     };
+    // Per-obligation records for --format json: (name, verdict, lrat_bytes).
+    let mut records: Vec<(String, &'static str, usize)> = Vec::new();
+    let text = format == Format::Text;
 
     let mut files: Vec<std::path::PathBuf> = Vec::new();
     let p = std::path::Path::new(path);
@@ -263,11 +405,17 @@ fn run_verus(args: &[String]) -> ExitCode {
                 Some(CheckResult::Unsat(cert)) => {
                     // The verdict is only worth as much as the re-check.
                     if let Err(e) = cert.recheck() {
-                        println!("FAIL {who}: certificate did not re-check: {e}");
+                        if text {
+                            println!("FAIL {who}: certificate did not re-check: {e}");
+                        }
+                        records.push((who.clone(), "recheck-failed", 0));
                         failed += 1;
                         continue;
                     }
-                    println!("unsat  {who}  ({} bytes of checked LRAT)", cert.lrat.len());
+                    if text {
+                        println!("unsat  {who}  ({} bytes of checked LRAT)", cert.lrat.len());
+                    }
+                    records.push((who.clone(), "unsat", cert.lrat.len()));
                     discharged += 1;
                     if let Some(dir) = cert_out {
                         let name = f
@@ -284,28 +432,59 @@ fn run_verus(args: &[String]) -> ExitCode {
                 // Verus posed the obligation as `premises AND NOT goal`, so a
                 // model means the lemma does NOT hold as stated.
                 Some(CheckResult::Sat(_)) => {
-                    println!("SAT    {who}  — obligation does NOT hold (counterexample exists)");
+                    if text {
+                        println!(
+                            "SAT    {who}  — obligation does NOT hold (counterexample exists)"
+                        );
+                    }
+                    records.push((who.clone(), "sat", 0));
                     failed += 1;
                 }
                 Some(CheckResult::Unknown) => {
-                    println!("unknown {who} — undecided; treat conservatively");
+                    if text {
+                        println!("unknown {who} — undecided; treat conservatively");
+                    }
+                    records.push((who.clone(), "unknown", 0));
                     failed += 1;
                 }
                 None => {
-                    println!("FAIL   {who}: no (check-sat) in the sliced obligation");
+                    if text {
+                        println!("FAIL   {who}: no (check-sat) in the sliced obligation");
+                    }
+                    records.push((who.clone(), "error", 0));
                     failed += 1;
                 }
             },
             Err(e) => {
-                println!("FAIL   {who}: {e}");
+                if text {
+                    println!("FAIL   {who}: {e}");
+                }
+                records.push((who.clone(), "error", 0));
                 failed += 1;
             }
         }
     }
 
-    println!(
-        "\n{discharged} discharged, {failed} failed, {skipped} skipped (not bitvector queries)"
-    );
+    if text {
+        println!(
+            "\n{discharged} discharged, {failed} failed, {skipped} skipped (not bitvector queries)"
+        );
+    } else {
+        let obligations: Vec<String> = records
+            .iter()
+            .map(|(name, verdict, lrat_bytes)| {
+                format!(
+                    "{{\"name\":\"{}\",\"verdict\":\"{verdict}\",\"lrat_bytes\":{lrat_bytes}}}",
+                    json_escape(name)
+                )
+            })
+            .collect();
+        println!(
+            "{{\"tool\":\"ordeal\",\"version\":\"{}\",\"discharged\":{discharged},\"failed\":{failed},\"skipped\":{skipped},\"obligations\":[{}]}}",
+            env!("CARGO_PKG_VERSION"),
+            obligations.join(",")
+        );
+    }
     if failed > 0 || discharged == 0 {
         ExitCode::from(1)
     } else {
