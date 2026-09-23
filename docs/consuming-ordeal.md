@@ -180,3 +180,21 @@ reproduce rather than solver output you trust. `to_cert_v1()` /
 bundle with an optional `witness` block (hash-verified before parsing
 returns). A `Sat` whose witness the trusted crate rejects is never
 returned — it degrades to `Unknown`, symmetric with the UNSAT gate.
+
+## Supply chain: SBOM and VEX
+
+From v0.20.0 each GitHub Release carries a CycloneDX SBOM
+(`ordeal-<ver>.cdx.json`) and a CycloneDX VEX (`ordeal-<ver>.vex.json`),
+both listed in the cosign-signed `SHA256SUMS.txt`. The VEX answers "does
+advisory X affect the ordeal I'm running?" for the **shipped closure** —
+the crates a release binary is built from. Because ordeal's default build
+has no third-party dependencies (CI-asserted), that closure is `ordeal` +
+`ordeal-lrat`, and the VEX normally carries no statements at all; it
+records the RustSec advisory-db commit and the time it was asserted, so a
+reader can tell how fresh the answer is.
+
+A weekly job re-audits the latest release. If the answer changes, a person
+classifies the new advisory and a re-issue is published as
+`ordeal-<ver>.vex.r<N>.json` with its own cosign bundle (signing identity:
+the `vex-reissue.yml` workflow). Take the highest revision present; the
+release-time VEX is never overwritten, so the signed sums stay valid.

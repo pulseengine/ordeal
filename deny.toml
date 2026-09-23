@@ -1,0 +1,23 @@
+# cargo-deny configuration (#146 / TR-043). ONLY the advisories section is
+# configured, because advisories are all CI gates on — configuring license
+# or source checks nobody runs would claim coverage that doesn't exist.
+#
+# CI runs this twice (see the Reproducible build job):
+#   - BLOCKING over the shipped closure:
+#       cargo deny --exclude-dev check advisories
+#     default features + no dev-deps = exactly what a release binary is
+#     built from (ordeal + ordeal-lrat; the same graph the dependency-
+#     freedom assertion checks). An advisory here is an advisory against
+#     the product.
+#   - ADVISORY (non-blocking) over everything in Cargo.lock:
+#       cargo deny --all-features check advisories
+#     dev, bench, fuzz and optional-feature crates never reach a release
+#     artifact but do run in our build, so their advisories are reported
+#     loudly without freezing unrelated work.
+#
+# Suppressing an advisory: add it to `ignore` ONLY together with a
+# human-authored judgement in vex/judgements.json — the two must agree.
+[advisories]
+version = 2
+yanked = "deny"
+ignore = []

@@ -237,6 +237,32 @@ jobs:
           echo "::notice::SBOM written to release-assets/ordeal-${BARE}.cdx.json"
           ls -la release-assets/
 
+      # ── CycloneDX VEX (#146 / TR-043) ───────────────────────────────────
+      # Generated from THIS tag's checkout, so the audited Cargo.lock is the
+      # shipped one (never main's). Scope = the shipped closure; bom-linked
+      # to the SBOM above; records the advisory-db commit and assertion
+      # time. Judgements come only from the human-authored
+      # vex/judgements.json — `not_affected` is never generated. Placed
+      # BEFORE the checksum step so its digest is cosign-signed with
+      # everything else. Re-issues after release are handled by
+      # vex-reissue.yml and never touch these signed sums.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+
+      - name: Generate VEX (CycloneDX 1.5)
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          BARE="${VERSION#v}"
+          python3 scripts/vex.py generate \
+            --sbom "release-assets/ordeal-${BARE}.cdx.json" \
+            --out "release-assets/ordeal-${BARE}.vex.json" \
+            --version "$BARE" --doc-version 1 \
+            --asserted-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
       - name: Generate SHA256 checksums
         run: |
           set -euo pipefail

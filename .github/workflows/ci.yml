@@ -107,6 +107,22 @@ jobs:
         run: |
           cargo tree -p ordeal --edges normal
           test "$(cargo tree -p ordeal --edges normal --prefix none | grep -vc '^\(ordeal\|ordeal-lrat\)')" -eq 0
+      # #146 / TR-043 supply-chain gate (deny.toml). BLOCKING over the
+      # shipped closure (--exclude-dev at default features = exactly what a
+      # release binary is built from); ADVISORY over everything else in
+      # Cargo.lock. Negative-controlled 2026-09-24: RUSTSEC-2020-0071 in the
+      # shipped closure -> blocking red; same crate dev-only -> blocking
+      # green, advisory red.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+      - name: Advisories — shipped closure (BLOCKING)
+        run: cargo deny --exclude-dev check advisories
+      - name: Advisories — full lockfile incl. dev/bench/optional (advisory)
+        continue-on-error: true
+        run: cargo deny --all-features check advisories
+      - name: VEX generator self-test
+        run: python3 scripts/vex.py self-test
       - name: Build twice, compare bit-for-bit
         run: |
           cargo build --release --target-dir target-a
@@ -199,6 +215,19 @@ jobs:
           test -n "$SBOM" && test -f "$SBOM"
           python3 -c "import json,sys; d=json.load(open('$SBOM')); assert d['bomFormat']=='CycloneDX', d" \
             && echo "::notice::SBOM smoke OK: $SBOM"
+          cp "$SBOM" /tmp/smoke.cdx.json
+      # #146: the EXACT release VEX recipe, per PR, so it cannot first fail
+      # at a tag cut (the #135 lesson).
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
+      - name: VEX generation smoke (release recipe)
+        run: |
+          set -euo pipefail
+          VER=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          python3 scripts/vex.py generate --sbom /tmp/smoke.cdx.json --out /tmp/smoke.vex.json \
+            --version "$VER" --asserted-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python3 -c "import json; d=json.load(open('/tmp/smoke.vex.json')); assert d['bomFormat']=='CycloneDX' and d['specVersion']=='1.5'; print('VEX smoke OK:', len(d['vulnerabilities']), 'statement(s)')"
 
   # ── cross aarch64-musl + qemu smoke (#135 de-risk for the release legs) ─
   # Proves the EXACT release recipe for the cross musl leg (cross build,

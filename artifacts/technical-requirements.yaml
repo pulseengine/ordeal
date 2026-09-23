@@ -1235,3 +1235,42 @@ artifacts:
         exit 1, message names the offending axiom). The file is a
         default target (lake build alone elaborates it).
 
+
+  - id: TR-043
+    type: sw-req
+    title: CycloneDX VEX for the shipped closure, re-audited weekly, never auto-judged
+    description: >
+      Field ask #146 (varve, 2026-09-23): publish a CycloneDX VEX with each
+      release and re-issue it when a new advisory matches a shipped
+      release, so a consumer pinned to a varve layer can ask "is advisory X
+      present in what I run?". Maintainer decisions (2026-09-24 dialogue):
+      the VEX covers the SHIPPED closure (ordeal + normal deps at default
+      features — today only ordeal-lrat; the 82-crate lockfile is otherwise
+      dev/bench/fuzz/optional), bom-linked to the release SBOM, recording
+      the advisory-db commit and assertion time; a weekly job re-audits the
+      LATEST release and opens an issue for human classification rather
+      than publishing; cargo-deny BLOCKS on the shipped closure and only
+      reports on the rest; shipped in v0.20.0. The generator never writes
+      not_affected (human-authored vex/judgements.json only; untriaged
+      matches are in_triage). Re-issues are new revisioned assets with their
+      own cosign bundle — the release-time VEX inside the signed
+      SHA256SUMS.txt is never modified.
+    status: verified
+    release: v0.20.0
+    tags: [release, vex, cyclonedx, supply-chain, varve, field-report]
+    links:
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: constraint
+      priority: should
+      verification-criteria: >
+        Generator self-test (13 checks: untriaged match -> in_triage, human
+        judgement carried verbatim, out-of-closure match excluded but
+        disclosed, bom-link into the SBOM, db commit required, invalid
+        judgements refused, compare keys on statements not timestamps)
+        passes in the required Reproducible build job; the cargo-deny gate
+        is negative-controlled as a pair (vulnerable crate in the shipped
+        closure -> blocking red citing the advisory; same crate dev-only ->
+        blocking green, advisory red); the exact release recipe is smoke-run
+        per PR; at the v0.20.0 cut the published VEX is in the signed sums.
