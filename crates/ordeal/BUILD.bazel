@@ -6,9 +6,9 @@ Two build shapes:
     CLI. Ordeal's own in-tree pure-Rust CDCL core is the engine on EVERY
     target; the only optional native extra is the Z3 differential oracle
     (cfg-gated behind the `oracle` cargo feature, dev/CI only).
-  * wasm32-wasip2 component — rust_wasm_component, the loom self-optimization
-    path (loom #246). The same pure-Rust core runs there; no FFI ever reaches
-    the wasm path.
+  * wasm32-wasip2 — built and differentially gated on the CARGO path (the
+    required CI job; see the #136 disposition at the bottom of this file).
+    The same pure-Rust core runs there; no FFI ever reaches the wasm path.
 
 The default build has ZERO external dependencies; the only dep below is the
 in-workspace ordeal-lrat checker (the trust boundary). Optional native extras
@@ -62,30 +62,14 @@ rust_test(
     edition = "2024",
 )
 
-# ── wasm32-wasip2 component (loom #246 self-optimization path) ────────────────
+# ── wasm32-wasip2 via Bazel: deliberately NOT wired (#136 disposition) ────────
 #
-# Build with:  bazel build --config=wasm //crates/ordeal:ordeal_wasm
-#
-# Produces a WebAssembly Component Model component from the pure-Rust solver.
-# No `wit_bindgen` is wired yet: the P0 skeleton exports no WIT world, and the
-# hard buildability requirement is proven directly by
-#   cargo build --target wasm32-wasip2 --release
-# in CI (the blocking `wasm32-wasip2` job). Once ordeal exposes a WIT world for
-# loom to import, add `wit_bindgen = "//wit:ordeal_interfaces"` here.
-#
-# NOTE: rust_wasm_component builds a cdylib internally; enabling it requires a
-# `[lib] crate-type = ["cdylib"]` variant, which the skeleton does not yet
-# declare (it is lib + bin). Left commented so `bazel build //...` stays green
-# on the P0 skeleton; the cargo wasip2 job is the enforced gate meanwhile.
-#
-# rust_wasm_component(
-#     name = "ordeal_wasm",
-#     srcs = glob(["src/**/*.rs"], exclude = ["src/main.rs"]),
-#     crate_root = "src/lib.rs",
-#     profiles = ["release"],
-#     # varisat is the primary SAT backend on wasm; cadical is cfg'd out.
-#     crate_features = ["varisat"],
-#     deps = [
-#         # "@crates//:varisat",  # pure-Rust SAT, wasm-clean
-#     ],
-# )
+# The enforced wasm gate is the cargo path: the REQUIRED `Build
+# (wasm32-wasip2)` CI job builds the component AND executes it under wasmtime
+# against the native binary (byte-identical verdicts/certificates, #135). A
+# Bazel `rust_wasm_component` target would need a cdylib crate-type variant
+# and the rules_wasm_component toolchain wiring; nothing consumes a
+# Bazel-built wasm artifact today, so carrying a second, unexercised wasm
+# build would recreate the two-artifact drift #136 exists to prevent. Wire it
+# only when a Bazel consumer materializes — and then give it the same
+# differential gate as the cargo artifact.
