@@ -10,10 +10,11 @@
 //! What loom emits (ARCHITECTURE.md → "The array / UF sliver", TR-008):
 //!
 //! - **Non-extensional `Array(BV32 → BV8)`** modeling linear memory:
-//!   `store`/`select` over **concrete consecutive offsets** only. No
-//!   whole-array equality. Eliminated by **eager read-over-write**: a
-//!   `select` on a `store` chain reduces to a nested if-then-else over
-//!   concrete index equalities down to the base array's fresh per-index
+//!   `store`/`select` over **concrete and symbolic** BV32 indices (symbolic
+//!   decided since v0.11.0 / TR-028). No whole-array equality. Eliminated by
+//!   **eager read-over-write**: a `select` on a `store` chain reduces to a
+//!   nested if-then-else over index equalities (constant-folded when both
+//!   indices are concrete) down to the base array's fresh per-index
 //!   variables.
 //! - **Uninterpreted `pure_call`** with **congruence** (same args ⇒ same
 //!   result). Eliminated by **Ackermannization**: each distinct call site

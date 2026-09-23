@@ -28,8 +28,9 @@
 //! exposed crate-internally for the differential oracle only.
 //!
 //! Trust status: the checker is small, dependency-free, and mutation-tested;
-//! its formal soundness proof (Rust → Lean 4 via Aeneas, TR-013) is the
-//! remaining P2 obligation and is tracked in rivet as FEAT-002.
+//! its formal soundness proof (Rust → Lean 4 via Aeneas, TR-013 / FEAT-002)
+//! is **discharged** — sorry-free and CI-gated against the model regenerated
+//! from `kernel.rs` before every proof build (TR-034).
 //!
 //! # The op-enablement gate (P1 kill criterion)
 //!

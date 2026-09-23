@@ -52,7 +52,8 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
   to be accepted, because —
 - The **checker is the only trusted component.** It replays the LRAT proof
   against the CNF and confirms the empty clause is derivable. It is small
-  enough to formally verify, and verifying it is the P2 milestone.
+  enough to formally verify — and it is verified: its soundness theorem is
+  discharged in Lean 4, sorry-free and CI-gated (see below).
 
 ### Verifying the checker: Aeneas → Lean
 
@@ -68,8 +69,11 @@ The alternative — writing the checker directly in Lean, `bv_decide`-style
 some construct prove awkward. Either way the trusted core is a small Lean-proved
 checker with **no build or link dependency on the untrusted solver.**
 
-The Lean side is built with the org's `rules_lean` Bazel rules, reserved (as a
-commented placeholder) in `MODULE.bazel` until the checker crate exists.
+The Lean side builds with `elan` + `lake` (the required *Lean model +
+soundness proof* CI job regenerates the Aeneas models from the Rust sources
+before every proof build — see `docs/formal-verification.md`). `rules_lean`
+exists only as a commented placeholder in `MODULE.bazel` and has never been
+part of the build.
 
 For a **SAT** verdict the "certificate" is the model itself: ordeal (and its
 callers) can independently evaluate the assignment against the assertions to
@@ -117,10 +121,12 @@ The soundness argument therefore reduces to: *the LRAT checker is correct.* Not
    UNSAT → the solver emits an **LRAT** proof, which the **verified checker**
    validates before we hand back a `Certificate`.
 
-In the phase-0 skeleton none of stages 2–6 exist yet: `Solver::check` returns
-`Unknown`, which is sound because callers must treat `Unknown` conservatively
-(never optimize on it). The pipeline is filled in op-by-op, each op gaining a
-proven bit-blasting rule before it is enabled.
+The full pipeline is shipped: every stage above is implemented and the
+closed fragment is decided end-to-end, each op having gained a proven
+bit-blasting rule before it was enabled (the op-enablement gate in
+`solver.rs`). `Solver::check` still returns `Unknown` when it cannot stand
+behind an answer — which is sound because callers must treat `Unknown`
+conservatively (never optimize on it).
 
 ## SAT backend choice
 
@@ -149,16 +155,13 @@ The backend is an implementation detail *below* the trust boundary. Whichever
 core runs, the LRAT certificate is checked by the same verified checker, so the
 choice changes performance, never soundness.
 
-The **default build carries neither backend** — it is zero-external-deps and
-wasip2-clean (the P0 skeleton). The split will be expressed in `Cargo.toml`:
-
-```toml
-# Our own pure-Rust CDCL core is an in-tree crate on ALL targets (no dep line).
-# The only cfg-gated, optional extras are native-only accelerators/oracle:
-[target.'cfg(not(target_family = "wasm"))'.dependencies]
-# cadical = { version = "...", optional = true }  # optional native accelerator/benchmark
-# z3      = { version = "...", optional = true }   # oracle feature only
-```
+The **default build carries no external backend** — it is
+zero-external-deps and wasip2-clean. The split is expressed in
+`crates/ordeal/Cargo.toml`: the pure-Rust CDCL core lives in-tree
+(`src/sat.rs`, no dependency line at all), while the only optional extras
+are native-scoped and off by default — `cadical-sys` behind the `cadical`
+accelerator feature and `z3` behind the `oracle` feature, both under
+`[target.'cfg(not(target_family = "wasm"))'.dependencies]`.
 
 ## The wasm32-wasip2 target
 
@@ -172,9 +175,10 @@ Two consequences drive the design:
 1. **No FFI on the wasm path.** Our own pure-Rust core is the engine on every
    target, so the wasm path needs no C toolchain and no FFI; CaDiCaL (the
    optional native accelerator) is simply `cfg`-gated out.
-2. **The default build stays wasip2-clean and zero-dep.** The P0 skeleton has
-   no backend at all, which trivially satisfies this; the enforced CI gate is
-   `cargo build --target wasm32-wasip2 --release`, kept green as backends land.
+2. **The default build stays wasip2-clean and zero-dep.** The in-tree CDCL
+   core is the backend, so the default build declares no external
+   dependencies; the enforced CI gate is
+   `cargo build --target wasm32-wasip2 --release`.
 
 The Component Model packaging is produced by the org's `rules_wasm_component`
 Bazel rules (see the build section below); the plain buildability guarantee is
@@ -182,18 +186,23 @@ the cargo command above.
 
 ## The array / UF sliver
 
-loom will eventually emit two things that pure bit-blasting cannot express:
+loom emits two things that pure bit-blasting cannot express:
 
 - **Non-extensional arrays** `Array(BV32 → BV8)` with `select` / `store`
   (modeling linear memory). Requires read-over-write reasoning, handled by
-  lazy axiom instantiation (or a preprocessing pass that eliminates a bounded
-  set of indices) rather than blasting an unbounded array.
+  a preprocessing pass that eliminates the accesses rather than blasting an
+  unbounded array.
 - **Uninterpreted `pure_call`** with **congruence** (same arguments ⇒ same
   result). Requires congruence closure layered over the boolean core.
 
-Both sit strictly *above* the bit-blasting core and are represented today only
-as a `TODO` comment in `term.rs` — deliberately not implemented, so the closed,
-provable fragment stays honest. They are ROADMAP phase P3.
+Both are **implemented** in `crates/ordeal/src/sliver.rs`
+(`Solver::check_sliver`) as a separate `Ext*` term layer that is
+preprocessed away — eager read-over-write elimination (including
+**symbolic** BV32 indices, a sound reduction into the closed fragment) and
+Ackermannization — into plain `BoolTerm` assertions before bit-blasting.
+The core `term.rs` fragment stays closed: no array/UF op ever reaches the
+AIG, so the "every op has a proven bit-blasting rule" invariant is preserved
+by construction.
 
 ## The differential oracle safety net
 
@@ -209,18 +218,38 @@ two jobs, both non-production, both behind the off-by-default `oracle` feature:
    integration overhead, not raw SAT speed).
 
 The default build pulls in **no** `z3` dependency and has **zero** external
-dependencies. ROADMAP phase P4 removes Z3 from the soundness argument entirely
-— by then the verified checker stands alone.
+dependencies. Phase P4 (shipped) removed Z3 from the soundness argument
+entirely — the verified checker stands alone.
 
 ## Crate layout
 
-Single workspace, single crate today; the pipeline stages will become modules
-(or crates, if compile times demand it) as they land.
+One workspace, **two crates** — the untrusted solver and, separately, the
+trusted checker. The separation *is* the trust boundary: `ordeal-lrat`
+declares no dependencies at all (enforced by test) and never depends on the
+solver.
 
 | Path | Purpose |
 |------|---------|
+| `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4). |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat` interface; result / certificate / model types. |
+| `crates/ordeal/src/blast/` | Bit-blasting rules per op family (`arith`, `bitwise`, `muldiv`, `shift`, `structural`) + the Kani proof harnesses (`proofs.rs`). |
+| `crates/ordeal/src/blast_kernel.rs` | The Aeneas-friendly blaster core mirrored into Lean (`BlastKernel.lean`). |
+| `crates/ordeal/src/aig.rs` | And-Inverter Graph with structural sharing + const-folding. |
+| `crates/ordeal/src/cnf.rs` | Tseitin CNF encoding. |
+| `crates/ordeal/src/sat.rs` | The in-tree pure-Rust CDCL core (primary engine, all targets; LRAT trace). |
+| `crates/ordeal/src/sat_cadical.rs` | Optional CaDiCaL accelerator (`cadical` feature; never load-bearing). |
+| `crates/ordeal/src/lrat.rs` | LRAT proof formatting from the CDCL trace. |
+| `crates/ordeal/src/canon.rs` | Semantics-preserving canonicalization pass. |
+| `crates/ordeal/src/eval.rs` | Concrete evaluator (model self-check, reference semantics). |
+| `crates/ordeal/src/sliver.rs` | The array/UF sliver (symbolic-index read-over-write + Ackermannization). |
+| `crates/ordeal/src/trap.rs` | WASM trap conditions as QF_BV predicates; trap-preservation VCs. |
+| `crates/ordeal/src/layout.rs` | Little-endian byte split/reassembly for layout-equivalence queries. |
+| `crates/ordeal/src/lowering.rs` | Derived-op lowering helpers. |
+| `crates/ordeal/src/smtlib.rs` | Minimal SMT-LIB2 QF_BV front end (the `check` subcommand). |
+| `crates/ordeal/src/verus.rs` | Verus `by (bit_vector)` obligation extraction (the `verus` subcommand). |
+| `crates/ordeal/src/cert_bundle.rs` | `ordeal-cert/v1` bundle serialization (`cert-bundle` feature). |
+| `crates/ordeal/src/bmc_corpus.rs` | BMC-shaped benchmark corpus (doc-hidden). |
 | `crates/ordeal/src/oracle.rs` | Z3 differential oracle (behind the `oracle` feature). |
 | `crates/ordeal/src/lib.rs` | Public API surface and re-exports. |
 | `crates/ordeal/src/main.rs` | CLI entry point. |
@@ -232,9 +261,10 @@ Ordeal builds two ways, both from the same cargo workspace:
 - **Cargo** — `cargo build` / `cargo test` (native), and
   `cargo build --target wasm32-wasip2 --release` for the component target. This
   is the source of truth and what the CI gates enforce.
-- **Bazel** (org convention, mirrors synth) — `rules_rust` builds the crate,
-  `rules_wasm_component` packages the wasip2 component, and `rules_lean` is
-  reserved for the verified checker:
+- **Bazel** (org convention, mirrors synth) — `rules_rust` builds the crate
+  and `rules_wasm_component` packages the wasip2 component. (`rules_lean`
+  remains a commented placeholder in `MODULE.bazel`; the Lean proofs build
+  with `elan` + `lake` in the required Lean CI job, not with Bazel.)
 
   | File | Purpose |
   |------|---------|

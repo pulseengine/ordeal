@@ -7,7 +7,7 @@ guide for trying it as a dependency and reporting back.
 
 ```toml
 [dependencies]
-ordeal = "0.7.0"
+ordeal = "0.19"
 ```
 
 `ordeal-lrat` (the trusted checker) is pulled transitively. The default
@@ -37,9 +37,10 @@ let verdict = Solver::check_sliver(&[/* ExtBoolTerm assertions */]);
 ```
 
 The fragment is the closed loom #246 op set (widths 8/32/64) plus the sliver
-(`Array(BV32→BV8)` select/store over **concrete** offsets, uninterpreted
-`pure_call`). Quantifiers, floating-point, optimization, and incremental
-push/pop are out of scope by design.
+(`Array(BV32→BV8)` select/store over concrete **and symbolic** BV32 indices
+— symbolic decided since v0.11.0 — plus uninterpreted `pure_call`).
+Quantifiers, floating-point, optimization, and incremental push/pop are out
+of scope by design.
 
 ### Layout / data-type equivalence (spar #38)
 
@@ -138,7 +139,8 @@ depth and per property. That independence is where your speedup lives:
 
 - **`Unknown` is conservative.** It means "not proven" — the solver could
   not decide, would not stand behind an answer, or the query used a
-  construct outside the enabled fragment (e.g. a symbolic array index).
+  construct outside the enabled fragment (e.g. a bitvector width other
+  than 8/32/64).
   You MUST NOT apply an optimization / accept a transformation on `Unknown`.
   Keep the original.
 - **`Unsat` is the only verdict that authorizes a transformation.** It
