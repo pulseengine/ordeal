@@ -1067,7 +1067,10 @@ artifacts:
       constraint representation -> true) — a trust-boundary design
       decision (what is the evaluator; over which representation; what
       joins the TCB). DESIGN-GATED per the #48 precedent: design doc +
-      review before any implementation.
+      review before any implementation. Design PROPOSED 2026-09-23
+      (docs/design/sat-witness.md — recommends O1: full CNF assignment
+      checked by a ~30-line check_sat in the trusted ordeal-lrat crate,
+      symmetric with the unsat story; 4 open questions await review).
     status: draft
     release: v0.20.0
     tags: [certificate, sat, witness, tcb, design-gated]
