@@ -528,9 +528,25 @@ pub fn check_binding(
             return Err(SatWitnessError::AssignmentTooShort { var });
         }
         let var_value = assignment[var - 1];
-        let bit_value = if lit > 0 { var_value } else { !var_value };
-        let expected = (value >> k) & 1 == 1;
-        if bit_value != expected {
+        let bit = (value >> k) & 1;
+        // Four-way branch instead of boolean-valued lets: every comparison
+        // sits in an `if` condition, the position the Aeneas translation
+        // handles cleanly (a `!x` / `x == y` in a value position extracted
+        // as Prop and broke the model's elaboration — caught by the
+        // regenerate-then-prove gate on the first CI run).
+        if lit > 0 {
+            if var_value {
+                if bit != 1 {
+                    return Err(SatWitnessError::BindingMismatch { bit: k });
+                }
+            } else if bit != 0 {
+                return Err(SatWitnessError::BindingMismatch { bit: k });
+            }
+        } else if var_value {
+            if bit != 0 {
+                return Err(SatWitnessError::BindingMismatch { bit: k });
+            }
+        } else if bit != 1 {
             return Err(SatWitnessError::BindingMismatch { bit: k });
         }
         k += 1;
