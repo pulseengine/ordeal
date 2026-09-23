@@ -8,13 +8,14 @@
 # NON-BLOCKING (continue-on-error) — a proof regression is surfaced loudly but
 # does not gate merges while the harness set and CI budget are being tuned.
 #
-# Scope run here (every trigger — PR, nightly schedule, and dispatch all run
-# the SAME harness list below): the fast 8-bit tier for most op families
-# (add/sub/urem, bitwise, shifts/rotate, all comparisons) plus the structural
-# rules and ite. NOT in the list: mul_8 and udiv_8 (compute-heavy even at
-# width 8) and the wider 32/64-bit harnesses — those are verified locally
-# (`cargo kani`), and mul/udiv additionally retain exhaustive-8 unit tests +
-# the Z3 differential (see the release notes and blast/proofs.rs).
+# Two tiers (#138): PR/dispatch runs the fast 8-bit tier below (mul_8 and
+# udiv_8 excluded — compute-heavy even at width 8; they retain exhaustive-8
+# unit tests + the Z3 differential, and the required Lean Blaster* proofs
+# carry the blaster soundness story regardless). The NIGHTLY schedule runs
+# the wider tier on top: mul_8, udiv_8, and the 32/64-bit light-op
+# harnesses, with a longer timeout. The 2026-09-23 fast-tier run was
+# cancelled at the default 2h job cap on a slow runner — timeouts below are
+# explicit so a slow runner produces a legible timeout, not a silent cap.
 name: Kani proofs
 
 on:
@@ -41,13 +42,14 @@ jobs:
     name: Bit-blaster equivalence proofs
     runs-on: ubuntu-latest
     continue-on-error: true
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
           key: kani
-      - name: Run Kani (fast tier — every rule at width 8 + structural)
+      - name: Run Kani (fast tier — width 8, mul/udiv excluded; see header)
         uses: model-checking/kani-github-action@v1
         with:
           args: >-
@@ -58,3 +60,14 @@ jobs:
             --harness sle_8 --harness sgt_8 --harness sge_8
             --harness concat_4_4 --harness extract_16_hi --harness extract_16_lo
             --harness zext_8_8 --harness sext_8_8 --harness ite_8
+      # #138: the nightly wider tier actually runs nightly now (the schedule
+      # previously re-ran the identical fast tier, contradicting the header).
+      - name: Run Kani (wider tier — mul/udiv at 8, light ops at 32/64; nightly only)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        uses: model-checking/kani-github-action@v1
+        with:
+          args: >-
+            --harness mul_8 --harness udiv_8
+            --harness add_32 --harness add_64 --harness sub_32 --harness sub_64
+            --harness and_32 --harness and_64 --harness or_32 --harness or_64
+            --harness xor_32 --harness xor_64

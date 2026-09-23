@@ -161,7 +161,9 @@ jobs:
           ARCHIVE="ordeal-${VERSION}-${TARGET}.tar.gz"
           mkdir -p staging
           cp "target/${TARGET}/release/ordeal" staging/
-          cp README.md LICENSE staging/ 2>/dev/null || true
+          # #138: never silently ship archives without the license — the
+          # old `|| true` swallowed a missing-file failure.
+          cp README.md LICENSE staging/
           tar -czf "$ARCHIVE" -C staging .
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 

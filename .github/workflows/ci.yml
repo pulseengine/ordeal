@@ -66,6 +66,31 @@ jobs:
         # Default build must NOT require Z3 — the Z3-backed `oracle` feature is
         # covered by the separate `oracle` job so the core gate stays hermetic.
         run: cargo test --all
+      # #138: cert-bundle is pure-Rust and hermetic (serde/serde_json/sha2) —
+      # it does NOT belong solely to the inert Z3 job. A cert_bundle
+      # regression must block merge (the sha2-bump lesson, fully applied).
+      - name: cert-bundle feature (clippy + tests, BLOCKING)
+        run: |
+          cargo clippy --all-targets --features cert-bundle -- -D warnings
+          cargo test -p ordeal --features cert-bundle cert_bundle
+      # #138: self-checking examples are executed, not just compiled — their
+      # runtime assertions (tamper rejection, consumer recipes) rot silently
+      # otherwise. dump_lrat_corpus runs in the lean job's differential.
+      - name: Run the self-checking examples
+        run: |
+          set -euo pipefail
+          cargo run -q -p ordeal --example translation_validation
+          cargo run -q -p ordeal --example consumer_recipes
+          cargo run -q -p ordeal --features cert-bundle --example rivet_ingestion -- "$(mktemp -d)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      # #138: benches are codegen-built (not run) so criterion-level rot is
+      # caught; clippy alone only type-checks them.
+      - name: Build benches (no run)
+        run: cargo bench -p ordeal --no-run
+      # #141/#138: every rivet verification citation must resolve against the
+      # workspace and the real test inventory — a filter matching zero tests
+      # is a vacuous-green citation (the VER-016/017 class).
+      - name: Check rivet verification citations
+        run: scripts/check_verification_citations.sh
 
   # ── Reproducible build (VER-003 / SYS-005) ────────────────────────────
   # Two release builds of the same commit in different target dirs must be
@@ -292,37 +317,41 @@ jobs:
         # generated BlastKernel and all Blaster* proof developments — so a rule
         # proof that regresses (or a regen that breaks a proof) fails CI here.
         run: lake build
-      - name: Guard the sorry budget (the soundness proof must stay complete)
+      - name: Guard the sorry budget (all hand-written proofs, tree-derived scope)
         working-directory: lean
         run: |
-          expected=0
-          # Count LEAN's OWN `declaration uses \`sorry\`` warnings, not a source
-          # grep. `lake env lean` re-elaborates Sound.lean from source (so it is
-          # cache-independent) and reports exactly what the elaborator treats as
-          # a sorry — every form: standalone, `exact sorry`, `:= sorry`, inline,
-          # or `admit`. A source-pattern grep would miss non-standalone sorries
-          # (a parser/validator differential) and could be silently evaded.
-          count=$(lake env lean Sound.lean 2>&1 | grep -cE 'declaration uses .sorry.' || true)
-          echo "sorry-bearing declarations in Sound.lean: $count (expected $expected)"
-          if [ "$count" -ne "$expected" ]; then
-            echo "::error file=lean/Sound.lean::Expected the soundness proof to be sorry-free (kernel_refines_pure, #12, is discharged), found $count sorry-bearing declaration(s) — a proven leaf regressed or a new gap was introduced."
+          # #138: the scope is DERIVED from the tree, not a hand-typed list —
+          # a renamed or newly added proof file cannot silently escape the
+          # guard, and a shrunken inventory is itself a failure. Excluded:
+          # the generated models (Kernel/BlastKernel — definitions only),
+          # DiffCheck (an exe with its own differential gate), AxiomCheck
+          # (fails the build directly via #guard_msgs), lakefile.
+          # Counting uses LEAN'S OWN `declaration uses `sorry`` warnings via
+          # re-elaboration (cache-independent, catches every sorry form), and
+          # the elaborator's EXIT CODE is checked before any count is
+          # trusted — a crashed elaboration is not a zero (#138).
+          set -uo pipefail
+          files=$(git ls-files . | grep '\.lean$' | grep -vE '(^|/)(Kernel|BlastKernel|DiffCheck|AxiomCheck)\.lean$' | grep -v lakefile || true)
+          n=$(echo "$files" | grep -c . || true)
+          if [ "$n" -lt 7 ]; then
+            echo "::error::proof-file inventory has $n entries (< 7) — the guard's scope derivation broke or proofs were deleted"
             exit 1
           fi
-      - name: Guard the blaster proofs' sorry budget (issue #68)
-        working-directory: lean
-        run: |
-          # Same elaborator-based count as the Sound guard, over every blaster
-          # proof development. The generated BlastKernel.lean is definitions
-          # only; the Blaster* files carry the theorems and must stay sorry-free.
           total=0
-          for f in BlasterProof.lean BlasterArith.lean BlasterCmp.lean BlasterShift.lean BlasterMul.lean BlasterDiv.lean; do
-            [ -f "$f" ] || continue
-            c=$(lake env lean "$f" 2>&1 | grep -cE 'declaration uses .sorry.' || true)
+          for f in $files; do
+            rc=0
+            out=$(lake env lean "$f" 2>&1) || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "::error file=lean/$f::elaboration failed (exit $rc) — a sorry count from a failed run is meaningless"
+              echo "$out" | tail -5
+              exit 1
+            fi
+            c=$(echo "$out" | grep -cE 'declaration uses .sorry.' || true)
             echo "sorry-bearing declarations in $f: $c"
             total=$((total + c))
           done
           if [ "$total" -ne 0 ]; then
-            echo "::error::Blaster correctness proofs must stay sorry-free (issue #68); found $total sorry-bearing declaration(s)."
+            echo "::error::proofs must stay sorry-free; found $total sorry-bearing declaration(s)"
             exit 1
           fi
       - name: Guard lean/README.md against status drift (issue #53)
