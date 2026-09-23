@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!(
-                "usage: ordeal check [FILE | -] [--format json]   (reads stdin if FILE is '-' or omitted)"
+                "Usage: ordeal check [FILE | -] [--format json]   (reads stdin if FILE is '-' or omitted)"
             );
             eprintln!(
                 "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]"
@@ -289,6 +289,9 @@ fn banner() {
     println!("Usage:");
     println!("  ordeal check <file.smt2>   solve a QF_BV SMT-LIB2 script");
     println!("  ordeal check -             solve a script read from stdin");
+    println!("  ordeal verus <log | dir>   discharge Verus `by (bit_vector)`");
+    println!("                             obligations from a --log-all dump");
+    println!("  ordeal -V | --version      print `ordeal <semver>` and exit");
     println!("  --format json              structured verdict on stdout (check and");
     println!("                             verus); unsat carries the full checkable");
     println!("                             pair (CNF clauses + LRAT text)");
@@ -297,9 +300,10 @@ fn banner() {
     println!("own CDCL core -> LRAT). SAT verdicts carry self-checked models;");
     println!("UNSAT verdicts carry an LRAT certificate validated by the");
     println!("ordeal-lrat checker before being returned — an Unsat the checker");
-    println!("did not accept is never reported. The checker's formal soundness");
-    println!("proof (Aeneas -> Lean 4) is the remaining P2 obligation.");
-    println!("See ROADMAP.md (phases P0-P5) for status.");
+    println!("did not accept is never reported. The checker's soundness proof");
+    println!("(Aeneas -> Lean 4) is discharged and CI-gated against the");
+    println!("regenerated model.");
+    println!("See ROADMAP.md for where the roadmap lives (the rivet graph).");
 }
 
 /// `ordeal verus <log|dir> [--cert-out DIR]` — discharge the `by (bit_vector)`
@@ -338,7 +342,7 @@ fn run_verus(args: &[String]) -> ExitCode {
         }
     }
     let Some(path) = path else {
-        eprintln!("usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]");
+        eprintln!("Usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]");
         return ExitCode::from(2);
     };
     // Per-obligation records for --format json: (name, verdict, lrat_bytes).

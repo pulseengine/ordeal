@@ -130,19 +130,15 @@ pub enum BvTerm {
         /// Value when `cond` does not hold.
         else_: Box<BvTerm>,
     },
-    // --- loom's later sliver (NOT yet implemented; see ROADMAP) ---
+    // --- loom's sliver (implemented in `sliver.rs`, NOT here) ---
     //
-    // The following belong to the fragment loom will eventually emit but are
-    // deliberately left unimplemented so the closed set above stays honest.
-    // When implemented they require, respectively, a non-extensional array
-    // theory (read-over-write axioms) and uninterpreted-function congruence
-    // closure — both strictly beyond pure bit-blasting.
-    //
-    // TODO(P3, loom #246 sliver): non-extensional Array(BV32 -> BV8).
-    //   ArraySelect { array: Box<ArrayTerm>, index: Box<BvTerm> },
-    //   ArrayStore  { array: Box<ArrayTerm>, index: Box<BvTerm>, value: Box<BvTerm> },
-    // TODO(P3, loom #246 sliver): uninterpreted `pure_call` with congruence.
-    //   PureCall { name: String, args: Vec<BvTerm>, sort: Sort },
+    // Non-extensional Array(BV32 -> BV8) select/store (concrete and symbolic
+    // indices) and uninterpreted `pure_call` congruence are implemented as a
+    // separate `Ext*` term layer in `crate::sliver` and preprocessed away
+    // into this closed fragment before bit-blasting (DES-014). They are
+    // deliberately NOT variants of `BvTerm`, so the "every op above has a
+    // proven bit-blasting rule" invariant stays true by construction — no
+    // array/UF op ever reaches the AIG.
 }
 
 /// A boolean-sorted term: the predicates you assert and `check`.

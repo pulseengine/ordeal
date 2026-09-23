@@ -8,11 +8,13 @@
 # NON-BLOCKING (continue-on-error) — a proof regression is surfaced loudly but
 # does not gate merges while the harness set and CI budget are being tuned.
 #
-# Scope run here: the 8-bit harness for every op family + all comparisons +
-# the structural rules — the fast, exhaustively-tractable tier that exercises
-# every rule. The wider tier (light ops at 32/64) is verified locally/nightly;
-# 64-bit mul/udiv are a known compute frontier and retain exhaustive-8 + the Z3
-# differential (see the release notes and blast/proofs.rs).
+# Scope run here (every trigger — PR, nightly schedule, and dispatch all run
+# the SAME harness list below): the fast 8-bit tier for most op families
+# (add/sub/urem, bitwise, shifts/rotate, all comparisons) plus the structural
+# rules and ite. NOT in the list: mul_8 and udiv_8 (compute-heavy even at
+# width 8) and the wider 32/64-bit harnesses — those are verified locally
+# (`cargo kani`), and mul/udiv additionally retain exhaustive-8 unit tests +
+# the Z3 differential (see the release notes and blast/proofs.rs).
 name: Kani proofs
 
 on:

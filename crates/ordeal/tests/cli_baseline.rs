@@ -34,7 +34,7 @@ fn unknown_flag_exits_two_with_usage_on_stderr() {
     assert_eq!(out.status.code(), Some(2), "unknown flags exit 2");
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(
-        err.contains("unknown command") && err.contains("usage:"),
+        err.contains("unknown command") && err.contains("Usage:"),
         "stderr carries the diagnosis and usage, got: {err}"
     );
     assert!(out.stdout.is_empty(), "errors do not pollute stdout");
@@ -155,12 +155,20 @@ fn unknown_format_value_exits_two() {
 #[test]
 fn help_keeps_the_honesty_banner() {
     // #120 explicitly asked to preserve the help text that states the
-    // soundness property and the outstanding obligation. Pin the
-    // load-bearing phrases so a help rework cannot silently drop them.
+    // soundness property; #140 pinned the proof-status sentence after the
+    // banner shipped a stale "remaining obligation" claim. Pin the
+    // load-bearing phrases so a help rework cannot silently drop them —
+    // or drift the proof status back to "open".
     let out = ordeal(&["--help"]);
     assert!(out.status.success());
     let help = String::from_utf8_lossy(&out.stdout);
-    for needle in ["Usage:", "LRAT certificate", "ordeal-lrat checker"] {
+    for needle in [
+        "Usage:",
+        "LRAT certificate",
+        "ordeal-lrat checker",
+        "discharged and CI-gated against the",
+        "regenerated model",
+    ] {
         assert!(help.contains(needle), "help must contain `{needle}`");
     }
 }

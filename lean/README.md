@@ -6,8 +6,9 @@ gated in CI (the *Lean model + soundness proof* job). Issue #12 is discharged.
 
 ## The obligation
 
-The sole trusted component is `crates/ordeal-lrat` (a ~250-line,
-dependency-free, RUP-only textual LRAT checker). Its soundness theorem:
+The sole trusted component is `crates/ordeal-lrat` (a small, dependency-free,
+RUP-only textual LRAT checker; its string-free checking core, `kernel.rs`, is
+486 lines). Its soundness theorem:
 
 > If `ordeal_lrat::check(cnf, cert)` returns `Ok(())`, then `cnf` is
 > unsatisfiable.
@@ -29,8 +30,9 @@ theorem lrat_check_sound
    [Aeneas](https://github.com/AeneasVerif/aeneas) (`Kernel.lean`).
 2. Prove the theorem against that model (RUP-step soundness by induction
    over the hint chain; acceptance implies the empty clause is derivable).
-3. Build with the org's `rules_lean` (reserved in `MODULE.bazel`) and gate
-   CI on the proof discharging.
+3. Build the proofs with `elan` + `lake` (the *Lean model + soundness proof*
+   CI job) and gate CI on the proof discharging. (`rules_lean` is only a
+   commented placeholder in `MODULE.bazel`; it has never built anything here.)
 
 ## Status — proved
 
@@ -69,14 +71,24 @@ declaration. A proven leaf cannot silently regress to `sorry`.
 
 ## Trust boundary (what the proof does and does not cover)
 
-The theorem is about the **Aeneas-generated model** (`Kernel.lean`). Its
-faithfulness to the actual Rust (`kernel.rs`) rests on `regen.sh` — CI does
-**not** re-run Aeneas to confirm `Kernel.lean` is the current translation of
-`kernel.rs`. That model-drift guard is a known gap tracked in **issue #44**
-(freshness); the `kernel-model-drift` workflow is the intended closure. So:
-`lrat_check_sound` is a mechanized proof modulo (a) the three standard Lean
-axioms and (b) the assumption that the committed `Kernel.lean` matches
-`kernel.rs`, which is a `regen.sh` convention rather than a re-run CI check.
+The theorem is about the **Aeneas-generated model** (`Kernel.lean`). That
+model is **generated, not checked** (TR-034): it is a `.gitignore`d build
+product — there is no committed model that could go stale — and the required
+*Lean model + soundness proof* CI job re-runs Charon + Aeneas
+(`lean/regen.sh all`, pins single-sourced in `lean/toolchain-pins.env`)
+**before every proof build**, so the proofs always certify the translation of
+the current `kernel.rs` by construction. (Freshness was originally planned as
+a separate drift-diff workflow — issue #44 — which this construction absorbed
+and retired; see `docs/design/checker-single-sourcing.md`.)
+
+What remains trusted, then: `lrat_check_sound` is a mechanized proof modulo
+(a) the three standard Lean axioms plus Lean's kernel, and (b)
+**Charon/Aeneas translation faithfulness** at the pinned revisions — the
+translator is a research tool and not itself verified. That residual is now
+witnessed adversarially by the TR-035 dual-mechanisation differential
+(CI-gated): ordeal's Aeneas-proven checker is differenced against Lean core's
+independently verified `Std.Tactic.BVDecide.LRAT.check` on a shared
+pristine + mutant certificate corpus, and any verdict disagreement fails CI.
 
 Two developer notes:
 - The Aeneas *support library* carries a few `sorry`s of its own
@@ -91,7 +103,8 @@ Two developer notes:
   Worth reporting to AeneasVerif/aeneas.
 
 With the theorem discharged, an `Unsat` from ordeal is backed by a certificate
-whose acceptance criterion is now **formally proved** to imply unsatisfiability
-(modulo the trust boundary above) — not merely validated by a mutation-tested
-Rust checker. The remaining step toward the final P2 story is closing the
-model-drift guard (#44), not any open mathematics.
+whose acceptance criterion is **formally proved** to imply unsatisfiability
+(modulo the residual trust base above) — not merely validated by a
+mutation-tested Rust checker. There is no open mathematics and no open
+freshness gap: the model is regenerated under the same required CI job that
+proves it.
