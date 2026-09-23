@@ -61,6 +61,14 @@ lean_lib «Sound» {}
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterDiv» {}
 
+-- Axiom-cleanliness gate (issue #137 / TR-042): #guard_msgs-pinned
+-- `#print axioms` for the soundness chain and each blaster capstone. A
+-- default target, so `lake build` — and with it the required Lean CI job —
+-- fails on any new axiom (`sorryAx`, `ofReduceBool` from native_decide, or
+-- a stray `axiom`). This makes the "only propext / Classical.choice /
+-- Quot.sound" claim in docs/formal-verification.md a GATE, not prose.
+@[default_target] lean_lib «AxiomCheck» {}
+
 -- TR-035 (issue #47): the adversarial dual-mechanisation differential.
 -- Runs Lean core's INDEPENDENTLY verified LRAT checker
 -- (`Std.Tactic.BVDecide.LRAT.check`, the absorbed leansat checker) over the

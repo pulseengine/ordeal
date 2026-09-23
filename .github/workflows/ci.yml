@@ -234,7 +234,9 @@ jobs:
   # ships; a stale committed model is unrepresentable (none is committed).
   # This absorbs and retires the #44 drift guard. The proof's trusted axioms
   # are ONLY propext / Classical.choice / Quot.sound (no sorryAx, no
-  # native_decide); `#print axioms kernel.spec.lrat_check_sound` is the check.
+  # native_decide) — GATED by lean/AxiomCheck.lean (#137): a default lake
+  # target whose #guard_msgs-pinned `#print axioms` fails this job on any
+  # new axiom in the soundness chain or a blaster capstone.
   lean:
     name: Lean model + soundness proof
     runs-on: ubuntu-latest
