@@ -216,6 +216,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Bazel build //...
         run: bazel build //... --config=dev
+      # #136: a built-but-never-run test binary is the relay-class smell —
+      # the Bazel-built tests must actually execute, not just link.
+      - name: Bazel test //...
+        run: bazel test //... --config=dev --test_output=errors
 
   # ── Lean model + soundness proof (VER-015) ────────────────────────────
   # Two obligations, both gated here:
