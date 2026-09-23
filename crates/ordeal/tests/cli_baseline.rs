@@ -51,12 +51,22 @@ fn ordeal_stdin(args: &[&str], input: &str) -> std::process::Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn ordeal");
-    child
+    // A child that rejects its arguments (e.g. `--format yaml`) exits
+    // before ever reading stdin, so this write can race the exit and see
+    // EPIPE — expected, not an error (observed as a Linux-only flake in
+    // CI; macOS pipe buffering masked it). Anything else is real.
+    if let Err(e) = child
         .stdin
         .take()
         .expect("stdin")
         .write_all(input.as_bytes())
-        .expect("write script");
+    {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "write script failed: {e}"
+        );
+    }
     child.wait_with_output().expect("wait ordeal")
 }
 

@@ -109,6 +109,40 @@ jobs:
       - name: Build wasm32-wasip2 (release)
         run: cargo build --target wasm32-wasip2 --release
 
+  # ── musl build + SBOM smoke (#143/#144 de-risk) ───────────────────────
+  # The release matrix's musl legs and the SBOM step only run at tag time;
+  # this job proves both mechanisms on every PR so a breakage cannot first
+  # surface during a release cut. The static musl binary is EXECUTED, not
+  # just built (the #135 lesson): version assert + a certified-unsat solve.
+  musl-sbom:
+    name: musl build + SBOM smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl-sbom
+      - name: Build x86_64-musl (release) and execute it
+        run: |
+          set -euo pipefail
+          cargo build --release --target x86_64-unknown-linux-musl -p ordeal
+          BIN=target/x86_64-unknown-linux-musl/release/ordeal
+          file "$BIN" | grep -qi 'static' || { echo "::error::musl binary is not statically linked"; exit 1; }
+          test "$("$BIN" --version)" = "ordeal $(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' | "$BIN" check - | head -1 | grep -qx unsat
+      - name: SBOM generation smoke (cargo-cyclonedx)
+        run: |
+          set -euo pipefail
+          cargo install --locked cargo-cyclonedx
+          cargo cyclonedx --manifest-path crates/ordeal/Cargo.toml --format json --spec-version 1.5
+          SBOM=$(find crates/ordeal -maxdepth 2 -name '*.cdx.json' | head -1)
+          test -n "$SBOM" && test -f "$SBOM"
+          python3 -c "import json,sys; d=json.load(open('$SBOM')); assert d['bomFormat']=='CycloneDX', d" \
+            && echo "::notice::SBOM smoke OK: $SBOM"
+
   # ── Bazel build via rules_rust + rules_wasm_component (non-blocking) ──
   # Mirrors the org Bazel setup (see synth). Non-blocking (continue-on-error):
   # the module graph pulls rules_rust + the pulseengine rules_wasm_component

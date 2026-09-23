@@ -53,6 +53,20 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz
+          # musl legs (#143 / TR-039, varve realm portability): statically
+          # linked, run on any Linux incl. Alpine and distroless-static.
+          # Safe here: the default build is dependency-free pure Rust with
+          # no dlopen/NSS use, and the CLI solve path is single-threaded,
+          # so the musl allocator/static-linking caveats don't apply. The
+          # x86_64 leg is NOT cross: the static binary executes on the
+          # runner, so it also passes the tag-version assert below.
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-unknown-linux-musl
+            os: ubuntu-latest
+            archive: tar.gz
+            cross: true
     steps:
       - uses: actions/checkout@v7
         with:
@@ -152,6 +166,42 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           find artifacts -type f -name "*.tar.gz" -exec cp {} release-assets/ \;
+          ls -la release-assets/
+
+      # ── CycloneDX SBOM (#144 / TR-040) ─────────────────────────────────
+      # Placed BEFORE the checksum step on purpose: the SBOM's digest lands
+      # inside the cosign-signed SHA256SUMS.txt, so varve ingests it under
+      # the same proof as the binaries (varve#179) with no new trust
+      # machinery. Block mirrors pulseengine/synth's canonical release.yml.
+      # (The cargo-package dirty-tree trap doesn't apply here — this
+      # workflow never runs `cargo package` — but the SBOM is copied out of
+      # the crate dir immediately regardless.)
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx
+
+      - name: Generate toolchain SBOM (CycloneDX)
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          BARE="${VERSION#v}"
+          # cargo-cyclonedx doesn't proxy cargo's `-p` package-selection
+          # flag (synth learned this on its first attempt); target the
+          # crate's manifest directly. The output lands next to it.
+          cargo cyclonedx \
+            --manifest-path crates/ordeal/Cargo.toml \
+            --format json \
+            --spec-version 1.5
+          SBOM_SRC="crates/ordeal/ordeal.cdx.json"
+          if [ ! -f "$SBOM_SRC" ]; then
+            SBOM_SRC=$(find crates/ordeal -maxdepth 2 -name '*.cdx.json' | head -1)
+          fi
+          test -n "$SBOM_SRC" && test -f "$SBOM_SRC"
+          cp "$SBOM_SRC" "release-assets/ordeal-${BARE}.cdx.json"
+          echo "::notice::SBOM written to release-assets/ordeal-${BARE}.cdx.json"
           ls -la release-assets/
 
       - name: Generate SHA256 checksums

@@ -1084,3 +1084,72 @@ artifacts:
         witness re-validates independently of the solver, a corrupted
         witness is rejected, and rivet's SAT warning is retired or
         downgraded only on the strength of that recheck.
+
+  - id: TR-039
+    type: sw-req
+    title: musl release builds beside gnu (varve realm portability)
+    description: >
+      Field ask #143 (varve, 2026-09-22, measured): ordeal's Linux release
+      assets are glibc-dynamic with a 2.34 floor, excluding Ubuntu 20.04 /
+      RHEL 8 / Alpine / distroless-static consumers of the varve rolling
+      layer, and no org repo ships musl. Decision (option 1 of the issue's
+      three): x86_64-unknown-linux-musl and aarch64-unknown-linux-musl
+      join the release matrix BESIDE the gnu legs, same asset naming.
+      Safety of the static build verified before deciding: the default
+      build is dependency-free pure Rust (CI-asserted via cargo tree), no
+      dlopen/NSS use anywhere in shipped code (std::thread appears only
+      in an #[ignore] test), CLI solve path single-threaded. The x86_64
+      musl leg is non-cross so the static binary executes the existing
+      tag-version assert; a CI smoke job (musl build + SBOM smoke) builds
+      AND executes the musl binary on every PR so breakage cannot first
+      surface at a release cut. Ships with the v0.20.0 cut; verified
+      against v0.20.0's published assets (TR-033 pattern).
+    status: implemented
+    release: v0.21.0
+    tags: [release, musl, portability, varve, field-report]
+    links:
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        The v0.20.0 GitHub Release carries ordeal-v0.20.0-{x86_64,aarch64}-
+        unknown-linux-musl.tar.gz alongside the gnu assets, listed in the
+        cosign-signed SHA256SUMS.txt; the downloaded x86_64 musl binary is
+        statically linked (file(1)), reports the tag version, and answers
+        a certified unsat; varve's realm manifest can pick the assets up
+        by triple. Falsified if a musl asset is absent or dynamic.
+
+  - id: TR-040
+    type: sw-req
+    title: CycloneDX SBOM published inside the signed checksum manifest
+    description: >
+      Field ask #144 (varve, 2026-09-23, measured): ordeal is the only org
+      repo whose release publishes no CycloneDX SBOM, leaving it the one
+      opaque payload as varve#179 ingests per-payload SBOMs into layers.
+      The release workflow gains synth's canonical cargo-cyclonedx block,
+      placed BEFORE the checksum step so ordeal-<ver>.cdx.json's digest
+      enters the cosign-signed SHA256SUMS.txt — ingestable under the same
+      proof as the binaries, no new trust machinery. The cargo-package
+      dirty-tree trap from the issue does not apply (this workflow never
+      packages) and the SBOM is copied out of the crate dir immediately.
+      A CI smoke job generates and shape-checks the SBOM on every PR.
+      Ships with the v0.20.0 cut; verified against v0.20.0's published
+      assets (TR-033 pattern).
+    status: implemented
+    release: v0.21.0
+    tags: [release, sbom, cyclonedx, supply-chain, varve, field-report]
+    links:
+      - type: derives-from
+        target: SYS-005
+    fields:
+      req-type: non-functional
+      priority: should
+      verification-criteria: >
+        The v0.20.0 GitHub Release carries ordeal-0.20.0.cdx.json; its
+        sha256 appears in SHA256SUMS.txt and cosign verify-blob passes on
+        the sums; the file parses as CycloneDX JSON (bomFormat CycloneDX,
+        spec 1.5) naming the ordeal crate and its (empty-by-design)
+        runtime dependency set. Falsified if the SBOM is missing from the
+        release or from the signed sums.
