@@ -499,9 +499,20 @@ impl Solver {
     /// Check that every assertion is well-sorted, reporting the first
     /// violation with a distinct error (TR-010). `check` treats ill-sorted
     /// input as `Unknown`; this gives callers the actionable diagnosis.
+    ///
+    /// Beyond per-operator sortedness this also demands a CONSISTENT width
+    /// for every variable name across the whole assertion set: two `Var`s
+    /// sharing a name at different widths are each locally well-sorted, yet
+    /// the blaster binds variables by name — fuzz-found (#139): such input
+    /// previously reached a blaster width assert and panicked instead of
+    /// returning the contractual `Unknown`.
     pub fn validate(&self) -> Result<(), EvalError> {
         for a in &self.assertions {
             validate_bool(a)?;
+        }
+        let mut widths: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
+        for a in &self.assertions {
+            check_var_widths_bool(a, &mut widths)?;
         }
         Ok(())
     }
@@ -906,6 +917,80 @@ fn validate_bool(term: &BoolTerm) -> Result<(), EvalError> {
     }
 }
 
+/// Walk every `Var` under a boolean term, demanding one width per name
+/// across the whole assertion set (see [`Solver::validate`]). A conflict
+/// reports the two widths as a [`EvalError::WidthMismatch`].
+fn check_var_widths_bool<'t>(
+    term: &'t BoolTerm,
+    widths: &mut std::collections::HashMap<&'t str, u32>,
+) -> Result<(), EvalError> {
+    match term {
+        BoolTerm::Eq(a, b)
+        | BoolTerm::Ne(a, b)
+        | BoolTerm::Ult(a, b)
+        | BoolTerm::Ule(a, b)
+        | BoolTerm::Ugt(a, b)
+        | BoolTerm::Uge(a, b)
+        | BoolTerm::Slt(a, b)
+        | BoolTerm::Sle(a, b)
+        | BoolTerm::Sgt(a, b)
+        | BoolTerm::Sge(a, b) => {
+            check_var_widths_bv(a, widths)?;
+            check_var_widths_bv(b, widths)
+        }
+        BoolTerm::Not(t) => check_var_widths_bool(t, widths),
+        BoolTerm::And(a, b) | BoolTerm::Or(a, b) => {
+            check_var_widths_bool(a, widths)?;
+            check_var_widths_bool(b, widths)
+        }
+    }
+}
+
+/// [`check_var_widths_bool`]'s bitvector leg.
+fn check_var_widths_bv<'t>(
+    term: &'t BvTerm,
+    widths: &mut std::collections::HashMap<&'t str, u32>,
+) -> Result<(), EvalError> {
+    match term {
+        BvTerm::Const { .. } => Ok(()),
+        BvTerm::Var { name, sort } => match widths.get(name.as_str()) {
+            None => {
+                widths.insert(name.as_str(), sort.width);
+                Ok(())
+            }
+            Some(&w) if w == sort.width => Ok(()),
+            Some(&w) => Err(EvalError::WidthMismatch {
+                left: w,
+                right: sort.width,
+            }),
+        },
+        BvTerm::Add(a, b)
+        | BvTerm::Sub(a, b)
+        | BvTerm::Mul(a, b)
+        | BvTerm::Udiv(a, b)
+        | BvTerm::Urem(a, b)
+        | BvTerm::And(a, b)
+        | BvTerm::Or(a, b)
+        | BvTerm::Xor(a, b)
+        | BvTerm::Shl(a, b)
+        | BvTerm::Lshr(a, b)
+        | BvTerm::Ashr(a, b)
+        | BvTerm::Rotr(a, b)
+        | BvTerm::Concat(a, b) => {
+            check_var_widths_bv(a, widths)?;
+            check_var_widths_bv(b, widths)
+        }
+        BvTerm::Extract { arg, .. } | BvTerm::ZeroExt { arg, .. } | BvTerm::SignExt { arg, .. } => {
+            check_var_widths_bv(arg, widths)
+        }
+        BvTerm::Ite { cond, then_, else_ } => {
+            check_var_widths_bool(cond, widths)?;
+            check_var_widths_bv(then_, widths)?;
+            check_var_widths_bv(else_, widths)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -925,6 +1010,25 @@ mod tests {
     }
     fn b(t: BvTerm) -> Box<BvTerm> {
         Box::new(t)
+    }
+
+    /// fuzz-found (#139): two `Var`s sharing a name at different widths are
+    /// each locally well-sorted but bind by name in the blaster — this used
+    /// to panic in blast_udivrem. validate must reject it and check must
+    /// stay conservative (`Unknown`), per the VER-005 contract.
+    #[test]
+    fn inconsistent_var_widths_are_unknown() {
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(b(var("a", 32)), b(c(0, 32))));
+        s.assert(BoolTerm::Eq(
+            b(BvTerm::Udiv(b(var("a", 8)), b(c(1, 8)))),
+            b(c(0, 8)),
+        ));
+        assert!(
+            s.validate().is_err(),
+            "cross-assertion width conflict must fail validate"
+        );
+        assert!(matches!(s.check(), CheckResult::Unknown));
     }
 
     /// The consumer-facing parallelism guarantee (docs/consuming-ordeal.md

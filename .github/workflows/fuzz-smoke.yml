@@ -1,13 +1,13 @@
 # Fuzz smoke — light smoke gate on every PR + push to main.
 #
 # `ordeal` parses and solves SMT-LIB QF_BV queries, so the primary robustness
-# concern is the parser / solver never panicking on adversarial input. This is
-# the SMOKE gate: a short (~60s) cargo-fuzz run if a `fuzz/` crate exists,
-# otherwise it degrades to the regular test suite so the job stays green on a
-# skeleton. Long-budget fuzzing with corpus persistence is out of scope here.
-#
-# When a `fuzz/` cargo-fuzz crate is added, list its target(s) in
-# `matrix.target` (mirrors the fuzz/Cargo.toml `[[bin]]` entries).
+# concern is the parser / solver never panicking on adversarial input — and
+# the fuzz target carries a real soundness oracle: any fuzz-found `Unsat`
+# must re-check through the trusted checker (fuzz/fuzz_targets/). The fuzz
+# crate exists since #139 (its first 30s run found a real blaster-panic via
+# duplicate declare-const, fixed with regression tests); the fallback branch
+# below is now dead in practice and retained only against accidental crate
+# removal. Long-budget fuzzing with corpus persistence stays out of scope.
 
 name: Fuzz Smoke
 
@@ -76,9 +76,15 @@ jobs:
           # libfuzzer-sys). The GNU target has a dynamic libc and works.
           for target in $(cargo +nightly fuzz list); do
             echo "::group::fuzz $target"
+            mkdir -p "fuzz/corpus/$target"
+            # Seeds start the mutator from real solvable scripts plus the
+            # committed regression inputs (fuzz-found #139 crash included);
+            # -timeout bounds a single adversarial solve, -max_len keeps
+            # inputs in the parser-robustness regime.
             cargo +nightly fuzz run "$target" \
               --target x86_64-unknown-linux-gnu \
-              -- -max_total_time=60 -print_final_stats=1
+              "fuzz/corpus/$target" "fuzz/seeds/smtlib" \
+              -- -max_total_time=60 -timeout=20 -max_len=1024 -print_final_stats=1
             echo "::endgroup::"
           done
 
