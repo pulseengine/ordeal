@@ -1,9 +1,13 @@
 # Design: an independently re-checkable SAT witness
 
 **Issue:** #133 · **rivet:** TR-038 · **Release:** v0.20.0 (the held cut's
-last open scope beside TR-032) · **Status: PROPOSED — no code lands until
-this doc is reviewed** (the #48 precedent; TR-038 is explicitly
-design-gated).
+last open scope beside TR-032) · **Status: APPROVED 2026-09-24** — all
+four open questions decided by the maintainer via review dialogue: **O1
+confirmed**; envelope = **verify rivet's reader tolerance, then
+v1-optional-field** (v1.1 + coordination only if the check fails); API =
+**`check_with_witness()` returning a `SatCertificate`**; the Lean
+`check_sat` proof extension **rides v0.21.0** (ships mutation-tested +
+fuzz-oracled now, proved next release).
 
 ## The asymmetry being closed
 
