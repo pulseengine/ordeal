@@ -1,0 +1,29 @@
+# ordeal fuzz targets (#139): the SMT-LIB front end takes untrusted input
+# (files/stdin), so parser+solver crash-freedom is fuzzed — and every
+# fuzz-found `Unsat` is re-checked through the trusted checker, giving the
+# fuzzer a real soundness oracle, not just panic-freedom.
+#
+# Standalone workspace on purpose: libfuzzer-sys must never enter the main
+# workspace's dependency graph (the default build stays dependency-free,
+# CI-asserted).
+[package]
+name = "ordeal-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+ordeal = { path = "../crates/ordeal" }
+
+[[bin]]
+name = "smtlib_parse"
+path = "fuzz_targets/smtlib_parse.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

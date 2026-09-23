@@ -731,9 +731,28 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
 
             "declare-const" => {
                 // (declare-const name (_ BitVec N))  |  (declare-const name Bool)
+                // Exactly three items — trailing garbage is a malformed
+                // declaration, not ignorable (fuzz-found, #139).
+                if items.len() != 3 {
+                    return Err(SmtError::Solver(format!(
+                        "declare-const takes exactly a name and a sort, got {} items",
+                        items.len()
+                    )));
+                }
                 let name = decl_name(items, 1)?;
                 let sort = item(items, 2, "declare-const")?;
                 let width = parse_sort(sort)?;
+                // SMT-LIB forbids redeclaration. Tolerate the byte-identical
+                // width (idempotent, appears in concatenated logs) but a
+                // DIFFERENT width would let one name denote two widths and
+                // previously drove a blaster panic (fuzz-found, #139).
+                if let Some(&prev) = ctx.decls.get(&name)
+                    && prev != width
+                {
+                    return Err(SmtError::Solver(format!(
+                        "redeclaration of '{name}' at width {width} (previously {prev})"
+                    )));
+                }
                 if as_atom(sort) == Some("Bool") {
                     ctx.bool_decls.insert(name.clone());
                 }
@@ -741,7 +760,14 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
                 declared.push((name, width));
             }
             "declare-fun" => {
-                // (declare-fun name () (_ BitVec N)) — only nullary funcs.
+                // (declare-fun name () (_ BitVec N)) — only nullary funcs,
+                // exactly four items (same strictness as declare-const).
+                if items.len() != 4 {
+                    return Err(SmtError::Solver(format!(
+                        "declare-fun takes exactly a name, parameter list and sort, got {} items",
+                        items.len()
+                    )));
+                }
                 let name = decl_name(items, 1)?;
                 match item(items, 2, "declare-fun")? {
                     Sexp::List(p) if p.is_empty() => {}
@@ -752,6 +778,13 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
                     }
                 }
                 let width = parse_sort(item(items, 3, "declare-fun")?)?;
+                if let Some(&prev) = ctx.decls.get(&name)
+                    && prev != width
+                {
+                    return Err(SmtError::Solver(format!(
+                        "redeclaration of '{name}' at width {width} (previously {prev})"
+                    )));
+                }
                 ctx.decls.insert(name.clone(), width);
                 declared.push((name, width));
             }
@@ -809,6 +842,25 @@ fn iff(a: &BoolTerm, b: &BoolTerm) -> BoolTerm {
 
 #[cfg(test)]
 mod tests {
+
+    // fuzz-found (#139): a redeclared name at a different width let one
+    // variable denote two widths and drove a blaster width-assert panic.
+    // Both parser-level rejections are pinned here; the API-level guard
+    // lives in solver::tests::inconsistent_var_widths_are_unknown.
+    #[test]
+    fn redeclaration_at_a_different_width_is_an_error() {
+        let s = "(set-logic QF_BV)\n(declare-const a (_ BitVec 32))\n(declare-const a (_ BitVec 8))\n(assert (= (bvudiv a #x01) a))\n(check-sat)\n";
+        assert!(super::solve_str(s).is_err());
+        // Byte-identical redeclaration stays tolerated (concatenated logs).
+        let ok = "(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(declare-const a (_ BitVec 8))\n(assert (= a #x00))\n(check-sat)\n";
+        assert!(super::solve_str(ok).is_ok());
+    }
+
+    #[test]
+    fn declare_const_with_trailing_garbage_is_an_error() {
+        let s = "(set-logic QF_BV)\n(declare-const b (_ BitVec 32) junk)\n(assert (= b #x00000000))\n(check-sat)\n";
+        assert!(super::solve_str(s).is_err());
+    }
     // ── TR-029: the Verus VC dialect (issue #65) ─────────────────────────
     //
     // Verus emits `(declare-const %%location_label%%N Bool)` + `(=> label goal)`

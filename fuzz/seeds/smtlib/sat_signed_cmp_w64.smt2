@@ -1,0 +1,5 @@
+(set-logic QF_BV)
+(declare-const a (_ BitVec 64))
+(assert (bvslt a #x0000000000000000))
+(assert (bvsgt a #xFFFFFFFFFFFFFF00))
+(check-sat)
