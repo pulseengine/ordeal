@@ -1153,3 +1153,42 @@ artifacts:
         spec 1.5) naming the ordeal crate and its (empty-by-design)
         runtime dependency set. Falsified if the SBOM is missing from the
         release or from the signed sums.
+
+  - id: TR-041
+    type: sw-req
+    title: Shipped artifacts are executed and behaviorally equivalent (relay-class closure)
+    description: >
+      Audit finding #135 (2026-09-16 consistency sweep, relay-incident
+      class): ordeal built artifacts it never executed — the wasm32-wasip2
+      component was a required check yet never run, no native/wasm
+      equivalence check existed (a stale local wasm binary demonstrably
+      diverged unnoticed), the aarch64 release tarball shipped a binary
+      never executed, and the reproducible-build job certified a
+      configuration that is not any shipped artifact. Closure: (1) the
+      required wasip2 job now executes the component under wasmtime and
+      demands byte-identical verdicts, models, full JSON certificates and
+      exit codes vs the native binary over a committed 8-script corpus
+      plus a preopened file-mode probe (scripts/wasm_native_differential.sh);
+      (2) release legs gain a certified-unsat solve smoke, and the cross
+      MUSL leg executes its assert under qemu-user (recipe proven per-PR
+      by a CI smoke job); the cross GNU leg's non-execution is an explicit
+      documented disposition, not an accident; (3) the repro job
+      additionally certifies bit-identical rebuilds of the wasm component
+      and a release-style --target build.
+    status: verified
+    release: v0.20.0
+    tags: [wasm, differential, relay-class, release, reproducibility]
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: derives-from
+        target: SYS-001
+    fields:
+      req-type: process
+      priority: should
+      verification-criteria: >
+        The required Build (wasm32-wasip2) context fails on any
+        native/wasm divergence (harness exits 1 on first differing byte
+        or exit code); the differential covers both verdict directions,
+        both output formats, and file-mode; the cross-qemu smoke executes
+        the exact release recipe per PR; repro covers wasm + --target.

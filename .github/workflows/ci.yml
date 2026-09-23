@@ -88,13 +88,34 @@ jobs:
           cargo build --release --target-dir target-b
           sha256sum target-a/release/ordeal target-b/release/ordeal
           cmp target-a/release/ordeal target-b/release/ordeal
+      # #135: the host-default build above is not any artifact we ship.
+      # Also certify the two configurations that ARE shipped/consumed:
+      # the wasm component and a release-style `--target` build (the
+      # release matrix's build path differs from a bare `cargo build`).
+      - name: wasm32-wasip2 — build twice, compare bit-for-bit
+        run: |
+          rustup target add wasm32-wasip2
+          cargo build --release --target wasm32-wasip2 --target-dir target-wa
+          cargo build --release --target wasm32-wasip2 --target-dir target-wb
+          cmp target-wa/wasm32-wasip2/release/ordeal.wasm target-wb/wasm32-wasip2/release/ordeal.wasm
+      - name: release-style --target build — twice, compare bit-for-bit
+        run: |
+          cargo build --release --target x86_64-unknown-linux-gnu --target-dir target-ta
+          cargo build --release --target x86_64-unknown-linux-gnu --target-dir target-tb
+          cmp target-ta/x86_64-unknown-linux-gnu/release/ordeal target-tb/x86_64-unknown-linux-gnu/release/ordeal
 
-  # ── wasm32-wasip2 buildability (BLOCKING) ─────────────────────────────
+  # ── wasm32-wasip2 buildability + native↔wasm differential (BLOCKING) ──
   # HARD REQUIREMENT: loom self-optimizes as a WebAssembly component and embeds
   # ordeal in-process, so ordeal MUST build as a wasm32-wasip2 component. The
   # default build is zero-external-deps and wasip2-clean; ordeal's own
   # pure-Rust CDCL core is the engine on every target, so no FFI ever reaches
   # the wasm path. This job is REQUIRED for merge.
+  # #135 / TR-041 (relay-class): building the wasm artifact is not evidence it
+  # BEHAVES like the native one — this job now also EXECUTES it under wasmtime
+  # and demands byte-identical verdicts, models, certificates (full JSON incl.
+  # LRAT text) and exit codes against the native binary on the committed
+  # differential corpus. The required context therefore guards equivalence,
+  # not just buildability.
   wasip2:
     name: Build (wasm32-wasip2)
     runs-on: ubuntu-latest
@@ -108,6 +129,17 @@ jobs:
           key: wasip2
       - name: Build wasm32-wasip2 (release)
         run: cargo build --target wasm32-wasip2 --release
+      - name: Build native (release) for the differential
+        run: cargo build --release -p ordeal
+      - name: Install wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+        with:
+          version: "27.0.0"
+      - name: wasm ↔ native behavioral differential
+        run: |
+          scripts/wasm_native_differential.sh \
+            target/release/ordeal \
+            wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm
 
   # ── musl build + SBOM smoke (#143/#144 de-risk) ───────────────────────
   # The release matrix's musl legs and the SBOM step only run at tag time;
@@ -142,6 +174,34 @@ jobs:
           test -n "$SBOM" && test -f "$SBOM"
           python3 -c "import json,sys; d=json.load(open('$SBOM')); assert d['bomFormat']=='CycloneDX', d" \
             && echo "::notice::SBOM smoke OK: $SBOM"
+
+  # ── cross aarch64-musl + qemu smoke (#135 de-risk for the release legs) ─
+  # Proves the EXACT release recipe for the cross musl leg (cross build,
+  # then qemu-user execution of the static binary) on every PR, so the
+  # release-time qemu version assert cannot first fail at a tag cut.
+  cross-qemu:
+    name: cross aarch64-musl + qemu smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cross-aarch64-musl
+      - name: Install qemu-user
+        run: sudo apt-get update && sudo apt-get install -y qemu-user
+      - name: cross build aarch64-musl (release) and execute under qemu
+        run: |
+          set -euo pipefail
+          cross build --release --target aarch64-unknown-linux-musl -p ordeal
+          BIN=target/aarch64-unknown-linux-musl/release/ordeal
+          file "$BIN" | grep -qi 'static' || { echo "::error::aarch64 musl binary is not statically linked"; exit 1; }
+          VER=$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')
+          test "$(qemu-aarch64 "$BIN" --version)" = "ordeal $VER"
+          printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' | qemu-aarch64 "$BIN" check - | head -1 | grep -qx unsat
 
   # ── Bazel build via rules_rust + rules_wasm_component (non-blocking) ──
   # Mirrors the org Bazel setup (see synth). Non-blocking (continue-on-error):

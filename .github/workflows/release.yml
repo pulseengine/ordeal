@@ -98,9 +98,10 @@ jobs:
 
       # The binary that ships must report the version being tagged (#120;
       # the varve#38 lesson — a v0.14.0 release once shipped a binary
-      # reporting 0.13.1). Native targets only: cross-built binaries can't
-      # execute on this runner.
-      - name: Assert built binary reports the tag version
+      # reporting 0.13.1). #135 extended this: every executable leg also
+      # SOLVES one query (a certified unsat), so no shipped artifact's
+      # deepest exercised path is `--version`.
+      - name: Assert tag version + solve smoke (native)
         if: ${{ !matrix.cross }}
         env:
           TARGET: ${{ matrix.target }}
@@ -108,13 +109,43 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
-          GOT=$("target/${TARGET}/release/ordeal" --version)
+          BIN="target/${TARGET}/release/ordeal"
+          GOT=$("$BIN" --version)
           WANT="ordeal ${VERSION#v}"
           if [ "$GOT" != "$WANT" ]; then
             echo "::error::version mismatch: binary says '$GOT', tag demands '$WANT'"
             exit 1
           fi
-          echo "::notice::binary self-reports '$GOT' — matches the tag"
+          printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' \
+            | "$BIN" check - | head -1 | grep -qx unsat
+          echo "::notice::'$GOT' matches the tag; certified-unsat smoke OK"
+
+      # #135: the cross MUSL leg is static, so it executes under qemu-user —
+      # same assert + smoke as the native legs (recipe proven per-PR by the
+      # `cross aarch64-musl + qemu smoke` CI job). The cross GNU leg remains
+      # unexecuted here by explicit disposition: a dynamic aarch64 glibc
+      # binary needs an aarch64 loader+libc tree on this runner; its build
+      # recipe is identical to the musl leg's modulo libc, and the musl
+      # leg's execution covers the cross toolchain path.
+      - name: Assert tag version + solve smoke (cross musl, qemu)
+        if: ${{ matrix.cross && contains(matrix.target, 'musl') }}
+        env:
+          TARGET: ${{ matrix.target }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update && sudo apt-get install -y qemu-user
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          BIN="target/${TARGET}/release/ordeal"
+          GOT=$(qemu-aarch64 "$BIN" --version)
+          WANT="ordeal ${VERSION#v}"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::version mismatch: binary says '$GOT', tag demands '$WANT'"
+            exit 1
+          fi
+          printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' \
+            | qemu-aarch64 "$BIN" check - | head -1 | grep -qx unsat
+          echo "::notice::'$GOT' matches the tag under qemu; certified-unsat smoke OK"
 
       - name: Package archive
         env:

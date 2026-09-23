@@ -1,0 +1,5 @@
+(set-logic QF_BV)
+(declare-const hi (_ BitVec 32))
+(declare-const flags (_ BitVec 8))
+(assert (distinct ((_ extract 7 0) (concat hi flags)) flags))
+(check-sat)

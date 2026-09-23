@@ -915,3 +915,30 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --test cli_baseline"
         coverage: "3 verdict shapes; pair recheck; text/json agreement; help advertisement; bad-format exit 2"
+
+  - id: VER-035
+    type: sw-verification
+    title: native/wasm behavioral differential executed and gated (TR-041)
+    description: >
+      Confirms TR-041: scripts/wasm_native_differential.sh run over the
+      committed 8-script corpus (4 sat / 4 unsat across widths 8/32/64,
+      mul/udiv/urem/shift/concat-extract/signed-cmp) in both text and
+      json modes plus the preopened file-mode probe — 17 invocations,
+      native vs wasmtime-executed wasm component byte-identical including
+      full JSON certificates (LRAT text): cross-target proof determinism
+      holds empirically. Wired into the REQUIRED Build (wasm32-wasip2)
+      context, so equivalence, not buildability, is what gates merge.
+      The cross-qemu CI job executes the release's cross-musl recipe
+      (static check, version assert, certified-unsat solve under
+      qemu-aarch64) on every PR.
+    status: verified
+    release: v0.20.0
+    tags: [wasm, differential, relay-class, qemu]
+    links:
+      - type: verifies
+        target: TR-041
+    fields:
+      method: automated-test
+      steps:
+        run: "scripts/wasm_native_differential.sh target/release/ordeal wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm"
+        coverage: "8 scripts x 2 formats + file-mode probe = 17 invocations; byte-identical incl. certificates; qemu cross-musl smoke"
