@@ -942,3 +942,28 @@ artifacts:
       steps:
         run: "scripts/wasm_native_differential.sh target/release/ordeal wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm"
         coverage: "8 scripts x 2 formats + file-mode probe = 17 invocations; byte-identical incl. certificates; qemu cross-musl smoke"
+
+  - id: VER-036
+    type: sw-verification
+    title: Axiom gate potent — both controls recorded (TR-042)
+    description: >
+      Confirms TR-042 by the gate-potency method: positive control —
+      lake build AxiomCheck elaborates all nine #guard_msgs-pinned
+      #print axioms (three soundness-chain theorems, six blaster
+      capstones) against the freshly regenerated models, exit 0;
+      negative control — a scratch theorem carrying a deliberate new
+      axiom fails the same guard shape with exit 1 and a message naming
+      the axiom ('tainted' depends on axioms: [evil]), 2026-09-23. The
+      guard runs inside the required Lean CI job via @[default_target].
+    status: verified
+    release: v0.20.0
+    tags: [tcb, lean, axioms, negative-control]
+    links:
+      - type: verifies
+        target: TR-042
+    fields:
+      method: automated-test
+      steps:
+        run: "cd lean && lake build AxiomCheck"
+        coverage: "9 pinned axiom lists; negative control recorded (new axiom -> exit 1)"
+

@@ -1192,3 +1192,35 @@ artifacts:
         or exit code); the differential covers both verdict directions,
         both output formats, and file-mode; the cross-qemu smoke executes
         the exact release recipe per PR; repro covers wasm + --target.
+
+  - id: TR-042
+    type: sw-req
+    title: Axiom-cleanliness is a gate, not prose
+    description: >
+      Audit finding #137 (found independently by two sweep agents): the
+      "only propext / Classical.choice / Quot.sound" claim appeared in
+      docs/formal-verification.md, lean/README.md and a ci.yml comment,
+      but nothing executed the check — a proof rewritten with
+      native_decide (ofReduceBool, re-widening the TCB to the Lean
+      compiler) or a stray axiom would have merged green. Closure:
+      lean/AxiomCheck.lean pins the exact axiom list of the soundness
+      chain (lrat_check_sound, pure_check_sound, kernel_refines_pure) and
+      one capstone theorem per blaster development via #guard_msgs over
+      #print axioms, registered as a default lake target so the REQUIRED
+      Lean CI job fails on any deviation.
+    status: verified
+    release: v0.20.0
+    tags: [tcb, lean, axioms, gate, claim-verification]
+    links:
+      - type: derives-from
+        target: SYS-003
+    fields:
+      req-type: process
+      priority: should
+      verification-criteria: >
+        Positive control: lake build AxiomCheck green on the clean tree.
+        Negative control: a theorem depending on a new axiom fails the
+        guard (recorded: scratch probe with `axiom evil`, lake env lean
+        exit 1, message names the offending axiom). The file is a
+        default target (lake build alone elaborates it).
+
