@@ -420,6 +420,124 @@ pub fn check_steps(cnf: &[Vec<i32>], steps: &[Step]) -> Result<(), CoreError> {
     }
 }
 
+/// Why the kernel rejected a SAT witness. Data-only (no strings), like
+/// [`CoreError`], so the Lean model stays simple.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SatWitnessError {
+    /// The input CNF contains the literal `0` or `i32::MIN`.
+    InvalidCnfLiteral {
+        /// 0-based index of the offending clause.
+        clause_index: usize,
+    },
+    /// A literal references a variable past the end of the assignment.
+    AssignmentTooShort {
+        /// The 1-based DIMACS variable index that was out of range.
+        var: usize,
+    },
+    /// A clause has no literal made true by the assignment.
+    UnsatisfiedClause {
+        /// 0-based index of the unsatisfied clause.
+        clause_index: usize,
+    },
+    /// A model binding's value disagrees with the assignment at one bit.
+    BindingMismatch {
+        /// 0-based bit index (within the binding) that disagrees.
+        bit: usize,
+    },
+    /// A binding names more bits than a `u128` value can carry.
+    BindingTooWide {
+        /// The offending bit count.
+        bits: usize,
+    },
+}
+
+/// Is some literal of `clause` true under `assignment`? (Own function so
+/// the caller's loop has no early return — Aeneas constraint; same style
+/// as [`classify_hint`].) `assignment[i]` is the value of DIMACS variable
+/// `i + 1`.
+fn clause_satisfied(
+    clause: &[i32],
+    assignment: &[bool],
+    clause_index: usize,
+) -> Result<bool, SatWitnessError> {
+    let mut sat = false;
+    let mut i = 0;
+    while !sat && i < clause.len() {
+        let lit = clause[i];
+        if lit == 0 || lit == i32::MIN {
+            return Err(SatWitnessError::InvalidCnfLiteral { clause_index });
+        }
+        let var = lit.unsigned_abs() as usize;
+        if var > assignment.len() {
+            return Err(SatWitnessError::AssignmentTooShort { var });
+        }
+        let value = assignment[var - 1];
+        if (lit > 0 && value) || (lit < 0 && !value) {
+            sat = true;
+        }
+        i += 1;
+    }
+    Ok(sat)
+}
+
+/// Check a claimed satisfying assignment against a CNF — the SAT twin of
+/// [`check_steps`] (TR-038, the ordeal-cert/v1 witness):
+///
+/// > If `check_sat(cnf, assignment)` returns `Ok(())`, then `cnf` is
+/// > satisfiable — by exhibition: `assignment` makes some literal of
+/// > every clause true.
+///
+/// A linear scan, no search, no solver state: soundness is immediate from
+/// the definition of satisfaction, which is what makes this small enough
+/// to sit in the trusted kernel (the Lean statement rides a later release;
+/// see docs/design/sat-witness.md).
+pub fn check_sat(cnf: &[Vec<i32>], assignment: &[bool]) -> Result<(), SatWitnessError> {
+    let mut clause_index = 0;
+    while clause_index < cnf.len() {
+        if !clause_satisfied(&cnf[clause_index], assignment, clause_index)? {
+            return Err(SatWitnessError::UnsatisfiedClause { clause_index });
+        }
+        clause_index += 1;
+    }
+    Ok(())
+}
+
+/// Check one model binding against the assignment: bit `k` of `value`
+/// (LSB-first) must equal the truth value of the DIMACS **literal**
+/// `bits[k]` — signed, because Tseitin encoding may bind a model bit to a
+/// negated CNF literal (`-v` means "bit k is the negation of variable
+/// v"). This is what makes the *advertised* model part of the witness
+/// rather than decoration: a bundle whose model disagrees with its own
+/// assignment is rejected here (TR-038).
+pub fn check_binding(
+    assignment: &[bool],
+    bits: &[i32],
+    value: u128,
+) -> Result<(), SatWitnessError> {
+    if bits.len() > 128 {
+        return Err(SatWitnessError::BindingTooWide { bits: bits.len() });
+    }
+    let mut k = 0;
+    while k < bits.len() {
+        let lit = bits[k];
+        if lit == 0 || lit == i32::MIN {
+            return Err(SatWitnessError::InvalidCnfLiteral { clause_index: k });
+        }
+        let var = lit_var(lit);
+        if var > assignment.len() {
+            return Err(SatWitnessError::AssignmentTooShort { var });
+        }
+        let var_value = assignment[var - 1];
+        let bit_value = if lit > 0 { var_value } else { !var_value };
+        let expected = (value >> k) & 1 == 1;
+        if bit_value != expected {
+            return Err(SatWitnessError::BindingMismatch { bit: k });
+        }
+        k += 1;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,6 +590,62 @@ mod tests {
                 Err(CoreError::InvalidStepLiteral { step: 0 })
             ));
         }
+    }
+
+    #[test]
+    fn check_sat_accepts_a_satisfying_assignment() {
+        // (1 ∨ 2) ∧ (¬1 ∨ 2) ∧ (¬2 ∨ 1) — satisfied by 1=true, 2=true.
+        let cnf = vec![vec![1, 2], vec![-1, 2], vec![-2, 1]];
+        assert_eq!(check_sat(&cnf, &[true, true]), Ok(()));
+    }
+
+    #[test]
+    fn check_sat_rejects_an_unsatisfied_clause() {
+        let cnf = vec![vec![1, 2], vec![-1, -2]];
+        assert!(matches!(
+            check_sat(&cnf, &[true, true]),
+            Err(SatWitnessError::UnsatisfiedClause { clause_index: 1 })
+        ));
+    }
+
+    #[test]
+    fn check_sat_rejects_short_assignments_and_bad_literals() {
+        // The out-of-range variable must actually be reached: a clause
+        // already satisfied by an earlier in-range literal is accepted
+        // lazily (sound — satisfaction is established without it).
+        assert!(matches!(
+            check_sat(&[vec![3]], &[true]),
+            Err(SatWitnessError::AssignmentTooShort { var: 3 })
+        ));
+        assert_eq!(check_sat(&[vec![1, 3]], &[true]), Ok(()));
+        for bad in [0i32, i32::MIN] {
+            assert!(matches!(
+                check_sat(&[vec![bad]], &[true]),
+                Err(SatWitnessError::InvalidCnfLiteral { clause_index: 0 })
+            ));
+        }
+    }
+
+    #[test]
+    fn check_binding_verifies_and_rejects() {
+        // Literals 1..=4 = bits of value 0b1010 (LSB-first): 1=false,
+        // 2=true, 3=false, 4=true.
+        let assignment = [false, true, false, true];
+        assert_eq!(check_binding(&assignment, &[1, 2, 3, 4], 0b1010), Ok(()));
+        // Negated literal: bit reads the variable's complement.
+        assert_eq!(check_binding(&assignment, &[-1, -2], 0b01), Ok(()));
+        assert!(matches!(
+            check_binding(&assignment, &[1, 2, 3, 4], 0b1011),
+            Err(SatWitnessError::BindingMismatch { bit: 0 })
+        ));
+        assert!(matches!(
+            check_binding(&assignment, &[9], 0),
+            Err(SatWitnessError::AssignmentTooShort { var: 9 })
+        ));
+        assert!(matches!(
+            check_binding(&assignment, &[0], 0),
+            Err(SatWitnessError::InvalidCnfLiteral { .. })
+        ));
     }
 
     #[test]

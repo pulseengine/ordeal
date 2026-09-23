@@ -971,3 +971,35 @@ artifacts:
         run: "cd lean && lake build AxiomCheck"
         coverage: "9 pinned axiom lists; negative control recorded (new axiom -> exit 1)"
 
+
+  - id: VER-037
+    type: sw-verification
+    title: SAT witness re-checkable through the trusted crate (TR-038)
+    description: >
+      Confirms TR-038 via the cert_bundle witness suite: a live solve's
+      SatCertificate re-checks through ordeal_lrat::check_sat +
+      check_binding; bundles round-trip ordeal-cert/v1 with the optional
+      witness block hash-verified before parse and are byte-identical
+      run to run; tamper classes behave as designed — flipped assignment
+      bit rejected at ingestion (integrity), truncated assignment fails
+      recheck, and a LYING MODEL is caught semantically as
+      BindingMismatch (the model block is deliberately un-hashed: its
+      guarantee is consistency with the assignment, not just bytes). The
+      unsat leg of check_with_witness carries the same checker-validated
+      Certificate as check. Kernel-side check_sat/check_binding carry
+      their own unit tests incl. lazy-acceptance semantics and
+      negated-literal bit maps; the fuzz oracle now demands BOTH
+      directions re-check (365k execs clean post-change). rivet 0.32.0
+      probed: unknown witness field = INFO + PASS (the v1-optional
+      envelope decision's precondition, recorded).
+    status: verified
+    release: v0.20.0
+    tags: [sat, witness, certificate, tcb, evidence]
+    links:
+      - type: verifies
+        target: TR-038
+    fields:
+      method: automated-test
+      steps:
+        run: "cargo test -p ordeal --features cert-bundle cert_bundle && cargo test -p ordeal-lrat -- check_sat check_binding"
+        coverage: "end-to-end recheck; determinism; 3 tamper classes incl. semantic model check; both-direction fuzz oracle; kernel unit tests"

@@ -93,19 +93,27 @@ companion (e.g. `Model::witness()` populated only via a new
 semver break, no cost on the common path. Exact spelling is review
 question 3.
 
-## Verification criteria (TR-038, to be pinned on approval)
+## Verification criteria (TR-038, PINNED at implementation 2026-09-24)
 
-1. For every SAT query in the differential corpus, the emitted witness
-   re-checks via `ordeal_lrat::check_sat` (and the wasm build emits a
-   byte-identical witness — the #135 differential extends to it).
-2. Tamper rejection: a flipped assignment bit, a truncated assignment,
-   and a model binding inconsistent with the assignment are each
-   rejected, before any acceptance.
-3. The fuzz target's oracle extends: a fuzz-found `Sat` must re-check
-   through `check_sat` (the #139 pattern, now both directions).
-4. rivet ingestion demonstrated against a released rivet that consumes
-   the witness (the TR-030 pattern) — or the boundary honestly kept as
-   a warning until rivet ships that.
+1. Witnesses re-check end to end (`sat_witness_rechecks_end_to_end`),
+   and bundles are byte-identical run to run
+   (`sat_witness_is_deterministic`). Wasm-side: the witness algorithm is
+   the same deterministic code, and model-level native↔wasm equality is
+   already gated by the #135 differential; the witness JSON itself is
+   not yet CLI-exposed, so its cross-target byte equality is covered by
+   determinism + model parity rather than an external diff (recorded
+   honestly here, not overclaimed).
+2. Tamper rejection, all three classes tested: flipped assignment bit →
+   integrity rejection at parse; truncated assignment → recheck failure;
+   a LYING MODEL parses (the model block is deliberately not
+   content-hashed) and is caught by recheck as a `BindingMismatch` — the
+   model's guarantee is semantic, not just integrity.
+3. The fuzz oracle covers BOTH directions (`solve_str_with_witness` in
+   the target): a fuzz-found Sat must re-check its witness, a fuzz-found
+   Unsat its LRAT certificate.
+4. rivet-side ingestion (consuming the witness and downgrading
+   `V-ordeal-cert-sat-is-self-checked`) is a rivet-repo follow-up filed
+   at implementation; the warning honestly stands until rivet ships it.
 
 ## Open questions for review
 

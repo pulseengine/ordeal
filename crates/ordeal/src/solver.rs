@@ -823,6 +823,82 @@ impl Solver {
         }
     }
 
+    /// Decide satisfiability and, on `Sat`, return an INDEPENDENTLY
+    /// re-checkable witness (TR-038 / #133, design:
+    /// docs/design/sat-witness.md): the full CNF assignment plus the
+    /// input-bit map, validated through the trusted `ordeal-lrat`
+    /// `check_sat`/`check_binding` BEFORE `Sat` is returned — symmetric
+    /// with the Unsat gate ("a Sat whose witness the trusted crate did
+    /// not accept is never reported"; it degrades to `Unknown`).
+    ///
+    /// The default API is untouched: this entry exists only under the
+    /// `cert-bundle` feature and pays the witness capture only when
+    /// called.
+    #[cfg(feature = "cert-bundle")]
+    pub fn check_with_witness(&self) -> crate::cert_bundle::WitnessCheckResult {
+        use crate::cert_bundle::{SatCertificate, WitnessCheckResult};
+        if self.assertions.is_empty() {
+            // Trivially satisfiable: the empty witness re-checks vacuously
+            // (no clauses to satisfy, no bindings to verify).
+            return WitnessCheckResult::Sat(SatCertificate {
+                model: Model {
+                    assignments: Vec::new(),
+                },
+                cnf: Vec::new(),
+                assignment: Vec::new(),
+                bit_map: Vec::new(),
+            });
+        }
+        let Some((blaster, cnf, map)) = self.lower() else {
+            return WitnessCheckResult::Unknown;
+        };
+        let mut sat_solver = SatSolver::new();
+        match sat_solver.solve(&cnf) {
+            SatResult::Unsat => {
+                let cert =
+                    crate::lrat::emit_lrat_trimmed(cnf.clauses.len(), sat_solver.proof_trace());
+                match ordeal_lrat::check(&cnf.clauses, &cert) {
+                    Ok(()) => WitnessCheckResult::Unsat(Certificate {
+                        lrat: cert.into_bytes(),
+                        cnf: cnf.clauses,
+                    }),
+                    Err(_) => {
+                        debug_assert!(false, "checker rejected our certificate — ordeal bug");
+                        WitnessCheckResult::Unknown
+                    }
+                }
+            }
+            SatResult::Sat(assignment) => {
+                let Pipeline::Sat(env) = self.decode_and_check(&blaster, &map, &assignment) else {
+                    return WitnessCheckResult::Unknown;
+                };
+                let mut assignments: Vec<(String, u128)> = env.into_iter().collect();
+                assignments.sort();
+                let mut bit_map: Vec<(String, u32, Vec<i32>)> = Vec::new();
+                for (name, width) in &blaster.var_order {
+                    let word = &blaster.vars[name];
+                    let bits: Vec<i32> = word.iter().map(|l| map.cnf_lit(*l)).collect();
+                    bit_map.push((name.clone(), *width, bits));
+                }
+                let cert = SatCertificate {
+                    model: Model { assignments },
+                    cnf: cnf.clauses,
+                    assignment,
+                    bit_map,
+                };
+                // The trusted crate validates the witness BEFORE Sat is
+                // asserted — the SAT twin of the LRAT gate above.
+                match cert.recheck() {
+                    Ok(()) => WitnessCheckResult::Sat(cert),
+                    Err(_) => {
+                        debug_assert!(false, "trusted crate rejected our witness — ordeal bug");
+                        WitnessCheckResult::Unknown
+                    }
+                }
+            }
+        }
+    }
+
     /// Decide with the optional CaDiCaL accelerator (TR-004's "benchmark
     /// yardstick" role) — identical pipeline and identical soundness gates,
     /// only the SAT engine differs: `sat_cadical::solve` returns Unsat solely

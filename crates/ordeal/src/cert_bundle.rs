@@ -285,6 +285,297 @@ pub fn model_to_cert_v1(model: &Model, attests: &Attests) -> String {
     serde_json::to_string_pretty(&env).expect("own-struct serialization")
 }
 
+/// The result of [`crate::Solver::check_with_witness`] (TR-038): like
+/// [`crate::CheckResult`] but `Sat` carries an independently
+/// re-checkable [`SatCertificate`] instead of a bare model.
+#[derive(Clone, Debug)]
+pub enum WitnessCheckResult {
+    /// Satisfiable, with a witness the trusted crate already validated.
+    Sat(SatCertificate),
+    /// Unsatisfiable, with the LRAT certificate the checker validated.
+    Unsat(Certificate),
+    /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
+    Unknown,
+}
+
+/// An independently re-checkable SAT verdict — the SAT twin of
+/// [`Certificate`] (TR-038 / #133, docs/design/sat-witness.md): the
+/// model, the CNF it satisfies, the FULL satisfying assignment (inputs
+/// and Tseitin auxiliaries), and the map from each model variable's bits
+/// to signed CNF literals. [`SatCertificate::recheck`] re-establishes
+/// the verdict via the trusted `ordeal-lrat` crate with zero solver
+/// trust: every clause is checked satisfied, and every advertised model
+/// binding is checked consistent with the assignment.
+#[derive(Clone, Debug)]
+pub struct SatCertificate {
+    /// The decoded model (what a consumer reads).
+    pub model: Model,
+    /// The CNF the assignment satisfies (same clauses an Unsat would
+    /// have refuted — the term↔CNF gap is carried by the blaster proofs
+    /// in both directions).
+    pub cnf: Vec<Vec<i32>>,
+    /// `assignment[i]` is the value of DIMACS variable `i + 1`.
+    pub assignment: Vec<bool>,
+    /// Per model variable: (name, width, LSB-first signed CNF literals —
+    /// a negative literal means the bit is that variable's complement).
+    pub bit_map: Vec<(String, u32, Vec<i32>)>,
+}
+
+/// Why a SAT witness recheck failed.
+#[derive(Debug)]
+pub enum SatRecheckError {
+    /// The trusted kernel rejected the witness (unsatisfied clause,
+    /// range error, or a binding/assignment disagreement).
+    Witness(ordeal_lrat::SatWitnessError),
+    /// A model binding has no bit-map entry — the advertised model is
+    /// not covered by the witness.
+    UnmappedBinding(String),
+    /// A binding's width disagrees with its bit-map entry.
+    WidthMismatch(String),
+}
+
+impl std::fmt::Display for SatRecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SatRecheckError::Witness(e) => write!(f, "witness rejected: {e:?}"),
+            SatRecheckError::UnmappedBinding(n) => {
+                write!(f, "model binding '{n}' has no bit-map entry")
+            }
+            SatRecheckError::WidthMismatch(n) => {
+                write!(f, "model binding '{n}' width disagrees with its bit map")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SatRecheckError {}
+
+impl SatCertificate {
+    /// Re-establish `Sat` independently of the solver: the trusted crate
+    /// checks every clause satisfied and every model binding consistent.
+    pub fn recheck(&self) -> Result<(), SatRecheckError> {
+        ordeal_lrat::check_sat(&self.cnf, &self.assignment).map_err(SatRecheckError::Witness)?;
+        for (name, value) in &self.model.assignments {
+            let Some((_, width, bits)) = self.bit_map.iter().find(|(n, _, _)| n == name) else {
+                return Err(SatRecheckError::UnmappedBinding(name.clone()));
+            };
+            if bits.len() != *width as usize {
+                return Err(SatRecheckError::WidthMismatch(name.clone()));
+            }
+            ordeal_lrat::check_binding(&self.assignment, bits, *value)
+                .map_err(SatRecheckError::Witness)?;
+        }
+        Ok(())
+    }
+
+    /// Serialize as an `ordeal-cert/v1` SAT bundle carrying the OPTIONAL
+    /// `witness` block (verified tolerable by released rivet readers —
+    /// rivet 0.32.0 reports an unknown field as INFO and passes; see
+    /// docs/design/sat-witness.md). Content sha256s cover the clause
+    /// text, the assignment bitstring, and the canonical bit-map text.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v1(&self, attests: &Attests) -> String {
+        let problem_text = cnf_text(&self.cnf);
+        let assignment_text = assignment_bitstring(&self.assignment);
+        let bit_map_text = bit_map_canonical_text(&self.bit_map);
+        let env = SatWitnessEnvelope {
+            format: "ordeal-cert/v1".into(),
+            verdict: "sat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: self.cnf.len(),
+                clauses: self.cnf.clone(),
+            },
+            model: SatModelBlock {
+                encoding: "assignments".into(),
+                assignments: self.model.assignments.clone(),
+            },
+            witness: WitnessBlock {
+                encoding: "bitstring-lsb-var1".into(),
+                assignment: assignment_text.clone(),
+                bit_map: self
+                    .bit_map
+                    .iter()
+                    .map(|(name, width, bits)| BitMapEntry {
+                        name: name.clone(),
+                        width: *width,
+                        bits: bits.clone(),
+                    })
+                    .collect(),
+                assignment_sha256: sha256_hex(assignment_text.as_bytes()),
+                bit_map_sha256: sha256_hex(bit_map_text.as_bytes()),
+            },
+            recheck: SatWitnessRecheck {
+                tool: "ordeal-lrat".into(),
+                min_version: env!("CARGO_PKG_VERSION").into(),
+                cmd: "ordeal_lrat::check_sat(problem, witness.assignment) + \
+                      ordeal_lrat::check_binding per model binding"
+                    .into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse a witness-carrying `ordeal-cert/v1` SAT bundle, verifying
+    /// all three content hashes BEFORE returning (integrity before
+    /// mathematics — the caller then runs [`SatCertificate::recheck`]).
+    /// A SAT bundle without a `witness` block is the legacy self-checked
+    /// shape and is reported as [`BundleError::Unsupported`].
+    pub fn from_cert_v1(json: &str) -> Result<SatCertificate, BundleError> {
+        let env: SatWitnessEnvelopeIn =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.format != "ordeal-cert/v1" {
+            return Err(BundleError::WrongFormat(env.format));
+        }
+        if env.verdict != "sat" {
+            return Err(BundleError::WrongVerdict(env.verdict));
+        }
+        if env.problem.encoding != "dimacs-cnf" {
+            return Err(BundleError::Unsupported(format!(
+                "problem encoding {}",
+                env.problem.encoding
+            )));
+        }
+        let Some(witness) = env.witness else {
+            return Err(BundleError::Unsupported(
+                "sat bundle without a witness block (legacy self-checked shape)".into(),
+            ));
+        };
+        if witness.encoding != "bitstring-lsb-var1" {
+            return Err(BundleError::Unsupported(format!(
+                "witness encoding {}",
+                witness.encoding
+            )));
+        }
+        // Integrity first: all three hashes must match their payloads.
+        let problem_text = cnf_text(&env.problem.clauses);
+        if sha256_hex(problem_text.as_bytes()) != env.recheck.problem_sha256 {
+            return Err(BundleError::HashMismatch("problem"));
+        }
+        if sha256_hex(witness.assignment.as_bytes()) != witness.assignment_sha256 {
+            return Err(BundleError::HashMismatch("witness-assignment"));
+        }
+        let bit_map: Vec<(String, u32, Vec<i32>)> = witness
+            .bit_map
+            .iter()
+            .map(|e| (e.name.clone(), e.width, e.bits.clone()))
+            .collect();
+        if sha256_hex(bit_map_canonical_text(&bit_map).as_bytes()) != witness.bit_map_sha256 {
+            return Err(BundleError::HashMismatch("witness-bit-map"));
+        }
+        let mut assignment = Vec::with_capacity(witness.assignment.len());
+        for c in witness.assignment.chars() {
+            match c {
+                '0' => assignment.push(false),
+                '1' => assignment.push(true),
+                other => {
+                    return Err(BundleError::Malformed(format!(
+                        "witness assignment contains '{other}' (expected '0'/'1')"
+                    )));
+                }
+            }
+        }
+        Ok(SatCertificate {
+            model: Model {
+                assignments: env.model.assignments,
+            },
+            cnf: env.problem.clauses,
+            assignment,
+            bit_map,
+        })
+    }
+}
+
+/// The witness assignment as a `0`/`1` string, `assignment[0]` first
+/// (variable 1). Stable and diff-friendly for hashing.
+fn assignment_bitstring(assignment: &[bool]) -> String {
+    let mut s = String::with_capacity(assignment.len());
+    for &b in assignment {
+        s.push(if b { '1' } else { '0' });
+    }
+    s
+}
+
+/// Canonical text of the bit map for hashing: `name width l1 l2 …\n` per
+/// entry, in-order.
+fn bit_map_canonical_text(bit_map: &[(String, u32, Vec<i32>)]) -> String {
+    let mut s = String::new();
+    for (name, width, bits) in bit_map {
+        s.push_str(name);
+        s.push(' ');
+        s.push_str(&width.to_string());
+        for b in bits {
+            s.push(' ');
+            s.push_str(&b.to_string());
+        }
+        s.push('\n');
+    }
+    s
+}
+
+#[derive(Serialize)]
+struct SatWitnessEnvelope {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    recheck: SatWitnessRecheck,
+}
+
+#[derive(Deserialize)]
+struct SatWitnessEnvelopeIn {
+    format: String,
+    verdict: String,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: Option<WitnessBlock>,
+    recheck: SatWitnessRecheck,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SatModelBlock {
+    encoding: String,
+    assignments: Vec<(String, u128)>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct WitnessBlock {
+    encoding: String,
+    assignment: String,
+    bit_map: Vec<BitMapEntry>,
+    assignment_sha256: String,
+    bit_map_sha256: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct BitMapEntry {
+    name: String,
+    width: u32,
+    bits: Vec<i32>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SatWitnessRecheck {
+    tool: String,
+    min_version: String,
+    cmd: String,
+    problem_sha256: String,
+}
+
 // rivet: verifies VER-027
 #[cfg(test)]
 mod tests {
@@ -396,5 +687,142 @@ mod tests {
                 .unwrap()
                 .contains("self-checked")
         );
+    }
+
+    // ── TR-038: the independently re-checkable SAT witness ──────────────
+    // rivet: verifies VER-037
+
+    fn a_sat_query() -> Solver {
+        use crate::{BoolTerm, BvTerm, Sort};
+        let mut s = Solver::new();
+        let a = BvTerm::Var {
+            name: "a".into(),
+            sort: Sort::new(8),
+        };
+        let five = BvTerm::Const {
+            value: 5,
+            sort: Sort::new(8),
+        };
+        let three = BvTerm::Const {
+            value: 3,
+            sort: Sort::new(8),
+        };
+        s.assert(BoolTerm::Eq(
+            Box::new(BvTerm::Urem(Box::new(a), Box::new(five))),
+            Box::new(three),
+        ));
+        s
+    }
+
+    fn a_sat_witness() -> SatCertificate {
+        match a_sat_query().check_with_witness() {
+            WitnessCheckResult::Sat(cert) => cert,
+            other => panic!("expected Sat with witness, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sat_witness_rechecks_end_to_end() {
+        let cert = a_sat_witness();
+        cert.recheck().expect("fresh witness must re-check");
+        // The model actually satisfies the query semantics.
+        let (_, v) = cert
+            .model
+            .assignments
+            .iter()
+            .find(|(n, _)| n == "a")
+            .unwrap();
+        assert_eq!(v % 5, 3);
+        // Round-trip through the v1 bundle, hash-verified, still re-checks.
+        let json = cert.to_cert_v1(&attests());
+        let back = SatCertificate::from_cert_v1(&json).expect("pristine bundle parses");
+        back.recheck().expect("round-tripped witness must re-check");
+        assert_eq!(back.model.assignments, cert.model.assignments);
+    }
+
+    #[test]
+    fn sat_witness_is_deterministic() {
+        let a = a_sat_witness().to_cert_v1(&attests());
+        let b = a_sat_witness().to_cert_v1(&attests());
+        assert_eq!(a, b, "witness bundles must be byte-identical run to run");
+    }
+
+    #[test]
+    fn tampered_witness_assignment_is_rejected_at_ingestion() {
+        let json = a_sat_witness().to_cert_v1(&attests());
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let bits = v["witness"]["assignment"].as_str().unwrap().to_string();
+        let flipped: String = bits
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == 0 {
+                    if c == '0' { '1' } else { '0' }
+                } else {
+                    c
+                }
+            })
+            .collect();
+        v["witness"]["assignment"] = serde_json::Value::String(flipped);
+        match SatCertificate::from_cert_v1(&v.to_string()) {
+            Err(BundleError::HashMismatch("witness-assignment")) => {}
+            other => panic!("expected witness-assignment hash mismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn tampered_model_is_caught_by_recheck_not_parsing() {
+        // The model block is deliberately not content-hashed: its guarantee
+        // is SEMANTIC — every advertised binding is verified against the
+        // assignment by the trusted crate. A lying model parses fine and
+        // then fails recheck with a BindingMismatch.
+        let json = a_sat_witness().to_cert_v1(&attests());
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let old = v["model"]["assignments"][0][1].as_u64().unwrap();
+        v["model"]["assignments"][0][1] = serde_json::Value::from(old ^ 1);
+        let cert = SatCertificate::from_cert_v1(&v.to_string())
+            .expect("model tamper is not an integrity failure");
+        match cert.recheck() {
+            Err(SatRecheckError::Witness(ordeal_lrat::SatWitnessError::BindingMismatch {
+                ..
+            })) => {}
+            other => panic!("expected BindingMismatch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn truncated_assignment_fails_recheck() {
+        let mut cert = a_sat_witness();
+        cert.assignment.truncate(1);
+        assert!(
+            cert.recheck().is_err(),
+            "truncated assignment must not re-check"
+        );
+    }
+
+    #[test]
+    fn witness_entry_reports_unsat_with_a_checked_certificate() {
+        use crate::{BoolTerm, BvTerm, Sort};
+        let mut s = Solver::new();
+        let a = BvTerm::Var {
+            name: "a".into(),
+            sort: Sort::new(8),
+        };
+        let one = BvTerm::Const {
+            value: 1,
+            sort: Sort::new(8),
+        };
+        let zero = BvTerm::Const {
+            value: 0,
+            sort: Sort::new(8),
+        };
+        s.assert(BoolTerm::Ne(
+            Box::new(BvTerm::Urem(Box::new(a), Box::new(one))),
+            Box::new(zero),
+        ));
+        match s.check_with_witness() {
+            WitnessCheckResult::Unsat(cert) => cert.recheck().expect("unsat leg re-checks"),
+            other => panic!("expected Unsat, got {other:?}"),
+        }
     }
 }

@@ -371,6 +371,12 @@ pub fn check(cnf: &[Vec<i32>], certificate: &str) -> Result<(), CheckError> {
     kernel::check_steps(cnf, &steps).map_err(|e| lift(e, &lines))
 }
 
+/// The SAT twin of [`check`] (TR-038): if this returns `Ok(())`, `cnf` is
+/// satisfiable — by exhibition. Thin re-export of the string-free kernel;
+/// see [`kernel::check_sat`]. Per-binding model consistency is
+/// [`kernel::check_binding`].
+pub use kernel::{SatWitnessError, check_binding, check_sat};
+
 #[cfg(test)]
 mod tests {
     use super::*;

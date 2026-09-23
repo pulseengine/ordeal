@@ -166,3 +166,17 @@ straight into the delivery loop:
 
 For `missing-capability` and `soundness`, a minimal reproducing `BoolTerm`
 (or SMT-LIB) makes the turnaround fast.
+
+## SAT verdicts as evidence: the re-checkable witness
+
+Since TR-038 (`cert-bundle` feature), `Solver::check_with_witness()`
+returns `Sat` as a `SatCertificate`: the model **plus** the full CNF
+assignment and per-variable bit map. `cert.recheck()` re-establishes the
+verdict through the same trusted `ordeal-lrat` crate that validates UNSAT
+proofs — every clause checked satisfied, every advertised model binding
+checked consistent — so **both** verdict directions are now evidence you
+reproduce rather than solver output you trust. `to_cert_v1()` /
+`SatCertificate::from_cert_v1()` round-trip it as an `ordeal-cert/v1`
+bundle with an optional `witness` block (hash-verified before parsing
+returns). A `Sat` whose witness the trusted crate rejects is never
+returned — it degrades to `Unknown`, symmetric with the UNSAT gate.
