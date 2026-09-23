@@ -1066,12 +1066,17 @@ artifacts:
       A re-checkable SAT witness needs a trusted evaluator (model +
       constraint representation -> true) — a trust-boundary design
       decision (what is the evaluator; over which representation; what
-      joins the TCB). DESIGN-GATED per the #48 precedent: design doc +
-      review before any implementation. Design PROPOSED 2026-09-23
-      (docs/design/sat-witness.md — recommends O1: full CNF assignment
-      checked by a ~30-line check_sat in the trusted ordeal-lrat crate,
-      symmetric with the unsat story; 4 open questions await review).
-    status: draft
+      joins the TCB). Design APPROVED 2026-09-24 (docs/design/
+      sat-witness.md, four decisions via review dialogue: O1; verified
+      v1-optional envelope — rivet 0.32.0 reports the unknown witness
+      field as INFO and passes; check_with_witness() -> SatCertificate;
+      Lean proof extension rides v0.21.0). Implemented: kernel check_sat
+      + check_binding (Aeneas-fragment style, signed-literal bit maps)
+      in the trusted crate; Solver::check_with_witness gates Sat on the
+      trusted recheck BEFORE returning (symmetric with the LRAT gate);
+      ordeal-cert/v1 sat bundles carry the optional hash-verified
+      witness block; the fuzz oracle covers both verdict directions.
+    status: verified
     release: v0.20.0
     tags: [certificate, sat, witness, tcb, design-gated]
     links:
@@ -1083,10 +1088,13 @@ artifacts:
       req-type: functional
       priority: could
       verification-criteria: >
-        To be pinned by the approved design; at minimum: a SAT verdict's
-        witness re-validates independently of the solver, a corrupted
-        witness is rejected, and rivet's SAT warning is retired or
-        downgraded only on the strength of that recheck.
+        As pinned in docs/design/sat-witness.md: end-to-end recheck +
+        byte-identical determinism; three tamper classes (integrity
+        rejection for the assignment, recheck failure for truncation,
+        BindingMismatch for a lying model — the model's guarantee is
+        semantic); the fuzz oracle demands both verdict directions
+        re-check; rivet-side witness ingestion is a filed follow-up and
+        the SAT warning honestly stands until rivet ships it.
 
   - id: TR-039
     type: sw-req

@@ -19,10 +19,26 @@ fuzz_target!(|data: &[u8]| {
     let Ok(script) = std::str::from_utf8(data) else {
         return;
     };
-    if let Ok(outcome) = ordeal::smtlib::solve_str(script) {
-        if let Some(ordeal::CheckResult::Unsat(cert)) = outcome.result {
-            cert.recheck()
-                .expect("fuzz-found Unsat certificate must re-check (soundness oracle)");
+    // TR-038: BOTH verdict directions carry a trusted-crate oracle now —
+    // a fuzz-found Unsat must re-check its LRAT certificate, and a
+    // fuzz-found Sat must re-check its witness (full CNF assignment +
+    // model-binding consistency). check_with_witness already runs both
+    // gates internally and degrades to Unknown on rejection, so any
+    // Sat/Unsat that reaches us was validated — we re-run the recheck
+    // here anyway so a future regression in that internal gating is
+    // itself fuzz-visible.
+    use ordeal::cert_bundle::WitnessCheckResult;
+    if let Ok((result, _declared)) = ordeal::smtlib::solve_str_with_witness(script) {
+        match result {
+            Some(WitnessCheckResult::Unsat(cert)) => {
+                cert.recheck()
+                    .expect("fuzz-found Unsat certificate must re-check (soundness oracle)");
+            }
+            Some(WitnessCheckResult::Sat(cert)) => {
+                cert.recheck()
+                    .expect("fuzz-found Sat witness must re-check (soundness oracle)");
+            }
+            Some(WitnessCheckResult::Unknown) | None => {}
         }
     }
 });

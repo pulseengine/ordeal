@@ -708,6 +708,36 @@ fn parse_sort(s: &Sexp) -> Result<u32, SmtError> {
 /// call on any target (the CLI wraps it with stdin/file reading and exit
 /// codes). Any construct outside the supported subset yields an [`SmtError`].
 pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
+    let (result, declared) = run_script(input, |solver| solver.check())?;
+    Ok(Outcome { result, declared })
+}
+
+/// The witness-carrying twin of [`solve_str`] (TR-038, `cert-bundle`
+/// only): identical reader, but `check-sat` runs
+/// [`Solver::check_with_witness`], so a `Sat` comes back with an
+/// independently re-checkable [`crate::cert_bundle::SatCertificate`].
+/// The fuzz oracle uses this to demand that every fuzz-found verdict —
+/// both directions — re-checks through the trusted crate.
+#[cfg(feature = "cert-bundle")]
+pub fn solve_str_with_witness(input: &str) -> Result<WitnessOutcome, SmtError> {
+    run_script(input, |solver| solver.check_with_witness())
+}
+
+/// [`solve_str_with_witness`]'s result: the last `check-sat`'s
+/// witness-carrying verdict (if any) plus the declared variables.
+#[cfg(feature = "cert-bundle")]
+pub type WitnessOutcome = (
+    Option<crate::cert_bundle::WitnessCheckResult>,
+    Vec<(String, u32)>,
+);
+
+/// Shared reader loop: parse and execute the script, running `check` at
+/// each `check-sat`. Returns the last check's result and the declarations.
+#[allow(clippy::type_complexity)] // (last-verdict, declarations) pair; a generic alias obscures more than it helps
+fn run_script<R>(
+    input: &str,
+    check: impl Fn(&Solver) -> R,
+) -> Result<(Option<R>, Vec<(String, u32)>), SmtError> {
     let toks = tokenize(input);
     let sexps = parse_sexps(&toks)?;
 
@@ -717,7 +747,7 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
     };
     let mut declared: Vec<(String, u32)> = Vec::new();
     let mut solver = Solver::new();
-    let mut result: Option<CheckResult> = None;
+    let mut result: Option<R> = None;
 
     for s in &sexps {
         let items = match s {
@@ -793,7 +823,7 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
                 solver.assert(term);
             }
             "check-sat" => {
-                result = Some(solver.check());
+                result = Some(check(&solver));
             }
             // Model queries: accepted; the CLI prints the model on `sat`.
             "get-model" | "get-value" => {}
@@ -808,7 +838,7 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
         }
     }
 
-    Ok(Outcome { result, declared })
+    Ok((result, declared))
 }
 
 /// Fetch command argument `n`, or a parse error naming the command.
