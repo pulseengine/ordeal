@@ -51,3 +51,8 @@ lean/BlastKernel.lean
 # nix GC roots for the pinned Charon/Aeneas builds (created by lean/regen.sh
 # so store gc — incl. the CI cache trim — keeps the tool closures).
 lean/.nix-roots/
+
+# cargo-cyclonedx writes <crate>.cdx.json into EVERY workspace crate dir; the
+# release workflow copies the one it needs out immediately (#144). Never commit
+# a generated SBOM.
+*.cdx.json
