@@ -1003,3 +1003,34 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --features cert-bundle cert_bundle && cargo test -p ordeal-lrat -- check_sat check_binding"
         coverage: "end-to-end recheck; determinism; 3 tamper classes incl. semantic model check; both-direction fuzz oracle; kernel unit tests"
+
+  - id: VER-038
+    type: sw-verification
+    title: VEX generator and advisory gate proven (TR-043)
+    description: >
+      Confirms TR-043's pre-release criteria, 2026-09-24. Generator: `python3
+      scripts/vex.py self-test` 13/13, and an end-to-end run on the real
+      tree produced a valid CycloneDX 1.5 VEX bom-linked to a real
+      cargo-cyclonedx SBOM, recording advisory-db commit 1e640cd and zero
+      statements (the truthful answer: the shipped closure is ordeal +
+      ordeal-lrat, no third-party crates). Gate, negative-controlled as a
+      pair on unyanked time 0.1.45: as a normal dependency the blocking
+      shipped-closure check exits 1 citing RUSTSEC-2020-0071; as a
+      dev-dependency only the blocking check exits 0 while the advisory
+      full-lockfile check exits 1 citing the same id; tree restored with no
+      diff. A first attempt with smallvec 0.6.9 was DISCARDED: that version
+      is yanked, resolution failed, and both "reds" were a crashed tool
+      run — recorded here so the controls are read with that trap in mind.
+      The published-asset check (VEX inside the signed sums) runs at the
+      v0.20.0 cut, where #146 closes.
+    status: verified
+    release: v0.20.0
+    tags: [vex, supply-chain, negative-control]
+    links:
+      - type: verifies
+        target: TR-043
+    fields:
+      method: automated-test
+      steps:
+        run: "python3 scripts/vex.py self-test && cargo deny --exclude-dev check advisories"
+        coverage: "13 generator checks; control pair on the blocking/advisory split; end-to-end generation on the real tree"
