@@ -32,8 +32,8 @@ artifacts:
         - Z3 available in the CI/dev environment
         - differential corpus generated
       steps:
-        run: "cargo test -p ordeal-oracle --features z3-differential"
-        coverage: "Full QF_BV op set at widths 8/32/64, verdict + model cross-check"
+        run: "cargo test -p ordeal --features oracle --release -- differential"
+        coverage: "Full QF_BV op set at widths 8/32/64, verdict + model cross-check (steps re-pointed 2026-09-23; vocabulary verified, not fully re-run: `oracle` feature exists in crates/ordeal/Cargo.toml and `LIBRARY_PATH=/opt/homebrew/lib cargo test -p ordeal --features oracle -- differential --list` compiles and lists 1 test, oracle::tests::differential_ordeal_vs_z3_on_corpus)"
 
   - id: VER-002
     type: sys-verification
@@ -210,8 +210,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal-term -- array_uf --features z3-differential"
-        coverage: "Array/UF reduction vs Z3; out-of-sliver constructs rejected"
+        run: "cargo test -p ordeal --lib -- sliver::"
+        coverage: "Array/UF reduction vs Z3; out-of-sliver constructs rejected (steps re-pointed + re-run 2026-09-23: 25 passed, 0 failed; the oracle leg is `cargo test -p ordeal --features oracle -- sliver_diff`)"
 
   - id: VER-010
     type: sw-verification
@@ -242,7 +242,9 @@ artifacts:
       Unit-level confirmation that the one-shot check-sat API returns a
       satisfying model on SAT and exposes no incremental (push/pop) surface,
       and that the API and any front end reject each out-of-scope construct with
-      a distinct error — complementing the system-level scope check.
+      a distinct error — complementing the system-level scope check. The
+      no-push/pop-surface property is by-construction — the one-shot Solver API
+      has no such methods — rather than test-named.
     status: verified
     release: v0.2.0
     tags: [scope, errors, api, one-shot, unit-tests]
@@ -254,8 +256,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal-api -- scope one_shot"
-        coverage: "One-shot model return; no incremental API; distinct scope-rejection errors"
+        run: "cargo test -p ordeal --lib -- solver::"
+        coverage: "One-shot model return; no incremental API; distinct scope-rejection errors (steps re-pointed + re-run 2026-09-23: 37 passed, 0 failed)"
 
   - id: VER-012
     type: sw-verification
@@ -277,6 +279,8 @@ artifacts:
       their releases green. Extended P5→P7 on 2026-07-16: P6/P7 shipped (v0.9.0,
       v0.10.0) while this gate still stopped at P5, leaving FEAT-007 and FEAT-008
       with no incoming `verifies` — so `rivet verify` correctly refused them.
+      Its VER-001/VER-009/VER-011 inputs had their steps.run citations
+      re-pointed 2026-09-23 in the #141 citation-rot sweep.
     status: verified
     tags: [roadmap, acceptance, milestone, gate]
     links:
@@ -394,8 +398,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal solver::certificate_is_independently_recheckable; cargo run -p ordeal --example translation_validation"
-        coverage: "cert.cnf populated; recheck() Ok on valid, Err on tampered CNF; example validates 4 correct + 1 buggy lowering"
+        run: "cargo test -p ordeal --lib -- certificate_is_independently_recheckable; cargo run -p ordeal --example translation_validation"
+        coverage: "cert.cnf populated; recheck() Ok on valid, Err on tampered CNF; example validates 4 correct + 1 buggy lowering (steps re-pointed + re-run 2026-09-23: 1 passed, 0 failed)"
 
   - id: VER-017
     type: sw-verification
@@ -417,8 +421,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal canon::; cargo test -p ordeal solver::a5_mul_commutativity_decides_unsat_after_canonicalization; CI 'Z3 Oracle' differential"
-        coverage: "eval-equivalence sweeps; A5 UNSAT + re-check; budget semantics on a hard survivor query; Z3 corpus agreement"
+        run: "cargo test -p ordeal --lib -- a5_mul_commutativity_decides_unsat_after_canonicalization canon::; CI 'Z3 Oracle' differential"
+        coverage: "eval-equivalence sweeps; A5 UNSAT + re-check; budget semantics on a hard survivor query; Z3 corpus agreement (steps re-pointed + re-run 2026-09-23: 6 passed, 0 failed)"
 
   - id: VER-018
     type: sw-verification
@@ -496,8 +500,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal --lib layout:: lowering::tests blast::muldiv; cargo kani --harness urem_8"
-        coverage: "le-bytes round-trip certificate + byte-swap counterexample; exhaustive width-8 native + derived div/rem vs SMT-LIB reference; width 16; multiplier-free structural assertion"
+        run: "cargo test -p ordeal --lib -- layout:: lowering::tests blast::muldiv; cargo kani --harness urem_8"
+        coverage: "le-bytes round-trip certificate + byte-swap counterexample; exhaustive width-8 native + derived div/rem vs SMT-LIB reference; width 16; multiplier-free structural assertion (steps re-pointed + re-run 2026-09-23: 15 passed, 0 failed)"
   - id: VER-021
     type: sw-verification
     title: Symbolic-index select/store reduces soundly and matches Z3's array theory
@@ -529,8 +533,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal --lib sliver:: solver::tests::symbolic_ solver::tests::loom_; cargo test -p ordeal --features oracle --lib sliver_diff"
-        coverage: "Read-over-write law (alias/non-alias/undetermined), congruence, loom LE chain, concrete fast path, Z3 differential"
+        run: "cargo test -p ordeal --lib -- sliver:: solver::tests::symbolic_ solver::tests::loom_; cargo test -p ordeal --features oracle --lib sliver_diff"
+        coverage: "Read-over-write law (alias/non-alias/undetermined), congruence, loom LE chain, concrete fast path, Z3 differential (steps re-pointed + re-run 2026-09-23: 30 passed, 0 failed)"
   - id: VER-022
     type: sw-verification
     title: Verus by(bit_vector) VC ingestion — gale's real obligations discharge
@@ -564,8 +568,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal --lib verus:: smtlib::; ordeal verus <verus --log-all dir> --cert-out <dir>"
-        coverage: "Slicer boundary (prelude excluded, config dropped, location reported, non-BV refused), Bool consts, =>, boolean = (iff), real gale obligations end-to-end"
+        run: "cargo test -p ordeal --lib -- verus:: smtlib::; ordeal verus <verus --log-all dir> --cert-out <dir>"
+        coverage: "Slicer boundary (prelude excluded, config dropped, location reported, non-BV refused), Bool consts, =>, boolean = (iff), real gale obligations end-to-end (steps re-pointed + re-run 2026-09-23: 26 passed, 0 failed)"
   - id: VER-023
     type: sw-verification
     title: prove_valid primitive + consumer recipes discharge with certificates
@@ -592,8 +596,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal --lib prove_valid meld_offset; cargo run -p ordeal --example consumer_recipes"
-        coverage: "prove_valid valid/invalid/dual, meld#338 guard, 5 consumer recipes"
+        run: "cargo test -p ordeal --lib -- prove_valid meld_offset; cargo run -p ordeal --example consumer_recipes"
+        coverage: "prove_valid valid/invalid/dual, meld#338 guard, 5 consumer recipes (steps re-pointed + re-run 2026-09-23: 4 passed, 0 failed)"
   - id: VER-024
     type: sw-verification
     title: Propositional SAT front-end — certified CNF decisions
@@ -687,8 +691,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal --lib deadline_ prove_equiv_sliver eval_const srem_vc lrat"
-        coverage: "TR-029 all three APIs; #97 VC-shape guard; trim invariants"
+        run: "cargo test -p ordeal --lib -- deadline_ prove_equiv_sliver eval_const srem_vc lrat"
+        coverage: "TR-029 all three APIs; #97 VC-shape guard; trim invariants (steps re-pointed + re-run 2026-09-23: 17 passed, 0 failed)"
 
   - id: VER-027
     type: sw-verification
@@ -711,8 +715,8 @@ artifacts:
     fields:
       method: automated-test
       steps:
-        run: "cargo test -p ordeal --features cert-bundle cert_bundle && (cd rules_ordeal/examples && bazel test //...)"
-        coverage: "hermetic gate pass/fail both demonstrated; bundle recheck + 2 tamper rejections"
+        run: "cargo test -p ordeal --features cert-bundle cert_bundle && (in pulseengine/rules_ordeal: cd examples && bazel test //...)"
+        coverage: "hermetic gate pass/fail both demonstrated; bundle recheck + 2 tamper rejections (steps re-pointed + cert_bundle leg re-run 2026-09-23: 5 passed, 0 failed; rules_ordeal leg is external, in pulseengine/rules_ordeal)"
 
   - id: VER-028
     type: sw-verification
