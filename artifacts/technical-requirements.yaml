@@ -913,7 +913,7 @@ artifacts:
       - type: derives-from
         target: SYS-005
     fields:
-      req-type: non-functional
+      req-type: constraint
       priority: must
       verification-criteria: >
         The v0.18.0 GitHub Release carries SHA256SUMS.txt.cosign.bundle,
@@ -946,7 +946,7 @@ artifacts:
       - type: derives-from
         target: SYS-003
     fields:
-      req-type: process
+      req-type: constraint
       priority: should
       verification-criteria: >
         The five criteria of docs/design/checker-single-sourcing.md section
@@ -986,7 +986,7 @@ artifacts:
       - type: refines
         target: TR-034
     fields:
-      req-type: process
+      req-type: constraint
       priority: could
       verification-criteria: >
         Both mechanisations run over the shared LRAT corpus (incl. the #29
@@ -1122,7 +1122,7 @@ artifacts:
       - type: derives-from
         target: SYS-005
     fields:
-      req-type: non-functional
+      req-type: constraint
       priority: should
       verification-criteria: >
         The v0.20.0 GitHub Release carries ordeal-v0.20.0-{x86_64,aarch64}-
@@ -1155,7 +1155,7 @@ artifacts:
       - type: derives-from
         target: SYS-005
     fields:
-      req-type: non-functional
+      req-type: constraint
       priority: should
       verification-criteria: >
         The v0.20.0 GitHub Release carries ordeal-0.20.0.cdx.json; its
@@ -1195,7 +1195,7 @@ artifacts:
       - type: derives-from
         target: SYS-001
     fields:
-      req-type: process
+      req-type: constraint
       priority: should
       verification-criteria: >
         The required Build (wasm32-wasip2) context fails on any
@@ -1226,7 +1226,7 @@ artifacts:
       - type: derives-from
         target: SYS-003
     fields:
-      req-type: process
+      req-type: constraint
       priority: should
       verification-criteria: >
         Positive control: lake build AxiomCheck green on the clean tree.
