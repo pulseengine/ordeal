@@ -1,9 +1,11 @@
 # Formal verification: what is proven, and what is trusted
 
-This document states — precisely and conservatively — what the Lean 4 proof in
-`lean/Sound.lean` does and does not establish about ordeal's LRAT certificate
-checker. It is written to be checkable line by line, not to impress. If a claim
-here cannot be backed by the source or a tool run, it does not belong here.
+This document states — precisely and conservatively — what the Lean 4 proofs in
+`lean/Sound.lean` (the UNSAT direction: the LRAT certificate checker) and
+`lean/SatWitness.lean` (the SAT direction: the witness checker, TR-044) do and
+do not establish about ordeal's trusted checker crate. It is written to be
+checkable line by line, not to impress. If a claim here cannot be backed by
+the source or a tool run, it does not belong here.
 
 ## The one-sentence claim
 
@@ -82,6 +84,73 @@ these would have to fail:
    physically always true (the slices already reside in a 64-bit address space)
    and does not weaken the guarantee in practice.
 
+## The SAT direction: the witness checker (TR-038 → TR-044 / VER-039)
+
+`lean/SatWitness.lean` (namespace `kernel.spec`, the SAME semantics as above —
+`asnOf` is the only new definition) states and proves, `sorry`-free, over the
+same Aeneas model of `kernel.rs`:
+
+```lean
+/-- DIMACS variable v ≥ 1 reads assignment[v-1]; past the end reads false. -/
+def asnOf (assignment : List Bool) : Asn := fun v => assignment.getD (v - 1) false
+
+theorem check_sat_sound (habs : UnsignedAbsSpec)
+    (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool)
+    (h : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) :
+    cnfHolds (asnOf assignment.val) (cnf.val.map (fun c => c.val))
+
+theorem check_sat_satisfiable (habs : UnsignedAbsSpec) (cnf) (assignment) (h : …) :
+    ¬ unsat (cnf.val.map (fun c => c.val))
+
+theorem check_binding_sound
+    (assignment : Slice Bool) (bits : Slice Std.I32) (value : Std.U128)
+    (h : kernel.check_binding assignment bits value = ok (core.result.Result.Ok ())) :
+    ∀ k, (hk : k < bits.val.length) →
+      value.val.testBit k = decide (litHolds (asnOf assignment.val) bits.val[k])
+
+theorem verdicts_exclusive (habs : UnsignedAbsSpec)
+    (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step) (assignment : Slice Bool)
+    (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
+    (hu : kernel.check_steps cnf steps = ok (core.result.Result.Ok ()))
+    (hs : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) : False
+```
+
+Qualifications, in the same spirit as for the UNSAT theorem:
+
+1. **The CNF is the actual argument** (`cnf.val`); the `ordeal-cert/v1`
+   bundle, its hash check and its parser stay untrusted. `h` is a genuine
+   accepting run of the model (the Rust unit tests exhibit such runs).
+2. **`asnOf`'s out-of-range default is never load-bearing.** The strong form
+   `check_sat_witnessed` shows every accepted clause has a literal the kernel
+   validated (nonzero, non-`i32::MIN`), read from a real slot
+   (`1 ≤ |lit| ≤ |assignment|`) and found true. Kernel-review finding recorded
+   while proving: `clause_satisfied` stops at the first true literal, so
+   literals *after* it in an already-satisfied clause are not validated. That
+   cannot affect soundness (a clause with a true literal holds), which is why
+   the specification speaks of "a witnessing literal", not "every literal in
+   range".
+3. **One opaque external — the `habs` hypothesis.** `clause_satisfied`
+   computes `lit.unsigned_abs()`, and the pinned Aeneas has no model of
+   `i32::unsigned_abs`: the generated `Kernel.lean` declares it as
+   `axiom core.num.I32.unsigned_abs : I32 → Result U32`, a function symbol
+   about which nothing is derivable. The `check_sat` family is therefore stated
+   **conditionally** on `UnsignedAbsSpec` — `∀ lit, unsigned_abs lit ⦃ u =>
+   u.val = |lit.val| ⦄`, the (plainly true) contract of the std function — as an
+   explicit hypothesis, never an axiom added by the proof. Consequently
+   `#print axioms kernel.spec.check_sat_sound` / `verdicts_exclusive` list
+   `kernel.core.num.I32.unsigned_abs` besides the three standard axioms — pinned
+   exactly so in `lean/AxiomCheck.lean`, so it cannot grow silently — while
+   `check_binding_sound`, whose path goes through the fully modelled `lit_var`,
+   reports **only** `propext`, `Classical.choice`, `Quot.sound`. The resolution
+   is at the Rust source, as for the LRAT path's former externals
+   (`lean/README.md`): route `clause_satisfied` through `lit_var`; the
+   hypothesis and the extra symbol then vanish and the pins shrink. (Not done
+   in the same change as the proof: it touches kernel logic, which is gated
+   separately.)
+4. `hfit` in `verdicts_exclusive` is `lrat_check_sound`'s side condition,
+   unchanged. Direction: **soundness only**, as above — a rejected witness
+   says nothing.
+
 ## Out of scope (explicitly NOT proven)
 
 - **Certificate text parsing.** The public entry point
@@ -120,7 +189,13 @@ dual-mechanisation work (issue #47 / TR-035).
 ./lean/regen.sh all                 # produce the models (nix; once per pin-bump)
 cd lean
 lake env lean Sound.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
+lake env lean SatWitness.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 echo 'import Sound
-#print axioms kernel.spec.lrat_check_sound' > /tmp/ax.lean
-lake env lean /tmp/ax.lean          # inspect the axiom list
+import SatWitness
+#print axioms kernel.spec.lrat_check_sound
+#print axioms kernel.spec.check_binding_sound
+#print axioms kernel.spec.check_sat_sound' > /tmp/ax.lean
+lake env lean /tmp/ax.lean          # inspect the axiom lists (the last one
+                                    # also names kernel.core.num.I32.unsigned_abs)
+lake build AxiomCheck               # the pinned lists, as a gate
 ```

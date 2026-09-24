@@ -181,6 +181,18 @@ bundle with an optional `witness` block (hash-verified before parsing
 returns). A `Sat` whose witness the trusted crate rejects is never
 returned — it degrades to `Unknown`, symmetric with the UNSAT gate.
 
+The SAT direction of the trusted crate is machine-checked too (v0.21.0,
+TR-044 / VER-039, `lean/SatWitness.lean`, `sorry`-free and CI-gated like
+the UNSAT proof): `kernel.spec.check_sat_sound` — an accepted witness
+satisfies the *actual* carried CNF; `check_sat_satisfiable` — hence that
+CNF is not unsatisfiable; `check_binding_sound` — bit `k` of an advertised
+model value *is* the truth value of the CNF literal it is bound to; and
+`verdicts_exclusive` — no CNF has both an accepted LRAT refutation and an
+accepted witness. One honest qualification: the `check_sat` theorems are
+conditional on the contract of `i32::unsigned_abs`, which the pinned
+Aeneas leaves opaque in the model (`check_binding_sound` carries no such
+condition); `docs/formal-verification.md` states it exactly.
+
 ## Supply chain: SBOM and VEX
 
 From v0.20.0 each GitHub Release carries a CycloneDX SBOM

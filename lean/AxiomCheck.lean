@@ -15,6 +15,7 @@ sorry budget is guarded separately (ci.yml); this file guards everything
 `sorry`-shaped guards miss.
 -/
 import Sound
+import SatWitness
 import BlasterProof
 import BlasterArith
 import BlasterCmp
@@ -59,3 +60,37 @@ import BlasterDiv
 /-- info: 'blast_kernel.spec.blast_urem_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms blast_kernel.spec.blast_urem_bitvec
+
+-- The SAT-witness checker (SatWitness.lean, TR-044 / VER-039).
+-- `check_binding` goes through the fully-modelled `lit_var`: clean.
+/-- info: 'kernel.spec.check_binding_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_binding_sound
+
+-- `check_sat` reaches the ONE external the pinned Aeneas leaves opaque:
+-- `i32::unsigned_abs` (called by `clause_satisfied`), emitted into the
+-- generated model as `axiom kernel.core.num.I32.unsigned_abs : I32 → Result U32`.
+-- It is a function SYMBOL, not a proposition; the theorems assume nothing
+-- about it beyond their explicit `UnsignedAbsSpec` hypothesis (its contract:
+-- `unsigned_abs lit = ok |lit|`). Pinned exactly so it cannot grow silently.
+-- Routing `clause_satisfied` through `lit_var` at the Rust source (as the
+-- LRAT path did for its former externals) removes the symbol from the model
+-- and the hypothesis from the theorems — then shrink these two pins to the
+-- three standard axioms.
+/--
+info: 'kernel.spec.check_sat_sound' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ kernel.core.num.I32.unsigned_abs]
+-/
+#guard_msgs in
+#print axioms kernel.spec.check_sat_sound
+
+/--
+info: 'kernel.spec.verdicts_exclusive' depends on axioms: [propext,
+ Classical.choice,
+ Quot.sound,
+ kernel.core.num.I32.unsigned_abs]
+-/
+#guard_msgs in
+#print axioms kernel.spec.verdicts_exclusive

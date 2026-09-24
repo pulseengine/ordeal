@@ -489,8 +489,15 @@ fn clause_satisfied(
 ///
 /// A linear scan, no search, no solver state: soundness is immediate from
 /// the definition of satisfaction, which is what makes this small enough
-/// to sit in the trusted kernel (the Lean statement rides a later release;
-/// see docs/design/sat-witness.md).
+/// to sit in the trusted kernel. Machine-checked over the Aeneas model as
+/// `kernel.spec.check_sat_sound` / `check_sat_satisfiable`
+/// (lean/SatWitness.lean, TR-044 / VER-039); `verdicts_exclusive` there
+/// shows no CNF has both an accepted refutation and an accepted witness.
+/// Model note: `unsigned_abs` (in `clause_satisfied`) has no Aeneas model
+/// and is an opaque `axiom` in Kernel.lean, so those theorems are stated
+/// conditionally on its contract (`UnsignedAbsSpec`); routing the scan
+/// through `lit_var`, as `check_binding` does, would remove that — see
+/// docs/formal-verification.md.
 pub fn check_sat(cnf: &[Vec<i32>], assignment: &[bool]) -> Result<(), SatWitnessError> {
     let mut clause_index = 0;
     while clause_index < cnf.len() {
@@ -508,7 +515,11 @@ pub fn check_sat(cnf: &[Vec<i32>], assignment: &[bool]) -> Result<(), SatWitness
 /// negated CNF literal (`-v` means "bit k is the negation of variable
 /// v"). This is what makes the *advertised* model part of the witness
 /// rather than decoration: a bundle whose model disagrees with its own
-/// assignment is rejected here (TR-038).
+/// assignment is rejected here (TR-038). Machine-checked as
+/// `kernel.spec.check_binding_sound` (lean/SatWitness.lean, TR-044):
+/// accepted ⟹ bit `k` of `value` equals the truth value of `bits[k]` under
+/// the assignment — axiom-clean (this path uses `lit_var`, which Aeneas
+/// models fully).
 pub fn check_binding(
     assignment: &[bool],
     bits: &[i32],

@@ -61,6 +61,19 @@ lean_lib «Sound» {}
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterDiv» {}
 
+-- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
+-- same Kernel model and the same semantics as Sound.lean —
+-- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),
+-- `check_sat_satisfiable` (⟹ ¬ unsat), `check_binding_sound` (bit k of the
+-- advertised value IS the truth value of literal bits[k]) and
+-- `verdicts_exclusive` (no cnf has both an accepted refutation and an
+-- accepted witness). `sorry`-free. `check_binding_sound` is axiom-clean;
+-- the `check_sat` family is explicitly CONDITIONAL on `UnsignedAbsSpec`,
+-- the contract of the one external the pinned Aeneas leaves opaque
+-- (`i32::unsigned_abs`, an `axiom` in the generated model) — see the file
+-- header and the pins in AxiomCheck.lean.
+@[default_target] lean_lib «SatWitness» {}
+
 -- Axiom-cleanliness gate (issue #137 / TR-042): #guard_msgs-pinned
 -- `#print axioms` for the soundness chain and each blaster capstone. A
 -- default target, so `lake build` — and with it the required Lean CI job —
