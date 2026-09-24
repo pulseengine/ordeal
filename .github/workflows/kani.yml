@@ -18,10 +18,13 @@
 #     here; `kani_tiers.sh check` (first job) fails unless every harness in
 #     proofs.rs is in exactly one tier or explicitly unscheduled with a
 #     reason — a harness nobody runs is not a proof;
-#   * fast (PR + nightly): width-8 rules without mul/div, ~8 min measured;
-#   * heavy (nightly): mul_8 / udiv_8 / urem_8, ONE JOB EACH with its own
+#   * fast (PR + nightly): width-8 rules without mul/div — 1286 s on run
+#     36019140498, the first completion since July;
+#   * heavy (nightly): mul_8 (374 s), ONE JOB PER HARNESS with its own
 #     timeout, so a runner preemption costs one harness, not the tier;
-#   * wide (nightly): the light 32/64 rules.
+#   * everything else is explicitly unscheduled in the script WITH the
+#     measured reason (the width-8 divider had the runner shut down under
+#     it at ~50 min; xor_32 alone exceeded 88 min) — see #169.
 # Job-level `continue-on-error` masks the run conclusion — read the job and
 # step conclusions (gh api …/runs/<id>/jobs), never the run badge.
 name: Kani proofs
@@ -85,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        harness: [mul_8, udiv_8, urem_8]
+        harness: [mul_8]
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -95,26 +98,6 @@ jobs:
       - id: tier
         run: echo "args=$(bash scripts/kani_tiers.sh args heavy:${{ matrix.harness }})" >> "$GITHUB_OUTPUT"
       - name: Run Kani (${{ matrix.harness }})
-        uses: model-checking/kani-github-action@v1
-        with:
-          args: ${{ steps.tier.outputs.args }}
-
-  wide:
-    name: Wide tier (light ops at 32/64, nightly)
-    needs: tiers
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    continue-on-error: true
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: kani-wide
-      - id: tier
-        run: echo "args=$(bash scripts/kani_tiers.sh args wide)" >> "$GITHUB_OUTPUT"
-      - name: Run Kani (wide tier)
         uses: model-checking/kani-github-action@v1
         with:
           args: ${{ steps.tier.outputs.args }}
