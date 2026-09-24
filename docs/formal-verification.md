@@ -94,12 +94,12 @@ same Aeneas model of `kernel.rs`:
 /-- DIMACS variable v ≥ 1 reads assignment[v-1]; past the end reads false. -/
 def asnOf (assignment : List Bool) : Asn := fun v => assignment.getD (v - 1) false
 
-theorem check_sat_sound (habs : UnsignedAbsSpec)
+theorem check_sat_sound
     (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool)
     (h : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) :
     cnfHolds (asnOf assignment.val) (cnf.val.map (fun c => c.val))
 
-theorem check_sat_satisfiable (habs : UnsignedAbsSpec) (cnf) (assignment) (h : …) :
+theorem check_sat_satisfiable (cnf) (assignment) (h : …) :
     ¬ unsat (cnf.val.map (fun c => c.val))
 
 theorem check_binding_sound
@@ -108,7 +108,7 @@ theorem check_binding_sound
     ∀ k, (hk : k < bits.val.length) →
       value.val.testBit k = decide (litHolds (asnOf assignment.val) bits.val[k])
 
-theorem verdicts_exclusive (habs : UnsignedAbsSpec)
+theorem verdicts_exclusive
     (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step) (assignment : Slice Bool)
     (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
     (hu : kernel.check_steps cnf steps = ok (core.result.Result.Ok ()))
@@ -129,24 +129,18 @@ Qualifications, in the same spirit as for the UNSAT theorem:
    cannot affect soundness (a clause with a true literal holds), which is why
    the specification speaks of "a witnessing literal", not "every literal in
    range".
-3. **One opaque external — the `habs` hypothesis.** `clause_satisfied`
-   computes `lit.unsigned_abs()`, and the pinned Aeneas has no model of
-   `i32::unsigned_abs`: the generated `Kernel.lean` declares it as
-   `axiom core.num.I32.unsigned_abs : I32 → Result U32`, a function symbol
-   about which nothing is derivable. The `check_sat` family is therefore stated
-   **conditionally** on `UnsignedAbsSpec` — `∀ lit, unsigned_abs lit ⦃ u =>
-   u.val = |lit.val| ⦄`, the (plainly true) contract of the std function — as an
-   explicit hypothesis, never an axiom added by the proof. Consequently
-   `#print axioms kernel.spec.check_sat_sound` / `verdicts_exclusive` list
-   `kernel.core.num.I32.unsigned_abs` besides the three standard axioms — pinned
-   exactly so in `lean/AxiomCheck.lean`, so it cannot grow silently — while
-   `check_binding_sound`, whose path goes through the fully modelled `lit_var`,
-   reports **only** `propext`, `Classical.choice`, `Quot.sound`. The resolution
-   is at the Rust source, as for the LRAT path's former externals
-   (`lean/README.md`): route `clause_satisfied` through `lit_var`; the
-   hypothesis and the extra symbol then vanish and the pins shrink. (Not done
-   in the same change as the proof: it touches kernel logic, which is gated
-   separately.)
+3. **Axiom-clean, and a new gate for how that could silently stop being
+   true.** `#print axioms` on all four theorems reports **only** `propext`,
+   `Classical.choice`, `Quot.sound` (pinned in `lean/AxiomCheck.lean`). Proving
+   them surfaced a regression: `clause_satisfied` computed `|lit|` with
+   `i32::unsigned_abs`, which the pinned Aeneas has no model of and emits into
+   the generated model as an opaque `axiom core.num.I32.unsigned_abs` — a
+   function symbol about which nothing is derivable, so the first proof had to
+   state the `check_sat` family conditionally on its contract. TR-038 had
+   introduced it and no gate noticed until a pinned theorem reached it. The
+   kernel now spells `|lit|` once, through the fully modelled `lit_var` (as
+   `check_binding` always did), and the Lean CI job fails on any `^axiom` in a
+   generated model (*Generated models carry no axioms*, right after regen).
 4. `hfit` in `verdicts_exclusive` is `lrat_check_sound`'s side condition,
    unchanged. Direction: **soundness only**, as above — a rejected witness
    says nothing.
@@ -195,7 +189,7 @@ import SatWitness
 #print axioms kernel.spec.lrat_check_sound
 #print axioms kernel.spec.check_binding_sound
 #print axioms kernel.spec.check_sat_sound' > /tmp/ax.lean
-lake env lean /tmp/ax.lean          # inspect the axiom lists (the last one
-                                    # also names kernel.core.num.I32.unsigned_abs)
+lake env lean /tmp/ax.lean          # inspect the axiom lists (three standard axioms each)
 lake build AxiomCheck               # the pinned lists, as a gate
+grep -c '^axiom' Kernel.lean BlastKernel.lean   # expect 0 and 0 (CI-gated)
 ```

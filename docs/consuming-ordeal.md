@@ -188,10 +188,9 @@ satisfies the *actual* carried CNF; `check_sat_satisfiable` — hence that
 CNF is not unsatisfiable; `check_binding_sound` — bit `k` of an advertised
 model value *is* the truth value of the CNF literal it is bound to; and
 `verdicts_exclusive` — no CNF has both an accepted LRAT refutation and an
-accepted witness. One honest qualification: the `check_sat` theorems are
-conditional on the contract of `i32::unsigned_abs`, which the pinned
-Aeneas leaves opaque in the model (`check_binding_sound` carries no such
-condition); `docs/formal-verification.md` states it exactly.
+accepted witness. All four depend only on Lean's three standard axioms,
+pinned in CI; `docs/formal-verification.md` states the trust boundary
+exactly.
 
 ## Supply chain: SBOM and VEX
 

@@ -45,12 +45,13 @@ owned step in the main loop; see the kernel's module docs). The model is a
 `lean/regen.sh all` (pinned Charon/Aeneas via nix, pins single-sourced in
 `toolchain-pins.env`) — run it once before proof development; the Lean CI
 job runs it before every proof build, so the proofs always certify the
-current translation. `lake build Kernel` — a CI gate — is green with zero
-sorries in the model. The LRAT path reaches **no axiom** (both of its former
-externals were eliminated at the Rust source); since TR-038 the model carries
-**one opaque external again** — `i32::unsigned_abs`, called only by
-`clause_satisfied` on the SAT-witness path (see the SAT-witness section
-below for what that costs and how to remove it).
+current translation. `lake build Kernel` — a CI gate — is green: **zero
+axioms** (every former external was eliminated at the Rust source) and zero
+sorries in the model. That "zero axioms" is now a CI gate of its own
+(*Generated models carry no axioms*, right after regen): TR-038 had
+re-introduced `core.num.I32.unsigned_abs` — a std call the pinned Aeneas has
+no model of, emitted as an opaque `axiom` — and nothing caught it until
+TR-044 pinned a theorem that reached it. See the SAT-witness section below.
 
 **The mathematics is proved.** `Sound.lean` contains a PURE, monad-free
 restatement of the checker (`pCheckSteps`) and a complete, `sorry`-free proof
@@ -83,13 +84,12 @@ TR-038), with four theorems, `sorry`-free and a default `lake build` target:
 /-- DIMACS variable v ≥ 1 reads assignment[v-1]; past the end reads false. -/
 def asnOf (assignment : List Bool) : Asn := fun v => assignment.getD (v - 1) false
 
-theorem check_sat_sound (habs : UnsignedAbsSpec)
+theorem check_sat_sound
     (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool)
     (h : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) :
     cnfHolds (asnOf assignment.val) (cnf.val.map (fun c => c.val))
 
-theorem check_sat_satisfiable (habs : UnsignedAbsSpec) … :
-    ¬ unsat (cnf.val.map (fun c => c.val))
+theorem check_sat_satisfiable … : ¬ unsat (cnf.val.map (fun c => c.val))
 
 theorem check_binding_sound
     (assignment : Slice Bool) (bits : Slice Std.I32) (value : Std.U128)
@@ -97,7 +97,7 @@ theorem check_binding_sound
     ∀ k, (hk : k < bits.val.length) →
       value.val.testBit k = decide (litHolds (asnOf assignment.val) bits.val[k])
 
-theorem verdicts_exclusive (habs : UnsignedAbsSpec)
+theorem verdicts_exclusive
     (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step) (assignment : Slice Bool)
     (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
     (hu : kernel.check_steps cnf steps = ok (core.result.Result.Ok ()))
@@ -110,20 +110,14 @@ theorem verdicts_exclusive (habs : UnsignedAbsSpec)
   `check_sat_witnessed` shows every accepted clause has a literal the kernel
   validated (nonzero, non-`MIN`), read from a real slot
   (`1 ≤ |lit| ≤ |assignment|`) and found true.
-- `check_binding_sound` is axiom-clean (`#print axioms` = the three standard
-  axioms), pinned in `AxiomCheck.lean`.
-- **One opaque external — the `habs` hypothesis.** `clause_satisfied` calls
-  `i32::unsigned_abs`, which the pinned Aeneas has no model of, so
-  `Kernel.lean` declares `axiom core.num.I32.unsigned_abs : I32 → Result U32`.
-  Nothing is derivable about an opaque symbol, so the `check_sat` family is
-  stated CONDITIONALLY on `UnsignedAbsSpec` (`∀ lit, unsigned_abs lit ⦃ u =>
-  u.val = |lit.val| ⦄` — the std function's contract) as an explicit
-  hypothesis, never an axiom added here. `#print axioms` on those theorems
-  therefore lists that function symbol besides the three standard axioms;
-  `AxiomCheck.lean` pins exactly that, so it cannot grow silently. The fix is
-  at the Rust source, as for the LRAT path's former externals: route
-  `clause_satisfied` through `lit_var` (which `check_binding` already uses);
-  the hypothesis and the extra symbol then vanish and the pin shrinks.
+- All four are axiom-clean (`#print axioms` = the three standard axioms),
+  pinned in `AxiomCheck.lean`. That pin is what surfaced the regression
+  described above: `clause_satisfied` originally computed `|lit|` with
+  `i32::unsigned_abs` (no Aeneas model → opaque `axiom` in `Kernel.lean`),
+  and the first TR-044 proof had to state the `check_sat` family
+  conditionally on that function's contract. The kernel now spells `|lit|`
+  exactly once, through `lit_var` (as `check_binding` always did), and the
+  *Generated models carry no axioms* CI step fails on any recurrence.
 - Kernel-review finding, recorded in the file header rather than papered
   over: `clause_satisfied` stops at the first true literal, so literals after
   it in an already-satisfied clause are not validated. Soundness is

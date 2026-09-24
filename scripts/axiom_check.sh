@@ -11,4 +11,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/../lean"
 lake build AxiomCheck
-echo "axiom gate: AxiomCheck elaborated — soundness chain, SAT-witness theorems and blaster capstones match their pinned axiom lists (propext / Classical.choice / Quot.sound; plus, for the check_sat family only, the pinned opaque external kernel.core.num.I32.unsigned_abs — see lean/AxiomCheck.lean)"
+echo "axiom gate: AxiomCheck elaborated — soundness chain, SAT-witness theorems and blaster capstones depend only on propext / Classical.choice / Quot.sound"

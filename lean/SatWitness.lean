@@ -25,19 +25,14 @@
      accepted). This does not affect soundness — a clause with a true
      literal holds whatever else it contains — but it is why the spec
      speaks of "a witnessing literal", not "every literal in range".
-   * `i32::unsigned_abs` (used by `clause_satisfied`, NOT by `check_binding`,
-     which goes through the fully-modelled `lit_var`) has no model in the
-     pinned Aeneas Std library, so the generated Kernel.lean declares it as
-     an opaque `axiom core.num.I32.unsigned_abs : I32 → Result U32`. Nothing
-     about it is derivable, so every theorem about `check_sat` is explicitly
-     CONDITIONAL on its (obviously true) specification `UnsignedAbsSpec`,
-     taken as a hypothesis — never assumed as an axiom here. Consequently
-     `#print axioms` on the `check_sat` family lists that opaque function
-     symbol besides propext / Classical.choice / Quot.sound (pinned in
-     AxiomCheck.lean); `check_binding_sound` is clean. Routing
-     `clause_satisfied` through `lit_var` at the Rust source (as the LRAT
-     path did for its former externals — see lean/README.md) removes the
-     axiom from the model and the hypothesis from these theorems.
+   * Both checkers compute `|lit|` through `lit_var`, which Aeneas models
+     fully, so every theorem here is axiom-clean (propext / Classical.choice
+     / Quot.sound only — pinned in AxiomCheck.lean). History worth keeping:
+     `clause_satisfied` originally used `i32::unsigned_abs`, which the
+     pinned Aeneas has no model of and extracted as an opaque `axiom`; the
+     first TR-044 proof had to state the `check_sat` family conditionally
+     on its contract. The kernel now has one spelling of `|lit|`, and the
+     ci.yml "generated models carry no axioms" gate fails on a recurrence.
 -/
 -- rivet: verifies VER-039
 import Kernel
@@ -70,13 +65,6 @@ theorem witnessed_clauseHolds {σ : Asn} {n : Nat} {c : List Std.I32}
     (h : witnessed σ n c) : clauseHolds σ c :=
   let ⟨lit, hmem, _, _, hh⟩ := h
   ⟨lit, hmem, hh⟩
-
-/-- The specification of the one external the model leaves opaque:
-    `i32::unsigned_abs` returns `|lit|` as a `u32` (total — it never panics;
-    `MIN` maps to `2^31`, which fits). Taken as a HYPOTHESIS by the `check_sat`
-    family below; see the header. -/
-def UnsignedAbsSpec : Prop :=
-  ∀ lit : Std.I32, core.num.I32.unsigned_abs lit ⦃ (u : Std.U32) => u.val = lit.val.natAbs ⦄
 
 /- ═══════════════════════ SHARED ARITHMETIC LEMMAS ═══════════════════════ -/
 
@@ -124,7 +112,7 @@ theorem testBit_eq_shift_mod (x k : Nat) :
 /-- The clause scan: on `Ok true` the clause is witnessed (a validated,
     in-range, true literal was read). Loop invariant: `sat = true` already
     carries a witness. `Ok false` and every `Err` certify nothing (`True`). -/
-theorem clause_satisfied_spec (habs : UnsignedAbsSpec)
+theorem clause_satisfied_spec
     (clause : Slice Std.I32) (assignment : Slice Bool) (ci : Std.Usize) :
     kernel.clause_satisfied clause assignment ci ⦃ r => match r with
       | .Ok b => b = true → witnessed (asnOf assignment.val) assignment.val.length clause.val
@@ -152,9 +140,8 @@ theorem clause_satisfied_spec (habs : UnsignedAbsSpec)
           · simp
           · rename_i hne0 hneM
             have hvalid : ValidLit lit := validLit_of_checks lit hne0 hneM
-            step with (habs lit) as ⟨u, hu⟩
-            step with (UScalar.cast_inBounds_spec .Usize u (by scalar_tac)) as ⟨var, hvar⟩
-            have hvv : var.val = litVar lit := by rw [hvar, hu]; rfl
+            step with (lit_var_spec lit hvalid) as ⟨var, hvar⟩
+            have hvv : var.val = litVar lit := hvar
             have hvpos : 0 < var.val := by rw [hvv]; exact litVar_pos lit hvalid
             split
             · simp
@@ -202,7 +189,7 @@ theorem clause_satisfied_spec (habs : UnsignedAbsSpec)
 
 /-- The clause loop from index `ci`: on `Ok ()`, every clause is witnessed.
     Invariant: all clauses before `ci` are witnessed. -/
-theorem check_sat_loop_spec (habs : UnsignedAbsSpec)
+theorem check_sat_loop_spec
     (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool) (ci : Std.Usize)
     (hci : ci.val ≤ cnf.val.length)
     (hpre : ∀ c ∈ cnf.val.take ci.val,
@@ -222,7 +209,7 @@ theorem check_sat_loop_spec (habs : UnsignedAbsSpec)
     · rename_i hlt
       have hil : i.val < cnf.val.length := by scalar_tac
       step as ⟨v, hv⟩
-      step with (clause_satisfied_spec habs (alloc.vec.Vec.deref v) assignment i) as ⟨r, hr⟩
+      step with (clause_satisfied_spec (alloc.vec.Vec.deref v) assignment i) as ⟨r, hr⟩
       cases r with
       | Ok b =>
         step as ⟨cf, hcf⟩
@@ -254,11 +241,11 @@ theorem check_sat_loop_spec (habs : UnsignedAbsSpec)
 
 /-- Every clause the kernel accepts is witnessed by a literal it actually
     validated and read — the strong form behind `check_sat_sound`. -/
-theorem check_sat_witnessed (habs : UnsignedAbsSpec)
+theorem check_sat_witnessed
     (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool)
     (h : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) :
     ∀ c ∈ cnf.val, witnessed (asnOf assignment.val) assignment.val.length c.val := by
-  have hspec := check_sat_loop_spec habs cnf assignment 0#usize (by simp) (by simp)
+  have hspec := check_sat_loop_spec cnf assignment 0#usize (by simp) (by simp)
   unfold kernel.check_sat at h
   rw [h] at hspec
   simpa using hspec
@@ -266,22 +253,21 @@ theorem check_sat_witnessed (habs : UnsignedAbsSpec)
 /-- **SAT witness soundness** (TR-038 / TR-044): if the kernel accepts
     `assignment` against `cnf`, the assignment it denotes satisfies every
     clause of the ACTUAL cnf argument (the mathematical list under the slice —
-    the parser stays untrusted). Conditional only on the specification of the
-    opaque external `i32::unsigned_abs` (see the header). -/
-theorem check_sat_sound (habs : UnsignedAbsSpec)
+    the parser stays untrusted). Axiom-clean. -/
+theorem check_sat_sound
     (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool)
     (h : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) :
     cnfHolds (asnOf assignment.val) (cnf.val.map (fun c => c.val)) := by
   intro c hc
   obtain ⟨v, hv, rfl⟩ := List.mem_map.mp hc
-  exact witnessed_clauseHolds (check_sat_witnessed habs cnf assignment h v hv)
+  exact witnessed_clauseHolds (check_sat_witnessed cnf assignment h v hv)
 
 /-- Satisfiability by exhibition: an accepted witness refutes `unsat`. -/
-theorem check_sat_satisfiable (habs : UnsignedAbsSpec)
+theorem check_sat_satisfiable
     (cnf : Slice (alloc.vec.Vec Std.I32)) (assignment : Slice Bool)
     (h : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) :
     ¬ unsat (cnf.val.map (fun c => c.val)) :=
-  fun hu => hu (asnOf assignment.val) (check_sat_sound habs cnf assignment h)
+  fun hu => hu (asnOf assignment.val) (check_sat_sound cnf assignment h)
 
 /- ═════════════════════════ check_binding ═════════════════════════ -/
 
@@ -413,8 +399,7 @@ theorem check_binding_loop_spec
 /-- **Binding soundness** (TR-038 / TR-044): an accepted binding means bit `k`
     of `value` (LSB-first) IS the truth value of the signed literal `bits[k]`
     under the witness — the advertised model is part of the evidence, not
-    decoration. No hypothesis on externals: `check_binding` goes through the
-    fully-modelled `lit_var`. -/
+    decoration. Axiom-clean. -/
 theorem check_binding_sound
     (assignment : Slice Bool) (bits : Slice Std.I32) (value : Std.U128)
     (h : kernel.check_binding assignment bits value = ok (core.result.Result.Ok ())) :
@@ -436,13 +421,12 @@ theorem check_binding_sound
 /-- The two verdict directions are mutually exclusive on the same CNF: no
     `cnf` can have both an accepted LRAT refutation (`lrat_check_sound`) and
     an accepted witness (`check_sat_satisfiable`). `hfit` is the LRAT
-    theorem's address-space side condition; `habs` the witness theorem's
-    external specification. -/
-theorem verdicts_exclusive (habs : UnsignedAbsSpec)
+    theorem's address-space side condition. -/
+theorem verdicts_exclusive
     (cnf : Slice (alloc.vec.Vec Std.I32)) (steps : Slice Step) (assignment : Slice Bool)
     (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
     (hu : kernel.check_steps cnf steps = ok (core.result.Result.Ok ()))
     (hs : kernel.check_sat cnf assignment = ok (core.result.Result.Ok ())) : False :=
-  check_sat_satisfiable habs cnf assignment hs (lrat_check_sound cnf steps hfit hu)
+  check_sat_satisfiable cnf assignment hs (lrat_check_sound cnf steps hfit hu)
 
 end kernel.spec

@@ -9,10 +9,11 @@ v1-optional-field** (v1.1 + coordination only if the check fails); API =
 `check_sat` proof extension **rides v0.21.0** (ships mutation-tested +
 fuzz-oracled now, proved next release). **Proof landed** (v0.21.0, TR-044
 / VER-039, `lean/SatWitness.lean`): `kernel.spec.check_sat_sound`,
-`check_sat_satisfiable`, `check_binding_sound`, `verdicts_exclusive`. The
-`check_sat` theorems are conditional on the contract of `i32::unsigned_abs`,
-which the pinned Aeneas leaves opaque in the model — exact statement and
-the source-level fix in `docs/formal-verification.md`.
+`check_sat_satisfiable`, `check_binding_sound`, `verdicts_exclusive`, all
+axiom-clean. Proving them found that `clause_satisfied`'s
+`i32::unsigned_abs` had re-entered the model as an opaque `axiom`; the
+scan now goes through `lit_var` like `check_binding`, and CI gates
+generated models against axioms — see `docs/formal-verification.md`.
 
 ## The asymmetry being closed
 
