@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# rivet: verifies VER-038
 """CycloneDX 1.5 VEX for ordeal releases (issue #146 / TR-043).
 
 The VEX states, for the SHIPPED dependency closure only, which RustSec

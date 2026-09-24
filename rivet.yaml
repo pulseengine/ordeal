@@ -34,8 +34,14 @@ commits:
     - ci
     - docs
     - build
+  # Commits touching these paths must carry artifact trailers (or
+  # `Trace: skip`). scripts/ hosts CI gates and lean/ the proofs — both are
+  # load-bearing code, not glue. (Note: this key governs commit-trailer
+  # exemption only; source-marker scanning is repo-wide.)
   traced-paths:
     - crates/
+    - scripts/
+    - lean/
 
 externals:
   loom:
