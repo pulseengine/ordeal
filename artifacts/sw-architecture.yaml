@@ -19,7 +19,7 @@ artifacts:
       This is the stable surface loom and synth embed in-process.
       UNTRUSTED — a bug here can at worst yield a wrong SAT model (caught by
       model re-evaluation) or a rejected certificate.
-    status: draft
+    status: implemented
     tags: [api, facade, untrusted]
     links:
       - type: allocated-from
@@ -30,13 +30,8 @@ artifacts:
   - id: ARC-002
     type: sw-arch-component
     title: ordeal-term (QF_BV term graph and preprocessing)
-    description: >
-      Hash-consed term graph for the QF_BV fragment (widths 8/32/64, the full
-      operator set) plus preprocessing for the array/UF sliver: eager
-      read-over-write rewriting for Array(BV32->BV8) select/store over concrete
-      consecutive offsets and Ackermannization of uninterpreted pure_call
-      congruence. Emits a pure QF_BV problem for bit-blasting. UNTRUSTED.
-    status: draft
+    description: "QF_BV term representation (crates/ordeal/src/term.rs): an owned expression tree (Box-linked BvTerm/BoolTerm enums — NOT hash-consed; sharing is recovered downstream by the AIG's structural hashing, and the canon pass orders commutative operands and folds constants, v0.8.0) over any width 1..=128, the closed operator set (loom #246), plus the array/UF sliver (crates/ordeal/src/sliver.rs): read-over-write reduction of Array(BV32->BV8) select/store over concrete AND symbolic BV32 indices (symbolic since v0.11.0, TR-028) and Ackermannization of uninterpreted pure_call congruence. Emits a pure QF_BV problem into the blaster. UNTRUSTED. (Description corrected 2026-09-24: it previously claimed a hash-consed graph, widths 8/32/64 only and concrete offsets only.)"
+    status: implemented
     tags: [term-graph, preprocessing, array, uf, untrusted]
     links:
       - type: allocated-from
@@ -44,16 +39,13 @@ artifacts:
       - type: allocated-from
         target: TR-008
 
+      - type: allocated-from
+        target: TR-028
   - id: ARC-003
     type: sw-arch-component
     title: ordeal-aig (bit-blaster and And-Inverter Graph)
-    description: >
-      Bit-blaster lowering each QF_BV operator to an AIG, with structural
-      hashing and a curated Bitwuzla-subset of local rewrites. Produces the
-      gate-level circuit consumed by the CNF encoder. UNTRUSTED — its
-      correctness is closed by op-by-op bit-blaster proofs (P4) and by the
-      end-to-end certificate/oracle checks.
-    status: draft
+    description: "Bit-blaster (crates/ordeal/src/blast/) lowering each QF_BV operator to an And-Inverter Graph (crates/ordeal/src/aig.rs) with structural hashing and constant folding — no further local rewrites. UNTRUSTED — every blast rule is machine-checked in Lean 4 against BitVec semantics at unbounded width (lean/Blaster*.lean, required CI context; shifts at widths 2^stages), with Kani harnesses at width 8 as an independent second witness and the end-to-end certificate/oracle checks. (Description corrected 2026-09-24: it previously claimed a curated Bitwuzla-subset of rewrites and named Kani P4 as the closing evidence.)"
+    status: implemented
     tags: [bit-blasting, aig, structural-hashing, rewrites, untrusted]
     links:
       - type: allocated-from
@@ -68,7 +60,7 @@ artifacts:
       Tseitin transformation lowering the AIG to CNF, maintaining the mapping
       from bit-vector variables to CNF literals needed to reconstruct models and
       to thread the LRAT certificate back to the original query. UNTRUSTED.
-    status: draft
+    status: implemented
     tags: [cnf, tseitin, encoding, untrusted]
     links:
       - type: allocated-from
@@ -85,7 +77,7 @@ artifacts:
       never load-bearing. Returns a satisfying assignment (mapped back to a
       model) or an UNSAT proof trace. UNTRUSTED — the SAT engine is never part
       of the soundness argument.
-    status: draft
+    status: implemented
     tags: [sat, cdcl, pure-rust, cadical, lrat, untrusted]
     links:
       - type: allocated-from
@@ -96,13 +88,8 @@ artifacts:
   - id: ARC-006
     type: sw-arch-component
     title: ordeal-lrat (verified certificate checker)
-    description: >
-      The sole TRUSTED component. A small, formally-verified LRAT checker: if it
-      accepts a certificate for a CNF, that CNF is unsatisfiable. Includes LRAT
-      trimming. It has no build or link dependency on the solver core, so the
-      trust boundary is exactly this crate. Ordeal reports UNSAT only when this
-      checker accepts the certificate.
-    status: draft
+    description: "The sole TRUSTED component (crates/ordeal-lrat, zero dependencies): the LRAT checker kernel::check_steps — if it accepts a certificate for a CNF, that CNF is unsatisfiable (lean/Sound.lean lrat_check_sound) — and, since TR-038, the SAT-witness checker kernel::check_sat / check_binding (lean/SatWitness.lean check_sat_sound / check_binding_sound / verdicts_exclusive, TR-044). Both are machine-checked over the Aeneas model regenerated from this crate's source in CI (TR-034). It has no build or link dependency on the solver, so the trust boundary is exactly this crate. Ordeal reports UNSAT only when this checker accepts the certificate, and SAT-with-witness only when check_sat accepts. LRAT trimming is NOT here: it lives in the untrusted solver (crates/ordeal/src/lrat.rs), and an over-trimmed proof is simply rejected. (Description corrected 2026-09-24: it previously claimed the trusted crate includes LRAT trimming.)"
+    status: implemented
     tags: [lrat, checker, verified, trusted-core, aeneas, lean]
     links:
       - type: allocated-from
@@ -114,6 +101,12 @@ artifacts:
       - type: allocated-from
         target: TR-013
 
+      - type: allocated-from
+        target: TR-038
+      - type: allocated-from
+        target: TR-044
+      - type: allocated-from
+        target: TR-034
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)
@@ -122,7 +115,7 @@ artifacts:
       Z3 and compares verdicts and models. Also drives the benchmark comparison.
       Excluded from the production critical path and from the soundness
       argument; NOT trusted and NOT shipped in the embeddable build.
-    status: draft
+    status: implemented
     tags: [z3, oracle, differential, benchmark, dev-only]
     links:
       - type: allocated-from
@@ -140,7 +133,7 @@ artifacts:
       Realized as target.'cfg(...)'.dependencies in Cargo.toml so no FFI/C
       dependency ever reaches the wasm path. UNTRUSTED — backend choice is
       below the trust boundary and never affects soundness.
-    status: draft
+    status: implemented
     tags: [wasm32-wasip2, cdcl, pure-rust, cadical, backend-split, cfg, untrusted]
     links:
       - type: allocated-from
@@ -151,16 +144,8 @@ artifacts:
   - id: ARC-009
     type: sw-arch-component
     title: ordeal-build-bazel (rules_rust + rules_wasm_component + reserved rules_lean)
-    description: >
-      The Bazel build definition mirroring the synth org conventions:
-      MODULE.bazel wires rules_rust (crate set resolved from Cargo.lock via
-      crate_universe from_cargo) and rules_wasm_component (wasm32-wasip2
-      component packaging), with rules_lean reserved as a documented placeholder
-      for the verified checker. Root and crate BUILD.bazel provide native
-      library/binary/test targets and the wasm component target; a wasm32_wasip2
-      platform drives --config=wasm. No synth-specific rules (Rocq/ARM/Renode)
-      are pulled in. Build infrastructure — not part of the solver TCB.
-    status: draft
+    description: "The Bazel build definition (MODULE.bazel, BUILD.bazel, crates/*/BUILD.bazel) mirroring the synth org conventions: rules_rust with the crate set resolved from Cargo.lock via crate_universe from_cargo; native rust_library / rust_binary / rust_test targets (bazel test executes the unit tests, #136). rules_wasm_component is declared as a bazel_dep but deliberately NOT wired to a target (#136 disposition: the enforced wasm artifact is the cargo-built component, gated by the required native<->wasm differential; a second, unexercised Bazel wasm build would recreate the two-artifact drift). rules_lean remains a reserved placeholder — the Lean proofs build via lake + the nix-pinned Charon/Aeneas regen in CI, not Bazel. The optional 'Bazel build' CI job is non-required. (Description corrected 2026-09-24: it previously stated rules_wasm_component packages the component.)"
+    status: implemented
     tags: [bazel, rules_rust, rules_wasm_component, rules_lean, build]
     links:
       - type: allocated-from
