@@ -118,12 +118,10 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
-    /// Lowercase hex of an independent digest (sha2 0.11 arrays have no LowerHex).
-    fn hex_of(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
-
-    // FIPS 180-4 / NIST CAVP known answers.
+    // FIPS 180-4 / NIST CAVP known answers. (The differential against the
+    // independent `sha2` crate lives in tests/sha256_differential.rs so the
+    // library's unit tests stay free of dev-dependencies — Bazel's
+    // `rust_test` compiles them without Cargo's dev-deps.)
     #[test]
     fn fips_known_answers() {
         assert_eq!(
@@ -150,25 +148,5 @@ mod tests {
             sha256_hex(&million),
             "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0"
         );
-    }
-
-    /// Padding boundaries: every length from 0 to 200 bytes crosses the
-    /// 55/56/63/64-byte cases that decide whether padding needs a second
-    /// block. Checked against the independent `sha2` crate (dev-dep).
-    #[test]
-    fn matches_sha2_across_padding_boundaries() {
-        use sha2::Digest;
-        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
-        for len in 0..=200usize {
-            let mut buf = Vec::with_capacity(len);
-            for _ in 0..len {
-                x ^= x << 13;
-                x ^= x >> 7;
-                x ^= x << 17;
-                buf.push((x & 0xff) as u8);
-            }
-            let expect = hex_of(&sha2::Sha256::digest(&buf));
-            assert_eq!(sha256_hex(&buf), expect, "len {len}");
-        }
     }
 }
