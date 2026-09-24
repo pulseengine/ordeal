@@ -81,19 +81,18 @@ fn compress(state: &mut [u32; 8], block: &[u8]) {
 #[must_use]
 pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut state = H0;
-    let mut chunks = bytes.chunks_exact(64);
-    for block in &mut chunks {
+    let (blocks, rem) = bytes.as_chunks::<64>();
+    for block in blocks {
         compress(&mut state, block);
     }
     // Padding: 0x80, zeros to 56 mod 64, then the bit length big-endian.
-    let rem = chunks.remainder();
     let mut tail = [0u8; 128];
     tail[..rem.len()].copy_from_slice(rem);
     tail[rem.len()] = 0x80;
     let tail_len = if rem.len() < 56 { 64 } else { 128 };
     let bit_len = (bytes.len() as u64).wrapping_mul(8);
     tail[tail_len - 8..tail_len].copy_from_slice(&bit_len.to_be_bytes());
-    for block in tail[..tail_len].chunks_exact(64) {
+    for block in tail[..tail_len].as_chunks::<64>().0 {
         compress(&mut state, block);
     }
     let mut out = [0u8; 32];
