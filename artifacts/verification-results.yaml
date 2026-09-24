@@ -1461,3 +1461,28 @@ artifacts:
         target: VER-039
       - type: part-of-execution
         target: VE-027
+
+  - id: VE-028
+    type: verification-execution
+    title: Kani tiers — first complete dispatched run after re-tiering (VER-043)
+    status: implemented
+    description: "workflow_dispatch of kani.yml on main at f144348 (run 36032091695): every job succeeded — Harness coverage 3 s (82 harnesses = 25 fast + 1 heavy + 56 explicitly unscheduled with reasons), Fast tier 1119 s with all 25 harnesses VERIFICATION SUCCESSFUL (10-77 s each; ite_8 105 s), Heavy tier mul_8 463 s SUCCESSFUL (434 s verification). The preceding dispatch 36019140498 on the pre-re-tier layout is the negative side of the record: fast 1286 s + mul_8 374 s succeeded while udiv_8/urem_8 had the runner shut down under them at 3269/2973 s and the wide tier's first harness xor_32 did not finish in 88 min — those harnesses are now unscheduled with exactly those numbers (issue #169). Coverage-check negative control executed locally: hiding add_8 from every list yields exactly one FAIL. Before #168 the job had not completed since 2026-07-16."
+    fields:
+      environment: "note: GitHub-hosted ubuntu-latest, Kani 0.68.0 via kani-github-action@v1, tiers from scripts/kani_tiers.sh @ f144348"
+      executor: ci
+      timestamp: 2026-09-24T17:07:00Z
+      version: f144348
+
+  - id: VV-051
+    type: verification-verdict
+    title: VER-043 pass — the Kani layer completes again; every scheduled harness SUCCESSFUL
+    status: implemented
+    description: "Executed pass. TR-046's criteria hold: a dispatched run in which every tier job completes with every harness SUCCESSFUL, fast tier under 20 minutes, coverage check potent both ways, heavy harnesses in their own jobs with explicit timeouts. Falsified if a future scheduled run has a job that neither succeeds nor reports a proof failure (a cancelled/shut-down job is the vacuous state this requirement forbids) or if a harness lands in proofs.rs without a tier."
+    fields:
+      evidence: "run 36032091695: coverage 3s, fast 1119s (25/25 SUCCESSFUL), mul_8 463s SUCCESSFUL; coverage check positive + negative control; fast tier under 20 min (1119 s and 1039 s on the PR run)"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-043
+      - type: part-of-execution
+        target: VE-028
