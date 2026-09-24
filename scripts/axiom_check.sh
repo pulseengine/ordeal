@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # rivet: verifies VER-036
+# rivet: verifies VER-039
 # The axiom-cleanliness gate (issue #137 / TR-042), as one named, callable
 # step: elaborate lean/AxiomCheck.lean, whose #guard_msgs-pinned
 # `#print axioms` fail on any axiom beyond propext / Classical.choice /
