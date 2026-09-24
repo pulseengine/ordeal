@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-24
+
+**Execute what we ship, and both verdict directions become evidence**
+(TR-037/038/039/040/041/042/043; issues #132, #133, #135–#141, #143, #144,
+#146). Shaped by the 2026-09-16 four-agent consistency sweep (build-vs-test,
+claims-vs-reality, gate potency, citation rot) and three varve field asks.
+
+### Added
+- **Re-checkable SAT witness** (TR-038, #133): `Solver::check_with_witness`
+  returns a `SatCertificate` — model + CNF + full assignment + bit map —
+  validated by the trusted `ordeal-lrat` crate (`check_sat`,
+  `check_binding`) BEFORE `Sat` is returned, symmetric with the LRAT gate.
+  Both verdict directions now re-check against the same carried CNF. The
+  `ordeal-cert/v1` SAT bundle gains an optional, hash-verified `witness`
+  block (rivet 0.32.0 tolerates it); a lying model is caught semantically.
+  The Lean statement for `check_sat` rides v0.21.0.
+- **`--format json`** (TR-037, #132): structured verdicts for `check` and
+  `verus`; on unsat the JSON carries the full CNF + LRAT pair, so the
+  output is itself re-checkable evidence.
+- **musl release builds** beside gnu (TR-039, #143) and a **CycloneDX SBOM**
+  inside the cosign-signed `SHA256SUMS.txt` (TR-040, #144).
+- **CycloneDX VEX** (TR-043, #146) for the shipped closure — generated from
+  the tag's own lockfile, bom-linked to the SBOM, recording the advisory-db
+  commit; never auto-judged; weekly re-audit opens an issue, re-issues are
+  new signed assets. `cargo-deny` blocks on the shipped closure.
+- **Fuzz crate** with a soundness oracle (#139): every fuzz-found verdict,
+  both directions, must re-check. Its first 30 s found a real panic (below).
+
+### Fixed
+- **API-reachable panic**: a name declared at two widths (duplicate
+  `declare-const`, or `Var{a,32}` + `Var{a,8}` via the API) slipped past
+  per-term validation into a blaster width assert. `Solver::validate` now
+  enforces one width per name (→ `Unknown`, per contract); the parser rejects
+  width-changing redeclaration and malformed declarations. Fuzz-found.
+- A Linux-only EPIPE race in the CLI test harness.
+
+### Changed — gates
+- The required wasm32 job now **executes** the component under wasmtime and
+  demands byte-identical verdicts, models and certificates vs native
+  (TR-041, #135); every release leg solves a certified unsat; the aarch64
+  musl leg runs its assert under qemu; repro compares shipped configs.
+- **Axiom cleanliness is a gate** (TR-042, #137): `lean/AxiomCheck.lean`
+  pins the axiom list of the soundness chain and blaster capstones.
+- `cert-bundle` compiles in a blocking job; the sorry guard's scope is
+  tree-derived and exit-code-honest; CaDiCaL joined the required contexts
+  (8); examples execute; benches build; rivet citations are checked in CI
+  (VER-016/017 had cited commands that ran zero tests); Bazel runs its
+  tests; Kani's nightly wider tier is real. Five stale doc surfaces
+  re-aligned with shipped reality, drift guard extended.
+
+### Scope
+- TR-032 (seed portfolio) moved to backlog with no release: its
+  measure-first activation has never fired; it re-enters a release with a
+  consumer measurement.
+
 ## [0.19.0] - 2026-08-20
 
 **TCB deepening: drift made unrepresentable, and a second mechanisation
