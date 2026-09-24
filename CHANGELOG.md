@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The SAT witness checker is machine-checked** (TR-044, #161 — the half
+  of #133 deferred at the TR-038 design): `lean/SatWitness.lean` proves,
+  over the Aeneas-regenerated model and in `Sound.lean`'s own vocabulary,
+  `check_sat_sound` (an accepted witness satisfies every clause of the
+  actual CNF argument — hence `check_sat_satisfiable`, not `unsat`),
+  `check_binding_sound` (bit `k` of an advertised model value *is* the
+  truth value of the signed literal it is bound to) and
+  `verdicts_exclusive` (no CNF has both an accepted LRAT refutation and an
+  accepted witness). Zero `sorry`; `AxiomCheck.lean` pins all three to
+  `[propext, Classical.choice, Quot.sound]`.
+- **CI gates axioms in the generated models.** The proof surfaced that
+  `clause_satisfied`'s `unsigned_abs()` call had put an opaque `axiom`
+  into `Kernel.lean` (TR-038 re-introduced it; nothing caught it because
+  `AxiomCheck` only sees axioms reachable from pinned theorems). The scan
+  now goes through `lit_var` like `check_binding` — the one logic line
+  changed in the trusted kernel — and a new step after regen fails on any
+  `^axiom` line in either generated model.
 - **The SAT witness ships in the CLI** (TR-045, #162 — a field finding from
   rivet's witness ingestion, rivet#988/#991): `ordeal check --format json`
   on `sat` now carries `certificate.clauses` plus a `witness` block (the

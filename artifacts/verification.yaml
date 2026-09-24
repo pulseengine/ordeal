@@ -1038,7 +1038,7 @@ artifacts:
   - id: VER-039
     type: sw-verification
     title: SAT witness checker soundness proven in Lean — zero sorry, axiom-pinned (TR-044)
-    status: approved
+    status: verified
     release: v0.21.0
     description: "Confirms TR-044 by the verifier itself: lean/SatWitness.lean must elaborate under lake build over the model regen.sh regenerated in the same job (TR-034), the tree-derived sorry guard must count zero, and AxiomCheck.lean must pin the three theorems to [propext, Classical.choice, Quot.sound]. The evidence is the green required Lean CI context on the landing PR plus a local clean-room re-run; recorded as a VE/VV pair when executed."
     tags: [sat, witness, lean, proof, tcb]

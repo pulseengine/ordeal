@@ -1281,7 +1281,7 @@ artifacts:
   - id: TR-044
     type: sw-req
     title: SAT witness checker soundness machine-checked in Lean (check_sat_sound / check_binding_sound / verdicts_exclusive)
-    status: approved
+    status: verified
     release: v0.21.0
     description: "TR-038 shipped the trusted SAT twin of the LRAT checker (kernel::check_sat + check_binding) with its soundness argued in prose ('immediate from the definition of satisfaction'); the design decision recorded in TR-038 was that the Lean statement rides v0.21.0. This requirement closes that gap the same way issue #12 closed it for UNSAT: over the Aeneas-regenerated model (TR-034 generation by construction) prove check_sat_sound (accept => the denoted assignment satisfies every clause of the actual CNF argument, hence not unsat), check_binding_sound (accept => bit k of the advertised value IS the truth value of the signed literal bits[k] under the witness, LSB-first), and verdicts_exclusive (no CNF admits both an accepted refutation and an accepted witness). Proof work found that clause_satisfied's unsigned_abs() call had re-introduced an opaque axiom into the generated model (no gate caught it); the scan is routed through lit_var like check_binding (semantically identical, MIN already excluded) and CI now gates axiom lines in both generated models. The kernel's fuzz oracle, unit tests and dual-mechanisation differential remain the executable evidence for TR-038."
     tags: [sat, witness, tcb, lean, proof]
