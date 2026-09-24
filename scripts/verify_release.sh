@@ -58,7 +58,24 @@ mac/ordeal check q.smt2 2>/dev/null | head -1 | grep -qx unsat && ok "published 
 J=$(mac/ordeal check q.smt2 --format json 2>/dev/null); python3 - "$J" <<'PY' && ok "--format json unsat carries cnf+lrat" || bad "json shape"
 import json,sys; d=json.loads(sys.argv[1]); assert d["verdict"]=="unsat" and d["certificate"]["clauses"] and d["certificate"]["lrat"]
 PY
-
+# rivet: verifies VER-042
+printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (= (bvurem a #x05) #x03))\n(check-sat)\n' > s.smt2
+mac/ordeal check s.smt2 --format json 2>/dev/null > sat.json
+python3 - sat.json <<'PY' && ok "--format json sat witness re-checks independently (clauses, bindings, both sha256 via hashlib)" || bad "sat witness recheck"
+import json,sys,hashlib
+d=json.load(open(sys.argv[1])); assert d["verdict"]=="sat", d["verdict"]
+w=d["certificate"]["witness"]; cnf=d["certificate"]["clauses"]; asn=[c=="1" for c in w["assignment"]]
+assert w["encoding"]=="bitstring-lsb-var1"
+def holds(l): v=abs(l); return asn[v-1] if l>0 else not asn[v-1]
+assert all(any(holds(l) for l in c) for c in cnf), "unsatisfied clause"
+for m in d["model"]:
+    e=next(e for e in w["bit_map"] if e["name"]==m["name"]); val=int(m["value"][2:],16)
+    assert all(((val>>k)&1==1)==holds(l) for k,l in enumerate(e["bits"])), "binding mismatch"
+    assert val%5==3
+assert hashlib.sha256(w["assignment"].encode()).hexdigest()==w["assignment_sha256"]
+bm="".join(f"{e['name']} {e['width']}"+"".join(f" {b}" for b in e["bits"])+"\n" for e in w["bit_map"])
+assert hashlib.sha256(bm.encode()).hexdigest()==w["bit_map_sha256"]
+PY
 else
   skip "darwin-arm64 execution checks (host is $(uname -s)-$(uname -m))"
 fi
@@ -80,7 +97,7 @@ PY
 # 5. release body composed from tag annotation + rivet note
 gh release view "$TAG" --repo "$REPO" --json body -q .body > body.md
 grep -q "## Falsification statement" body.md && grep -q "Release note (rivet, from the trace)" body.md && grep -q "## Functionalities provided" body.md && grep -q "Not covered by this note" body.md && ok "release body: falsification + rivet note sections present" || bad "release body composition"
-grep -q "TR-038" body.md && ok "release body lists TR-038 (from the trace)" || bad "body lacks in-scope artifacts"
+grep -qE "\`(TR|VER)-[0-9]{3}\` \(verified\)" body.md && ok "release body lists the release's verified artifacts (from the trace): $(grep -oE '\`TR-[0-9]{3}\`' body.md | tr -d '\`' | sort -u | tr '\n' ' ')" || bad "body lacks in-scope artifacts"
 
 # 6. crates.io
 for c in ordeal ordeal-lrat; do
