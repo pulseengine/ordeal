@@ -169,7 +169,7 @@ For `missing-capability` and `soundness`, a minimal reproducing `BoolTerm`
 
 ## SAT verdicts as evidence: the re-checkable witness
 
-Since TR-038 (`cert-bundle` feature), `Solver::check_with_witness()`
+Since TR-038, `Solver::check_with_witness()` (no feature gate since #162)
 returns `Sat` as a `SatCertificate`: the model **plus** the full CNF
 assignment and per-variable bit map. `cert.recheck()` re-establishes the
 verdict through the same trusted `ordeal-lrat` crate that validates UNSAT
@@ -191,6 +191,23 @@ model value *is* the truth value of the CNF literal it is bound to; and
 accepted witness. All four depend only on Lean's three standard axioms,
 pinned in CI; `docs/formal-verification.md` states the trust boundary
 exactly.
+
+### At the command line
+
+Since #162 (TR-045) the released binary carries the same witness:
+`ordeal check foo.smt2 --format json` on `sat` prints `certificate.clauses`
+and a `witness` block — `encoding` (`bitstring-lsb-var1`), the full
+`assignment`, the per-variable `bit_map` (`name`, `width`, LSB-first signed
+CNF literals) and `assignment_sha256` / `bit_map_sha256` — byte-identical
+to the `ordeal-cert/v1` witness the API emits, so rivet's field mapping
+(`witness-sha256`, `bit-map-sha256`) applies to CLI output too. Re-check
+it exactly as the API's: `ordeal_lrat::check_sat(clauses, assignment)`
+and `ordeal_lrat::check_binding(assignment, bits, value)` per model
+variable. The hashes are computed in-tree (`ordeal::sha256`, FIPS-tested
+and cross-checked against `sha2` in CI) so the default binary stays
+dependency-free; they are integrity only — the verdict rests on the
+recheck, never on the hash. A `sat` is only printed after the trusted
+recheck passed; text mode notes the witness size on stderr.
 
 ## Supply chain: SBOM and VEX
 

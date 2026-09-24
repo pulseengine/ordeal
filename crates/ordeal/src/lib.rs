@@ -62,12 +62,17 @@ pub mod layout;
 pub mod lowering;
 pub mod lrat;
 pub mod sat;
+/// In-tree SHA-256 for `ordeal-cert/v1` content hashes (#162 / TR-045):
+/// integrity only, never part of the soundness argument.
+pub mod sha256;
 pub mod sliver;
 pub mod smtlib;
 pub mod solver;
 pub mod term;
 pub mod trap;
 pub mod verus;
+/// The re-checkable SAT witness (TR-038) — always compiled.
+pub mod witness;
 
 #[cfg(feature = "oracle")]
 pub mod oracle;
@@ -77,3 +82,4 @@ pub mod sat_cadical;
 
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};
+pub use witness::{SatCertificate, SatRecheckError, WitnessCheckResult};

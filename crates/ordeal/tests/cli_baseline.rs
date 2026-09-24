@@ -172,3 +172,138 @@ fn help_keeps_the_honesty_banner() {
         assert!(help.contains(needle), "help must contain `{needle}`");
     }
 }
+
+/// Lowercase hex of an independent digest (sha2 0.11 arrays have no LowerHex).
+fn hex_of(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+// rivet: verifies VER-042
+/// #162 / TR-045: the `sat` JSON carries the FULL witness — clauses,
+/// complete assignment, per-variable bit map, both content hashes — and
+/// this test re-establishes the verdict with the trusted crate (zero trust
+/// in the CLI process), checks every advertised model value against the
+/// bit map, and recomputes the hashes with an INDEPENDENT SHA-256 (`sha2`,
+/// dev-only) so the in-tree implementation the binary ships is itself
+/// cross-checked on real output.
+#[test]
+fn format_json_sat_carries_a_recheckable_witness() {
+    use sha2::Digest;
+    let out = ordeal_stdin(&["check", "-", "--format", "json"], SAT_SCRIPT);
+    assert!(out.status.success());
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(v["verdict"], "sat");
+    let cert = &v["certificate"];
+    let cnf: Vec<Vec<i32>> = cert["clauses"]
+        .as_array()
+        .expect("clauses")
+        .iter()
+        .map(|c| {
+            c.as_array()
+                .expect("clause")
+                .iter()
+                .map(|l| l.as_i64().expect("lit") as i32)
+                .collect()
+        })
+        .collect();
+    let w = &cert["witness"];
+    assert_eq!(w["encoding"], "bitstring-lsb-var1");
+    let bitstring = w["assignment"].as_str().expect("assignment bitstring");
+    let assignment: Vec<bool> = bitstring
+        .chars()
+        .map(|c| match c {
+            '0' => false,
+            '1' => true,
+            other => panic!("non-bit character {other:?} in the assignment"),
+        })
+        .collect();
+    assert!(!cnf.is_empty() && !assignment.is_empty());
+    // 1. Every clause is satisfied — the trusted crate says so, not the CLI.
+    ordeal_lrat::check_sat(&cnf, &assignment).expect("the emitted witness re-checks");
+    // 2. Every advertised model value IS what the assignment says, bit by bit.
+    let model = v["model"].as_array().expect("model array");
+    let bit_map = w["bit_map"].as_array().expect("bit map");
+    assert_eq!(model.len(), 1, "one declared variable");
+    for binding in model {
+        let name = binding["name"].as_str().expect("name");
+        let width = binding["width"].as_u64().expect("width");
+        let value = u128::from_str_radix(
+            binding["value"]
+                .as_str()
+                .expect("value")
+                .trim_start_matches("#x"),
+            16,
+        )
+        .expect("hex value");
+        let entry = bit_map
+            .iter()
+            .find(|e| e["name"] == name)
+            .expect("every model variable has a bit-map entry");
+        assert_eq!(entry["width"].as_u64().expect("bm width"), width);
+        let bits: Vec<i32> = entry["bits"]
+            .as_array()
+            .expect("bits")
+            .iter()
+            .map(|b| b.as_i64().expect("bit lit") as i32)
+            .collect();
+        assert_eq!(bits.len() as u64, width);
+        ordeal_lrat::check_binding(&assignment, &bits, value)
+            .expect("the advertised model value is bound by the witness");
+        assert_eq!(value % 5, 3, "and it satisfies the script");
+    }
+    // 3. The content hashes are what an independent SHA-256 computes over
+    //    the documented canonical texts.
+    let assignment_sha = hex_of(&sha2::Sha256::digest(bitstring.as_bytes()));
+    assert_eq!(w["assignment_sha256"], assignment_sha);
+    let mut bit_map_text = String::new();
+    for e in bit_map {
+        bit_map_text.push_str(e["name"].as_str().unwrap());
+        bit_map_text.push(' ');
+        bit_map_text.push_str(&e["width"].as_u64().unwrap().to_string());
+        for b in e["bits"].as_array().unwrap() {
+            bit_map_text.push(' ');
+            bit_map_text.push_str(&b.as_i64().unwrap().to_string());
+        }
+        bit_map_text.push('\n');
+    }
+    let bit_map_sha = hex_of(&sha2::Sha256::digest(bit_map_text.as_bytes()));
+    assert_eq!(w["bit_map_sha256"], bit_map_sha);
+}
+
+/// A tampered witness must be REJECTED by the same re-check a consumer
+/// runs — the negative control that proves test above is not vacuous:
+/// flip one assignment bit that a model variable is bound to.
+#[test]
+fn tampered_sat_witness_is_rejected_by_the_trusted_crate() {
+    let out = ordeal_stdin(&["check", "-", "--format", "json"], SAT_SCRIPT);
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    let w = &v["certificate"]["witness"];
+    let mut assignment: Vec<bool> = w["assignment"]
+        .as_str()
+        .unwrap()
+        .chars()
+        .map(|c| c == '1')
+        .collect();
+    let entry = &w["bit_map"].as_array().unwrap()[0];
+    let bits: Vec<i32> = entry["bits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b.as_i64().unwrap() as i32)
+        .collect();
+    let value = u128::from_str_radix(
+        v["model"][0]["value"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches("#x"),
+        16,
+    )
+    .unwrap();
+    ordeal_lrat::check_binding(&assignment, &bits, value).expect("pristine binding holds");
+    let var = bits[0].unsigned_abs() as usize - 1;
+    assignment[var] = !assignment[var];
+    assert!(
+        ordeal_lrat::check_binding(&assignment, &bits, value).is_err(),
+        "a flipped witness bit must break the advertised binding"
+    );
+}

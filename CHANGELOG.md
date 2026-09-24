@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The SAT witness ships in the CLI** (TR-045, #162 — a field finding from
+  rivet's witness ingestion, rivet#988/#991): `ordeal check --format json`
+  on `sat` now carries `certificate.clauses` plus a `witness` block (the
+  full assignment as `bitstring-lsb-var1`, the per-variable bit map, and
+  both content hashes), byte-identical to the `ordeal-cert/v1` witness the
+  API emits — so a consumer of the released binary re-establishes a `sat`
+  the same way it re-establishes an `unsat`, with `ordeal_lrat::check_sat`
+  + `check_binding` and zero trust in the process. Text mode is unchanged
+  on stdout (a witness note goes to stderr). Every CLI `sat` is now only
+  printed after the trusted recheck (it degrades to `unknown` otherwise).
+- **In-tree SHA-256** (`ordeal::sha256`, FIPS 180-4 known answers +
+  differential against `sha2` on every padding boundary in `cargo test`)
+  so the witness hashes ship in the **dependency-free default binary** —
+  the option chosen on #162 over pulling `sha2`/`serde_json` into the
+  shipped closure. Integrity only; the soundness argument is unchanged.
+
+### Changed
+- `SatCertificate`, `WitnessCheckResult`, `SatRecheckError`,
+  `Solver::check_with_witness` and `smtlib::solve_str_with_witness` are no
+  longer behind `cert-bundle`; they live in the always-compiled
+  `ordeal::witness` module (re-exported from `cert_bundle` and the crate
+  root, so 0.20.0 paths keep compiling). `cert-bundle` no longer depends on
+  `sha2`.
+
 ## [0.20.0] - 2026-09-24
 
 **Execute what we ship, and both verdict directions become evidence**
