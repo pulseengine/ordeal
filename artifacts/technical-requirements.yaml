@@ -872,9 +872,11 @@ artifacts:
       a single-query latency wall that consumer-side fan-out, the cadical
       accelerator, and TR-009 caching do not clear — with the measurement.
       Wasm is never affected (threads unavailable; the own sequential core
-      remains the only engine there, TR-004).
+      remains the only engine there, TR-004). Scope decision 2026-09-24 (maintainer, after blocking two
+      cuts): BACKLOG with no release — a condition-triggered requirement is
+      not calendar-bound; it re-enters a release the day a consumer
+      measurement arrives, and never blocks a cut while waiting.
     status: draft
-    release: v0.20.0
     tags: [parallel, portfolio, parked, measure-first, native-only]
     links:
       - type: derives-from
