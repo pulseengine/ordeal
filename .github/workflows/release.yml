@@ -188,6 +188,10 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.tag || github.ref }}
+          # Full history + tags: the rivet release note walks the commits
+          # since the previous tag, and the tag annotation (the falsification
+          # statement) is read back into the release body.
+          fetch-depth: 0
 
       - name: Download all build artifacts
         uses: actions/download-artifact@v8
@@ -313,6 +317,62 @@ jobs:
         with:
           subject-path: "release-assets/*.tar.gz"
 
+      # ── Release note from the trace (rivet, ASPICE 11-03) ───────────────
+      # The GitHub Release body is COMPOSED, never hand-typed: (1) the tag
+      # annotation — the falsification statement the maintainer signed at
+      # cut time; (2) `rivet release notes`, computed from the artifact
+      # store and commit trailers, so the delivered scope, withheld scope,
+      # and verification-evidence gaps cannot drift from the release-scope
+      # query; (3) a pointer to CHANGELOG.md for prose. rivet itself is a
+      # cosign-verified release download (its sums are keyless-signed by
+      # rivet's own release workflow), never a floating install.
+      - name: Install rivet (cosign-verified release)
+        env:
+          RIVET_VERSION: v0.38.0
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/rivet && cd /tmp/rivet
+          gh release download "$RIVET_VERSION" --repo pulseengine/rivet \
+            -p "rivet-${RIVET_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -p 'SHA256SUMS.txt*'
+          cosign verify-blob \
+            --certificate-identity-regexp 'https://github.com/pulseengine/rivet/.github/workflows/release.yml@.*' \
+            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+            --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt
+          grep 'x86_64-unknown-linux-gnu' SHA256SUMS.txt | sed 's#\./##' | sha256sum -c -
+          tar -xzf "rivet-${RIVET_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          install -m 755 ./rivet /usr/local/bin/rivet
+          rivet --version
+        # The GITHUB_TOKEN can read another public repo's release assets.
+        # (cosign was installed above for the checksum signing.)
+
+      - name: Compose the release body
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          PREV=$(git describe --tags --abbrev=0 "${VERSION}^" 2>/dev/null || true)
+          {
+            echo "## Falsification statement"
+            echo
+            # The annotated tag's message, minus its subject line.
+            git tag -l --format='%(contents:body)' "$VERSION" | sed '/^$/N;/^\n$/D'
+            echo
+            echo "## Release note (rivet, from the trace)"
+            echo
+            if [ -n "$PREV" ]; then
+              rivet release notes "$VERSION" --format markdown --since "$PREV" | sed '1{/^# /d;}'
+            else
+              rivet release notes "$VERSION" --format markdown | sed '1{/^# /d;}'
+            fi
+            echo
+            echo "## Prose"
+            echo
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/${VERSION}/CHANGELOG.md) for the narrative of this release."
+          } > /tmp/release-body.md
+          echo "::group::release body"; cat /tmp/release-body.md; echo "::endgroup::"
+
       - name: Create or update GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -323,14 +383,15 @@ jobs:
           set -euo pipefail
           VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
           # Idempotent: re-running the workflow for an existing release
-          # uploads/overwrites assets rather than failing.
+          # uploads/overwrites assets and refreshes the composed body.
           if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "::notice::Release $VERSION exists; uploading assets"
+            echo "::notice::Release $VERSION exists; uploading assets + refreshing the body"
             gh release upload "$VERSION" --clobber release-assets/*
+            gh release edit "$VERSION" --notes-file /tmp/release-body.md
           else
             echo "::notice::Creating Release $VERSION with assets"
             gh release create "$VERSION" \
               --title "ordeal $VERSION" \
-              --generate-notes \
+              --notes-file /tmp/release-body.md \
               release-assets/*
           fi

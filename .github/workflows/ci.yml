@@ -346,6 +346,9 @@ jobs:
         # generated BlastKernel and all Blaster* proof developments — so a rule
         # proof that regresses (or a regen that breaks a proof) fails CI here.
         run: lake build
+      - name: Axiom gate (TR-042 — AxiomCheck.lean, #guard_msgs-pinned axiom lists)
+        working-directory: lean
+        run: bash ../scripts/axiom_check.sh
       - name: Guard the sorry budget (all hand-written proofs, tree-derived scope)
         working-directory: lean
         run: |

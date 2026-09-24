@@ -877,6 +877,7 @@ artifacts:
       not calendar-bound; it re-enters a release the day a consumer
       measurement arrives, and never blocks a cut while waiting.
     status: draft
+    release: backlog
     tags: [parallel, portfolio, parked, measure-first, native-only]
     links:
       - type: derives-from

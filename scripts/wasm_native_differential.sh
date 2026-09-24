@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# rivet: verifies VER-035
 # wasm ↔ native behavioral differential (issue #135 / TR-041).
 #
 # The relay incident class: two green builds of the same software that are
