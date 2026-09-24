@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-24
+
+**The SAT direction closes: proven, and shipped at the command line**
+(TR-039/040/044/045; issues #161, #162; rivet#988/#991). The witness the
+API gained in 0.20.0 is now machine-checked in Lean and emitted by the
+dependency-free binary, so both verdict directions are evidence for every
+consumer — and the proof found (and CI now gates) an axiom that had
+silently re-entered the trusted model.
+
 ### Added
 - **The SAT witness checker is machine-checked** (TR-044, #161 — the half
   of #133 deferred at the TR-038 design): `lean/SatWitness.lean` proves,
@@ -1047,7 +1056,9 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.21.0
+[0.20.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.20.0
 [0.4.2]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.2
 [0.4.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.1
 [0.4.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.0
