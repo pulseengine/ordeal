@@ -1118,7 +1118,7 @@ artifacts:
       AND executes the musl binary on every PR so breakage cannot first
       surface at a release cut. Ships with the v0.20.0 cut; verified
       against v0.20.0's published assets (TR-033 pattern).
-    status: implemented
+    status: verified
     release: v0.21.0
     tags: [release, musl, portability, varve, field-report]
     links:
@@ -1151,7 +1151,7 @@ artifacts:
       A CI smoke job generates and shape-checks the SBOM on every PR.
       Ships with the v0.20.0 cut; verified against v0.20.0's published
       assets (TR-033 pattern).
-    status: implemented
+    status: verified
     release: v0.21.0
     tags: [release, sbom, cyclonedx, supply-chain, varve, field-report]
     links:
@@ -1277,3 +1277,20 @@ artifacts:
         closure -> blocking red citing the advisory; same crate dev-only ->
         blocking green, advisory red); the exact release recipe is smoke-run
         per PR; at the v0.20.0 cut the published VEX is in the signed sums.
+
+  - id: TR-044
+    type: sw-req
+    title: SAT witness checker soundness machine-checked in Lean (check_sat_sound / check_binding_sound / verdicts_exclusive)
+    status: approved
+    release: v0.21.0
+    description: "TR-038 shipped the trusted SAT twin of the LRAT checker (kernel::check_sat + check_binding) with its soundness argued in prose ('immediate from the definition of satisfaction'); the design decision recorded in TR-038 was that the Lean statement rides v0.21.0. This requirement closes that gap the same way issue #12 closed it for UNSAT: over the Aeneas-regenerated model (TR-034 generation by construction) prove check_sat_sound (accept => the denoted assignment satisfies every clause of the actual CNF argument, hence not unsat), check_binding_sound (accept => bit k of the advertised value IS the truth value of the signed literal bits[k] under the witness, LSB-first), and verdicts_exclusive (no CNF admits both an accepted refutation and an accepted witness). The model's SAT-side functions were already written in the Aeneas-clean fragment (the TR-034 gate caught the one extraction issue on the first CI run), so this is proof work only: no kernel.rs logic change, which keeps the Kani/fuzz/differential evidence for TR-038 valid."
+    tags: [sat, witness, tcb, lean, proof]
+    fields:
+      priority: should
+      req-type: functional
+      verification-criteria: lean/SatWitness.lean elaborates under lake build with ZERO sorry (tree-derived guard) and AxiomCheck.lean pins check_sat_sound / check_binding_sound / verdicts_exclusive to exactly [propext, Classical.choice, Quot.sound]; the theorems quantify over the ACTUAL cnf/assignment slice arguments (the parser stays untrusted) and reuse Sound.lean's semantics (litHolds / cnfHolds / unsat) unchanged, so the SAT and UNSAT capstones are stated in one vocabulary; verdicts_exclusive derives False from an accepted refutation and an accepted witness on the same CNF. Falsified if any theorem needs a weaker statement than the sketch in TR-038's design (docs/design/sat-witness.md) or a new axiom.
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: refines
+        target: TR-038

@@ -1397,3 +1397,42 @@ artifacts:
     fields:
       verdict: pass
       evidence: "diffcheck 64/64 agree exit 0 (agent + clean-room reruns); mutant rejections ground-truthed pre-write; findings documented in DiffCheck.lean and gated visibly"
+
+  - id: VE-026
+    type: verification-execution
+    title: v0.20.0 published-asset verification re-run for TR-039/TR-040 (VER-040, VER-041)
+    status: implemented
+    description: "Executed 2026-09-24T10:17Z against the live GitHub Release v0.20.0 (tag 44d9ef0, own main CI run success, release run 35957256509 success) with the scripted post-release verifier: 22/22 PASS — 6 platform archives + ordeal-0.20.0.cdx.json + ordeal-0.20.0.vex.json all listed in SHA256SUMS.txt; shasum -c OK over every listed asset; cosign verify-blob Verified OK against the release.yml workflow identity + GitHub OIDC issuer; both musl triples present; the x86_64 musl binary is a static-pie ELF with no PT_INTERP and zero DT_NEEDED (the earlier file(1) 'statically linked' grep was a false FAIL on 'static-pie linked' and was replaced by the ELF parse); the darwin binary reports ordeal 0.20.0, answers a certified unsat, and its --format json carries cnf+lrat; SBOM parses as CycloneDX 1.5 with component set [ordeal-lrat]; VEX has 0 statements, bom-links the SBOM serial, records advisory-db commit + asserted-at; release body carries the falsification statement + the rivet note naming TR-038; crates.io max_version 0.20.0 for both crates."
+    fields:
+      environment: "note: macOS arm64; gh release download fresh; cosign v2 (homebrew); python3 ELF parse for the static check; crates.io queried directly"
+      executor: local
+      timestamp: 2026-09-24T10:17:10Z
+      version: v0.20.0
+
+  - id: VV-048
+    type: verification-verdict
+    title: VER-040 pass — v0.20.0 ships static musl assets inside the signed sums
+    status: implemented
+    description: Executed pass on published bytes. TR-039's criteria hold on v0.20.0 (the release it shipped with). Falsified if a musl asset is absent from the signed sums or links dynamically.
+    fields:
+      evidence: "both musl archives listed in cosign-signed SHA256SUMS.txt; shasum -c OK; x86_64 musl ELF: no PT_INTERP, DT_NEEDED=0; release run executed both musl binaries (native + qemu) before publish"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-040
+      - type: part-of-execution
+        target: VE-026
+
+  - id: VV-049
+    type: verification-verdict
+    title: VER-041 pass — v0.20.0 ships a CycloneDX SBOM inside the signed sums
+    status: implemented
+    description: Executed pass on published bytes. TR-040's criteria hold on v0.20.0 (the release it shipped with). Falsified if the SBOM is missing from the release or from the signed sums.
+    fields:
+      evidence: ordeal-0.20.0.cdx.json listed in cosign-signed SHA256SUMS.txt; shasum -c OK; CycloneDX 1.5, components=[ordeal-lrat]; VEX ordeal:sbom bom-link matches the SBOM serialNumber/version
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-041
+      - type: part-of-execution
+        target: VE-026
