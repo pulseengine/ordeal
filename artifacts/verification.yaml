@@ -1034,3 +1034,48 @@ artifacts:
       steps:
         run: "python3 scripts/vex.py self-test && cargo deny --exclude-dev check advisories"
         coverage: "13 generator checks; control pair on the blocking/advisory split; end-to-end generation on the real tree"
+
+  - id: VER-039
+    type: sw-verification
+    title: SAT witness checker soundness proven in Lean — zero sorry, axiom-pinned (TR-044)
+    status: approved
+    release: v0.21.0
+    description: "Confirms TR-044 by the verifier itself: lean/SatWitness.lean must elaborate under lake build over the model regen.sh regenerated in the same job (TR-034), the tree-derived sorry guard must count zero, and AxiomCheck.lean must pin the three theorems to [propext, Classical.choice, Quot.sound]. The evidence is the green required Lean CI context on the landing PR plus a local clean-room re-run; recorded as a VE/VV pair when executed."
+    tags: [sat, witness, lean, proof, tcb]
+    fields:
+      coverage: "check_sat_sound, check_binding_sound, verdicts_exclusive over the regenerated Aeneas model; axiom lists pinned by #guard_msgs; sorry budget 0"
+      method: formal-verification
+      steps: "run: bash lean/regen.sh all && cd lean && lake build && bash ../scripts/axiom_check.sh   (the required 'Lean model + soundness proof' CI context runs exactly this; the sorry guard is tree-derived so SatWitness.lean cannot escape it)"
+    links:
+      - type: verifies
+        target: TR-044
+
+  - id: VER-040
+    type: sw-verification
+    title: musl release assets present, signed, static, executing (TR-039)
+    status: verified
+    release: v0.21.0
+    description: "Confirms TR-039 on the PUBLISHED v0.20.0 bytes (TR-033 pattern): ordeal-v0.20.0-{x86_64,aarch64}-unknown-linux-musl.tar.gz are listed in SHA256SUMS.txt, the sums verify (shasum -c) and are cosign-signed by the release.yml workflow identity; the x86_64 musl binary parses as a static-pie ELF with no PT_INTERP and zero DT_NEEDED entries (file(1) reports 'static-pie linked' — a plain 'statically linked' grep is the wrong oracle, recorded). Execution of the musl binaries happened inside the release run (native x86_64 assert + qemu aarch64 assert) before the assets were published."
+    tags: [release, musl, portability, varve]
+    fields:
+      coverage: both musl triples listed in the cosign-signed sums; x86_64 musl binary ELF-proven static; release job executed the x86_64 musl binary natively and the aarch64 one under qemu (tag-version assert + certified unsat)
+      method: automated-test
+      steps: "run: gh release download v0.20.0 && grep musl SHA256SUMS.txt && shasum -a 256 -c SHA256SUMS.txt && cosign verify-blob ... SHA256SUMS.txt && tar -xzf ordeal-v0.20.0-x86_64-unknown-linux-musl.tar.gz ordeal && <ELF parse: no PT_INTERP, zero DT_NEEDED>  (scripted: the v0.20.0 post-release verifier)"
+    links:
+      - type: verifies
+        target: TR-039
+
+  - id: VER-041
+    type: sw-verification
+    title: CycloneDX SBOM published inside the signed sums and well-formed (TR-040)
+    status: verified
+    release: v0.21.0
+    description: "Confirms TR-040 on the PUBLISHED v0.20.0 bytes: ordeal-0.20.0.cdx.json is listed in SHA256SUMS.txt, the sums verify and are cosign-signed by the release.yml workflow identity, the file parses as CycloneDX 1.5 JSON whose component list is exactly the dependency-free runtime closure (ordeal-lrat), and the sibling VEX's ordeal:sbom property bom-links the SBOM's serialNumber/version — so varve ingests the SBOM under the same signature proof as the binaries."
+    tags: [release, sbom, cyclonedx, supply-chain, varve]
+    fields:
+      coverage: SBOM listed in signed sums; parses as CycloneDX 1.5; component set = ordeal-lrat (the empty-by-design runtime closure); the VEX bom-links this exact SBOM serial
+      method: automated-test
+      steps: "run: gh release download v0.20.0 && grep ordeal-0.20.0.cdx.json SHA256SUMS.txt && shasum -a 256 -c SHA256SUMS.txt && cosign verify-blob ... SHA256SUMS.txt && python3 -c 'json: bomFormat==CycloneDX, specVersion 1.5, components; VEX ordeal:sbom == urn:cdx:<serialNumber>/<version>'  (scripted: the v0.20.0 post-release verifier)"
+    links:
+      - type: verifies
+        target: TR-040
