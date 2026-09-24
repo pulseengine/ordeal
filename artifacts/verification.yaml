@@ -1038,7 +1038,7 @@ artifacts:
   - id: VER-039
     type: sw-verification
     title: SAT witness checker soundness proven in Lean — zero sorry, axiom-pinned (TR-044)
-    status: approved
+    status: verified
     release: v0.21.0
     description: "Confirms TR-044 by the verifier itself: lean/SatWitness.lean must elaborate under lake build over the model regen.sh regenerated in the same job (TR-034), the tree-derived sorry guard must count zero, and AxiomCheck.lean must pin the three theorems to [propext, Classical.choice, Quot.sound]. The evidence is the green required Lean CI context on the landing PR plus a local clean-room re-run; recorded as a VE/VV pair when executed."
     tags: [sat, witness, lean, proof, tcb]
@@ -1079,3 +1079,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-040
+
+  - id: VER-042
+    type: sw-verification
+    title: CLI sat JSON re-checks through the trusted crate; in-tree SHA-256 cross-checked against sha2 (TR-045)
+    status: verified
+    release: v0.21.0
+    description: "Confirms TR-045 by executing the consumer's recheck on the CLI's own output and by cross-checking the in-tree hash against an independent implementation: format_json_sat_carries_a_recheckable_witness (clauses + assignment through check_sat, every model value through check_binding, both hashes equal sha2's over the documented canonical texts), tampered_sat_witness_is_rejected_by_the_trusted_crate (negative control), sha256::tests (FIPS 180-4 known answers incl. 1M-byte, and sha2 agreement on lengths 0..=200 — every padding boundary), plus the existing required gates: the TR-041 native<->wasm differential now compares the witness bytes on the corpus' 4 sat scripts, and the repro job's cargo tree assertion proves no third-party crate entered the default closure."
+    tags: [sat, witness, cli, sha256, evidence]
+    fields:
+      coverage: "sat JSON: clauses + witness re-checked by ordeal_lrat::check_sat/check_binding, hashes recomputed with sha2, tampered bit rejected; sha256: FIPS KATs + 201-length differential vs sha2; wasm<->native byte agreement on 4 sat scripts; default closure = ordeal + ordeal-lrat"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --test cli_baseline -- sat_witness && cargo test -p ordeal --lib sha256 && bash scripts/wasm_native_differential.sh (in the required wasip2 job) && cargo tree -p ordeal --edges normal (dependency-free assert in the required repro job)"
+    links:
+      - type: verifies
+        target: TR-045

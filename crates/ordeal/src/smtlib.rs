@@ -712,22 +712,20 @@ pub fn solve_str(input: &str) -> Result<Outcome, SmtError> {
     Ok(Outcome { result, declared })
 }
 
-/// The witness-carrying twin of [`solve_str`] (TR-038, `cert-bundle`
-/// only): identical reader, but `check-sat` runs
-/// [`Solver::check_with_witness`], so a `Sat` comes back with an
-/// independently re-checkable [`crate::cert_bundle::SatCertificate`].
-/// The fuzz oracle uses this to demand that every fuzz-found verdict —
-/// both directions — re-checks through the trusted crate.
-#[cfg(feature = "cert-bundle")]
+/// The witness-carrying twin of [`solve_str`] (TR-038): identical reader,
+/// but `check-sat` runs [`Solver::check_with_witness`], so a `Sat` comes
+/// back with an independently re-checkable [`crate::witness::SatCertificate`].
+/// The CLI runs this (both verdict directions are evidence at the command
+/// line, #162 / TR-045) and the fuzz oracle uses it to demand that every
+/// fuzz-found verdict — both directions — re-checks through the trusted crate.
 pub fn solve_str_with_witness(input: &str) -> Result<WitnessOutcome, SmtError> {
     run_script(input, |solver| solver.check_with_witness())
 }
 
 /// [`solve_str_with_witness`]'s result: the last `check-sat`'s
 /// witness-carrying verdict (if any) plus the declared variables.
-#[cfg(feature = "cert-bundle")]
 pub type WitnessOutcome = (
-    Option<crate::cert_bundle::WitnessCheckResult>,
+    Option<crate::witness::WitnessCheckResult>,
     Vec<(String, u32)>,
 );
 

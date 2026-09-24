@@ -831,12 +831,11 @@ impl Solver {
     /// with the Unsat gate ("a Sat whose witness the trusted crate did
     /// not accept is never reported"; it degrades to `Unknown`).
     ///
-    /// The default API is untouched: this entry exists only under the
-    /// `cert-bundle` feature and pays the witness capture only when
-    /// called.
-    #[cfg(feature = "cert-bundle")]
-    pub fn check_with_witness(&self) -> crate::cert_bundle::WitnessCheckResult {
-        use crate::cert_bundle::{SatCertificate, WitnessCheckResult};
+    /// Always available (no feature gate since #162 / TR-045: the CLI emits
+    /// the witness on every `sat`); `check` is untouched and pays nothing —
+    /// the witness capture happens only when this entry is called.
+    pub fn check_with_witness(&self) -> crate::witness::WitnessCheckResult {
+        use crate::witness::{SatCertificate, WitnessCheckResult};
         if self.assertions.is_empty() {
             // Trivially satisfiable: the empty witness re-checks vacuously
             // (no clauses to satisfy, no bindings to verify).

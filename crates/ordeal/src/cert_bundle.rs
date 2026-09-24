@@ -22,9 +22,13 @@
 //!   [`UnsatBundle::recheck`] re-runs the trusted checker — a tampered or
 //!   internally-inconsistent bundle never yields a usable [`Certificate`].
 
+use crate::sha256::sha256_hex;
 use crate::solver::{Certificate, Model};
+use crate::witness::{assignment_bitstring, bit_map_canonical_text, cnf_text};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+// Re-exported so 0.20.0 paths (`cert_bundle::SatCertificate`, …) keep working;
+// the types live in `crate::witness` (always compiled) since #162 / TR-045.
+pub use crate::witness::{SatCertificate, SatRecheckError, WitnessCheckResult};
 
 /// The `attests` block: what this certificate is evidence *of*.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -45,31 +49,6 @@ pub struct Tool {
     pub name: String,
     /// Tool version.
     pub version: String,
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut h = Sha256::new();
-    h.update(bytes);
-    let d = h.finalize();
-    let mut out = String::with_capacity(64);
-    for b in d {
-        out.push_str(&format!("{b:02x}"));
-    }
-    out
-}
-
-/// Canonical text form of the CNF for hashing and the `problem` block:
-/// DIMACS clause lines (`lit* 0`), one per clause, `\n`-separated.
-fn cnf_text(cnf: &[Vec<i32>]) -> String {
-    let mut s = String::new();
-    for clause in cnf {
-        for lit in clause {
-            s.push_str(&lit.to_string());
-            s.push(' ');
-        }
-        s.push_str("0\n");
-    }
-    s
 }
 
 #[derive(Serialize, Deserialize)]
@@ -285,89 +264,7 @@ pub fn model_to_cert_v1(model: &Model, attests: &Attests) -> String {
     serde_json::to_string_pretty(&env).expect("own-struct serialization")
 }
 
-/// The result of [`crate::Solver::check_with_witness`] (TR-038): like
-/// [`crate::CheckResult`] but `Sat` carries an independently
-/// re-checkable [`SatCertificate`] instead of a bare model.
-#[derive(Clone, Debug)]
-pub enum WitnessCheckResult {
-    /// Satisfiable, with a witness the trusted crate already validated.
-    Sat(SatCertificate),
-    /// Unsatisfiable, with the LRAT certificate the checker validated.
-    Unsat(Certificate),
-    /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
-    Unknown,
-}
-
-/// An independently re-checkable SAT verdict — the SAT twin of
-/// [`Certificate`] (TR-038 / #133, docs/design/sat-witness.md): the
-/// model, the CNF it satisfies, the FULL satisfying assignment (inputs
-/// and Tseitin auxiliaries), and the map from each model variable's bits
-/// to signed CNF literals. [`SatCertificate::recheck`] re-establishes
-/// the verdict via the trusted `ordeal-lrat` crate with zero solver
-/// trust: every clause is checked satisfied, and every advertised model
-/// binding is checked consistent with the assignment.
-#[derive(Clone, Debug)]
-pub struct SatCertificate {
-    /// The decoded model (what a consumer reads).
-    pub model: Model,
-    /// The CNF the assignment satisfies (same clauses an Unsat would
-    /// have refuted — the term↔CNF gap is carried by the blaster proofs
-    /// in both directions).
-    pub cnf: Vec<Vec<i32>>,
-    /// `assignment[i]` is the value of DIMACS variable `i + 1`.
-    pub assignment: Vec<bool>,
-    /// Per model variable: (name, width, LSB-first signed CNF literals —
-    /// a negative literal means the bit is that variable's complement).
-    pub bit_map: Vec<(String, u32, Vec<i32>)>,
-}
-
-/// Why a SAT witness recheck failed.
-#[derive(Debug)]
-pub enum SatRecheckError {
-    /// The trusted kernel rejected the witness (unsatisfied clause,
-    /// range error, or a binding/assignment disagreement).
-    Witness(ordeal_lrat::SatWitnessError),
-    /// A model binding has no bit-map entry — the advertised model is
-    /// not covered by the witness.
-    UnmappedBinding(String),
-    /// A binding's width disagrees with its bit-map entry.
-    WidthMismatch(String),
-}
-
-impl std::fmt::Display for SatRecheckError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SatRecheckError::Witness(e) => write!(f, "witness rejected: {e:?}"),
-            SatRecheckError::UnmappedBinding(n) => {
-                write!(f, "model binding '{n}' has no bit-map entry")
-            }
-            SatRecheckError::WidthMismatch(n) => {
-                write!(f, "model binding '{n}' width disagrees with its bit map")
-            }
-        }
-    }
-}
-
-impl std::error::Error for SatRecheckError {}
-
 impl SatCertificate {
-    /// Re-establish `Sat` independently of the solver: the trusted crate
-    /// checks every clause satisfied and every model binding consistent.
-    pub fn recheck(&self) -> Result<(), SatRecheckError> {
-        ordeal_lrat::check_sat(&self.cnf, &self.assignment).map_err(SatRecheckError::Witness)?;
-        for (name, value) in &self.model.assignments {
-            let Some((_, width, bits)) = self.bit_map.iter().find(|(n, _, _)| n == name) else {
-                return Err(SatRecheckError::UnmappedBinding(name.clone()));
-            };
-            if bits.len() != *width as usize {
-                return Err(SatRecheckError::WidthMismatch(name.clone()));
-            }
-            ordeal_lrat::check_binding(&self.assignment, bits, *value)
-                .map_err(SatRecheckError::Witness)?;
-        }
-        Ok(())
-    }
-
     /// Serialize as an `ordeal-cert/v1` SAT bundle carrying the OPTIONAL
     /// `witness` block (verified tolerable by released rivet readers —
     /// rivet 0.32.0 reports an unknown field as INFO and passes; see
@@ -494,33 +391,6 @@ impl SatCertificate {
             bit_map,
         })
     }
-}
-
-/// The witness assignment as a `0`/`1` string, `assignment[0]` first
-/// (variable 1). Stable and diff-friendly for hashing.
-fn assignment_bitstring(assignment: &[bool]) -> String {
-    let mut s = String::with_capacity(assignment.len());
-    for &b in assignment {
-        s.push(if b { '1' } else { '0' });
-    }
-    s
-}
-
-/// Canonical text of the bit map for hashing: `name width l1 l2 …\n` per
-/// entry, in-order.
-fn bit_map_canonical_text(bit_map: &[(String, u32, Vec<i32>)]) -> String {
-    let mut s = String::new();
-    for (name, width, bits) in bit_map {
-        s.push_str(name);
-        s.push(' ');
-        s.push_str(&width.to_string());
-        for b in bits {
-            s.push(' ');
-            s.push_str(&b.to_string());
-        }
-        s.push('\n');
-    }
-    s
 }
 
 #[derive(Serialize)]

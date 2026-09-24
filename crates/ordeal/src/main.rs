@@ -14,9 +14,9 @@
 use std::io::Read;
 use std::process::ExitCode;
 
-use ordeal::CheckResult;
-use ordeal::smtlib::{self, Outcome};
+use ordeal::smtlib;
 use ordeal::verus;
+use ordeal::{CheckResult, WitnessCheckResult};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -118,10 +118,13 @@ fn run_check(args: &[String]) -> ExitCode {
         },
     };
 
-    match smtlib::solve_str(&input) {
-        Ok(outcome) => match format {
-            Format::Text => print_outcome(&outcome),
-            Format::Json => print_outcome_json(&outcome),
+    // The witness-carrying solve (TR-038): a `sat` is only ever printed
+    // after the trusted crate re-checked its witness, and `--format json`
+    // carries that witness so the consumer can re-check it too (#162).
+    match smtlib::solve_str_with_witness(&input) {
+        Ok((result, declared)) => match format {
+            Format::Text => print_outcome(result.as_ref(), &declared),
+            Format::Json => print_outcome_json(result.as_ref(), &declared),
         },
         Err(e) => {
             // Prints `parse error: ...` / `unsupported: ...` / `solver error: ...`.
@@ -150,13 +153,28 @@ fn json_escape(s: &str) -> String {
     out
 }
 
+/// DIMACS clauses as a JSON array-of-arrays body (no brackets around the
+/// whole): `[1,-2],[3]`.
+fn clauses_json(cnf: &[Vec<i32>]) -> String {
+    cnf.iter()
+        .map(|c| {
+            let lits: Vec<String> = c.iter().map(ToString::to_string).collect();
+            format!("[{}]", lits.join(","))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// One JSON object on stdout — the structured twin of [`print_outcome`].
-/// On `unsat` the object carries the FULL checkable pair (CNF clauses +
-/// LRAT text): strictly stronger than a content hash, and a consumer
-/// re-establishes the verdict with `ordeal_lrat::check` and zero trust in
-/// this process.
-fn print_outcome_json(outcome: &Outcome) -> ExitCode {
-    let Some(result) = &outcome.result else {
+/// Both verdict directions carry their FULL re-checkable evidence: on
+/// `unsat` the CNF clauses + LRAT text (`ordeal_lrat::check`), on `sat`
+/// the CNF clauses + the `witness` block — the complete assignment, the
+/// per-variable bit map and both content hashes, byte-identical to the
+/// `ordeal-cert/v1` witness the API emits (`ordeal_lrat::check_sat` +
+/// `check_binding`). Strictly stronger than a hash: a consumer
+/// re-establishes either verdict with zero trust in this process.
+fn print_outcome_json(result: Option<&WitnessCheckResult>, declared: &[(String, u32)]) -> ExitCode {
+    let Some(result) = result else {
         eprintln!("ordeal: script contained no (check-sat) command");
         return ExitCode::from(2);
     };
@@ -165,7 +183,8 @@ fn print_outcome_json(outcome: &Outcome) -> ExitCode {
         env!("CARGO_PKG_VERSION")
     );
     match result {
-        CheckResult::Sat(model) => {
+        WitnessCheckResult::Sat(cert) => {
+            let model = &cert.model;
             let value_of = |name: &str| -> u128 {
                 model
                     .assignments
@@ -174,8 +193,7 @@ fn print_outcome_json(outcome: &Outcome) -> ExitCode {
                     .map(|(_, v)| *v)
                     .unwrap_or(0)
             };
-            let bindings: Vec<String> = outcome
-                .declared
+            let bindings: Vec<String> = declared
                 .iter()
                 .map(|(name, width)| {
                     format!(
@@ -186,44 +204,61 @@ fn print_outcome_json(outcome: &Outcome) -> ExitCode {
                     )
                 })
                 .collect();
-            println!(
-                "{head},\"verdict\":\"sat\",\"model\":[{}]}}",
-                bindings.join(",")
-            );
-        }
-        CheckResult::Unsat(cert) => {
-            let clauses: Vec<String> = cert
-                .cnf
+            let bit_map: Vec<String> = cert
+                .bit_map
                 .iter()
-                .map(|c| {
-                    let lits: Vec<String> = c.iter().map(|l| l.to_string()).collect();
-                    format!("[{}]", lits.join(","))
+                .map(|(name, width, bits)| {
+                    let lits: Vec<String> = bits.iter().map(ToString::to_string).collect();
+                    format!(
+                        "{{\"name\":\"{}\",\"width\":{},\"bits\":[{}]}}",
+                        json_escape(name),
+                        width,
+                        lits.join(",")
+                    )
                 })
                 .collect();
+            println!(
+                "{head},\"verdict\":\"sat\",\"model\":[{}],\"certificate\":{{\"clauses\":[{}],\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}}}}}}",
+                bindings.join(","),
+                clauses_json(&cert.cnf),
+                ordeal::witness::WITNESS_ENCODING,
+                cert.assignment_bitstring(),
+                bit_map.join(","),
+                cert.assignment_sha256(),
+                cert.bit_map_sha256()
+            );
+        }
+        WitnessCheckResult::Unsat(cert) => {
             let lrat = cert.lrat_text().unwrap_or_default();
             println!(
                 "{head},\"verdict\":\"unsat\",\"certificate\":{{\"clauses\":[{}],\"lrat\":\"{}\"}}}}",
-                clauses.join(","),
+                clauses_json(&cert.cnf),
                 json_escape(lrat)
             );
         }
-        CheckResult::Unknown => println!("{head},\"verdict\":\"unknown\"}}"),
+        WitnessCheckResult::Unknown => println!("{head},\"verdict\":\"unknown\"}}"),
     }
     ExitCode::SUCCESS
 }
 
 /// Print the verdict (and, on `sat`, the model) and return the exit code.
-fn print_outcome(outcome: &Outcome) -> ExitCode {
-    let Some(result) = &outcome.result else {
+fn print_outcome(result: Option<&WitnessCheckResult>, declared: &[(String, u32)]) -> ExitCode {
+    let Some(result) = result else {
         eprintln!("ordeal: script contained no (check-sat) command");
         return ExitCode::from(2);
     };
     match result {
-        CheckResult::Sat(model) => {
+        WitnessCheckResult::Sat(cert) => {
             println!("sat");
-            print_model(model, &outcome.declared);
+            print_model(&cert.model, declared);
+            // Note the witness on stderr so stdout stays a clean verdict.
+            eprintln!(
+                "; sat witness: {} variables re-checked by the trusted crate against {} clauses",
+                cert.assignment.len(),
+                cert.cnf.len()
+            );
         }
-        CheckResult::Unsat(cert) => {
+        WitnessCheckResult::Unsat(cert) => {
             println!("unsat");
             // Note the certificate on stderr so stdout stays a clean verdict.
             eprintln!(
@@ -231,7 +266,7 @@ fn print_outcome(outcome: &Outcome) -> ExitCode {
                 cert.lrat.len()
             );
         }
-        CheckResult::Unknown => println!("unknown"),
+        WitnessCheckResult::Unknown => println!("unknown"),
     }
     ExitCode::SUCCESS
 }

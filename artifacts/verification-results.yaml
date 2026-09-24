@@ -1436,3 +1436,28 @@ artifacts:
         target: VER-041
       - type: part-of-execution
         target: VE-026
+
+  - id: VE-027
+    type: verification-execution
+    title: "PR #165 required Lean job — regen, axiom gate, SatWitness proofs, sorry guard (VER-039)"
+    status: implemented
+    description: "Executed by the required 'Lean model + soundness proof' context on PR #165 (run 35989407575, job 107599635445, conclusion success, every step success): regen.sh all regenerated Kernel.lean + BlastKernel.lean from the Rust sources in 23s (warm cache); the NEW 'Generated models carry no axioms' step reported 0 axiom lines in both models (before the lit_var fix the same grep would have found core.num.I32.unsigned_abs); lake build elaborated Kernel, Sound, the blaster developments and the new SatWitness lib (four 'Build completed successfully' passes, 1658-1677 jobs); the TR-042 axiom gate reported the soundness chain, SAT-witness theorems and blaster capstones depend only on propext / Classical.choice / Quot.sound; the tree-derived sorry guard counted zero sorry-bearing declarations; the README drift guard and the TR-035 dual-mechanisation differential also passed. Squash-merged as 0521b99. The agent's worktree run reported the identical results beforehand (lake build 1712 jobs, axiom counts 0/0, cargo test ordeal-lrat 22, ordeal 189+8)."
+    fields:
+      environment: "note: GitHub-hosted ubuntu-latest, nix-pinned Charon/Aeneas (lean/toolchain-pins.env), elan + mathlib cache; the clean-room run is the required CI context itself, on a fresh runner from the PR head"
+      executor: ci
+      timestamp: 2026-09-24T10:48:58Z
+      version: 0521b99
+
+  - id: VV-050
+    type: verification-verdict
+    title: VER-039 pass — check_sat_sound / check_binding_sound / verdicts_exclusive machine-checked, axiom-clean
+    status: implemented
+    description: "Executed pass. TR-044's criteria hold: the theorems are stated over the actual slice arguments in Sound.lean's vocabulary with no weakening and no new axiom; the finding along the way (an opaque axiom re-introduced by TR-038) is closed by the lit_var routing and gated in CI. Falsified if any future regen reintroduces an axiom line (the gate fails) or a pinned axiom list changes."
+    fields:
+      evidence: "required Lean context success on PR #165 (job 107599635445): axioms 0/0 in generated models; lake build incl. SatWitness; axiom gate pins [propext, Classical.choice, Quot.sound] for all three theorems; sorry guard 0; kernel change limited to one line (unsigned_abs -> lit_var)"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-039
+      - type: part-of-execution
+        target: VE-027

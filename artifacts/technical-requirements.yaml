@@ -1281,14 +1281,31 @@ artifacts:
   - id: TR-044
     type: sw-req
     title: SAT witness checker soundness machine-checked in Lean (check_sat_sound / check_binding_sound / verdicts_exclusive)
-    status: approved
+    status: verified
     release: v0.21.0
-    description: "TR-038 shipped the trusted SAT twin of the LRAT checker (kernel::check_sat + check_binding) with its soundness argued in prose ('immediate from the definition of satisfaction'); the design decision recorded in TR-038 was that the Lean statement rides v0.21.0. This requirement closes that gap the same way issue #12 closed it for UNSAT: over the Aeneas-regenerated model (TR-034 generation by construction) prove check_sat_sound (accept => the denoted assignment satisfies every clause of the actual CNF argument, hence not unsat), check_binding_sound (accept => bit k of the advertised value IS the truth value of the signed literal bits[k] under the witness, LSB-first), and verdicts_exclusive (no CNF admits both an accepted refutation and an accepted witness). The model's SAT-side functions were already written in the Aeneas-clean fragment (the TR-034 gate caught the one extraction issue on the first CI run), so this is proof work only: no kernel.rs logic change, which keeps the Kani/fuzz/differential evidence for TR-038 valid."
+    description: "TR-038 shipped the trusted SAT twin of the LRAT checker (kernel::check_sat + check_binding) with its soundness argued in prose ('immediate from the definition of satisfaction'); the design decision recorded in TR-038 was that the Lean statement rides v0.21.0. This requirement closes that gap the same way issue #12 closed it for UNSAT: over the Aeneas-regenerated model (TR-034 generation by construction) prove check_sat_sound (accept => the denoted assignment satisfies every clause of the actual CNF argument, hence not unsat), check_binding_sound (accept => bit k of the advertised value IS the truth value of the signed literal bits[k] under the witness, LSB-first), and verdicts_exclusive (no CNF admits both an accepted refutation and an accepted witness). Proof work found that clause_satisfied's unsigned_abs() call had re-introduced an opaque axiom into the generated model (no gate caught it); the scan is routed through lit_var like check_binding (semantically identical, MIN already excluded) and CI now gates axiom lines in both generated models. The kernel's fuzz oracle, unit tests and dual-mechanisation differential remain the executable evidence for TR-038."
     tags: [sat, witness, tcb, lean, proof]
     fields:
       priority: should
       req-type: functional
       verification-criteria: lean/SatWitness.lean elaborates under lake build with ZERO sorry (tree-derived guard) and AxiomCheck.lean pins check_sat_sound / check_binding_sound / verdicts_exclusive to exactly [propext, Classical.choice, Quot.sound]; the theorems quantify over the ACTUAL cnf/assignment slice arguments (the parser stays untrusted) and reuse Sound.lean's semantics (litHolds / cnfHolds / unsat) unchanged, so the SAT and UNSAT capstones are stated in one vocabulary; verdicts_exclusive derives False from an accepted refutation and an accepted witness on the same CNF. Falsified if any theorem needs a weaker statement than the sketch in TR-038's design (docs/design/sat-witness.md) or a new axiom.
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: refines
+        target: TR-038
+
+  - id: TR-045
+    type: sw-req
+    title: Both verdict directions are evidence at the CLI — the SAT witness ships in the dependency-free binary (in-tree SHA-256)
+    status: verified
+    release: v0.21.0
+    description: "Field finding from rivet's ingestion of the TR-038 witness (rivet#988/#991, ordeal#162): the ordeal-cert/v1 SAT witness was API-only behind the cert-bundle feature, so the shipped binary's --format json printed the model alone on sat and every CLI consumer kept rivet's V-ordeal-cert-sat-is-self-checked warning. Scope decision (user, 2026-09-24, option 1 of four): keep the shipped closure dependency-free and hash in-tree. The witness types (SatCertificate, WitnessCheckResult, recheck, canonical texts) move to an always-compiled crate::witness module; SHA-256 is implemented in crates/ordeal/src/sha256.rs (untrusted crate; integrity only — soundness still rests on ordeal_lrat::check_sat/check_binding and the LRAT checker; a wrong hash can only reject a valid bundle, never accept an invalid one); cert-bundle drops its sha2 dependency and re-exports the moved types so 0.20.0 API paths keep compiling; Solver::check_with_witness and smtlib::solve_str_with_witness lose their feature gate; the CLI's check path runs the witness-carrying solve so a sat is only printed after the trusted recheck, and --format json carries the full witness block. Ships in v0.21.0 beside TR-044."
+    tags: [sat, witness, cli, certificate, supply-chain, field-report]
+    fields:
+      priority: should
+      req-type: functional
+      verification-criteria: "ordeal check --format json on a sat script emits certificate.clauses plus a witness block {encoding: bitstring-lsb-var1, assignment, bit_map[{name,width,bits}], assignment_sha256, bit_map_sha256} whose values are byte-identical to the ordeal-cert/v1 witness the API emits; a test re-establishes the verdict through ordeal_lrat::check_sat + check_binding on the parsed JSON, recomputes both hashes with an INDEPENDENT SHA-256 (sha2, dev-only), and a flipped witness bit is rejected (negative control); the in-tree SHA-256 passes the FIPS 180-4 known answers (incl. the 1M-byte vector) and agrees with sha2 on every length 0..=200; cargo tree on the default build still lists only ordeal + ordeal-lrat; the wasm<->native differential (TR-041) agrees byte-for-byte on the 4 sat corpus scripts' witness JSON; the text verdict is unchanged on stdout. Falsified if the shipped binary's sat JSON lacks the witness, if any hash disagrees with sha2, or if a third-party crate enters the default closure."
     links:
       - type: derives-from
         target: SYS-002
