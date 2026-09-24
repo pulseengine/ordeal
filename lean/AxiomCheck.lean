@@ -15,6 +15,7 @@ sorry budget is guarded separately (ci.yml); this file guards everything
 `sorry`-shaped guards miss.
 -/
 import Sound
+import SatWitness
 import BlasterProof
 import BlasterArith
 import BlasterCmp
@@ -59,3 +60,21 @@ import BlasterDiv
 /-- info: 'blast_kernel.spec.blast_urem_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms blast_kernel.spec.blast_urem_bitvec
+
+-- The SAT-witness checker (SatWitness.lean, TR-044 / VER-039). These pins
+-- are what surfaced the TR-038 regression: `clause_satisfied` used
+-- `i32::unsigned_abs`, which the pinned Aeneas extracts as an opaque
+-- `axiom`, and `check_sat_sound` listed it here. The kernel now spells
+-- `|lit|` once (`lit_var`); ci.yml also fails on any `^axiom` in a
+-- generated model.
+/-- info: 'kernel.spec.check_binding_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_binding_sound
+
+/-- info: 'kernel.spec.check_sat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_sat_sound
+
+/-- info: 'kernel.spec.verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.verdicts_exclusive

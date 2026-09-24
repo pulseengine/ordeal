@@ -321,6 +321,23 @@ jobs:
           bash lean/regen.sh all
           echo "regen.sh all wall time: $(( $(date +%s) - start ))s"
           test -f lean/Kernel.lean && test -f lean/BlastKernel.lean
+      - name: Generated models carry no axioms
+        # TR-044 finding: a Rust std call Aeneas has no model of is emitted
+        # into the generated model as an opaque `axiom` (TR-038 re-introduced
+        # `core.num.I32.unsigned_abs` this way, and nothing caught it until a
+        # pinned theorem reached it). A proof over such a model is conditional
+        # on an unstated contract. Fail here, before any proof builds.
+        run: |
+          set -uo pipefail
+          k=$(grep -c '^axiom' lean/Kernel.lean || true)
+          b=$(grep -c '^axiom' lean/BlastKernel.lean || true)
+          echo "axioms in lean/Kernel.lean: $k"
+          echo "axioms in lean/BlastKernel.lean: $b"
+          if [ "$k" -ne 0 ] || [ "$b" -ne 0 ]; then
+            grep -n '^axiom' lean/Kernel.lean lean/BlastKernel.lean || true
+            echo "::error::a generated model declares an axiom — a Rust call the pinned Aeneas cannot model; route it through modelled code (see lean/README.md)"
+            exit 1
+          fi
       - name: Install elan
         run: |
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \

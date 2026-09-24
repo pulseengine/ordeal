@@ -454,7 +454,13 @@ pub enum SatWitnessError {
 /// Is some literal of `clause` true under `assignment`? (Own function so
 /// the caller's loop has no early return — Aeneas constraint; same style
 /// as [`classify_hint`].) `assignment[i]` is the value of DIMACS variable
-/// `i + 1`.
+/// `i + 1`. The variable is computed by [`lit_var`], as in
+/// [`check_binding`] — the kernel has exactly one spelling of `|lit|`.
+/// (It was `lit.unsigned_abs() as usize` until TR-044: identical for the
+/// non-`MIN` literals that reach it, but `i32::unsigned_abs` has no model
+/// in the pinned Aeneas and was extracted as an opaque `axiom`, which
+/// made the SAT-witness theorems conditional. The `ci.yml` "generated
+/// models carry no axioms" gate now fails on any recurrence.)
 fn clause_satisfied(
     clause: &[i32],
     assignment: &[bool],
@@ -467,7 +473,7 @@ fn clause_satisfied(
         if lit == 0 || lit == i32::MIN {
             return Err(SatWitnessError::InvalidCnfLiteral { clause_index });
         }
-        let var = lit.unsigned_abs() as usize;
+        let var = lit_var(lit);
         if var > assignment.len() {
             return Err(SatWitnessError::AssignmentTooShort { var });
         }
@@ -489,8 +495,11 @@ fn clause_satisfied(
 ///
 /// A linear scan, no search, no solver state: soundness is immediate from
 /// the definition of satisfaction, which is what makes this small enough
-/// to sit in the trusted kernel (the Lean statement rides a later release;
-/// see docs/design/sat-witness.md).
+/// to sit in the trusted kernel. Machine-checked over the Aeneas model as
+/// `kernel.spec.check_sat_sound` / `check_sat_satisfiable`
+/// (lean/SatWitness.lean, TR-044 / VER-039), axiom-clean like the LRAT
+/// path; `verdicts_exclusive` there shows no CNF has both an accepted
+/// refutation and an accepted witness. See docs/formal-verification.md.
 pub fn check_sat(cnf: &[Vec<i32>], assignment: &[bool]) -> Result<(), SatWitnessError> {
     let mut clause_index = 0;
     while clause_index < cnf.len() {
@@ -508,7 +517,10 @@ pub fn check_sat(cnf: &[Vec<i32>], assignment: &[bool]) -> Result<(), SatWitness
 /// negated CNF literal (`-v` means "bit k is the negation of variable
 /// v"). This is what makes the *advertised* model part of the witness
 /// rather than decoration: a bundle whose model disagrees with its own
-/// assignment is rejected here (TR-038).
+/// assignment is rejected here (TR-038). Machine-checked as
+/// `kernel.spec.check_binding_sound` (lean/SatWitness.lean, TR-044):
+/// accepted ⟹ bit `k` of `value` equals the truth value of `bits[k]` under
+/// the assignment — axiom-clean.
 pub fn check_binding(
     assignment: &[bool],
     bits: &[i32],

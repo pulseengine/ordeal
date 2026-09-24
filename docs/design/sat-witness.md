@@ -7,7 +7,13 @@ confirmed**; envelope = **verify rivet's reader tolerance, then
 v1-optional-field** (v1.1 + coordination only if the check fails); API =
 **`check_with_witness()` returning a `SatCertificate`**; the Lean
 `check_sat` proof extension **rides v0.21.0** (ships mutation-tested +
-fuzz-oracled now, proved next release).
+fuzz-oracled now, proved next release). **Proof landed** (v0.21.0, TR-044
+/ VER-039, `lean/SatWitness.lean`): `kernel.spec.check_sat_sound`,
+`check_sat_satisfiable`, `check_binding_sound`, `verdicts_exclusive`, all
+axiom-clean. Proving them found that `clause_satisfied`'s
+`i32::unsigned_abs` had re-entered the model as an opaque `axiom`; the
+scan now goes through `lit_var` like `check_binding`, and CI gates
+generated models against axioms — see `docs/formal-verification.md`.
 
 ## The asymmetry being closed
 
@@ -125,4 +131,5 @@ question 3.
    vs. enriching `CheckResult::Sat` behind the feature flag?
 4. **Proof follow-up**: is the Lean extension of `check_sat` (soundness
    by exhibition) v0.21.0 scope, or fold into this release and hold the
-   cut longer?
+   cut longer? — *Decided: v0.21.0; landed as TR-044 / VER-039
+   (`lean/SatWitness.lean`, see the status line at the top).*

@@ -11,4 +11,4 @@
 set -euo pipefail
 cd "$(dirname "$0")/../lean"
 lake build AxiomCheck
-echo "axiom gate: AxiomCheck elaborated — soundness chain and blaster capstones depend only on propext / Classical.choice / Quot.sound"
+echo "axiom gate: AxiomCheck elaborated — soundness chain, SAT-witness theorems and blaster capstones depend only on propext / Classical.choice / Quot.sound"
