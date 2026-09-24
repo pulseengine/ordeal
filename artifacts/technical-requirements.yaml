@@ -1311,3 +1311,18 @@ artifacts:
         target: SYS-002
       - type: refines
         target: TR-038
+
+  - id: TR-046
+    type: sw-req
+    title: The Kani blaster-proof layer completes again — tiered by cost, harness coverage gated, preemption-isolated
+    status: approved
+    release: v0.22.0
+    description: "Issue #153, measured 2026-09-24: the Kani job had not completed since 2026-07-16 — the day v0.10.0 made bvurem native (the restoring divider). urem_8 stayed in the PR fast tier while mul_8/udiv_8 (same family) were excluded; every run since ran the 18 cheap harnesses in ~8 minutes and then sat on urem_8 until the runner was shut down (~50 min) or the job cap hit, and because the nightly wider tier was a second step of the same job it was skipped on every nightly for seventy days. Additionally 2026-09-16..20 failed in 30 s on a kani-github-action version-skew error. Seventy days of a vacuous instrument that the run-level 'success' (continue-on-error) hid. Requirement: the layer either completes or is retired honestly. Design: tiers defined once in scripts/kani_tiers.sh (fast / heavy per-harness / wide nightly / explicitly-unscheduled with reasons) and consumed by kani.yml; independent matrix jobs with explicit timeouts; a coverage check that fails when a harness in proofs.rs is in no tier; solver choice for the heavy harnesses decided by local measurement (minisat vs cadical, Kani 0.67). The blaster soundness story keeps resting on the required Lean Blaster* proofs and the exhaustive-8 unit tests; this layer is the Z3-independent second witness and stays non-required until it has completed reliably."
+    tags: [kani, proofs, ci, gate-potency, blaster]
+    fields:
+      priority: should
+      req-type: constraint
+      verification-criteria: A scheduled or dispatched kani.yml run in which every tier job completes with every harness VERIFICATION SUCCESSFUL (run id recorded); the fast tier finishes in under 20 minutes on the standard runner; scripts/kani_tiers.sh check passes (every harness in proofs.rs is in exactly one tier or in the explicitly-unscheduled list with a reason, and every tier name resolves to a harness); the heavy harnesses (mul_8, udiv_8, urem_8) each run in their own job with an explicit per-job timeout so a runner preemption cannot take the tier or the nightly with it. Falsified if a harness is silently in no tier, or if the fast tier exceeds its budget on the standard runner.
+    links:
+      - type: derives-from
+        target: SYS-002
