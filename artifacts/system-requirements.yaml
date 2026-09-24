@@ -38,7 +38,7 @@ artifacts:
       machine-checkable LRAT certificate that a small, formally-verified
       checker validates independently of the (untrusted) solver. A verdict
       whose certificate the checker rejects shall not be reported as UNSAT.
-    status: draft
+    status: verified
     tags: [certificate, lrat, soundness]
     links:
       - type: derives-from
@@ -59,7 +59,7 @@ artifacts:
       shall be untrusted: a bug in any of them can at worst produce a wrong SAT
       model (caught by model re-evaluation) or a certificate the checker rejects,
       never an unsound UNSAT.
-    status: draft
+    status: verified
     tags: [trusted-core, architecture, soundness]
     links:
       - type: derives-from
@@ -121,7 +121,7 @@ artifacts:
       Ordeal shall expose a thin, stable Rust API for one-shot check-sat and
       model retrieval suitable for direct in-process embedding in loom and
       synth, and shall be distributed under the Apache-2.0 license.
-    status: draft
+    status: verified
     tags: [api, license, integration]
     links:
       - type: derives-from

@@ -44,7 +44,7 @@ artifacts:
       The proof depends only on the checker and the LRAT semantics, not on the
       solver internals, establishing that the trusted computing base is exactly
       the checker.
-    status: draft
+    status: verified
     release: v0.5.0
     tags: [soundness, lrat, checker, formal-verification, trusted-core]
     links:
@@ -137,7 +137,7 @@ artifacts:
       operator's formal BitVec semantics (P4), closing the encoder trust gap so
       that Z3 can eventually be dropped from the soundness argument entirely.
       Covers every operator in the fragment at widths 8/32/64.
-    status: draft
+    status: verified
     release: v0.6.0
     tags: [bit-blaster, formal-verification, bitvec, p4]
     links:
@@ -1109,3 +1109,48 @@ artifacts:
     links:
       - type: verifies
         target: TR-046
+
+  - id: VER-044
+    type: sw-verification
+    title: ite bool→BV bridge proven and differentially checked (TR-014)
+    status: verified
+    release: v0.22.0
+    description: "Links the evidence TR-014 always had but never recorded: the per-bit mux is proven equal to BitVec ite at every width in lean/BlasterCmp.lean (blast_ite_bitvec, axiom-pinned, required CI context), independently witnessed at width 8 by the Kani ite_8 harness (TR-046 fast tier, SUCCESSFUL on run 36032091695), and differentially checked against Z3's ite on the oracle corpus (generator case 15 builds BvTerm::Ite)."
+    tags: [ite, blaster, evidence]
+    fields:
+      coverage: blast_ite_bitvec at unbounded width (required Lean context); Kani ite_8 in the scheduled fast tier; Z3 differential over a corpus that includes Ite
+      method: formal-verification
+      steps: "run: cd lean && lake build BlasterCmp (blast_ite_bitvec); cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus (the random generator emits BvTerm::Ite)"
+    links:
+      - type: verifies
+        target: TR-014
+
+  - id: VER-045
+    type: sw-verification
+    title: Derived-op lowering helpers match SMT-LIB and Z3 (TR-015)
+    status: verified
+    release: v0.22.0
+    description: "Links TR-015's existing evidence: lowering::tests (7 tests — exhaustive width-8 udiv/urem/sdiv/srem/smod family against the SMT-LIB reference, width-16 family, deliberate derivation shapes, fast multiplicative-model VCs) and lowering::lowering_diff under the oracle feature (8 tests — each derived form agrees with Z3's native op on boundary pairs incl. division by zero and signed overflow edges, and on randomized pairs)."
+    tags: [lowering, evidence]
+    fields:
+      coverage: exhaustive width-8 div/rem family vs the SMT-LIB reference, width-16 family, derivation shapes; Z3 differential for not/neg/rotl/urem/sdiv/srem incl. boundary pairs (div-by-zero, INT_MIN/-1) and randomized pairs
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- lowering::tests && cargo test -p ordeal --features oracle --release --lib -- lowering::lowering_diff"
+    links:
+      - type: verifies
+        target: TR-015
+
+  - id: VER-046
+    type: sw-verification
+    title: Conflict budget returns Unknown, never an unchecked answer (TR-016)
+    status: verified
+    release: v0.22.0
+    description: "Links TR-016's existing evidence: sat::tests budget_exhaustion_returns_none / budget_zero_still_decides_pure_propagation / budget_matches_unbounded_on_trivially_decidable and solver::tests bounded_check_matches_check_within_budget / zero_budget_forces_unknown — an exhausted budget yields Unknown (the conservative verdict), and within budget check_with_limit agrees with check()."
+    tags: [budget, unknown, evidence]
+    fields:
+      coverage: budget exhaustion -> None/Unknown; zero budget still decides pure propagation; within-budget verdict equals check()
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- sat::tests::budget solver::tests::bounded_check_matches_check_within_budget solver::tests::zero_budget_forces_unknown"
+    links:
+      - type: verifies
+        target: TR-016

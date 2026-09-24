@@ -4,7 +4,7 @@
 phases P0–P5 are modeled as `FEAT-000`…`FEAT-015` in
 [`artifacts/features.yaml`](artifacts/features.yaml) — all phases through P5
 are **verified**, and every feature carries the release that shipped it
-(`release:` field, v0.1.0 through v0.19.0 all shipped). This file is only a
+(`release:` field). This file is only a
 pointer; a hand-maintained mirror of the phase tables went stale and was
 retired (issue #140).
 
@@ -26,9 +26,15 @@ V-model gate.
 
 ## What's next
 
-Post-P5 work is planned per release on GitHub: see the
-[v0.20.0 milestone](https://github.com/pulseengine/ordeal/milestone/11)
-for the current scope.
+Post-P5 work is planned per release in rivet (`release:` field) and mirrored
+to GitHub milestones. Current plan and readiness:
+
+```bash
+rivet release status v0.22.0      # the release in progress
+rivet list --release backlog      # deliberately unscheduled (e.g. TR-032)
+```
+
+Open GitHub milestones: <https://github.com/pulseengine/ordeal/milestones>.
 
 ## Out of scope (permanent)
 

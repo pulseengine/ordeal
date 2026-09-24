@@ -18,7 +18,7 @@ artifacts:
       statically-linked Z3 makes hermetic, reproducible builds painful across
       Linux and macOS and across the Bazel and Cargo build systems. Ordeal
       shall provide a validator whose production build is fully hermetic.
-    status: draft
+    status: approved
     tags: [hermetic, build, reproducibility, loom-246]
     fields:
       priority: must
@@ -34,7 +34,7 @@ artifacts:
       (no SMT-LIB text parsing, no theory-combination overhead) matters more
       than raw SAT-engine throughput. The validator must not become the CI
       bottleneck.
-    status: draft
+    status: approved
     tags: [performance, ci, latency, loom-246]
     fields:
       priority: must
@@ -50,7 +50,7 @@ artifacts:
       formally-verified checker — the CompCert certifying-algorithm pattern,
       blueprinted on Lean 4 bv_decide (OOPSLA 2025). Only the checker need be
       trusted; the solver itself may remain untrusted.
-    status: draft
+    status: approved
     tags: [soundness, certificate, trusted-core, loom-246]
     fields:
       priority: must
@@ -64,7 +64,7 @@ artifacts:
       permissive license (Apache-2.0) and expose a thin, stable Rust API for
       one-shot check-sat with counterexample models. No heavyweight SMT-LIB
       front end is required for the production integration path.
-    status: draft
+    status: approved
     tags: [license, api, integration, loom-246]
     fields:
       priority: must
@@ -79,7 +79,7 @@ artifacts:
       Z3 static-link toolchain independently. Ordeal shall serve exactly the
       QF_BV fragment those crates use (plus loom's later array/UF sliver) and
       nothing more, so the shared story stays small and auditable.
-    status: draft
+    status: approved
     tags: [ecosystem, consolidation, scope, loom-246]
     fields:
       priority: should

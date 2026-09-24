@@ -1486,3 +1486,109 @@ artifacts:
         target: VER-043
       - type: part-of-execution
         target: VE-028
+
+  - id: VE-029
+    type: verification-execution
+    title: Required Lean job on the v0.21.0 release commit — checker soundness, blaster proofs, axiom gate (VER-002, VER-006)
+    status: implemented
+    description: "Main-branch CI run 36008133061 on a0b23d9 — the commit tagged v0.21.0 — job 107662741351, conclusion success, every step success: regen.sh all regenerated Kernel.lean and BlastKernel.lean from the Rust sources; 'Generated models carry no axioms' (0/0); 'Build the soundness proof' (lean/Sound.lean: kernel.spec.lrat_check_sound — kernel accepts => cnf unsat, over the actual CNF argument; plus lean/SatWitness.lean for the SAT direction); 'Build the bit-blaster model + correctness proofs' (lean/Blaster*.lean: a blast_<op>_bitvec theorem for every operator of the closed fragment — add sub mul udiv urem and or xor shl lshr ashr rotr extract concat zero_ext sign_ext ite and all ten comparisons eq ne ult ule ugt uge slt sle sgt sge — against Lean BitVec semantics at unbounded width; the shift family at widths 2^stages, which include 8/32/64); the axiom-cleanliness gate pinning the soundness chain and every blaster capstone to propext / Classical.choice / Quot.sound; the tree-derived sorry guard at zero; the dual-mechanisation differential (Lean core's independently verified LRAT.check agrees with ordeal-lrat on the shared corpus)."
+    fields:
+      environment: "note: GitHub-hosted ubuntu-latest; nix-pinned Charon/Aeneas (lean/toolchain-pins.env); the job is the required 'Lean model + soundness proof' context"
+      executor: ci
+      timestamp: 2026-09-24T13:34:00Z
+      version: a0b23d9
+
+  - id: VV-052
+    type: verification-verdict
+    title: VER-002 pass — the checker-only soundness proof discharges; the TCB is the checker
+    status: implemented
+    description: "Executed pass. Certificate-backed UNSAT: an UNSAT is reported only after ordeal_lrat::check accepts, and acceptance implies unsatisfiability of the actual CNF (machine-checked). Checker-only TCB: the proof depends on the checker and LRAT semantics only — the solver, blaster, CNF encoder and SAT backend appear nowhere in its statement or hypotheses; the checker crate has no dependency on the solver. Falsified if the axiom gate, the sorry guard or the in-job regeneration fails on main."
+    fields:
+      evidence: "job 107662741351 on a0b23d9 (v0.21.0): Sound.lean lrat_check_sound built, axiom-pinned (3 standard axioms), sorry 0, models regenerated in-job with 0 axioms; the theorem's hypotheses mention only kernel.check_steps and the CNF — no solver symbol"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-002
+      - type: part-of-execution
+        target: VE-029
+
+  - id: VV-053
+    type: verification-verdict
+    title: VER-006 pass — every operator's blast rule proven against BitVec semantics (Lean, unbounded width)
+    status: implemented
+    description: "Executed pass, and stronger than the 2026-07 criterion (widths 8/32/64): the Lean proofs hold at every width (the shift family at every power-of-two width, which covers 8/32/64 — non-power-of-two shift widths are covered by the Kani/unit/differential layers, not by this proof). Discharged by the Lean route that replaced the Kani P4 plan as the primary evidence; the Kani harnesses remain the independent width-8 witness."
+    fields:
+      evidence: "job 107662741351: Blaster*.lean build success; 28 blast_*_bitvec theorems covering all 17 BV operators and all 10 comparisons of term.rs; axiom-pinned; shifts proven at widths 2^stages (8/32/64 included)"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-006
+      - type: part-of-execution
+        target: VE-029
+
+  - id: VE-030
+    type: verification-execution
+    title: Local re-execution of the TR-014/015/016 and SYS-006 evidence (VER-044..046, VER-004)
+    status: implemented
+    description: "Executed on main @ 5833b03: lowering::tests 7 passed; budget tests 5 passed; --features oracle --release: lowering::lowering_diff + oracle::tests::differential_ordeal_vs_z3_on_corpus 9 passed (differential 326 s); cargo run --example translation_validation exit 0 (four lowerings PROVEN with re-checked certificates, the planted buggy rule reported WRONG with counterexample x=0x80000000); workspace license = Apache-2.0 inherited by both crates. A first attempt at the oracle leg used a wrong module filter (lowering::z3, matching zero tests) in a debug build and was discarded, not counted."
+    fields:
+      environment: "note: macOS arm64, rustc 1.98.1, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), release build for the oracle legs"
+      executor: local
+      timestamp: 2026-09-24T21:40:00Z
+      version: 5833b03
+
+  - id: VV-054
+    type: verification-verdict
+    title: VER-044 pass — TR-014 ite bridge re-executed 2026-09-24
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-030 (local, main @ 5833b03)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-044
+      - type: part-of-execution
+        target: VE-030
+
+  - id: VV-055
+    type: verification-verdict
+    title: VER-045 pass — TR-015 lowering re-executed 2026-09-24
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-030 (local, main @ 5833b03)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-045
+      - type: part-of-execution
+        target: VE-030
+
+  - id: VV-056
+    type: verification-verdict
+    title: VER-046 pass — TR-016 budget re-executed 2026-09-24
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-030 (local, main @ 5833b03)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-046
+      - type: part-of-execution
+        target: VE-030
+
+  - id: VV-057
+    type: verification-verdict
+    title: VER-004 pass — SYS-006 API+license re-executed 2026-09-24
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-030 (local, main @ 5833b03)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-004
+      - type: part-of-execution
+        target: VE-030
