@@ -1094,3 +1094,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-045
+
+  - id: VER-043
+    type: sw-verification
+    title: "Kani tiers complete: green run recorded, coverage check potent (TR-046)"
+    status: approved
+    release: v0.22.0
+    description: "Confirms TR-046 with the instrument itself: a complete kani.yml run (run id, per-harness verification times from the logs) in which every tier job succeeds, plus the coverage check executed both ways — passing on the tree and failing when a harness is deliberately left out of every tier — so the 'every harness runs somewhere' claim is a gate, not prose."
+    tags: [kani, proofs, ci, evidence]
+    fields:
+      coverage: tier coverage check (positive + negative control); one complete scheduled/dispatched run with per-harness times recorded; fast tier < 20 min
+      method: automated-test
+      steps: "run: bash scripts/kani_tiers.sh check && gh workflow run kani.yml && (every matrix job success, every harness VERIFICATION SUCCESSFUL in the logs); negative control: add a harness to proofs.rs without a tier -> check fails"
+    links:
+      - type: verifies
+        target: TR-046

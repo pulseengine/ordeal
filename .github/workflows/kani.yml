@@ -1,4 +1,4 @@
-# ── Kani bit-blaster proofs (FEAT-004 / P4) ───────────────────────────────
+# ── Kani bit-blaster proofs (FEAT-004 / P4; tiers: TR-046 / #153) ─────────
 # Machine-checked proofs that each bit-blasting rule equals the concrete
 # reference (SMT-LIB QF_BV semantics) for ALL inputs — the Z3-independent
 # soundness evidence for the blaster (crates/ordeal/src/blast/proofs.rs).
@@ -6,16 +6,24 @@
 # Kani (CBMC/SAT) is expensive, so this does NOT run on every PR: it runs on a
 # nightly schedule, on demand, and on PRs that touch the blaster. It is
 # NON-BLOCKING (continue-on-error) — a proof regression is surfaced loudly but
-# does not gate merges while the harness set and CI budget are being tuned.
+# does not gate merges. The blaster soundness story rests on the REQUIRED
+# Lean Blaster* proofs and the exhaustive-8 unit tests; this layer is the
+# second, independent witness.
 #
-# Two tiers (#138): PR/dispatch runs the fast 8-bit tier below (mul_8 and
-# udiv_8 excluded — compute-heavy even at width 8; they retain exhaustive-8
-# unit tests + the Z3 differential, and the required Lean Blaster* proofs
-# carry the blaster soundness story regardless). The NIGHTLY schedule runs
-# the wider tier on top: mul_8, udiv_8, and the 32/64-bit light-op
-# harnesses, with a longer timeout. The 2026-09-23 fast-tier run was
-# cancelled at the default 2h job cap on a slow runner — timeouts below are
-# explicit so a slow runner produces a legible timeout, not a silent cap.
+# Tiers (#153, 2026-09-24): the job had not completed since 2026-07-16 —
+# urem_8 sat in the PR tier after v0.10.0 made the divider native and ran
+# for hours until the runner was shut down, which also skipped the nightly
+# tier behind it; 44 harnesses were in no tier at all. Now:
+#   * the tiers are defined ONCE in scripts/kani_tiers.sh and consumed
+#     here; `kani_tiers.sh check` (first job) fails unless every harness in
+#     proofs.rs is in exactly one tier or explicitly unscheduled with a
+#     reason — a harness nobody runs is not a proof;
+#   * fast (PR + nightly): width-8 rules without mul/div, ~8 min measured;
+#   * heavy (nightly): mul_8 / udiv_8 / urem_8, ONE JOB EACH with its own
+#     timeout, so a runner preemption costs one harness, not the tier;
+#   * wide (nightly): the light 32/64 rules.
+# Job-level `continue-on-error` masks the run conclusion — read the job and
+# step conclusions (gh api …/runs/<id>/jobs), never the run badge.
 name: Kani proofs
 
 on:
@@ -28,6 +36,7 @@ on:
       - "crates/ordeal/src/blast/**"
       - "crates/ordeal/src/aig.rs"
       - "crates/ordeal/src/eval.rs"
+      - "scripts/kani_tiers.sh"
       - ".github/workflows/kani.yml"
 
 permissions:
@@ -38,36 +47,74 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  proofs:
-    name: Bit-blaster equivalence proofs
+  tiers:
+    name: Harness coverage (every proof is in a tier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Every harness in proofs.rs is in exactly one tier (or unscheduled with a reason)
+        run: bash scripts/kani_tiers.sh check
+
+  fast:
+    name: Fast tier (width 8, no mul/div)
+    needs: tiers
     runs-on: ubuntu-latest
     continue-on-error: true
-    timeout-minutes: 150
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          key: kani
-      - name: Run Kani (fast tier — width 8, mul/udiv excluded; see header)
+          key: kani-fast
+      - id: tier
+        run: echo "args=$(bash scripts/kani_tiers.sh args fast)" >> "$GITHUB_OUTPUT"
+      - name: Run Kani (fast tier)
         uses: model-checking/kani-github-action@v1
         with:
-          args: >-
-            --harness add_8 --harness sub_8 --harness urem_8 --harness and_8 --harness or_8
-            --harness xor_8 --harness shl_8 --harness lshr_8 --harness ashr_8
-            --harness rotr_8 --harness eq_8 --harness ne_8 --harness ult_8
-            --harness ule_8 --harness ugt_8 --harness uge_8 --harness slt_8
-            --harness sle_8 --harness sgt_8 --harness sge_8
-            --harness concat_4_4 --harness extract_16_hi --harness extract_16_lo
-            --harness zext_8_8 --harness sext_8_8 --harness ite_8
-      # #138: the nightly wider tier actually runs nightly now (the schedule
-      # previously re-ran the identical fast tier, contradicting the header).
-      - name: Run Kani (wider tier — mul/udiv at 8, light ops at 32/64; nightly only)
-        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+          args: ${{ steps.tier.outputs.args }}
+
+  heavy:
+    name: Heavy tier — ${{ matrix.harness }} (nightly)
+    needs: tiers
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        harness: [mul_8, udiv_8, urem_8]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kani-heavy
+      - id: tier
+        run: echo "args=$(bash scripts/kani_tiers.sh args heavy:${{ matrix.harness }})" >> "$GITHUB_OUTPUT"
+      - name: Run Kani (${{ matrix.harness }})
         uses: model-checking/kani-github-action@v1
         with:
-          args: >-
-            --harness mul_8 --harness udiv_8
-            --harness add_32 --harness add_64 --harness sub_32 --harness sub_64
-            --harness and_32 --harness and_64 --harness or_32 --harness or_64
-            --harness xor_32 --harness xor_64
+          args: ${{ steps.tier.outputs.args }}
+
+  wide:
+    name: Wide tier (light ops at 32/64, nightly)
+    needs: tiers
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: kani-wide
+      - id: tier
+        run: echo "args=$(bash scripts/kani_tiers.sh args wide)" >> "$GITHUB_OUTPUT"
+      - name: Run Kani (wide tier)
+        uses: model-checking/kani-github-action@v1
+        with:
+          args: ${{ steps.tier.outputs.args }}
