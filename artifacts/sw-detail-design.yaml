@@ -429,3 +429,106 @@ artifacts:
         target: DES-014
     fields:
       unit: crates/ordeal/src/sliver.rs
+
+  - id: DES-020
+    type: sw-detail-design
+    title: Target-gated backend selection
+    status: verified
+    description: "The own CDCL core is compiled on every target; the CaDiCaL accelerator module (sat_cadical.rs) is compiled only under cfg(all(feature = \"cadical\", not(target_family = \"wasm\"))), and the default build has no external dependency. Unit: the cfg gates in lib.rs and Cargo.toml features."
+    links:
+      - type: refines
+        target: ARC-008
+      - type: satisfies
+        target: TR-004
+      - type: satisfies
+        target: TR-011
+
+  - id: DES-021
+    type: sw-detail-design
+    title: Bazel targets over crate_universe
+    status: verified
+    description: MODULE.bazel resolves crates from Cargo.lock via crate_universe; crates/*/BUILD.bazel declare rust_library, rust_binary and rust_test targets; the library's unit tests stay free of Cargo dev-dependencies because rust_test compiles them without them.
+    links:
+      - type: refines
+        target: ARC-009
+      - type: satisfies
+        target: TR-012
+
+  - id: DES-022
+    type: sw-detail-design
+    title: SMT-LIB2 reader and CLI dispatch
+    status: verified
+    description: "smtlib.rs: tokenizer, s-expression parser and a command loop (run_script) shared by solve_str and solve_str_with_witness; strict declare-const / declare-fun arity; width-consistent redeclaration. main.rs: subcommand dispatch, --format parsing, hand-rolled JSON (dependency-free), exit codes 0/2."
+    links:
+      - type: refines
+        target: ARC-010
+      - type: satisfies
+        target: TR-023
+      - type: satisfies
+        target: TR-036
+      - type: satisfies
+        target: TR-037
+      - type: satisfies
+        target: TR-045
+
+  - id: DES-023
+    type: sw-detail-design
+    title: Evidence encodings and integrity hashes
+    status: verified
+    description: "Canonical texts: DIMACS clause lines for the CNF, bitstring-lsb-var1 for the assignment, 'name width lits' lines for the bit map; SHA-256 (FIPS 180-4, in-tree) over each. ordeal-cert/v1 envelopes verify hashes before parsing returns; recheck() re-runs the trusted checker."
+    links:
+      - type: refines
+        target: ARC-011
+      - type: satisfies
+        target: TR-017
+      - type: satisfies
+        target: TR-025
+      - type: satisfies
+        target: TR-045
+
+  - id: DES-024
+    type: sw-detail-design
+    title: Consumer term builders
+    status: verified
+    description: trap.rs builds each partial WASM op's trap predicate as a BoolTerm; layout.rs splits and reassembles little-endian bytes with extract/concat; lowering.rs derives not/neg/rotl/urem/sdiv/srem from the closed op set; all are pure term constructors with no solver state.
+    links:
+      - type: refines
+        target: ARC-012
+      - type: satisfies
+        target: TR-015
+      - type: satisfies
+        target: TR-019
+      - type: satisfies
+        target: TR-020
+      - type: satisfies
+        target: TR-021
+
+  - id: DES-025
+    type: sw-detail-design
+    title: VEX generation and advisory gate
+    status: verified
+    description: scripts/vex.py generates a CycloneDX VEX for the shipped closure (never writes not_affected; human judgements in vex/judgements.json) and compares re-audits; deny.toml gates advisories (blocking on the shipped closure, advisory elsewhere).
+    links:
+      - type: refines
+        target: ARC-013
+      - type: satisfies
+        target: TR-033
+      - type: satisfies
+        target: TR-040
+      - type: satisfies
+        target: TR-043
+
+  - id: DES-026
+    type: sw-detail-design
+    title: Gate scripts over the proof and harness inventories
+    status: verified
+    description: "scripts/kani_tiers.sh derives the Kani harness inventory from proofs.rs and fails unless each harness is in exactly one tier or explicitly unscheduled; scripts/axiom_check.sh builds lean/AxiomCheck.lean whose #guard_msgs pin each capstone's axiom list; scripts/check_verification_citations.sh resolves every cited cargo-test filter against the real test list."
+    links:
+      - type: refines
+        target: ARC-014
+      - type: satisfies
+        target: TR-042
+      - type: satisfies
+        target: TR-046
+      - type: satisfies
+        target: TR-047

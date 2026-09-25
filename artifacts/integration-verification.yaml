@@ -1,0 +1,12 @@
+# Integration Verification (ASPICE SWE.5 and SYS.4)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# SWE.5: sw-integration-verification verifies each software architecture
+# component (ARC-*) as integrated with its neighbours. SYS.4:
+# sys-integration-verification verifies each system architecture element
+# (SA-*) as delivered. Every measure cites an executable command.
+#
+# Format: rivet generic-yaml
+
+artifacts:

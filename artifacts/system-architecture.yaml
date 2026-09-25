@@ -1,0 +1,77 @@
+# System Architecture (ASPICE SYS.3)
+#
+# System: Ordeal — certificate-checked QF_BV SMT solver
+#
+# The system elements ordeal is delivered as. Each is allocated from the
+# system requirements it realises and is verified at SYS.4 by the
+# sys-integration-verification artifacts in integration-verification.yaml.
+#
+# Format: rivet generic-yaml
+
+artifacts:
+
+  - id: SA-001
+    type: system-arch-component
+    title: "ordeal library crate (crates.io: ordeal)"
+    status: implemented
+    description: "The embeddable solver library consumers link in-process: the one-shot API, term model, blaster, CNF, SAT core, consumer libraries and evidence formats. Dependency-free by default, wasm32-wasip2-clean."
+    links:
+      - type: allocated-from
+        target: SYS-001
+      - type: allocated-from
+        target: SYS-006
+      - type: allocated-from
+        target: SYS-007
+
+  - id: SA-002
+    type: system-arch-component
+    title: "ordeal-lrat trusted checker crate (crates.io: ordeal-lrat)"
+    status: implemented
+    description: "The only trusted element: zero dependencies, no dependency on the solver, re-establishes both verdicts (LRAT refutation and SAT witness)."
+    links:
+      - type: allocated-from
+        target: SYS-002
+      - type: allocated-from
+        target: SYS-003
+
+  - id: SA-003
+    type: system-arch-component
+    title: ordeal command-line tool and wasm32-wasip2 component
+    status: implemented
+    description: The shipped executable in its native forms (gnu, static musl, darwin) and the WebAssembly component, all built from the same sources and required to behave byte-identically.
+    links:
+      - type: allocated-from
+        target: SYS-001
+      - type: allocated-from
+        target: SYS-005
+
+  - id: SA-004
+    type: system-arch-component
+    title: machine-checked proof development (lean/)
+    status: implemented
+    description: "The Lean 4 development over models regenerated from the Rust source in CI: checker soundness, SAT-witness soundness, and blaster correctness, axiom-pinned."
+    links:
+      - type: allocated-from
+        target: SYS-002
+      - type: allocated-from
+        target: SYS-003
+
+  - id: SA-005
+    type: system-arch-component
+    title: release and distribution channels
+    status: implemented
+    description: Signed GitHub releases (cosign sums, SBOM, VEX, provenance), crates.io, the varve pulseengine layer, and the rules_ordeal Bazel toolchain.
+    links:
+      - type: allocated-from
+        target: SYS-005
+      - type: allocated-from
+        target: SYS-006
+
+  - id: SA-006
+    type: system-arch-component
+    title: Z3 differential harness (development and CI only)
+    status: implemented
+    description: The oracle-feature harness that cross-checks verdicts and models against Z3; outside the shipped build and the soundness argument.
+    links:
+      - type: allocated-from
+        target: SYS-004

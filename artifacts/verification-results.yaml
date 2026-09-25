@@ -1592,3 +1592,123 @@ artifacts:
         target: VER-004
       - type: part-of-execution
         target: VE-030
+
+  - id: VE-031
+    type: verification-execution
+    title: Unit verification of the new SWE.3 designs (UV-019, UV-021..025)
+    status: implemented
+    description: "Each unit verification's cited command executed: default dependency closure = ordeal + ordeal-lrat; wasm32-wasip2 release build OK; solver::tests 38 passed; smtlib::tests + verus::tests 28 passed; sha256::tests 1 passed and cert_bundle::tests 11 passed; trap/layout/lowering 33 passed (1 ignored by design); vex.py self-test 13/13; kani_tiers.sh check PASS and the citation checker PASS. Every command exited 0."
+    fields:
+      environment: "note: macOS arm64, rustc 1.98.1; main @ 2a09147 plus this branch's artifacts only"
+      executor: local
+      timestamp: 2026-09-25T06:30:00Z
+      version: 2a09147
+
+  - id: VE-032
+    type: verification-execution
+    title: Bazel unit tests on main (UV-020)
+    status: implemented
+    description: "Main CI run 36063162096 on 2a09147, job 107846658648 (Bazel build, optional) success: //crates/ordeal:ordeal-test PASSED and //crates/ordeal-lrat:ordeal-lrat-test PASSED — 2 of 2 bazel test targets. Local Bazel on macOS fails at link (ld64.lld TAPI), so CI is the executing environment."
+    fields:
+      environment: "note: GitHub-hosted ubuntu-latest, optional Bazel CI job"
+      executor: ci
+      timestamp: 2026-09-24T21:40:00Z
+      version: 2a09147
+
+  - id: VV-058
+    type: verification-verdict
+    title: UV-019 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see the linked execution
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-019
+      - type: part-of-execution
+        target: VE-031
+
+  - id: VV-059
+    type: verification-verdict
+    title: UV-021 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see the linked execution
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-021
+      - type: part-of-execution
+        target: VE-031
+
+  - id: VV-060
+    type: verification-verdict
+    title: UV-022 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see the linked execution
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-022
+      - type: part-of-execution
+        target: VE-031
+
+  - id: VV-061
+    type: verification-verdict
+    title: UV-023 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see the linked execution
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-023
+      - type: part-of-execution
+        target: VE-031
+
+  - id: VV-062
+    type: verification-verdict
+    title: UV-024 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see the linked execution
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-024
+      - type: part-of-execution
+        target: VE-031
+
+  - id: VV-063
+    type: verification-verdict
+    title: UV-025 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see the linked execution
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-025
+      - type: part-of-execution
+        target: VE-031
+
+  - id: VV-064
+    type: verification-verdict
+    title: UV-020 pass (bazel test on main)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "CI job 107846658648: 2/2 bazel test targets PASSED"
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-020
+      - type: part-of-execution
+        target: VE-032

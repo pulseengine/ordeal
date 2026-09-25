@@ -1125,6 +1125,8 @@ artifacts:
       - type: verifies
         target: TR-014
 
+      - type: verifies
+        target: FEAT-006
   - id: VER-045
     type: sw-verification
     title: Derived-op lowering helpers match SMT-LIB and Z3 (TR-015)
@@ -1140,6 +1142,8 @@ artifacts:
       - type: verifies
         target: TR-015
 
+      - type: verifies
+        target: FEAT-006
   - id: VER-046
     type: sw-verification
     title: Conflict budget returns Unknown, never an unchecked answer (TR-016)
@@ -1154,3 +1158,5 @@ artifacts:
     links:
       - type: verifies
         target: TR-016
+      - type: verifies
+        target: FEAT-006

@@ -27,6 +27,24 @@ artifacts:
       - type: allocated-from
         target: TR-010
 
+      - type: allocated-from
+        target: TR-016
+      - type: allocated-from
+        target: TR-026
+      - type: allocated-from
+        target: TR-024
+      - type: allocated-from
+        target: TR-029
+      - type: allocated-from
+        target: FEAT-000
+      - type: allocated-from
+        target: FEAT-003
+      - type: allocated-from
+        target: FEAT-006
+      - type: allocated-from
+        target: FEAT-010
+      - type: allocated-from
+        target: FEAT-014
   - id: ARC-002
     type: sw-arch-component
     title: ordeal-term (QF_BV term graph and preprocessing)
@@ -41,6 +59,20 @@ artifacts:
 
       - type: allocated-from
         target: TR-028
+      - type: allocated-from
+        target: TR-014
+      - type: allocated-from
+        target: TR-018
+      - type: allocated-from
+        target: TR-029
+      - type: allocated-from
+        target: FEAT-000
+      - type: allocated-from
+        target: FEAT-003
+      - type: allocated-from
+        target: FEAT-005
+      - type: allocated-from
+        target: FEAT-013
   - id: ARC-003
     type: sw-arch-component
     title: ordeal-aig (bit-blaster and And-Inverter Graph)
@@ -53,6 +85,24 @@ artifacts:
       - type: allocated-from
         target: TR-009
 
+      - type: allocated-from
+        target: TR-014
+      - type: allocated-from
+        target: TR-022
+      - type: allocated-from
+        target: TR-027
+      - type: allocated-from
+        target: FEAT-001
+      - type: allocated-from
+        target: FEAT-004
+      - type: allocated-from
+        target: FEAT-005
+      - type: allocated-from
+        target: FEAT-006
+      - type: allocated-from
+        target: FEAT-008
+      - type: allocated-from
+        target: FEAT-012
   - id: ARC-004
     type: sw-arch-component
     title: ordeal-cnf (Tseitin CNF encoder)
@@ -66,6 +116,8 @@ artifacts:
       - type: allocated-from
         target: TR-003
 
+      - type: allocated-from
+        target: FEAT-001
   - id: ARC-005
     type: sw-arch-component
     title: ordeal-sat (own pure-Rust CDCL core; optional CaDiCaL accelerator)
@@ -85,6 +137,18 @@ artifacts:
       - type: allocated-from
         target: TR-005
 
+      - type: allocated-from
+        target: TR-016
+      - type: allocated-from
+        target: TR-026
+      - type: allocated-from
+        target: FEAT-001
+      - type: allocated-from
+        target: FEAT-002
+      - type: allocated-from
+        target: FEAT-005
+      - type: allocated-from
+        target: FEAT-014
   - id: ARC-006
     type: sw-arch-component
     title: ordeal-lrat (verified certificate checker)
@@ -107,6 +171,8 @@ artifacts:
         target: TR-044
       - type: allocated-from
         target: TR-034
+      - type: allocated-from
+        target: FEAT-002
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)
@@ -121,6 +187,8 @@ artifacts:
       - type: allocated-from
         target: TR-007
 
+      - type: allocated-from
+        target: FEAT-001
   - id: ARC-008
     type: sw-arch-component
     title: ordeal-backend-split (own core everywhere / CaDiCaL native opt-in cfg gate)
@@ -152,3 +220,108 @@ artifacts:
         target: TR-012
       - type: allocated-from
         target: TR-011
+
+  - id: ARC-010
+    type: sw-arch-component
+    title: ordeal-frontends (SMT-LIB2 reader, Verus-VC bridge, CLI)
+    status: implemented
+    description: "Text front ends onto the one-shot API: the SMT-LIB2 QF_BV reader (crates/ordeal/src/smtlib.rs, pure std, no I/O, wasm-clean), the Verus by-(bit_vector) obligation bridge over it (verus.rs), and the ordeal CLI (main.rs: check / verus subcommands, --format json with the full evidence for both verdicts, machine-quotable --version, strict exit codes). UNTRUSTED: a reader bug yields a wrong question, never an accepted wrong answer; answers still pass the trusted checker."
+    links:
+      - type: allocated-from
+        target: TR-023
+      - type: allocated-from
+        target: TR-036
+      - type: allocated-from
+        target: TR-037
+      - type: allocated-from
+        target: TR-045
+
+      - type: allocated-from
+        target: FEAT-009
+  - id: ARC-011
+    type: sw-arch-component
+    title: ordeal-evidence (portable certificate, ordeal-cert/v1 bundle, SAT witness, in-tree SHA-256)
+    status: implemented
+    description: "The evidence formats a consumer re-checks without trusting the solver: the portable UNSAT Certificate carrying its CNF (recheck()), the ordeal-cert/v1 JSON bundle with content hashes (cert_bundle.rs, cert-bundle feature), the always-compiled SAT witness types and canonical texts (witness.rs), and the dependency-free SHA-256 used for integrity hashes (sha256.rs). UNTRUSTED for soundness: every format is re-established by the trusted checker; the hashes are integrity only."
+    links:
+      - type: allocated-from
+        target: TR-017
+      - type: allocated-from
+        target: TR-025
+      - type: allocated-from
+        target: TR-030
+      - type: allocated-from
+        target: TR-045
+
+      - type: allocated-from
+        target: FEAT-011
+      - type: allocated-from
+        target: FEAT-015
+  - id: ARC-012
+    type: sw-arch-component
+    title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)
+    status: implemented
+    description: "Libraries that turn a consumer's question into the closed fragment: WASM trap and partiality conditions including the float-to-int truncation classifier (trap.rs), little-endian byte layout helpers (layout.rs), derived-op lowering for not/neg/rotl/urem/sdiv/srem (lowering.rs), the constant evaluator (eval.rs), and the prove_valid / prove_equiv / check_with_deadline toolkit entries on the solver facade. UNTRUSTED: each only builds terms; the answers go through the certified pipeline."
+    links:
+      - type: allocated-from
+        target: TR-015
+      - type: allocated-from
+        target: TR-019
+      - type: allocated-from
+        target: TR-020
+      - type: allocated-from
+        target: TR-021
+      - type: allocated-from
+        target: TR-024
+      - type: allocated-from
+        target: TR-029
+
+      - type: allocated-from
+        target: FEAT-006
+      - type: allocated-from
+        target: FEAT-007
+      - type: allocated-from
+        target: FEAT-008
+      - type: allocated-from
+        target: FEAT-010
+  - id: ARC-013
+    type: sw-arch-component
+    title: ordeal-release-pipeline (signed release, SBOM, VEX, musl, verification of published bytes)
+    status: implemented
+    description: "The delivery pipeline: .github/workflows/release.yml builds six archives (gnu/darwin plus static musl), executes each where the host can, composes the release body from the tag annotation and rivet release notes, emits a CycloneDX SBOM and VEX (scripts/vex.py, deny.toml) into the cosign-signed SHA256SUMS.txt, and attaches SLSA provenance; vex-reissue.yml re-audits weekly; scripts/verify_release.sh verifies the published bytes after a cut. Carries no solver logic; its correctness is that what ships is what was built and verified."
+    links:
+      - type: allocated-from
+        target: TR-033
+      - type: allocated-from
+        target: TR-039
+      - type: allocated-from
+        target: TR-040
+      - type: allocated-from
+        target: TR-043
+
+  - id: ARC-014
+    type: sw-arch-component
+    title: ordeal-verification-infrastructure (Lean regeneration, Kani tiers, fuzzing, differentials, gates)
+    status: implemented
+    description: "The machinery that produces verification evidence: lean/regen.sh regenerating the Aeneas models inside the required CI job, the Lean proof developments and axiom gate (scripts/axiom_check.sh), the dual-mechanisation differential (lean/DiffCheck.lean), the Kani tiers (scripts/kani_tiers.sh, kani.yml), the fuzz crate (fuzz/), the native/wasm behavioural differential (scripts/wasm_native_differential.sh), the citation checker, and the BMC benchmark corpus (bmc_corpus.rs, benches/). Not shipped; it is the right-hand side of the V made executable."
+    links:
+      - type: allocated-from
+        target: TR-027
+      - type: allocated-from
+        target: TR-031
+      - type: allocated-from
+        target: TR-035
+      - type: allocated-from
+        target: TR-041
+      - type: allocated-from
+        target: TR-042
+      - type: allocated-from
+        target: TR-046
+      - type: allocated-from
+        target: TR-047
+      - type: allocated-from
+        target: FEAT-004
+      - type: allocated-from
+        target: FEAT-012
+      - type: allocated-from
+        target: FEAT-015
