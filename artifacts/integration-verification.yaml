@@ -10,3 +10,191 @@
 # Format: rivet generic-yaml
 
 artifacts:
+
+  - id: IV-001
+    type: sw-integration-verification
+    title: End-to-end pipeline against Z3, and the CaDiCaL accelerator against the own core
+    status: verified
+    description: "Integrates term model, blaster, CNF, SAT core, the optional CaDiCaL accelerator and the Z3 harness, pairwise: the whole pipeline (own CDCL core) agrees with Z3 on verdicts and models over a corpus exercising every operator variant, SAT models satisfy every assertion, a wrong model is detected; the array/UF sliver agrees with Z3; and CaDiCaL agrees with the own core on random CNFs with every CaDiCaL UNSAT carrying an LRAT proof the checker accepts. 14 tests."
+    fields:
+      method: automated-test
+      steps: "run: LIBRARY_PATH=/opt/homebrew/lib cargo test -p ordeal --features 'oracle cadical cert-bundle' --release --lib -- oracle:: sat_cadical::"
+    links:
+      - type: verifies
+        target: ARC-001
+      - type: verifies
+        target: ARC-002
+      - type: verifies
+        target: ARC-003
+      - type: verifies
+        target: ARC-004
+      - type: verifies
+        target: ARC-005
+      - type: verifies
+        target: ARC-007
+      - type: verifies
+        target: ARC-008
+
+  - id: IV-002
+    type: sw-integration-verification
+    title: "Certificate path across the trust boundary: solver emits, checker accepts, consumer re-checks"
+    status: verified
+    description: "Integrates the untrusted solver with the trusted checker and the evidence formats as a consumer sees them: the CLI's JSON for unsat carries CNF + LRAT that ordeal_lrat::check accepts, the JSON for sat carries a witness that ordeal_lrat::check_sat / check_binding accept, the hashes match an independent SHA-256, and a tampered witness is rejected."
+    fields:
+      method: automated-test
+      steps: "run: cargo test -p ordeal --test cli_baseline && cargo test -p ordeal --test sha256_differential"
+    links:
+      - type: verifies
+        target: ARC-005
+      - type: verifies
+        target: ARC-006
+      - type: verifies
+        target: ARC-010
+      - type: verifies
+        target: ARC-011
+
+  - id: IV-003
+    type: sw-integration-verification
+    title: CLI front end native and as a wasm32-wasip2 component, byte-identical
+    status: verified
+    description: "Integrates the SMT-LIB2 reader and CLI with the solver on both targets of the backend split: the native binary and the wasm32-wasip2 component under wasmtime must produce byte-identical output (verdicts, models, certificates, witnesses) on the differential corpus in text and JSON modes, plus a file-mode probe."
+    fields:
+      method: automated-test
+      steps: "run: cargo build --release -p ordeal && cargo build --release -p ordeal --target wasm32-wasip2 && bash scripts/wasm_native_differential.sh target/release/ordeal wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm"
+    links:
+      - type: verifies
+        target: ARC-008
+      - type: verifies
+        target: ARC-010
+
+  - id: IV-004
+    type: sw-integration-verification
+    title: Consumer libraries through the certified pipeline
+    status: verified
+    description: "Integrates the consumer libraries (trap semantics, layout, lowering, prove toolkit) with the solver facade on the workloads they exist for: the consumer recipes, a translation-validation run that must prove the correct WASM-to-ARM lowerings (certificates re-checked) and refute the planted buggy rule with a counterexample, and the README quickstart."
+    fields:
+      method: automated-test
+      steps: "run: cargo run -p ordeal --example consumer_recipes && cargo run -p ordeal --example translation_validation && cargo run -p ordeal --example quickstart"
+    links:
+      - type: verifies
+        target: ARC-001
+      - type: verifies
+        target: ARC-012
+
+  - id: IV-005
+    type: sw-integration-verification
+    title: Evidence ingested by a real consumer (rivet)
+    status: verified
+    description: "Integrates the ordeal-cert/v1 bundle with its first external consumer: a live solve's bundle is hash-verified on ingestion and re-checked, tampered bundles are rejected, and the emitted rivet ordeal-certificate fixture validates against the installed rivet."
+    fields:
+      method: automated-test
+      steps: "run: cargo run -p ordeal --features cert-bundle --example rivet_ingestion -- \"$(mktemp -d)\" \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\""
+    links:
+      - type: verifies
+        target: ARC-011
+
+  - id: IV-006
+    type: sw-integration-verification
+    title: Release pipeline end to end, on the published bytes
+    status: verified
+    description: "Integrates build legs, signing, SBOM/VEX and release-body composition as delivered: the latest release's archives, SBOM and VEX are listed in the cosign-signed sums and verify, the musl binary is ELF-static, the darwin binary reports the tag and solves (unsat certificate and sat witness re-checked independently), SBOM and VEX are bom-linked, and the release body carries the falsification statement and the rivet note."
+    fields:
+      method: automated-test
+      steps: "run: bash scripts/verify_release.sh v0.21.0"
+    links:
+      - type: verifies
+        target: ARC-013
+
+  - id: IV-007
+    type: sw-integration-verification
+    title: Verification infrastructure regenerates, proves and gates in one job
+    status: verified
+    description: "Integrates the Rust kernels with the proof development: the required Lean CI job regenerates the Aeneas models from the Rust source, fails on any axiom in them, builds every proof, pins axioms, guards the sorry budget and runs the dual-mechanisation differential; the Kani tiers run from the script-defined inventory."
+    fields:
+      method: automated-test
+      steps: "run: the required 'Lean model + soundness proof' CI context (bash lean/regen.sh all && cd lean && lake build && bash ../scripts/axiom_check.sh) and gh workflow run kani.yml"
+    links:
+      - type: verifies
+        target: ARC-006
+      - type: verifies
+        target: ARC-014
+
+  - id: IV-008
+    type: sw-integration-verification
+    title: Bazel build integrates the workspace crates
+    status: verified
+    description: "Integrates both crates under the org Bazel rules: bazel test builds and runs the library and checker test targets from the crate_universe graph."
+    fields:
+      method: automated-test
+      steps: "run: bazel test //... --config=dev --test_output=errors (optional Bazel CI job)"
+    links:
+      - type: verifies
+        target: ARC-009
+
+  - id: SIV-001
+    type: sys-integration-verification
+    title: The shipped release, verified as delivered
+    status: verified
+    description: "System-level integration of what a user downloads: every platform archive, the SBOM and the VEX are covered by the cosign-signed manifest; the executable reports its tag and answers both verdicts with re-checkable evidence."
+    fields:
+      method: automated-test
+      steps: "run: bash scripts/verify_release.sh v0.21.0"
+    links:
+      - type: verifies
+        target: SA-003
+      - type: verifies
+        target: SA-005
+
+  - id: SIV-002
+    type: sys-integration-verification
+    title: Library and checker crates integrate as published on crates.io
+    status: verified
+    description: A fresh consumer depending only on the published ordeal and ordeal-lrat (exact version, no workspace paths) proves an equivalence, re-checks the certificate through Certificate::recheck, and calls the published checker directly on the published solver's proof.
+    fields:
+      method: automated-test
+      steps: "run: cargo new consumer && cargo add ordeal@=0.21.0 ordeal-lrat@=0.21.0 && (quickstart + a direct ordeal_lrat::check call) && cargo run"
+    links:
+      - type: verifies
+        target: SA-001
+      - type: verifies
+        target: SA-002
+
+  - id: SIV-003
+    type: sys-integration-verification
+    title: Proof development verified against the shipped system's source
+    status: verified
+    description: The required Lean job on the commit a release is tagged from regenerates the models from exactly that source and discharges every proof, axiom-pinned and sorry-free — the proofs describe the system that ships.
+    fields:
+      method: automated-test
+      steps: "run: the required 'Lean model + soundness proof' CI context on the release commit"
+    links:
+      - type: verifies
+        target: SA-002
+      - type: verifies
+        target: SA-004
+
+  - id: SIV-004
+    type: sys-integration-verification
+    title: The Z3 harness agrees with the system on the full operator set
+    status: verified
+    description: "System-level differential: the development harness drives the shipped solver and Z3 over the corpus; any verdict or model disagreement fails."
+    fields:
+      method: automated-test
+      steps: "run: LIBRARY_PATH=/opt/homebrew/lib cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus"
+    links:
+      - type: verifies
+        target: SA-006
+
+  - id: SIV-005
+    type: sys-integration-verification
+    title: Distribution channels deliver the same working system
+    status: verified
+    description: The pinned varve layer resolves ordeal 0.21.0, which answers unsat with a certificate and sat with a witness in JSON; rules_ordeal v0.6.0's CI downloads the pinned release by hash and runs it on ubuntu and macos.
+    fields:
+      method: automated-test
+      steps: "run: varve install && varve run ordeal --version && varve run ordeal check - (unsat + --format json sat); rules_ordeal main CI (bazel test ubuntu + macos)"
+    links:
+      - type: verifies
+        target: SA-003
+      - type: verifies
+        target: SA-005

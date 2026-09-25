@@ -19,7 +19,7 @@ artifacts:
       This is the stable surface loom and synth embed in-process.
       UNTRUSTED — a bug here can at worst yield a wrong SAT model (caught by
       model re-evaluation) or a rejected certificate.
-    status: implemented
+    status: verified
     tags: [api, facade, untrusted]
     links:
       - type: allocated-from
@@ -49,7 +49,7 @@ artifacts:
     type: sw-arch-component
     title: ordeal-term (QF_BV term graph and preprocessing)
     description: "QF_BV term representation (crates/ordeal/src/term.rs): an owned expression tree (Box-linked BvTerm/BoolTerm enums — NOT hash-consed; sharing is recovered downstream by the AIG's structural hashing, and the canon pass orders commutative operands and folds constants, v0.8.0) over any width 1..=128, the closed operator set (loom #246), plus the array/UF sliver (crates/ordeal/src/sliver.rs): read-over-write reduction of Array(BV32->BV8) select/store over concrete AND symbolic BV32 indices (symbolic since v0.11.0, TR-028) and Ackermannization of uninterpreted pure_call congruence. Emits a pure QF_BV problem into the blaster. UNTRUSTED. (Description corrected 2026-09-24: it previously claimed a hash-consed graph, widths 8/32/64 only and concrete offsets only.)"
-    status: implemented
+    status: verified
     tags: [term-graph, preprocessing, array, uf, untrusted]
     links:
       - type: allocated-from
@@ -77,7 +77,7 @@ artifacts:
     type: sw-arch-component
     title: ordeal-aig (bit-blaster and And-Inverter Graph)
     description: "Bit-blaster (crates/ordeal/src/blast/) lowering each QF_BV operator to an And-Inverter Graph (crates/ordeal/src/aig.rs) with structural hashing and constant folding — no further local rewrites. UNTRUSTED — every blast rule is machine-checked in Lean 4 against BitVec semantics at unbounded width (lean/Blaster*.lean, required CI context; shifts at widths 2^stages), with Kani harnesses at width 8 as an independent second witness and the end-to-end certificate/oracle checks. (Description corrected 2026-09-24: it previously claimed a curated Bitwuzla-subset of rewrites and named Kani P4 as the closing evidence.)"
-    status: implemented
+    status: verified
     tags: [bit-blasting, aig, structural-hashing, rewrites, untrusted]
     links:
       - type: allocated-from
@@ -110,7 +110,7 @@ artifacts:
       Tseitin transformation lowering the AIG to CNF, maintaining the mapping
       from bit-vector variables to CNF literals needed to reconstruct models and
       to thread the LRAT certificate back to the original query. UNTRUSTED.
-    status: implemented
+    status: verified
     tags: [cnf, tseitin, encoding, untrusted]
     links:
       - type: allocated-from
@@ -129,7 +129,7 @@ artifacts:
       never load-bearing. Returns a satisfying assignment (mapped back to a
       model) or an UNSAT proof trace. UNTRUSTED — the SAT engine is never part
       of the soundness argument.
-    status: implemented
+    status: verified
     tags: [sat, cdcl, pure-rust, cadical, lrat, untrusted]
     links:
       - type: allocated-from
@@ -153,7 +153,7 @@ artifacts:
     type: sw-arch-component
     title: ordeal-lrat (verified certificate checker)
     description: "The sole TRUSTED component (crates/ordeal-lrat, zero dependencies): the LRAT checker kernel::check_steps — if it accepts a certificate for a CNF, that CNF is unsatisfiable (lean/Sound.lean lrat_check_sound) — and, since TR-038, the SAT-witness checker kernel::check_sat / check_binding (lean/SatWitness.lean check_sat_sound / check_binding_sound / verdicts_exclusive, TR-044). Both are machine-checked over the Aeneas model regenerated from this crate's source in CI (TR-034). It has no build or link dependency on the solver, so the trust boundary is exactly this crate. Ordeal reports UNSAT only when this checker accepts the certificate, and SAT-with-witness only when check_sat accepts. LRAT trimming is NOT here: it lives in the untrusted solver (crates/ordeal/src/lrat.rs), and an over-trimmed proof is simply rejected. (Description corrected 2026-09-24: it previously claimed the trusted crate includes LRAT trimming.)"
-    status: implemented
+    status: verified
     tags: [lrat, checker, verified, trusted-core, aeneas, lean]
     links:
       - type: allocated-from
@@ -181,7 +181,7 @@ artifacts:
       Z3 and compares verdicts and models. Also drives the benchmark comparison.
       Excluded from the production critical path and from the soundness
       argument; NOT trusted and NOT shipped in the embeddable build.
-    status: implemented
+    status: verified
     tags: [z3, oracle, differential, benchmark, dev-only]
     links:
       - type: allocated-from
@@ -201,7 +201,7 @@ artifacts:
       Realized as target.'cfg(...)'.dependencies in Cargo.toml so no FFI/C
       dependency ever reaches the wasm path. UNTRUSTED — backend choice is
       below the trust boundary and never affects soundness.
-    status: implemented
+    status: verified
     tags: [wasm32-wasip2, cdcl, pure-rust, cadical, backend-split, cfg, untrusted]
     links:
       - type: allocated-from
@@ -213,7 +213,7 @@ artifacts:
     type: sw-arch-component
     title: ordeal-build-bazel (rules_rust + rules_wasm_component + reserved rules_lean)
     description: "The Bazel build definition (MODULE.bazel, BUILD.bazel, crates/*/BUILD.bazel) mirroring the synth org conventions: rules_rust with the crate set resolved from Cargo.lock via crate_universe from_cargo; native rust_library / rust_binary / rust_test targets (bazel test executes the unit tests, #136). rules_wasm_component is declared as a bazel_dep but deliberately NOT wired to a target (#136 disposition: the enforced wasm artifact is the cargo-built component, gated by the required native<->wasm differential; a second, unexercised Bazel wasm build would recreate the two-artifact drift). rules_lean remains a reserved placeholder — the Lean proofs build via lake + the nix-pinned Charon/Aeneas regen in CI, not Bazel. The optional 'Bazel build' CI job is non-required. (Description corrected 2026-09-24: it previously stated rules_wasm_component packages the component.)"
-    status: implemented
+    status: verified
     tags: [bazel, rules_rust, rules_wasm_component, rules_lean, build]
     links:
       - type: allocated-from
@@ -224,7 +224,7 @@ artifacts:
   - id: ARC-010
     type: sw-arch-component
     title: ordeal-frontends (SMT-LIB2 reader, Verus-VC bridge, CLI)
-    status: implemented
+    status: verified
     description: "Text front ends onto the one-shot API: the SMT-LIB2 QF_BV reader (crates/ordeal/src/smtlib.rs, pure std, no I/O, wasm-clean), the Verus by-(bit_vector) obligation bridge over it (verus.rs), and the ordeal CLI (main.rs: check / verus subcommands, --format json with the full evidence for both verdicts, machine-quotable --version, strict exit codes). UNTRUSTED: a reader bug yields a wrong question, never an accepted wrong answer; answers still pass the trusted checker."
     links:
       - type: allocated-from
@@ -241,7 +241,7 @@ artifacts:
   - id: ARC-011
     type: sw-arch-component
     title: ordeal-evidence (portable certificate, ordeal-cert/v1 bundle, SAT witness, in-tree SHA-256)
-    status: implemented
+    status: verified
     description: "The evidence formats a consumer re-checks without trusting the solver: the portable UNSAT Certificate carrying its CNF (recheck()), the ordeal-cert/v1 JSON bundle with content hashes (cert_bundle.rs, cert-bundle feature), the always-compiled SAT witness types and canonical texts (witness.rs), and the dependency-free SHA-256 used for integrity hashes (sha256.rs). UNTRUSTED for soundness: every format is re-established by the trusted checker; the hashes are integrity only."
     links:
       - type: allocated-from
@@ -260,7 +260,7 @@ artifacts:
   - id: ARC-012
     type: sw-arch-component
     title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)
-    status: implemented
+    status: verified
     description: "Libraries that turn a consumer's question into the closed fragment: WASM trap and partiality conditions including the float-to-int truncation classifier (trap.rs), little-endian byte layout helpers (layout.rs), derived-op lowering for not/neg/rotl/urem/sdiv/srem (lowering.rs), the constant evaluator (eval.rs), and the prove_valid / prove_equiv / check_with_deadline toolkit entries on the solver facade. UNTRUSTED: each only builds terms; the answers go through the certified pipeline."
     links:
       - type: allocated-from
@@ -287,7 +287,7 @@ artifacts:
   - id: ARC-013
     type: sw-arch-component
     title: ordeal-release-pipeline (signed release, SBOM, VEX, musl, verification of published bytes)
-    status: implemented
+    status: verified
     description: "The delivery pipeline: .github/workflows/release.yml builds six archives (gnu/darwin plus static musl), executes each where the host can, composes the release body from the tag annotation and rivet release notes, emits a CycloneDX SBOM and VEX (scripts/vex.py, deny.toml) into the cosign-signed SHA256SUMS.txt, and attaches SLSA provenance; vex-reissue.yml re-audits weekly; scripts/verify_release.sh verifies the published bytes after a cut. Carries no solver logic; its correctness is that what ships is what was built and verified."
     links:
       - type: allocated-from
@@ -302,7 +302,7 @@ artifacts:
   - id: ARC-014
     type: sw-arch-component
     title: ordeal-verification-infrastructure (Lean regeneration, Kani tiers, fuzzing, differentials, gates)
-    status: implemented
+    status: verified
     description: "The machinery that produces verification evidence: lean/regen.sh regenerating the Aeneas models inside the required CI job, the Lean proof developments and axiom gate (scripts/axiom_check.sh), the dual-mechanisation differential (lean/DiffCheck.lean), the Kani tiers (scripts/kani_tiers.sh, kani.yml), the fuzz crate (fuzz/), the native/wasm behavioural differential (scripts/wasm_native_differential.sh), the citation checker, and the BMC benchmark corpus (bmc_corpus.rs, benches/). Not shipped; it is the right-hand side of the V made executable."
     links:
       - type: allocated-from

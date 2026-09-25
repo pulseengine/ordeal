@@ -1712,3 +1712,196 @@ artifacts:
         target: UV-020
       - type: part-of-execution
         target: VE-032
+
+  - id: VE-033
+    type: verification-execution
+    title: Integration verification run — SWE.5 and SYS.4 (IV-001..006, SIV-001/002/004/005)
+    status: implemented
+    description: "Pipeline vs Z3 / CaDiCaL: 14 lib tests passed (7 oracle, 5 sliver-oracle, 2 CaDiCaL), 303 s release; a first capture showed only zero-count lines of other crates (the lib line fell outside a tail -6) and was re-run with --list first, not counted. Certificate path: cli_baseline 10 passed incl. the unsat pair and sat witness re-checked by ordeal-lrat; sha256_differential 2 passed. Native vs wasm: wasm/native differential 17 invocations byte-identical. Consumer libraries: consumer_recipes, translation_validation (4 PROVEN, planted bug WRONG with counterexample) and quickstart all exit 0. rivet ingestion: rivet_ingestion 4 PASS (ingest+recheck, two tamper rejections, fixture). Published release: verify_release.sh v0.21.0 ALL PASS on published bytes. Published crates: a scratch crate depending on ordeal =0.21.0 and ordeal-lrat =0.21.0 from crates.io (no workspace paths) ran the quickstart and a direct ordeal_lrat::check on the published solver's proof. Z3 harness vs system: the differential test is part of the pipeline-vs-Z3 run. Distribution channels: through ordeal's varve pin, layer 2026.09.15 resolved ordeal 0.21.0 which answered unsat with a certificate and sat with a JSON witness; rules_ordeal v0.6.0 main CI run 36011007708 success on ubuntu and macos. Found on the way: without the pin in scope varve resolved a stale unverified binary (reported upstream)."
+    fields:
+      environment: "note: macOS arm64, rustc 1.98.1, Z3 via Homebrew, wasmtime 42.0.1, varve 0.38.0 (layer 2026.09.15 via ordeal's pin); main @ 2a09147 + the ASPICE architecture branch"
+      executor: local
+      timestamp: 2026-09-25T07:40:00Z
+      version: 2a09147
+
+  - id: VV-065
+    type: verification-verdict
+    title: IV-001 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: 14 lib tests passed (oracle, sliver-oracle, CaDiCaL), 0 failed
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-001
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-066
+    type: verification-verdict
+    title: IV-002 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: cli_baseline 10 passed; sha256_differential 2 passed
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-002
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-067
+    type: verification-verdict
+    title: IV-003 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: 17 invocations byte-identical native vs wasm
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-003
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-068
+    type: verification-verdict
+    title: IV-004 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: three examples exit 0; planted bug refuted with counterexample
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-004
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-069
+    type: verification-verdict
+    title: IV-005 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: rivet_ingestion 4 PASS
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-005
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-070
+    type: verification-verdict
+    title: IV-006 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: verify_release.sh v0.21.0 ALL PASS
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-006
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-071
+    type: verification-verdict
+    title: IV-007 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "Lean job on the v0.21.0 commit: regen, 0 axioms, all proofs, axiom gate, sorry 0, differential; Kani tiers green on run 36032091695"
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-007
+      - type: part-of-execution
+        target: VE-029
+
+  - id: VV-072
+    type: verification-verdict
+    title: IV-008 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: bazel test 2/2 targets PASSED on main
+      verdict: pass
+    links:
+      - type: result-of
+        target: IV-008
+      - type: part-of-execution
+        target: VE-032
+
+  - id: VV-073
+    type: verification-verdict
+    title: SIV-001 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: verify_release.sh v0.21.0 ALL PASS
+      verdict: pass
+    links:
+      - type: result-of
+        target: SIV-001
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-074
+    type: verification-verdict
+    title: SIV-002 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "published crates integrate: quickstart + direct checker call"
+      verdict: pass
+    links:
+      - type: result-of
+        target: SIV-002
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-075
+    type: verification-verdict
+    title: SIV-003 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: Lean job on the release commit, all steps success
+      verdict: pass
+    links:
+      - type: result-of
+        target: SIV-003
+      - type: part-of-execution
+        target: VE-029
+
+  - id: VV-076
+    type: verification-verdict
+    title: SIV-004 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: differential_ordeal_vs_z3_on_corpus passed
+      verdict: pass
+    links:
+      - type: result-of
+        target: SIV-004
+      - type: part-of-execution
+        target: VE-033
+
+  - id: VV-077
+    type: verification-verdict
+    title: SIV-005 pass (2026-09-25)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: varve layer ordeal 0.21.0 unsat+sat witness; rules_ordeal CI ubuntu+macos
+      verdict: pass
+    links:
+      - type: result-of
+        target: SIV-005
+      - type: part-of-execution
+        target: VE-033
