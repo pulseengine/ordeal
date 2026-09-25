@@ -290,6 +290,16 @@ artifacts:
         target: ARC-006
       - type: traces-to
         target: TR-018
+      - type: traces-to
+        target: VE-017
+      - type: traces-to
+        target: VER-010
+      - type: traces-to
+        target: VE-018
+      - type: traces-to
+        target: VV-040
+      - type: traces-to
+        target: TR-031
     fields:
       req-type: performance
       priority: should
@@ -669,6 +679,8 @@ artifacts:
         target: SYS-002
       - type: allocated-to
         target: ARC-006
+      - type: traces-to
+        target: TR-030
     fields:
       req-type: functional
       priority: should
@@ -808,6 +820,10 @@ artifacts:
         target: SYS-002
       - type: allocated-to
         target: ARC-006
+      - type: traces-to
+        target: TR-025
+      - type: traces-to
+        target: VER-029
     fields:
       req-type: functional
       priority: should
@@ -844,6 +860,10 @@ artifacts:
         target: SYS-006
       - type: allocated-to
         target: ARC-005
+      - type: traces-to
+        target: TR-002
+      - type: traces-to
+        target: TR-009
     fields:
       req-type: functional
       priority: should
@@ -884,6 +904,10 @@ artifacts:
         target: SYS-004
       - type: allocated-to
         target: ARC-005
+      - type: traces-to
+        target: TR-009
+      - type: traces-to
+        target: TR-004
     fields:
       req-type: functional
       priority: could
@@ -1124,6 +1148,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+      - type: traces-to
+        target: TR-033
     fields:
       req-type: constraint
       priority: should
@@ -1157,6 +1183,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+      - type: traces-to
+        target: TR-033
     fields:
       req-type: constraint
       priority: should
@@ -1295,6 +1323,8 @@ artifacts:
       - type: refines
         target: TR-038
 
+      - type: traces-to
+        target: TR-034
   - id: TR-045
     type: sw-req
     title: Both verdict directions are evidence at the CLI — the SAT witness ships in the dependency-free binary (in-tree SHA-256)
@@ -1312,6 +1342,10 @@ artifacts:
       - type: refines
         target: TR-038
 
+      - type: traces-to
+        target: TR-044
+      - type: traces-to
+        target: TR-041
   - id: TR-046
     type: sw-req
     title: The Kani blaster-proof layer completes again — tiered by cost, harness coverage gated, preemption-isolated

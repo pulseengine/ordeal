@@ -300,6 +300,16 @@ artifacts:
         target: FEAT-007
       - type: verifies
         target: FEAT-008
+      - type: traces-to
+        target: VER-018
+      - type: traces-to
+        target: VER-020
+      - type: traces-to
+        target: VER-001
+      - type: traces-to
+        target: VER-009
+      - type: traces-to
+        target: VER-011
     fields:
       method: review
       steps:
@@ -688,6 +698,10 @@ artifacts:
     links:
       - type: verifies
         target: TR-029
+      - type: traces-to
+        target: TR-022
+      - type: traces-to
+        target: TR-009
     fields:
       method: automated-test
       steps:
@@ -1050,6 +1064,8 @@ artifacts:
       - type: verifies
         target: TR-044
 
+      - type: traces-to
+        target: TR-034
   - id: VER-040
     type: sw-verification
     title: musl release assets present, signed, static, executing (TR-039)
@@ -1065,6 +1081,8 @@ artifacts:
       - type: verifies
         target: TR-039
 
+      - type: traces-to
+        target: TR-033
   - id: VER-041
     type: sw-verification
     title: CycloneDX SBOM published inside the signed sums and well-formed (TR-040)
@@ -1095,6 +1113,8 @@ artifacts:
       - type: verifies
         target: TR-045
 
+      - type: traces-to
+        target: TR-041
   - id: VER-043
     type: sw-verification
     title: "Kani tiers complete: green run recorded, coverage check potent (TR-046)"
@@ -1127,6 +1147,8 @@ artifacts:
 
       - type: verifies
         target: FEAT-006
+      - type: traces-to
+        target: TR-046
   - id: VER-045
     type: sw-verification
     title: Derived-op lowering helpers match SMT-LIB and Z3 (TR-015)
