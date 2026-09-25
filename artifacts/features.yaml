@@ -153,6 +153,10 @@ artifacts:
         target: TR-008
       - type: satisfies
         target: TR-017
+      - type: traces-to
+        target: VER-004
+      - type: traces-to
+        target: VER-016
     fields:
       req-type: functional
       priority: should
@@ -219,6 +223,8 @@ artifacts:
         target: TR-009
       - type: satisfies
         target: TR-018
+      - type: traces-to
+        target: VER-017
     fields:
       req-type: performance
       priority: should
@@ -260,6 +266,8 @@ artifacts:
         target: TR-019
       - type: satisfies
         target: TR-020
+      - type: traces-to
+        target: VER-018
     fields:
       req-type: functional
       priority: should
@@ -301,6 +309,8 @@ artifacts:
         target: TR-021
       - type: satisfies
         target: TR-022
+      - type: traces-to
+        target: VER-019
     fields:
       req-type: functional
       priority: should
@@ -387,6 +397,10 @@ artifacts:
         target: SYS-002
       - type: satisfies
         target: TR-025
+      - type: traces-to
+        target: TR-030
+      - type: traces-to
+        target: TR-026
     fields:
       req-type: functional
       priority: should
@@ -509,6 +523,8 @@ artifacts:
         target: TR-031
       - type: satisfies
         target: TR-030
+      - type: traces-to
+        target: TR-009
     fields:
       req-type: functional
       priority: should

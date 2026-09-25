@@ -1045,6 +1045,10 @@ artifacts:
         target: VER-026
       - type: part-of-execution
         target: VE-017
+      - type: traces-to
+        target: TR-029
+      - type: traces-to
+        target: TR-022
     fields:
       verdict: pass
       evidence: "180 lib tests; 15s-UNKNOWN -> 5.3ms measurement; inverted shape test + deadline guard; trim corpus numbers"
@@ -1069,6 +1073,9 @@ artifacts:
       executor: local
       environment:
         note: "macOS arm64; criterion --measurement-time 2; oracle feature via LIBRARY_PATH=/opt/homebrew/lib"
+    links:
+      - type: traces-to
+        target: TR-009
 
   - id: VV-040
     type: verification-verdict
@@ -1085,6 +1092,10 @@ artifacts:
         target: VER-010
       - type: part-of-execution
         target: VE-018
+      - type: traces-to
+        target: TR-009
+      - type: traces-to
+        target: VE-017
     fields:
       verdict: pass
       evidence: "benches/latency.rs, 13 measurements, both lanes; table in PR #106 and the commit"
@@ -1114,6 +1125,9 @@ artifacts:
       executor: local
       environment:
         note: "macOS arm64; cargo test -p ordeal --features 'cadical oracle' --release; Z3 via LIBRARY_PATH=/opt/homebrew/lib"
+    links:
+      - type: traces-to
+        target: TR-004
 
   - id: VV-041
     type: verification-verdict
@@ -1169,6 +1183,8 @@ artifacts:
         target: VER-027
       - type: part-of-execution
         target: VE-020
+      - type: traces-to
+        target: TR-030
     fields:
       verdict: pass
       evidence: "rules_ordeal CI 30444081859 success on 6e0a5ab; cert_bundle tests in PR #107 CI"
@@ -1212,6 +1228,8 @@ artifacts:
         target: VER-028
       - type: part-of-execution
         target: VE-021
+      - type: traces-to
+        target: TR-009
     fields:
       verdict: pass
       evidence: "benches/bmc.rs table; bmc_corpus tests 5 passed (incl. cadical parity); criterion log /tmp/bmc_bench.log exit=0"
@@ -1258,6 +1276,10 @@ artifacts:
         target: VER-029
       - type: part-of-execution
         target: VE-022
+      - type: traces-to
+        target: TR-025
+      - type: traces-to
+        target: TR-030
     fields:
       verdict: pass
       evidence: "example 4/4 PASS exit 0; rivet validate positive exit 0 (PASS, 0 warnings); negative exit 1 naming the recheck gate on OC-1"
@@ -1343,6 +1365,10 @@ artifacts:
         target: VER-031
       - type: part-of-execution
         target: VE-024
+      - type: traces-to
+        target: TR-034
+      - type: traces-to
+        target: TR-035
     fields:
       verdict: pass
       evidence: "runs 32314572430/32314575631 red at the right steps; main 3f0d1e5 green; gate 8→7 recorded; git ls-files clean of models"
@@ -1394,6 +1420,8 @@ artifacts:
         target: VER-033
       - type: part-of-execution
         target: VE-025
+      - type: traces-to
+        target: TR-034
     fields:
       verdict: pass
       evidence: "diffcheck 64/64 agree exit 0 (agent + clean-room reruns); mutant rejections ground-truthed pre-write; findings documented in DiffCheck.lean and gated visibly"
@@ -1408,6 +1436,9 @@ artifacts:
       executor: local
       timestamp: 2026-09-24T10:17:10Z
       version: v0.20.0
+    links:
+      - type: traces-to
+        target: TR-038
 
   - id: VV-048
     type: verification-verdict
@@ -1423,6 +1454,8 @@ artifacts:
       - type: part-of-execution
         target: VE-026
 
+      - type: traces-to
+        target: TR-039
   - id: VV-049
     type: verification-verdict
     title: VER-041 pass — v0.20.0 ships a CycloneDX SBOM inside the signed sums
@@ -1437,6 +1470,8 @@ artifacts:
       - type: part-of-execution
         target: VE-026
 
+      - type: traces-to
+        target: TR-040
   - id: VE-027
     type: verification-execution
     title: "PR #165 required Lean job — regen, axiom gate, SatWitness proofs, sorry guard (VER-039)"
@@ -1447,7 +1482,12 @@ artifacts:
       executor: ci
       timestamp: 2026-09-24T10:48:58Z
       version: 0521b99
+    links:
+      - type: traces-to
+        target: TR-042
 
+      - type: traces-to
+        target: TR-035
   - id: VV-050
     type: verification-verdict
     title: VER-039 pass — check_sat_sound / check_binding_sound / verdicts_exclusive machine-checked, axiom-clean
@@ -1462,6 +1502,10 @@ artifacts:
       - type: part-of-execution
         target: VE-027
 
+      - type: traces-to
+        target: TR-044
+      - type: traces-to
+        target: TR-038
   - id: VE-028
     type: verification-execution
     title: Kani tiers — first complete dispatched run after re-tiering (VER-043)
@@ -1487,6 +1531,8 @@ artifacts:
       - type: part-of-execution
         target: VE-028
 
+      - type: traces-to
+        target: TR-046
   - id: VE-029
     type: verification-execution
     title: Required Lean job on the v0.21.0 release commit — checker soundness, blaster proofs, axiom gate (VER-002, VER-006)
