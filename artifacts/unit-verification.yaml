@@ -325,3 +325,87 @@ artifacts:
       steps:
         run: "cargo test -p ordeal --features oracle sliver_uf"
         coverage: "Ackermannization vs Z3 UF; congruence; inconsistent-call rejection"
+
+  - id: UV-019
+    type: unit-verification
+    title: Target-gated backend selection — unit verification
+    status: verified
+    description: "The gate holds in both directions: the default build's dependency closure is exactly the two workspace crates, and the wasm32-wasip2 build compiles without the accelerator."
+    fields:
+      method: automated-test
+      steps: "run: cargo tree -p ordeal --edges normal --prefix none && cargo build -p ordeal --target wasm32-wasip2 --release && cargo test -p ordeal --lib -- solver::tests"
+    links:
+      - type: verifies
+        target: DES-020
+
+  - id: UV-020
+    type: unit-verification
+    title: Bazel targets over crate_universe — unit verification
+    status: verified
+    description: bazel test executes the library unit tests (the optional Bazel CI job).
+    fields:
+      method: automated-test
+      steps: "run: bazel test //... --config=dev --test_output=errors"
+    links:
+      - type: verifies
+        target: DES-021
+
+  - id: UV-021
+    type: unit-verification
+    title: SMT-LIB2 reader and CLI dispatch — unit verification
+    status: verified
+    description: The reader's command set, arity strictness and redeclaration rule, and the Verus log ingestion, behave as specified.
+    fields:
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- smtlib::tests verus::tests"
+    links:
+      - type: verifies
+        target: DES-022
+
+  - id: UV-022
+    type: unit-verification
+    title: Evidence encodings and integrity hashes — unit verification
+    status: verified
+    description: The hash primitive matches the FIPS known answers; the bundle round-trips, rejects tampering, and re-checks.
+    fields:
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- sha256::tests && cargo test -p ordeal --features cert-bundle --lib -- cert_bundle::tests"
+    links:
+      - type: verifies
+        target: DES-023
+
+  - id: UV-023
+    type: unit-verification
+    title: Consumer term builders — unit verification
+    status: verified
+    description: Each builder matches its reference semantics (WASM spec traps, byte order, SMT-LIB div/rem family).
+    fields:
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- trap::tests layout::tests lowering::tests"
+    links:
+      - type: verifies
+        target: DES-024
+
+  - id: UV-024
+    type: unit-verification
+    title: VEX generation and advisory gate — unit verification
+    status: verified
+    description: The VEX generator's built-in self-test passes (generation, comparison, and the never-auto-judge rule).
+    fields:
+      method: automated-test
+      steps: "run: python3 scripts/vex.py self-test"
+    links:
+      - type: verifies
+        target: DES-025
+
+  - id: UV-025
+    type: unit-verification
+    title: Gate scripts over the proof and harness inventories — unit verification
+    status: verified
+    description: Each gate passes on the tree and each has a recorded negative control.
+    fields:
+      method: automated-test
+      steps: "run: bash scripts/kani_tiers.sh check && bash scripts/check_verification_citations.sh"
+    links:
+      - type: verifies
+        target: DES-026
