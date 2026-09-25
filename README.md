@@ -196,6 +196,10 @@ cargo build --target wasm32-wasip2 --release   # the WebAssembly component
 The Z3 cross-check used in development is behind the off-by-default `oracle`
 feature.
 
+The PulseEngine tools ordeal's own workflow uses (rivet) are pinned as a
+varve layer in [`varve.toml`](varve.toml): `varve install` gives you exactly
+the versions CI and the release job use.
+
 ## Part of PulseEngine
 
 | Project | Role |

@@ -1,0 +1,19 @@
+# ordeal's toolchain pin (varve layer).
+#
+# Why: the PulseEngine tools ordeal's own workflow uses (today: rivet, in the
+# release job's `rivet release notes`) come from ONE pinned, signed, dated
+# layer instead of version strings scattered across workflow files. The
+# realm supplies registry + trust root (varve-realms.toml beside this file),
+# so no environment variable is needed.
+#
+# Bumping: change `layer`, run `varve install`, and record the digest it
+# verified — resolved by name, then recorded, never guessed (the jess#261
+# lesson: a name alone is ambiguous across registry moves).
+manifest-version = 1
+
+[toolchain]
+realm   = "pulseengine"
+channel = "rolling"
+layer   = "2026.09.15"
+# The digest `varve install` verified against the realm root on 2026-09-25.
+digest  = "sha256:fd5944569898b4ea719256f415d273875d58baa5578c9529665451dcbed65e52"

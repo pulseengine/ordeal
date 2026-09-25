@@ -490,3 +490,29 @@ jobs:
       # without it no job ever built them (caught 2026-08-08).
       - name: Run oracle tests (incl. three-way backend parity)
         run: cargo test --all --features "oracle cadical cert-bundle" --release
+
+  # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
+  # change, not first at release time: install varve the verified way,
+  # install and verify the pinned layer against the realm root, then run the
+  # pinned rivet over this repo's own graph. Not a required context — a
+  # registry or layer-support outage must not block unrelated merges — but a
+  # red here is a pin to fix before the next release (the release job uses
+  # the same pin).
+  varve-pin:
+    name: varve layer pin resolves (pinned rivet validates the graph)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: sigstore/cosign-installer@v3
+      - name: Install varve (verified) and the pinned layer
+        env:
+          VARVE_VERSION: v0.38.0
+        run: bash scripts/install_varve.sh
+      - name: The pinned rivet is the one on PATH, and it validates the graph
+        run: |
+          set -euo pipefail
+          test "$(command -v rivet)" = "$HOME/.varve/shims/rivet"
+          rivet --version
+          ~/.varve/bin/varve status
+          rivet validate

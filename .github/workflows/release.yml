@@ -326,25 +326,18 @@ jobs:
       # query; (3) a pointer to CHANGELOG.md for prose. rivet itself is a
       # cosign-verified release download (its sums are keyless-signed by
       # rivet's own release workflow), never a floating install.
-      - name: Install rivet (cosign-verified release)
+      - name: Install rivet from the pinned varve layer (varve.toml)
+        # rivet comes from the layer pinned in varve.toml (realm pulseengine,
+        # trust root in varve-realms.toml), verified by varve against the
+        # realm root — not from a version string in this file. varve itself
+        # is installed the verified way (cosign on its signed sums before
+        # install.sh runs); see scripts/install_varve.sh. cosign was
+        # installed above for the checksum signing.
         env:
-          RIVET_VERSION: v0.38.0
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VARVE_VERSION: v0.38.0
         run: |
-          set -euo pipefail
-          mkdir -p /tmp/rivet && cd /tmp/rivet
-          gh release download "$RIVET_VERSION" --repo pulseengine/rivet \
-            -p "rivet-${RIVET_VERSION}-x86_64-unknown-linux-gnu.tar.gz" -p 'SHA256SUMS.txt*'
-          cosign verify-blob \
-            --certificate-identity-regexp 'https://github.com/pulseengine/rivet/.github/workflows/release.yml@.*' \
-            --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
-            --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt
-          grep 'x86_64-unknown-linux-gnu' SHA256SUMS.txt | sed 's#\./##' | sha256sum -c -
-          tar -xzf "rivet-${RIVET_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
-          install -m 755 ./rivet /usr/local/bin/rivet
-          rivet --version
-        # The GITHUB_TOKEN can read another public repo's release assets.
-        # (cosign was installed above for the checksum signing.)
+          bash scripts/install_varve.sh
+          ~/.varve/bin/varve run rivet --version
 
       - name: Compose the release body
         env:
