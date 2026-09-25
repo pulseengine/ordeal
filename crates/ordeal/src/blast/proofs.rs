@@ -372,6 +372,7 @@ macro_rules! ite_proof {
         }
     };
 }
+// rivet: verifies VER-044
 ite_proof!(ite_8, 8);
 ite_proof!(ite_32, 32);
 ite_proof!(ite_64, 64);

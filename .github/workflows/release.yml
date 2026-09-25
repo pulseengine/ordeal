@@ -339,6 +339,7 @@ jobs:
           bash scripts/install_varve.sh
           ~/.varve/bin/varve run rivet --version
 
+      # rivet: verifies VER-047
       - name: Release gate — full V-closure and scope readiness (TR-047)
         # Nothing is published unless the V-model is closed at every ASPICE
         # level (schemas/ordeal-v-closure.yaml, severity error: `rivet

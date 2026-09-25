@@ -22,6 +22,7 @@
 # Deliberately unscheduled requirements (the rivet `release: backlog`
 # convention) carry `backlog: true` and are EXEMPT — reported as their own
 # count by rivet (exempt-when-field, #848), never silently dropped.
+# rivet: verifies VER-047
 schema:
   name: ordeal-v-closure
   version: "0.1.0"
