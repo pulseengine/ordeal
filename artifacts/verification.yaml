@@ -1182,3 +1182,18 @@ artifacts:
         target: TR-016
       - type: verifies
         target: FEAT-006
+
+  - id: VER-047
+    type: sw-verification
+    title: Per-level V-closure rules bite; the release job gates on them (TR-047)
+    status: verified
+    release: v0.22.0
+    description: "Confirms TR-047 by exercising the gate both ways. Positive: with the closure schema loaded, rivet validate reports zero errors across every level. Negative control (scratch copy): removing the only integration-verification link on the Bazel component makes rivet validate FAIL with the component named at SWE.5. Two findings recorded rather than glossed: (1) the rules evaluate requirements at approved or later, so a draft requirement is not checked at all — the backlog field on the parked requirement is therefore an explicit marker that only matters if it is approved while still unscheduled; removing it from the draft changes nothing, as observed. (2) rivet release status is release-scoped: a broken chain on an out-of-scope component leaves a scope cuttable, so the release job gates on rivet validate (global) in addition to rivet release status (scope)."
+    tags: [aspice, v-model, release-gate, negative-control]
+    fields:
+      coverage: eight per-level error rules (SWE.2-6, SYS.3-5) load from the on-disk schema; positive run clean; SWE.5 negative control fails as designed; release-status scope limitation recorded; draft/backlog exemption behaviour recorded
+      method: automated-test
+      steps: "run: rivet validate (exit 0 with schemas/ordeal-v-closure.yaml loaded) && negative controls on a scratch copy of the project: remove one sw-integration-verification link -> rivet validate FAILs naming the component at SWE.5; plus the release job runs rivet validate and rivet release status <tag> before publishing"
+    links:
+      - type: verifies
+        target: TR-047

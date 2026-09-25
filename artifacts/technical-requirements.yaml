@@ -918,6 +918,7 @@ artifacts:
         on the activating consumer's workload is reported honestly,
         including the certificate-nondeterminism concession.
 
+      backlog: "true"
   - id: TR-033
     type: sw-req
     title: Release checksums are cosign-signed (keyless Sigstore, org Track A)
@@ -1364,7 +1365,7 @@ artifacts:
   - id: TR-047
     type: sw-req
     title: Full level-matched ASPICE V-closure gates the release
-    status: approved
+    status: verified
     release: v0.22.0
     description: "Every release scope is cuttable only when its V-model is closed at every level, not only when statuses read verified. Level-matched per ASPICE 4.0: each software requirement is allocated to >=1 architecture component (SWE.2) and verified (SWE.6); each component is refined by >=1 detailed design (SWE.3) and integration-verified (SWE.5); each design is unit-verified (SWE.4); each system requirement is allocated to the system architecture (SYS.3) and verified (SYS.5), and each system element is integration-verified (SYS.4). Enforced in the schema as per-level coverage rules at severity error with release.require: coverage in rivet.yaml, following rivet's documented guidance that the built-in >=1-of-many warning rule is not per-level closure. Evidence first, gate last: the strict rules are switched on only once they already pass."
     tags: [aspice, v-model, release-gate, traceability]

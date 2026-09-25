@@ -12,6 +12,16 @@ project:
   schemas:
     - common
     - aspice
+    # Per-level ASPICE V-closure at severity error (TR-047) — schemas/ordeal-v-closure.yaml
+    - ordeal-v-closure
+
+# Release readiness (TR-047). `require: coverage` also derives readiness from
+# the V-closure rules; the TEETH are the error-severity rules in
+# schemas/ordeal-v-closure.yaml, which make `rivet validate` fail on any open
+# chain — and the release job runs validate + `rivet release status <tag>`
+# before it publishes anything.
+release:
+  require: coverage
 
 sources:
   - path: artifacts

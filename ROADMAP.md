@@ -21,8 +21,12 @@ rivet query '(and (has-tag "roadmap") (not (= status "verified")))'
 rivet query '(has-tag "p4")'
 ```
 
-`rivet release status` shows the release plan; `rivet verify` runs the
-V-model gate.
+`rivet release status <version>` shows a release's readiness; `rivet verify`
+advances an artifact only on linked evidence. A release is cut only when
+**`rivet validate` passes with the per-level ASPICE V-closure rules in
+[`schemas/ordeal-v-closure.yaml`](schemas/ordeal-v-closure.yaml)** (SWE.2–SWE.6,
+SYS.3–SYS.5, severity error) **and** `rivet release status <tag>` is
+cuttable. The release job runs both before publishing anything (TR-047).
 
 ## What's next
 
