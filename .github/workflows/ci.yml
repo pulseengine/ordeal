@@ -81,6 +81,7 @@ jobs:
           set -euo pipefail
           cargo run -q -p ordeal --example translation_validation
           cargo run -q -p ordeal --example consumer_recipes
+          cargo run -q -p ordeal --example quickstart   # the README's Rust starter, kept compiling
           cargo run -q -p ordeal --features cert-bundle --example rivet_ingestion -- "$(mktemp -d)" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       # #138: benches are codegen-built (not run) so criterion-level rot is
       # caught; clippy alone only type-checks them.
