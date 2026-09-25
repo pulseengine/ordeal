@@ -1976,3 +1976,28 @@ artifacts:
         target: VER-047
       - type: part-of-execution
         target: VE-034
+
+  - id: VE-035
+    type: verification-execution
+    title: SAT witness ingested by released rivet 0.39.0, both ways (VER-048)
+    status: implemented
+    description: "rivet_witness_ingestion on main @ 6e4fe3f (+ this branch): ingest+recheck PASS (1037 clauses satisfied, 1 binding consistent), tampered assignment rejected at parse (content hash mismatch), lying model rejected by recheck (BindingMismatch at bit 0), both fixtures emitted from the same live bundle. rivet 0.39.0 validate: witness fixture PASS with 0 warnings; no-witness control PASS with exactly one warning — OC-1 is a SAT certificate used as a verifies source without a witness. Version control: the witness fixture under rivet 0.38.0 still draws the SAT warning, so the downgrade is 0.39.0's consumption of the witness (rivet#991), not an artifact of the fixture."
+    fields:
+      environment: "note: macOS arm64; rivet v0.39.0 (9c90b0f8) downloaded from the release, SHA256SUMS cosign Verified OK against rivet's release workflow identity, archive checksum OK; installed rivet 0.38.0 as the version control"
+      executor: local
+      timestamp: 2026-09-25T12:20:00Z
+      version: 6e4fe3f
+
+  - id: VV-079
+    type: verification-verdict
+    title: VER-048 pass — rivet 0.39.0 accepts the re-checked witness and flags its absence
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: witness fixture 0 warnings; no-witness control exactly the SAT self-checked warning; ordeal-side 4 PASS
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-048
+      - type: part-of-execution
+        target: VE-035

@@ -257,6 +257,8 @@ artifacts:
         target: FEAT-011
       - type: allocated-from
         target: FEAT-015
+      - type: allocated-from
+        target: TR-048
   - id: ARC-012
     type: sw-arch-component
     title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)

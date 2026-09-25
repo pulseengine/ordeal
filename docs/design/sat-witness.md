@@ -118,8 +118,12 @@ question 3.
    the target): a fuzz-found Sat must re-check its witness, a fuzz-found
    Unsat its LRAT certificate.
 4. rivet-side ingestion (consuming the witness and downgrading
-   `V-ordeal-cert-sat-is-self-checked`) is a rivet-repo follow-up filed
-   at implementation; the warning honestly stands until rivet ships it.
+   `V-ordeal-cert-sat-is-self-checked`) was a rivet-repo follow-up filed
+   at implementation (rivet#988). **Shipped in rivet 0.39.0** (rivet#991)
+   and demonstrated end to end by TR-048
+   (`examples/rivet_witness_ingestion.rs`): with the witness fields and a
+   recorded `verification-result: pass` the warning is gone; without them
+   it is raised.
 
 ## Open questions for review
 
