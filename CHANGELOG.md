@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-25
+
+**Released through a full ASPICE V-closure gate** (TR-046, TR-047; issues
+#153, #169). No change to what the solver decides or emits: the crates and
+the CLI behave exactly as in 0.21.0. This release changes how a release is
+allowed to happen, and makes the verification layers complete.
+
+### Added
+- **Full, level-matched ASPICE V-closure is the release gate** (TR-047).
+  `schemas/ordeal-v-closure.yaml` adds one rule per level at severity error:
+  SWE.2 allocation, SWE.3 refinement, SWE.4/5/6 verification, SYS.3
+  allocation, SYS.4/5 verification. The release job runs `rivet validate`
+  (the whole graph) and `rivet release status <tag>` (the scope) before it
+  publishes anything. Both are needed: release status only sees its own
+  scope.
+- The architecture model now covers everything that ships:
+  - five new components (front ends, evidence formats, consumer libraries,
+    release pipeline, verification infrastructure), with designs and unit
+    verifications;
+  - every requirement allocated to at least one component;
+  - a system architecture;
+  - integration verification for every component and system element.
+- ordeal's own tools come from a pinned **varve layer** (`varve.toml`,
+  2026.09.15). The release job installs varve through a verified path and
+  gets rivet from the layer. A `varve-pin` CI job checks on every change
+  that the pin resolves.
+- `examples/quickstart.rs`: the README's Rust starter, run in CI.
+
+### Fixed
+- **The Kani proof layer completes again** (TR-046, #153). It had not
+  completed since 2026-07-16. The harness tiers are now defined once in
+  `scripts/kani_tiers.sh` with a coverage gate, and the heavy harnesses run
+  as separate jobs. Only harnesses measured to finish are scheduled; the
+  rest are listed as unscheduled with their measured reasons (#169).
+
+### Changed
+- README rewritten as an introduction: what ordeal answers, how to get it
+  (varve, cargo, release binaries, Bazel), and a quick start.
+- `rivet validate`: 58 warnings → 0. The 57 cross-references that existed
+  only in prose are typed `traces-to` links.
+
+
 ## [0.21.0] - 2026-09-24
 
 **The SAT direction closes: proven, and shipped at the command line**
@@ -1056,7 +1098,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.0
 [0.21.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.21.0
 [0.20.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.20.0
 [0.4.2]: https://github.com/pulseengine/ordeal/releases/tag/v0.4.2

@@ -843,6 +843,7 @@ mod tests {
         assert_sat_with_model(&pigeonhole(3, 3));
     }
 
+    // rivet: verifies VER-046
     #[test]
     fn budget_matches_unbounded_on_trivially_decidable() {
         // A generous budget must not change a verdict decided within it.

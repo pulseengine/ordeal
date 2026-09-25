@@ -201,6 +201,7 @@ pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
     BvTerm::Sub(Box::new(a), Box::new(prod))
 }
 
+// rivet: verifies VER-045
 #[cfg(test)]
 mod tests {
     use super::*;
