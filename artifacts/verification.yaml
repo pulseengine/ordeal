@@ -1197,3 +1197,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-047
+
+  - id: VER-048
+    type: sw-verification
+    title: SAT witness ingested by released rivet, both ways (TR-048)
+    status: verified
+    release: v0.23.0
+    description: "Confirms TR-048 against a released rivet: the example performs the ordeal-side ingestion checks and emits two fixtures from the same live bundle — one with the witness fields, one without; rivet validate must stay silent about SAT self-checking on the first and raise it on the second."
+    tags: [sat, witness, rivet, negative-control]
+    fields:
+      coverage: round-trip + trusted recheck; tampered assignment rejected at parse; tampered model rejected by recheck; released rivet validates the witness fixture without the SAT warning and flags the no-witness control
+      method: automated-test
+      steps: "run: cargo run -p ordeal --features cert-bundle --example rivet_witness_ingestion -- OUT $(date -u +%Y-%m-%dT%H:%M:%SZ) && rivet --project OUT/rivet-project validate (no sat-is-self-checked) && rivet --project OUT/rivet-project-no-witness validate (sat-is-self-checked present)"
+    links:
+      - type: verifies
+        target: TR-048

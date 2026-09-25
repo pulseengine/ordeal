@@ -200,7 +200,12 @@ and a `witness` block — `encoding` (`bitstring-lsb-var1`), the full
 `assignment`, the per-variable `bit_map` (`name`, `width`, LSB-first signed
 CNF literals) and `assignment_sha256` / `bit_map_sha256` — byte-identical
 to the `ordeal-cert/v1` witness the API emits, so rivet's field mapping
-(`witness-sha256`, `bit-map-sha256`) applies to CLI output too. Re-check
+(`witness-sha256`, `bit-map-sha256`) applies to CLI output too. From rivet
+0.39.0 an `ordeal-certificate` with `verdict: sat` that carries
+`witness-sha256` and a recorded `verification-result: pass` counts as
+evidence without the "SAT is self-checked" warning;
+`examples/rivet_witness_ingestion.rs` produces such a fixture from a live
+solve (and the no-witness control that still warns). Re-check
 it exactly as the API's: `ordeal_lrat::check_sat(clauses, assignment)`
 and `ordeal_lrat::check_binding(assignment, bits, value)` per model
 variable. The hashes are computed in-tree (`ordeal::sha256`, FIPS-tested

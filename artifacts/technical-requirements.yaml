@@ -1376,3 +1376,22 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+
+  - id: TR-048
+    type: sw-req
+    title: rivet ingests the ordeal SAT witness as evidence — the self-checked warning downgrades on a re-checked witness
+    status: verified
+    release: v0.23.0
+    description: "The SAT twin of TR-030. rivet 0.39.0 (rivet#991) consumes the TR-038 witness: an ordeal-certificate with verdict sat, witness-sha256 and a recorded verification-result: pass no longer draws V-ordeal-cert-sat-is-self-checked. This requirement demonstrates that hand-off end to end with a real solve, the way TR-030 did for UNSAT: the ordeal side (bundle, ingestion, tamper rejection, fixture with the bundle's own hashes) plus the rivet side (a released rivet validating the fixture both ways)."
+    tags: [sat, witness, rivet, evidence, consumer]
+    fields:
+      priority: should
+      req-type: interface
+      verification-criteria: "A live check_with_witness SAT bundle round-trips through ordeal-cert/v1 (hash-verified parse + trusted recheck); tampered assignment and tampered model are both rejected; the emitted rivet fixture carrying witness-sha256 + bit-map-sha256 + verification-result: pass validates under released rivet >= 0.39.0 with NO V-ordeal-cert-sat-is-self-checked diagnostic, and the same fixture without the witness fields does raise it (negative control). Falsified if either direction fails against the released rivet."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: refines
+        target: TR-038
+      - type: traces-to
+        target: TR-030
