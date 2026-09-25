@@ -1,0 +1,115 @@
+# ordeal's full, level-matched ASPICE V-closure (TR-047).
+#
+# The built-in aspice schema checks closure with ONE permissive rule per
+# level family ("an sw-req is verified by >= 1 of {unit, integration, sw}",
+# severity warning). rivet's own docs/release-status.md is explicit that this
+# is not per-level closure and that a project wanting that must say so in its
+# schema. This file says so: one rule per ASPICE level, severity ERROR, so an
+# open chain fails `rivet validate` (and the release job, which runs it before
+# publishing).
+#
+# Level-matched, as ASPICE 4.0 defines the V (decided 2026-09-25): each
+# verification level verifies the design level it faces —
+#   SWE.2  every sw-req is allocated to >= 1 architecture component
+#   SWE.3  every component is refined by >= 1 detailed design
+#   SWE.4  every detailed design is unit-verified
+#   SWE.5  every component is integration-verified
+#   SWE.6  every sw-req is verified
+#   SYS.3  every system-req is allocated to >= 1 system element
+#   SYS.4  every system element is integration-verified
+#   SYS.5  every system-req is verified
+#
+# Deliberately unscheduled requirements (the rivet `release: backlog`
+# convention) carry `backlog: true` and are EXEMPT — reported as their own
+# count by rivet (exempt-when-field, #848), never silently dropped.
+schema:
+  name: ordeal-v-closure
+  version: "0.1.0"
+  extends: [aspice]
+  description: >
+    ordeal's per-level ASPICE V-closure rules (severity error) and the project
+    fields its artifacts use.
+
+artifact-types:
+  - name: sw-req
+    description: Software requirement (SWE.1)
+    fields:
+      - name: backlog
+        type: boolean
+        required: false
+        description: >
+          Deliberately unscheduled (release: backlog). Exempts the requirement
+          from the per-level closure rules; rivet reports it as an exempt count.
+  - name: sw-verification
+    description: Software verification measure (SWE.6)
+    fields:
+      - name: coverage
+        type: text
+        required: false
+        description: What the measure covers and how it was last executed.
+  - name: sys-verification
+    description: System verification measure (SYS.5)
+    fields:
+      - name: coverage
+        type: text
+        required: false
+        description: What the measure covers and how it was last executed.
+
+traceability-rules:
+  - name: ordeal-swe2-req-allocated
+    description: "SWE.2 — every software requirement is allocated to at least one architecture component"
+    source-type: sw-req
+    required-backlink: allocated-from
+    from-types: [sw-arch-component]
+    exempt-when-field: backlog
+    severity: error
+
+  - name: ordeal-swe3-component-refined
+    description: "SWE.3 — every architecture component is refined by at least one detailed design"
+    source-type: sw-arch-component
+    required-backlink: refines
+    from-types: [sw-detail-design]
+    severity: error
+
+  - name: ordeal-swe4-design-unit-verified
+    description: "SWE.4 — every detailed design is verified by at least one unit verification"
+    source-type: sw-detail-design
+    required-backlink: verifies
+    from-types: [unit-verification]
+    severity: error
+
+  - name: ordeal-swe5-component-integration-verified
+    description: "SWE.5 — every architecture component is verified by at least one integration verification"
+    source-type: sw-arch-component
+    required-backlink: verifies
+    from-types: [sw-integration-verification]
+    severity: error
+
+  - name: ordeal-swe6-req-verified
+    description: "SWE.6 — every software requirement is verified by at least one software verification"
+    source-type: sw-req
+    required-backlink: verifies
+    from-types: [sw-verification]
+    exempt-when-field: backlog
+    severity: error
+
+  - name: ordeal-sys3-sysreq-allocated
+    description: "SYS.3 — every system requirement is allocated to at least one system architecture element"
+    source-type: system-req
+    required-backlink: allocated-from
+    from-types: [system-arch-component]
+    severity: error
+
+  - name: ordeal-sys4-element-integration-verified
+    description: "SYS.4 — every system architecture element is verified by at least one system integration verification"
+    source-type: system-arch-component
+    required-backlink: verifies
+    from-types: [sys-integration-verification]
+    severity: error
+
+  - name: ordeal-sys5-sysreq-verified
+    description: "SYS.5 — every system requirement is verified by at least one system verification"
+    source-type: system-req
+    required-backlink: verifies
+    from-types: [sys-verification]
+    severity: error

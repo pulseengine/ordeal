@@ -339,6 +339,22 @@ jobs:
           bash scripts/install_varve.sh
           ~/.varve/bin/varve run rivet --version
 
+      - name: Release gate — full V-closure and scope readiness (TR-047)
+        # Nothing is published unless the V-model is closed at every ASPICE
+        # level (schemas/ordeal-v-closure.yaml, severity error: `rivet
+        # validate` exits non-zero on any open chain, in or out of the release
+        # scope) AND the release scope itself is cuttable. Both are needed:
+        # `rivet release status` is scope-only, so a broken chain on an
+        # out-of-scope component would leave it green (VER-047's recorded
+        # finding).
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          rivet validate
+          rivet release status "$VERSION"
+
       - name: Compose the release body
         env:
           INPUT_TAG: ${{ inputs.tag }}
