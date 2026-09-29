@@ -918,7 +918,7 @@ artifacts:
         on the activating consumer's workload is reported honestly,
         including the certificate-nondeterminism concession.
 
-      backlog: "true"
+      backlog: true
   - id: TR-033
     type: sw-req
     title: Release checksums are cosign-signed (keyless Sigstore, org Track A)
