@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-30
+
+**Proof and evidence depth.** The shift and rotate proofs now hold at every
+bit-width. A release's test evidence comes from its own CI run. ordeal
+records its own certificates and supply chain in rivet. Kani proves the
+light width-32/64 rules on CI. What the solver decides is unchanged.
+
 ### Added
 - **ordeal records its own evidence with its own rivet types** (TR-058,
   #191).
@@ -1255,7 +1262,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.24.0
 [0.23.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.23.0
 [0.22.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.1
 [0.22.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.0
