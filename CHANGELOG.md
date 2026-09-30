@@ -17,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     command, the new `cert_bundle_smt2` example.
   - The v0.23.0 release is recorded: 7 signed assets, each with its SLSA v1
     provenance and the SBOM components.
+- **Kani proves the light width-32/64 rules again** (#169, TR-046).
+  - and/or/xor/add/sub at widths 32 and 64 are in a new nightly `wide`
+    tier, one job per harness. Before, `xor_32` didn't finish in 88 min.
+  - The cause was CBMC's default 64-byte limit on array field sensitivity.
+    A width-32 `Word` is 128 bytes, so symbolic execution of the real rule
+    blew up. The tier raises the limit with `--cbmc-args`. The harnesses
+    and their assertions are unchanged.
+  - Local times: 50–297 s at width 32, 114–1019 s at width 64.
 - **Test results are release evidence** (TR-057, #203).
   - CI runs the test suite through cargo-nextest with JUnit output.
     `scripts/junit_to_rivet.py` maps each test to the rivet measures named
