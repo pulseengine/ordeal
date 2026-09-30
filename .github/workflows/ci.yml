@@ -107,8 +107,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Assert dependency-free default build
         run: |
-          cargo tree -p ordeal --edges normal
-          test "$(cargo tree -p ordeal --edges normal --prefix none | grep -vc '^\(ordeal\|ordeal-lrat\)')" -eq 0
+          # #187: build-dependencies count (they run at build time), and the
+          # match is on exact crate names, not a prefix.
+          cargo tree -p ordeal --edges normal,build
+          test "$(cargo tree -p ordeal --edges normal,build --prefix none | awk '{print $1}' | grep -vcxE 'ordeal|ordeal-lrat')" -eq 0
       # #146 / TR-043 supply-chain gate (deny.toml). BLOCKING over the
       # shipped closure (--exclude-dev at default features = exactly what a
       # release binary is built from); ADVISORY over everything else in

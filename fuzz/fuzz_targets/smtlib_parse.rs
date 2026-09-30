@@ -8,12 +8,52 @@
 //!    `ordeal-lrat` checker. A fuzz input that yields an unrecheckable
 //!    Unsat would be a soundness bug worth more than any crash.
 //!
+//! 3. THE SEMANTIC ORACLE (#187): properties 1-2 only check ordeal's
+//!    certificate against ordeal's OWN CNF, so an encoding bug (#182)
+//!    passes them. For an `Unsat` whose declared variables total at most
+//!    `BRUTE_FORCE_BITS` bits, every assignment is evaluated through the
+//!    concrete evaluator, which shares no code with the bit-blaster. Any
+//!    assignment satisfying every assertion is a certified wrong answer.
+//!
 //! Inputs are size-bounded by the harness flags (-max_len) and per-input
 //! wall time by -timeout; random text rarely forms hard queries, and the
 //! seed corpus (fuzz/seeds/smtlib) starts from real solvable scripts.
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+
+/// Largest total declared width brute-forced on an `Unsat` (2^16 evaluations
+/// at most; #182's width-3 shift would have been caught at 3 bits).
+const BRUTE_FORCE_BITS: u32 = 16;
+
+/// Panics if some assignment of `declared` satisfies every assertion.
+fn assert_no_model(script: &str) {
+    let Ok((Some(assertions), declared)) = ordeal::smtlib::assertions_at_check_sat(script) else {
+        return;
+    };
+    let total: u32 = declared.iter().map(|(_, w)| *w).sum();
+    if total > BRUTE_FORCE_BITS {
+        return;
+    }
+    for bits in 0u64..(1u64 << total) {
+        let mut env = ordeal::eval::Env::new();
+        let mut shift = 0;
+        for (name, w) in &declared {
+            env.insert(
+                name.clone(),
+                u128::from((bits >> shift) & ((1u64 << w) - 1)),
+            );
+            shift += w;
+        }
+        let all_true = assertions
+            .iter()
+            .all(|a| ordeal::eval::eval_bool(a, &env) == Ok(true));
+        assert!(
+            !all_true,
+            "certified Unsat, but the evaluator satisfies every assertion with {env:?} (semantic oracle, #187)"
+        );
+    }
+}
 
 fuzz_target!(|data: &[u8]| {
     let Ok(script) = std::str::from_utf8(data) else {
@@ -33,6 +73,7 @@ fuzz_target!(|data: &[u8]| {
             Some(WitnessCheckResult::Unsat(cert)) => {
                 cert.recheck()
                     .expect("fuzz-found Unsat certificate must re-check (soundness oracle)");
+                assert_no_model(script);
             }
             Some(WitnessCheckResult::Sat(cert)) => {
                 cert.recheck()

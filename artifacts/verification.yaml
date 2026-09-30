@@ -1242,3 +1242,22 @@ artifacts:
     links:
       - type: verifies
         target: TR-050
+
+  - id: VER-052
+    type: sw-verification
+    title: Gates fail closed, each shown with a negative control (TR-052)
+    status: verified
+    release: v0.23.0
+    description: "Each hardened gate is exercised in the direction that used to pass vacuously: a rotted citation makes the citation checker exit 1, an unsupported steps shape makes it exit non-zero; the pre-#182 stage count makes the fuzz semantic oracle panic on the width-3 shift seed while the fixed code passes; a crate named ordeal-evil fails the exact-name dependency match. The checker also found two real vacuous citations (UV-016, UV-018), now repointed."
+    tags: [gates, negative-control, fuzz]
+    fields:
+      coverage: citation checker over all artifacts/*.yaml with 3 negative controls; fuzz semantic oracle with the pre-#182 negative control; cargo tree exact-name check with a synthetic negative control; ite unit test widened to what UV-016 claims
+      method: automated-test
+      steps: "run: scripts/check_verification_citations.sh && cargo test -p ordeal --lib -- blast::bitwise::tests::ite_selects"
+    links:
+      - type: verifies
+        target: TR-052
+      - type: traces-to
+        target: UV-016
+      - type: traces-to
+        target: UV-018

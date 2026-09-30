@@ -220,10 +220,10 @@ mod tests {
         }
     }
 
+    // rivet: verifies UV-016
     #[test]
     fn ite_selects_the_right_branch() {
-        // One AIG: a condition input + two 8-bit branch words. Exhaustive over
-        // (cond, then, else) low bytes at width 8 via simulation.
+        // Width 8: exhaustive over (cond, then, else) via simulation.
         let mut aig = Aig::new();
         let cond = aig.input();
         let then_ = word_input(&mut aig, 8);
@@ -231,7 +231,7 @@ mod tests {
         let out = blast_ite(&mut aig, cond, &then_, &else_);
         for c in [false, true] {
             for t in 0u128..=0xFF {
-                for e in [0u128, 1, 0x80, 0xFF, 0x5A] {
+                for e in 0u128..=0xFF {
                     let inputs: Vec<bool> = std::iter::once(c)
                         .chain((0..8).map(|i| (t >> i) & 1 == 1))
                         .chain((0..8).map(|i| (e >> i) & 1 == 1))
@@ -240,6 +240,45 @@ mod tests {
                     let want = if c { t } else { e };
                     assert_eq!(word_value(&aig, &vals, &out), want, "ite {c} {t:#x} {e:#x}");
                 }
+            }
+        }
+    }
+
+    // rivet: verifies UV-016
+    #[test]
+    fn ite_selects_the_right_branch_randomized_at_32_and_64() {
+        // Seeded xorshift: deterministic, no dependency.
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = move || {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state
+        };
+        for width in [32u32, 64] {
+            let mut aig = Aig::new();
+            let cond = aig.input();
+            let then_ = word_input(&mut aig, width);
+            let else_ = word_input(&mut aig, width);
+            let out = blast_ite(&mut aig, cond, &then_, &else_);
+            let mask = if width == 64 {
+                u64::MAX
+            } else {
+                (1u64 << width) - 1
+            };
+            for _ in 0..2000 {
+                let (c, t, e) = (next() & 1 == 1, next() & mask, next() & mask);
+                let inputs: Vec<bool> = std::iter::once(c)
+                    .chain((0..width).map(|i| (t >> i) & 1 == 1))
+                    .chain((0..width).map(|i| (e >> i) & 1 == 1))
+                    .collect();
+                let vals = aig.simulate(&inputs);
+                let want = u128::from(if c { t } else { e });
+                assert_eq!(
+                    word_value(&aig, &vals, &out),
+                    want,
+                    "ite w{width} {c} {t:#x} {e:#x}"
+                );
             }
         }
     }

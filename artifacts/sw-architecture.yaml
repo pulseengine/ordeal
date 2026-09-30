@@ -331,3 +331,5 @@ artifacts:
         target: FEAT-012
       - type: allocated-from
         target: FEAT-015
+      - type: allocated-from
+        target: TR-052

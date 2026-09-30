@@ -441,6 +441,13 @@ impl Solver {
         }
     }
 
+    /// The assertions added so far, in order (read-only). Lets an
+    /// independent oracle, such as the fuzz target's brute-force evaluator
+    /// check (#187), judge a verdict against the query rather than the CNF.
+    pub fn assertions(&self) -> &[BoolTerm] {
+        &self.assertions
+    }
+
     /// Add a boolean assertion to the conjunction to be checked.
     pub fn assert(&mut self, term: BoolTerm) {
         self.assertions.push(term);

@@ -1,132 +1,118 @@
 #!/usr/bin/env bash
 # check_verification_citations.sh — standing counter-measure for issue #141
 # (rivet verification-citation rot: verified artifacts whose steps.run cited
-# commands that ran ZERO tests but exited green, or named crates/features that
-# no longer exist).
+# commands that ran ZERO tests but exited green, or named crates, test
+# targets or features that no longer exist).
 #
-# STATIC check only — the cited commands are never executed. Two invariants:
-#   1. Every `cargo test` steps.run in artifacts/verification.yaml that names
-#      `-p <crate>` must reference a crate that exists in this workspace.
-#   2. Every `cargo test` leg containing ` -- ` filter tokens has each token
-#      checked against a test-name inventory generated ONCE (default feature
-#      set) via:
-#        cargo test -p ordeal --lib -- --list
-#        cargo test -p ordeal-lrat -- --list
-#        cargo test -p ordeal --test cli_baseline -- --list
-#      A filter token matching zero inventory lines is exactly the class-1
-#      defect of #141 (vacuous green) => exit 1.
-# Legs mentioning --features or an external repo are SKIPped with a line, since
-# the default-features inventory cannot vouch for them.
+# STATIC check only — the cited commands are never executed. For every
+# `cargo test` leg of every `steps` run in artifacts/*.yaml:
+#   1. `-p <crate>` names a workspace crate;
+#   2. `--test <name>` names an existing integration-test target;
+#   3. every test-name filter (positional before ` -- `, or after it) matches
+#      >= 1 name in the default-features test inventory
+#      (`cargo test --workspace -- --list`). A filter matching zero tests is
+#      the class-1 defect of #141 (vacuous green) => exit 1.
+# Legs with `--features` are reported as SKIP and counted: the default
+# inventory cannot vouch for feature-gated test names.
 #
-# Deliberately NOT wired into CI here — that wiring decision belongs to #138.
+# Issue #187: this script used to crash on string-shaped `steps` and still
+# exit 0 (no pipefail), and only read verification.yaml. Any internal error
+# now exits non-zero, never 0.
 
-set -u
+set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-YAML="$ROOT/artifacts/verification.yaml"
 TMPDIR_LOCAL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_LOCAL"' EXIT
-RUNS="$TMPDIR_LOCAL/runs.txt"
 INVENTORY="$TMPDIR_LOCAL/inventory.txt"
+META="$TMPDIR_LOCAL/metadata.json"
 
-[ -f "$YAML" ] || { echo "FATAL: $YAML not found" >&2; exit 2; }
+python3 -c 'import yaml' || { echo "FATAL: python3 with PyYAML is required" >&2; exit 2; }
 
-# --- 1. Extract every steps.run (python yaml preferred, sed fallback) --------
-if python3 -c 'import yaml' 2>/dev/null; then
-  python3 - "$YAML" >"$RUNS" <<'PYEOF'
-import sys, yaml
-with open(sys.argv[1]) as f:
-    doc = yaml.safe_load(f)
-for art in doc.get("artifacts", []):
-    run = (art.get("fields") or {}).get("steps", {}).get("run")
-    if run:
-        print(f"{art.get('id', '?')}\t{run}")
-PYEOF
-else
-  # Fallback: pair each `- id:` with the following `run:` line.
-  awk '
-    /^  - id: /       { id = $3 }
-    /^        run: /  {
-      line = $0
-      sub(/^        run: /, "", line)
-      gsub(/^"|"$/, "", line)
-      print id "\t" line
-    }
-  ' "$YAML" >"$RUNS"
-fi
+(cd "$ROOT" && cargo metadata --no-deps --format-version 1) >"$META" \
+  || { echo "FATAL: cargo metadata failed" >&2; exit 2; }
 
-[ -s "$RUNS" ] || { echo "FATAL: extracted zero steps.run entries" >&2; exit 2; }
-
-# --- 2. Workspace crate list -------------------------------------------------
-if CRATES="$(cd "$ROOT" && cargo metadata --no-deps --format-version 1 2>/dev/null \
-    | python3 -c 'import json,sys; [print(p["name"]) for p in json.load(sys.stdin)["packages"]]' 2>/dev/null)" \
-    && [ -n "$CRATES" ]; then
-  :
-else
-  CRATES="$(grep -h '^name *= *"' "$ROOT"/crates/*/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')"
-fi
-
-# --- 3. Test-name inventory, generated once (default feature set) ------------
-{
-  (cd "$ROOT" && cargo test -p ordeal --lib -- --list 2>/dev/null)
-  (cd "$ROOT" && cargo test -p ordeal-lrat -- --list 2>/dev/null)
-  (cd "$ROOT" && cargo test -p ordeal --test cli_baseline -- --list 2>/dev/null)
-} | grep ': test$' >"$INVENTORY"
-
-if ! [ -s "$INVENTORY" ]; then
-  echo "FATAL: test inventory came back empty (build broken?)" >&2
-  exit 2
-fi
+# Test-name inventory, generated once (default feature set, whole workspace).
+(cd "$ROOT" && cargo test -q --workspace -- --list 2>/dev/null) \
+  | { grep ': test$' || true; } >"$INVENTORY"
+[ -s "$INVENTORY" ] || { echo "FATAL: test inventory came back empty (build broken?)" >&2; exit 2; }
 echo "inventory: $(wc -l <"$INVENTORY" | tr -d ' ') test names"
 
-# --- 4. Check each cargo-test leg --------------------------------------------
-fail=0
-while IFS=$'\t' read -r id run; do
-  # Split the command into legs on ';' and '&&'.
-  echo "$run" | awk '{gsub(/&&|;/, "\n"); print}' | while IFS= read -r leg; do
-    # Trim whitespace and env-var prefixes (FOO=bar cargo test ...).
-    leg="$(echo "$leg" | sed 's/^ *//; s/ *$//; s/^\([A-Z_][A-Z0-9_]*=[^ ]* \)*//')"
-    case "$leg" in
-      "cargo test"*) ;;
-      *)
-        if echo "$leg" | grep -Eq 'pulseengine/|bazel'; then
-          echo "SKIP  $id: external leg: $leg"
-        fi
-        continue
-        ;;
-    esac
-    if echo "$leg" | grep -q -- '--features'; then
-      echo "SKIP  $id: non-default features (inventory cannot vouch): $leg"
-      continue
-    fi
-    # Invariant 1: -p <crate> exists in the workspace.
-    crate="$(echo "$leg" | sed -n 's/.* -p \([^ ]*\).*/\1/p')"
-    if [ -n "$crate" ] && ! printf '%s\n' "$CRATES" | grep -qx "$crate"; then
-      echo "FAIL  $id: cites crate '$crate' not in workspace: $leg"
-      echo fail >>"$TMPDIR_LOCAL/failed"
-      continue
-    fi
-    # Invariant 2: every filter token after ' -- ' matches >=1 inventory line.
-    case "$leg" in
-      *" -- "*)
-        tokens="$(echo "${leg#* -- }" | tr ' ' '\n' | grep -v '^-' | grep -v '^$' || true)"
-        for tok in $tokens; do
-          n="$(grep -cF -- "$tok" "$INVENTORY" || true)"
-          if [ "${n:-0}" -eq 0 ]; then
-            echo "FAIL  $id: filter token '$tok' matches ZERO tests in inventory: $leg"
-            echo fail >>"$TMPDIR_LOCAL/failed"
-          else
-            echo "ok    $id: '$tok' -> $n test(s)"
-          fi
-        done
-        ;;
-    esac
-  done
-done <"$RUNS"
+python3 - "$ROOT" "$META" "$INVENTORY" <<'PYEOF'
+import glob, json, os, re, shlex, sys
+import yaml
 
-if [ -f "$TMPDIR_LOCAL/failed" ]; then
-  echo "RESULT: FAIL — rotted citations found" >&2
-  exit 1
-fi
-echo "RESULT: PASS — all cargo-test citations resolve against the workspace and test inventory"
-exit 0
+root, meta_path, inv_path = sys.argv[1:4]
+meta = json.load(open(meta_path))
+crates = {p["name"] for p in meta["packages"]}
+test_targets = {t["name"] for p in meta["packages"] for t in p["targets"] if "test" in t["kind"]}
+inventory = [l.rsplit(": test", 1)[0] for l in open(inv_path).read().splitlines()]
+
+# cargo options that consume the following token
+CARGO_VALUE = {"-p", "--package", "--features", "-F", "--test", "--example", "--bin",
+               "--bench", "--target", "-j", "--jobs", "--manifest-path", "--profile",
+               "--color", "--target-dir", "-Z", "--exclude"}
+# libtest options that consume the following token (the --skip value is not a
+# filter that must match: skipping nothing is harmless)
+HARNESS_VALUE = {"--test-threads", "--skip", "--format", "--color", "-Z", "--logfile"}
+
+def runs():
+    for path in sorted(glob.glob(os.path.join(root, "artifacts", "*.yaml"))):
+        doc = yaml.safe_load(open(path)) or {}
+        for art in doc.get("artifacts") or []:
+            steps = (art.get("fields") or {}).get("steps")
+            if isinstance(steps, dict):
+                run = steps.get("run")
+            elif isinstance(steps, str):
+                run = steps[len("run:"):].strip() if steps.startswith("run:") else None
+            elif steps is None:
+                run = None
+            else:
+                raise TypeError(f"{art.get('id')}: unsupported steps shape {type(steps).__name__}")
+            if run:
+                yield os.path.basename(path), art.get("id", "?"), str(run)
+
+fails = checked = skipped = 0
+for fname, aid, run in runs():
+    for leg in re.split(r"&&|;", run):
+        leg = leg.strip()
+        leg = re.sub(r"^(?:[A-Z_][A-Z0-9_]*=\S*\s+)*", "", leg)
+        if not leg.startswith("cargo test"):
+            continue
+        toks = shlex.split(leg)[2:]
+        if any(t in ("--features", "-F") or t.startswith("--features=") for t in toks):
+            print(f"SKIP  {aid}: non-default features (inventory cannot vouch): {leg}")
+            skipped += 1
+            continue
+        checked += 1
+        filters, i, harness = [], 0, False
+        while i < len(toks):
+            t = toks[i]
+            if t == "--" and not harness:
+                harness = True
+            elif not harness and t in CARGO_VALUE:
+                v = toks[i + 1] if i + 1 < len(toks) else ""
+                if t in ("-p", "--package") and v not in crates:
+                    print(f"FAIL  {aid}: cites crate '{v}' not in workspace: {leg}"); fails += 1
+                if t == "--test" and v not in test_targets:
+                    print(f"FAIL  {aid}: cites test target '{v}' that does not exist: {leg}"); fails += 1
+                i += 1
+            elif harness and t in HARNESS_VALUE:
+                i += 1
+            elif not t.startswith("-"):
+                filters.append(t)
+            i += 1
+        for tok in filters:
+            n = sum(tok in name for name in inventory)
+            if n == 0:
+                print(f"FAIL  {aid}: filter '{tok}' matches ZERO tests in inventory: {leg}"); fails += 1
+            else:
+                print(f"ok    {aid}: '{tok}' -> {n} test(s)")
+
+print(f"legs checked: {checked}, skipped (features): {skipped}")
+if checked == 0:
+    print("FATAL: zero cargo-test legs checked", file=sys.stderr); sys.exit(2)
+if fails:
+    print(f"RESULT: FAIL — {fails} rotted citation(s)", file=sys.stderr); sys.exit(1)
+print("RESULT: PASS — all cargo-test citations resolve against the workspace and test inventory")
+PYEOF

@@ -1,0 +1,34 @@
+# Nightly exhaustive sweeps that are too slow for per-PR CI (#187).
+#
+# VER-019 cites `exhaustive_f32_to_i32_all_bit_patterns` (2^32 f32 bit
+# patterns, #[ignore]d in the normal test run). Before this workflow no job
+# ever ran it, so the verification it backs was never re-executed. Measured
+# locally: ~6 min in --release.
+name: Nightly exhaustive
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  exhaustive:
+    name: Exhaustive sweeps (ignored tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: VER-019 exhaustive f32 -> i32 trunc trap (2^32 patterns)
+        run: |
+          set -euo pipefail
+          out="$(cargo test -p ordeal --lib --release exhaustive_f32_to_i32_all_bit_patterns -- --ignored 2>&1)"
+          echo "$out" | tail -5
+          # Fail if the filter matched nothing: a green run of zero tests is
+          # exactly the vacuous gate #187 is about.
+          echo "$out" | grep -q 'test result: ok. 1 passed' \
+            || { echo "::error::expected exactly 1 exhaustive test to pass"; exit 1; }
