@@ -103,7 +103,7 @@ sat
 ((x #x0000002a))
 ```
 
-`--format json` prints one JSON object per query. It carries the full evidence
+`--format json` prints one JSON object for the script's last `check-sat`. It carries the full evidence
 for either answer:
 
 - the CNF and LRAT proof for `unsat`;
@@ -150,7 +150,7 @@ A deliberately closed fragment of QF_BV, bit-widths 1 to 128 (SMT-LIB names):
 There is also a small preprocessed layer for byte arrays (`select`/`store`)
 and uninterpreted pure calls.
 
-Anything else is rejected as `unsupported`; ordeal never guesses. **Not
+Other constructs are rejected as `unsupported` (exit 2). A bit-width outside 1 to 128 is answered `unknown`. ordeal never guesses. **Not
 planned:** quantifiers, floating point, optimisation, incremental push/pop.
 `Unknown` is always a possible answer (for example on a resource limit), and
 callers must treat it as "no claim".

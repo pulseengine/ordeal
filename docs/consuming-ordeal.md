@@ -7,7 +7,7 @@ guide for trying it as a dependency and reporting back.
 
 ```toml
 [dependencies]
-ordeal = "0.19"
+ordeal = "0.23"
 ```
 
 `ordeal-lrat` (the trusted checker) is pulled transitively. The default
@@ -36,7 +36,7 @@ use ordeal::sliver::{ArrayTerm, ExtBvTerm, ExtBoolTerm};
 let verdict = Solver::check_sliver(&[/* ExtBoolTerm assertions */]);
 ```
 
-The fragment is the closed loom #246 op set (widths 8/32/64) plus the sliver
+The fragment is the closed loom #246 op set (bit-widths 1 to 128) plus the sliver
 (`Array(BV32→BV8)` select/store over concrete **and symbolic** BV32 indices
 — symbolic decided since v0.11.0 — plus uninterpreted `pure_call`).
 Quantifiers, floating-point, optimization, and incremental push/pop are out
@@ -123,10 +123,12 @@ depth and per property. That independence is where your speedup lives:
   is no shared state and no ordering requirement between checks.
 - For BMC-style use: race all depths `k = 1..N` and all properties
   concurrently. Any SAT is your counterexample; all-UNSAT clears the depth.
-  Measured single-query envelope to plan around (macOS arm64, certified
-  end-to-end incl. the checker): a queue-overflow-shaped unrolling crosses
-  1 s around k ≈ 90 and sits at ~2.5 s at k = 128; deadlock-shaped
-  instances stay under ~275 ms through k = 96 (`benches/bmc.rs`).
+  A single-query envelope measured once to plan around (macOS arm64,
+  certified end-to-end incl. the checker; TR-031 / VER-028, not re-measured
+  by CI, which only builds the benches): a queue-overflow-shaped unrolling
+  crossed 1 s around k ≈ 90 and sat at ~2.5 s at k = 128; deadlock-shaped
+  instances stayed under ~275 ms through k = 96 (`benches/bmc.rs`). Treat
+  these as a dated measurement, not a guarantee.
 - Blast/Tseitin are microseconds; the SAT search is the whole cost on hard
   queries. Parallelizing *inside* one solve is therefore deliberately not
   offered today: a seed portfolio would make certificates run-to-run
@@ -139,8 +141,8 @@ depth and per property. That independence is where your speedup lives:
 
 - **`Unknown` is conservative.** It means "not proven" — the solver could
   not decide, would not stand behind an answer, or the query used a
-  construct outside the enabled fragment (e.g. a bitvector width other
-  than 8/32/64).
+  construct outside the enabled fragment (e.g. a bitvector width outside
+  1 to 128).
   You MUST NOT apply an optimization / accept a transformation on `Unknown`.
   Keep the original.
 - **`Unsat` is the only verdict that authorizes a transformation.** It

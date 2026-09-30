@@ -116,7 +116,7 @@ The soundness argument therefore reduces to: *the LRAT checker is correct.* Not
    well-defined bit-blasting rule.
 2. **Bit-blast.** Each `w`-bit operation expands to a fixed boolean-gate
    pattern (ripple-carry adder for `bvadd`, barrel shifter for `bvshl`, etc.).
-   Widths are 8/32/64, so the blow-up is bounded and predictable.
+   Widths are 1 to 128, so the blow-up is bounded and predictable.
 3. **AIG.** Gates land in an And-Inverter Graph, which gives structural sharing
    (common subexpressions collapse) and cheap local simplification before we
    ever hit the SAT solver.
@@ -217,11 +217,13 @@ two jobs, both non-production, both behind the off-by-default `oracle` feature:
 
 1. **Differential oracle.** In development and CI, a query can be sent to both
    ordeal and Z3; any disagreement is an ordeal bug to chase. This catches
-   *incompleteness* (ordeal says `Unknown`/`Sat` where Z3 proves `Unsat`) that
-   the LRAT checker — which only guards *soundness* — cannot catch on its own.
+   *incompleteness* (ordeal says `Unknown`/`Sat` where Z3 proves `Unsat`), and
+   encoding bugs where ordeal says a certified `Unsat` but Z3 finds a model
+   (#182). The LRAT checker catches neither: it certifies the CNF, not the
+   query.
 2. **Benchmark rival.** We measure ordeal's amortized per-op latency against
-   the Z3 integration path (see the README's honesty note: the win is
-   integration overhead, not raw SAT speed).
+   the Z3 integration path (the win is integration overhead, not raw SAT
+   speed).
 
 The default build pulls in **no** `z3` dependency and has **zero** external
 dependencies. Phase P4 (shipped) removed Z3 from the soundness argument
