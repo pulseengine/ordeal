@@ -1361,3 +1361,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-056
+
+  - id: VER-057
+    type: sw-verification
+    title: CI results map to measures and gate the release, with negative controls (TR-057)
+    status: verified
+    release: v0.24.0
+    description: "Runs nextest with the ci JUnit profile, maps the results with junit_to_rivet.py, and checks the release scope with check_release_results.py; negative controls: a marker matching no test fails the mapper; removing a measure's results or injecting a failure fails the gate."
+    tags: [evidence, negative-control]
+    fields:
+      coverage: marker mapping over src/ and tests/ with a skip list; dead-marker detection; release-scope gate on missing and failed results
+      method: automated-test
+      steps: "run: cargo nextest run --workspace --features ordeal/cert-bundle --profile ci && python3 scripts/junit_to_rivet.py target/nextest/ci/junit.xml m.xml && python3 scripts/check_release_results.py v0.24.0 m.xml"
+    links:
+      - type: verifies
+        target: TR-057

@@ -1,0 +1,8 @@
+# #203: the `ci` profile writes JUnit XML that scripts/junit_to_rivet.py maps
+# onto rivet measures (via `// rivet: verifies <ID>` markers) and
+# `rivet import-results` ingests, so verdicts come from the CI run.
+[profile.ci]
+fail-fast = false
+
+[profile.ci.junit]
+path = "junit.xml"

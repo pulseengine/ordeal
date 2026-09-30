@@ -2469,3 +2469,28 @@ artifacts:
         target: VER-056
       - type: part-of-execution
         target: VE-045
+
+  - id: VE-046
+    type: verification-execution
+    title: CI-results ingestion verified locally, with negative controls (VER-057)
+    status: implemented
+    description: "cargo nextest run --workspace --features ordeal/cert-bundle --profile ci: 244 run, 244 passed, 1 skipped. junit_to_rivet.py: 56 (test, artifact) results over 12 measures; two markers skip-listed with reasons (Kani harnesses; cadical+oracle test); before the marker fixes it reported 5 dead markers (Kani, two feature-gated, two above helper functions) and exited 1. check_release_results.py v0.24.0: 3 CI results for the in-scope measure, all pass, exit 0; with that measure's results removed and one other result failed: exit 1 with both findings. rivet import-results on a sample: results keyed by artifact ID; rivet trace-results then showed the measure as pass. actionlint clean on ci.yml and release.yml; check_release_order.py PASS."
+    fields:
+      environment: "note: macOS arm64, local, cargo-nextest 0.9.138 (CI pins 0.9.146), rivet 0.39.0; branch feat/junit-results-203 on main @ 0ad7cd8"
+      executor: local
+      timestamp: 2026-09-30T14:42:36Z
+      version: 0ad7cd8
+
+  - id: VV-103
+    type: verification-verdict
+    title: VER-057 pass — CI results become release evidence
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-046
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-057
+      - type: part-of-execution
+        target: VE-046

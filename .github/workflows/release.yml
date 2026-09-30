@@ -84,6 +84,22 @@ jobs:
           bash scripts/install_varve.sh
           ~/.varve/bin/varve run rivet --version
 
+      # #203: the release's test evidence is the tagged commit's own main CI
+      # run (its uploaded, measure-mapped JUnit), not a hand-written verdict.
+      - name: Release gate — CI test results for the scope (TR-057)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          SHA="$(git rev-parse HEAD)"
+          RUN="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&branch=main&event=push" \
+            --jq '[.workflow_runs[] | select(.conclusion == "success")][0].id')"
+          gh run download "$RUN" --repo "$GITHUB_REPOSITORY" --name rivet-test-results --dir ci-results
+          python3 scripts/check_release_results.py "$VERSION" ci-results/rivet-test-results.xml
+          rivet import-results --format junit ci-results/rivet-test-results.xml --output ci-results/rivet
+
       # rivet: verifies VER-047
       - name: Release gate — full V-closure and scope readiness (TR-047)
         # `rivet release status` is scope-only, so a broken chain on an
