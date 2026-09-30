@@ -105,6 +105,11 @@ required-features = ["cert-bundle"]
 name = "rivet_witness_ingestion"
 required-features = ["cert-bundle"]
 
+# #191: ordeal records its own certificate bundles as rivet evidence
+[[example]]
+name = "cert_bundle_smt2"
+required-features = ["cert-bundle"]
+
 [[bench]]
 name = "latency"
 harness = false

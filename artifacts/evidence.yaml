@@ -1,0 +1,57 @@
+artifacts:
+
+  - id: OC-001
+    type: ordeal-certificate
+    title: "Certified: width-12 rotate/shift identity (non-power-of-two, #182 class)"
+    status: verified
+    description: "Bundle evidence/certs/rotl_decompose_w12.json, emitted by crates/ordeal/examples/cert_bundle_smt2.rs from evidence/certs/rotl_decompose_w12.smt2 with ordeal 0.23.0. The example re-parsed it (content hashes verified) and re-ran the trusted ordeal-lrat checker (verification-result pass). Z3 independently reports the query unsat. The width is not a power of two, the class #182 mis-encoded."
+    fields:
+      attests-claim: rotate_left 1 equals its shift decomposition for every 12-bit x >> b, b < 12
+      attests-kind: qf_bv_validity
+      checked-by: {name: ordeal-lrat, version: 0.23.0}
+      cnf-sha256: 93f5332ede7da2f9f8b55c0017594ea8a86ce03c605008f9cd907aa287afffa6
+      format: ordeal-cert/v1
+      # Mappings written by hand: `rivet add --field` cannot set type: mapping (rivet#1021).
+      produced-by: {name: ordeal, version: 0.23.0}
+      proof-sha256: 04124c8865b9b4e0e328ea378fe8e9d55ec28c2d8f46ab4d2cf21934de4cfc76
+      recheck: {command: "cargo run -p ordeal --features cert-bundle --example cert_bundle_smt2 -- evidence/certs/rotl_decompose_w12.smt2 evidence/certs/rotl_decompose_w12.json qf_bv_validity 'rotate_left 1 equals its shift decomposition for every 12-bit x >> b, b < 12'", expect-exit: 0}
+      cited-source:
+        uri: ./evidence/certs/rotl_decompose_w12.json
+        kind: file
+        sha256: a8f81111883c283dbb84fa033533f77f9df8cc104c9567ceed0f7be6325c75a2
+      rechecked-at: 2026-09-30T17:06:42Z
+      verdict: unsat
+      verification-result: pass
+    links:
+      - type: verifies
+        target: TR-049
+      - type: verifies
+        target: TR-056
+
+  - id: OC-002
+    type: ordeal-certificate
+    title: "Certified: width-24 shift round-trip mask identity (non-power-of-two, #182 class)"
+    status: verified
+    description: "Bundle evidence/certs/shl_lshr_mask_w24.json, emitted by crates/ordeal/examples/cert_bundle_smt2.rs from evidence/certs/shl_lshr_mask_w24.smt2 with ordeal 0.23.0. The example re-parsed it (content hashes verified) and re-ran the trusted ordeal-lrat checker (verification-result pass). Z3 independently reports the query unsat. The width is not a power of two, the class #182 mis-encoded."
+    fields:
+      attests-claim: (x << s) >> s equals x & (ones >> s) for every 24-bit x, s < 24
+      attests-kind: qf_bv_validity
+      checked-by: {name: ordeal-lrat, version: 0.23.0}
+      cnf-sha256: eaf481b622efc0944d3f49c694082d7eb729594119f55509f4d4966bdb926710
+      format: ordeal-cert/v1
+      # Mappings written by hand: `rivet add --field` cannot set type: mapping (rivet#1021).
+      produced-by: {name: ordeal, version: 0.23.0}
+      proof-sha256: ef5b75c8b9fbbd78c9c13af7ae07a0ee1e53398e4b3725931bbf0d14e4a6095f
+      recheck: {command: "cargo run -p ordeal --features cert-bundle --example cert_bundle_smt2 -- evidence/certs/shl_lshr_mask_w24.smt2 evidence/certs/shl_lshr_mask_w24.json qf_bv_validity '(x << s) >> s equals x & (ones >> s) for every 24-bit x, s < 24'", expect-exit: 0}
+      cited-source:
+        uri: ./evidence/certs/shl_lshr_mask_w24.json
+        kind: file
+        sha256: 7ed460dda44b3c00b1c670bcfb8f9642943c683b7c63b81cb219cbb448ad1fc7
+      rechecked-at: 2026-09-30T17:06:42Z
+      verdict: unsat
+      verification-result: pass
+    links:
+      - type: verifies
+        target: TR-049
+      - type: verifies
+        target: TR-056

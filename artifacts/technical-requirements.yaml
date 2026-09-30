@@ -1631,3 +1631,22 @@ artifacts:
         target: TR-054
       - type: allocated-to
         target: ARC-014
+
+  - id: TR-058
+    type: sw-req
+    title: ordeal records its own certificates and release supply chain with the rivet evidence types it asks consumers to use (#191)
+    status: verified
+    release: v0.24.0
+    description: "Maintainer decision on #191 (2026-09-30): load the ordeal-certificate and supply-chain schemas and record real evidence with them, and remove the 9 unsynced externals. ordeal-certificate artifacts pin re-checked ordeal-cert/v1 bundles by sha256 with a reproducible recheck command; supply-chain artifacts record each signed v0.23.0 release asset, its SLSA provenance and the SBOM components."
+    tags: [evidence, dogfooding, supply-chain, certificate]
+    fields:
+      priority: should
+      req-type: functional
+      verification-criteria: rivet validate passes with both schemas loaded and no externals; each certificate bundle regenerates byte-identically from its recorded recheck command and re-checks through ordeal-lrat; tampering with a bundle raises the cited-source sha256 mismatch; dropping verification-result makes the certificate's verifies links an error; every release artifact has a verified SLSA v1 attestation (gh attestation verify).
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: traces-to
+        target: TR-030
+      - type: allocated-to
+        target: ARC-014

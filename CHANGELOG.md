@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **ordeal records its own evidence with its own rivet types** (TR-058,
+  #191).
+  - The `ordeal-certificate` and `supply-chain` schemas are now loaded.
+  - Two re-checked `ordeal-cert/v1` bundles, at widths 12 and 24 (the
+    #182 class), are stored under `evidence/certs/`. Each is pinned by
+    sha256 and regenerates byte-identically from its recorded recheck
+    command, the new `cert_bundle_smt2` example.
+  - The v0.23.0 release is recorded: 7 signed assets, each with its SLSA v1
+    provenance and the SBOM components.
 - **Test results are release evidence** (TR-057, #203).
   - CI runs the test suite through cargo-nextest with JUnit output.
     `scripts/junit_to_rivet.py` maps each test to the rivet measures named
@@ -20,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the results.
 
 ### Fixed
+- **Removed the 9 unsynced rivet externals** (#191). They were never synced
+  and ordeal made no outbound links into them. Their unprefixed IDs also
+  produced false cross-repo backlinks (rivet#1015).
 - **Shift and rotate proofs now cover every width** (#201). The Lean
   theorems `blast_shl_bitvec`, `blast_lshr_bitvec`, `blast_ashr_bitvec` and
   `blast_rotr_bitvec` assumed a power-of-two width (`2 ^ stages = w`); at

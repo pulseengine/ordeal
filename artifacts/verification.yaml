@@ -1376,3 +1376,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-057
+
+  - id: VER-058
+    type: sw-verification
+    title: ordeal's own certificate and supply-chain evidence validates and re-checks (TR-058)
+    status: verified
+    release: v0.24.0
+    description: Regenerate each evidence bundle with its recorded recheck command (crates/ordeal/examples/cert_bundle_smt2.rs, which re-parses with hash verification and re-runs ordeal-lrat), confirm the bytes match the cited-source stamp, and run rivet validate with the ordeal-certificate and supply-chain schemas loaded.
+    tags: [evidence, dogfooding, negative-control]
+    fields:
+      coverage: 2 certificate bundles (widths 12 and 24, non-power-of-two) regenerated and re-checked; 7 release artifacts with SLSA v1 attestations verified; negative controls on bundle tampering and missing verification-result
+      method: automated-test
+      steps: "run: cargo run -p ordeal --features cert-bundle --example cert_bundle_smt2 -- evidence/certs/rotl_decompose_w12.smt2 /tmp/b.json qf_bv_validity x && rivet validate"
+    links:
+      - type: verifies
+        target: TR-058
