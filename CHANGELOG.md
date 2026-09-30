@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-09-30
+
+**Soundness fix** (TR-049; issue #182). Upgrade is strongly recommended.
+
+### Fixed
+- **Shifts and rotations at non-power-of-two widths were mis-encoded**
+  (`bvshl`, `bvlshr`, `bvashr`, `rotate_left`, `rotate_right`, and the
+  `bvrotl` lowering). This affected every release from 0.8.0 through 0.22.0.
+  - The barrel shifter used too few stages at widths such as 3, 5, 12 or 24.
+  - Release builds could answer `unsat` to a satisfiable query, *with a
+    certificate that re-checks*: the checker certifies the CNF it is given,
+    and the CNF was the wrong encoding.
+  - The SMT-LIB front end also did not reduce constant rotate amounts
+    modulo the width.
+- Widths 1, 2, 4, 8, 16, 32, 64 and 128 are unaffected. Their encoding is
+  unchanged.
+
+### Verification
+- A new exhaustive test covers every width from 1 to 7, with randomized tests
+  at every width from 9 to 128.
+- The Z3 differential now runs at widths 3, 5, 8, 12, 24, 32 and 64
+  (previously 8, 32 and 64).
+- Two new differential fixtures cover `lshr` at width 24 and a rotate
+  round-trip at width 5.
+- Negative controls: with the old stage count, both the exhaustive test and
+  the differential fail.
+
 ## [0.22.0] - 2026-09-25
 
 **Released through a full ASPICE V-closure gate** (TR-046, TR-047; issues
@@ -1098,7 +1125,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.1
 [0.22.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.0
 [0.21.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.21.0
 [0.20.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.20.0
