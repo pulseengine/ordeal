@@ -512,6 +512,9 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
+        with:
+          # full history: the commit-trailer gate below walks the PR range
+          fetch-depth: 0
       - uses: sigstore/cosign-installer@v3
       - name: Install varve (verified) and the pinned layer
         env:
@@ -524,3 +527,12 @@ jobs:
           rivet --version
           ~/.varve/bin/varve status
           rivet validate
+      # rivet: verifies VER-054
+      # #188: every commit of the PR carries real artifact trailers or is
+      # exempt; `Trace: skip` may not cancel Implements/Verifies trailers.
+      - name: Commit trailers (PR commits)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: scripts/check_commit_trailers.sh "${BASE_SHA}..${HEAD_SHA}"

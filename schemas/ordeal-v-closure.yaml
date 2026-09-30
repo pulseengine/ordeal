@@ -114,3 +114,20 @@ traceability-rules:
     required-backlink: verifies
     from-types: [sys-verification]
     severity: error
+
+  # #188: a measure that is `verified` must carry at least one recorded
+  # verdict (verification-verdict --result-of--> measure). Before this rule,
+  # nine measures were `verified` with no result anywhere in the graph.
+  - name: ordeal-measure-has-verdict-sw
+    description: "Every non-draft software verification measure has at least one recorded verdict"
+    source-type: sw-verification
+    required-backlink: result-of
+    from-types: [verification-verdict]
+    severity: error
+
+  - name: ordeal-measure-has-verdict-unit
+    description: "Every non-draft unit verification measure has at least one recorded verdict"
+    source-type: unit-verification
+    required-backlink: result-of
+    from-types: [verification-verdict]
+    severity: error

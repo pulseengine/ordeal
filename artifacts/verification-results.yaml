@@ -2131,3 +2131,291 @@ artifacts:
         target: VER-051
       - type: part-of-execution
         target: VE-040
+  - id: VE-041
+    type: verification-execution
+    title: Re-execution of the nine measures that were verified with no recorded result (#188)
+    status: implemented
+    description: "Each measure's own steps were re-run and every leg ran at least one test. UV-014: sliver::array 15 passed, sliver_diff (oracle) 3 passed. UV-015: sliver_uf (oracle) 2 passed. VER-032 and VER-034: cli_baseline 10 passed. VER-035: wasm/native differential, 21 invocations byte-identical. VER-037: cert_bundle (cert-bundle) 11 passed, ordeal-lrat check_sat/check_binding 4 passed. VER-038: vex.py self-test 13/13, cargo deny --exclude-dev advisories ok. VER-042: cli_baseline sat_witness 1 passed, lib sha256 1 passed. VER-036 (Lean, needs Charon/Aeneas regeneration) is taken from the required CI job on main 9bcdf32, run 36670069900, job 109742980993 'Lean model + soundness proof' success at 2026-09-30T04:48:40Z: generated models 0 axioms each, AxiomCheck built, axiom gate step passed."
+    fields:
+      environment: "note: macOS arm64, local, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), wasmtime; main @ e6f8854; VER-036 from CI ubuntu-latest"
+      executor: local
+      timestamp: 2026-09-30T05:15:54Z
+      version: e6f8854
+    links:
+      - type: traces-to
+        target: UV-014
+
+      - type: traces-to
+        target: UV-015
+      - type: traces-to
+        target: VER-032
+      - type: traces-to
+        target: VER-034
+      - type: traces-to
+        target: VER-035
+      - type: traces-to
+        target: VER-036
+      - type: traces-to
+        target: VER-037
+      - type: traces-to
+        target: VER-038
+      - type: traces-to
+        target: VER-042
+  - id: VV-085
+    type: verification-verdict
+    title: UV-014 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-014
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-086
+    type: verification-verdict
+    title: UV-015 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-015
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-087
+    type: verification-verdict
+    title: VER-032 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-032
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-088
+    type: verification-verdict
+    title: VER-034 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-034
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-089
+    type: verification-verdict
+    title: VER-035 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-035
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-090
+    type: verification-verdict
+    title: VER-036 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-036
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-091
+    type: verification-verdict
+    title: VER-037 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-037
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-092
+    type: verification-verdict
+    title: VER-038 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-038
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VV-093
+    type: verification-verdict
+    title: VER-042 pass — re-executed with a recorded result (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-041: every leg of the measure's own steps ran at least one test and passed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-042
+      - type: part-of-execution
+        target: VE-041
+
+  - id: VE-042
+    type: verification-execution
+    title: Re-execution of unit verdicts older than the code they cover (#188)
+    status: implemented
+    description: "Re-run after the #182 blaster fix and the #184 solver change, so each verdict post-dates the code it covers: blast::bitwise 5 passed (UV-005), blast::arith 4 passed (UV-006), blast::shift 5 passed including the every-width tests from #183 (UV-007), blast::muldiv 4 passed (UV-008), blast::structural 4 passed (UV-009), ordeal-lrat 22 passed (UV-011); 0 failed."
+    fields:
+      environment: "note: macOS arm64, local; main @ e6f8854 (code unchanged in the working tree)"
+      executor: local
+      timestamp: 2026-09-30T05:18:24Z
+      version: e6f8854
+    links:
+      - type: traces-to
+        target: UV-005
+
+      - type: traces-to
+        target: UV-006
+      - type: traces-to
+        target: UV-007
+      - type: traces-to
+        target: UV-008
+      - type: traces-to
+        target: UV-009
+      - type: traces-to
+        target: UV-011
+  - id: VV-094
+    type: verification-verdict
+    title: UV-005 pass — re-executed against the current code (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-042
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-005
+      - type: part-of-execution
+        target: VE-042
+
+  - id: VV-095
+    type: verification-verdict
+    title: UV-006 pass — re-executed against the current code (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-042
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-006
+      - type: part-of-execution
+        target: VE-042
+
+  - id: VV-096
+    type: verification-verdict
+    title: UV-007 pass — re-executed against the current code (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-042
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-007
+      - type: part-of-execution
+        target: VE-042
+
+  - id: VV-097
+    type: verification-verdict
+    title: UV-008 pass — re-executed against the current code (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-042
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-008
+      - type: part-of-execution
+        target: VE-042
+
+  - id: VV-098
+    type: verification-verdict
+    title: UV-009 pass — re-executed against the current code (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-042
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-009
+      - type: part-of-execution
+        target: VE-042
+
+  - id: VV-099
+    type: verification-verdict
+    title: UV-011 pass — re-executed against the current code (#188)
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-042
+      verdict: pass
+    links:
+      - type: result-of
+        target: UV-011
+      - type: part-of-execution
+        target: VE-042
+
+  - id: VE-043
+    type: verification-execution
+    title: Evidence gates verified with negative controls (VER-054)
+    status: implemented
+    description: "rivet validate with the two new verdict rules: 9 errors, exactly the 9 measures named in #188, before re-execution; PASS 0 warnings after their verdicts were recorded. check_commit_trailers.sh 1a6275e..origin/main: linked=2 exempt=2 orphans=0, PASS, exit 0; 6e4fe3f~20..6e4fe3f: exit 1, flags f144348, a391850, 7b17dd4, 0521b99. commit-msg hook: Trace: skip + Implements exit 1; Implements alone exit 0. actionlint clean on ci.yml."
+    fields:
+      environment: "note: macOS arm64, local, rivet 0.39.0; branch fix/rivet-evidence-fed on main @ e6f8854"
+      executor: local
+      timestamp: 2026-09-30T05:18:54Z
+      version: e6f8854
+
+  - id: VV-100
+    type: verification-verdict
+    title: VER-054 pass — evidence gates fail on missing verdicts and cancelled trailers
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see VE-043: every negative control fails as designed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-054
+      - type: part-of-execution
+        target: VE-043

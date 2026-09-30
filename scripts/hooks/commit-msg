@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# commit-msg hook (#188): reject `Trace: skip` combined with Implements:/Verifies:.
+# rivet treats a commit with `Trace: skip` as exempt, which silently cancels
+# its real artifact trailers. Enable with:
+#   git config core.hooksPath scripts/hooks
+set -euo pipefail
+msg="$1"
+if grep -qE '^Trace:[[:space:]]*skip' "$msg" && grep -qE '^(Implements|Verifies):' "$msg"; then
+  echo "commit-msg: 'Trace: skip' would cancel this commit's Implements/Verifies trailers; drop one." >&2
+  exit 1
+fi
