@@ -1395,3 +1395,20 @@ artifacts:
         target: TR-038
       - type: traces-to
         target: TR-030
+
+  - id: TR-049
+    type: sw-req
+    title: "Shift and rotate encodings are exact at every bit-width 1..=128 (soundness, #182)"
+    status: verified
+    release: v0.22.1
+    description: "Soundness defect #182 (found 2026-09-30 by the claims-vs-tests audit). The barrel shifter computed its stage count as w.trailing_zeros() with a release-erased debug_assert(w.is_power_of_two()), so at non-power-of-two widths release builds encoded shifts and rotates wrongly and a satisfiable query could return a certified unsat (the checker correctly certified the wrong CNF). lowering::bvrotl applied the power-of-two-only rotr(a, 0 - b) identity at every width, and SMT-LIB rotate constants were truncated mod 2^w instead of reduced mod w. Affected: CLI v0.8.0..v0.22.0, API since v0.2.0; power-of-two widths unaffected. The requirement: the encodings are exact at every accepted width, and the independent-solver differential covers non-power-of-two widths so this class cannot recur silently."
+    tags: [soundness, blaster, shift, rotate, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "For every width 1..=7 exhaustively and every width 9..=128 by seeded sampling, the shl/lshr/ashr/rotr blasters agree with the evaluator on all sampled (a, b) including out-of-range amounts; bvrotl agrees with a direct left rotation at every width 1..=10 exhaustively; the Z3 differential corpus includes non-power-of-two widths and agrees with Z3; the reported satisfiable queries return sat and valid non-power-of-two identities stay certified unsat; power-of-two encodings are byte-identical to v0.22.0. Negative control: restoring the pre-fix stage count makes the exhaustive test and the Z3 differential fail."
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: traces-to
+        target: TR-001

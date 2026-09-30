@@ -424,19 +424,24 @@ impl Ctx {
             }),
             "rotate_right" => {
                 // SMT-LIB's amount is a CONSTANT k; the core Rotr rotates by a
-                // term, so materialize k as a same-width constant.
+                // term, so materialize it as a same-width constant — reduced
+                // mod w FIRST: a k >= 2^w would otherwise be truncated to
+                // k mod 2^w, which differs from k mod w at non-power-of-two
+                // widths (fixed 0.22.1).
                 let k = idx(2)?;
                 let x = arg(self)?;
                 let w = Self::width_of(&x)?;
-                Ok(BvTerm::Rotr(Box::new(x), Box::new(const_bv(k as u128, w))))
+                let k = (k as u128) % w as u128;
+                Ok(BvTerm::Rotr(Box::new(x), Box::new(const_bv(k, w))))
             }
             "rotate_left" => {
-                // rotate_left k == rotr by (-k); lowering::bvrotl builds exactly
-                // that (exact for the power-of-two widths 8/32/64).
+                // rotate_left k: reduce k mod w (see rotate_right), then
+                // lowering::bvrotl, which is exact at every width.
                 let k = idx(2)?;
                 let x = arg(self)?;
                 let w = Self::width_of(&x)?;
-                Ok(lowering::bvrotl(x, const_bv(k as u128, w), w))
+                let k = (k as u128) % w as u128;
+                Ok(lowering::bvrotl(x, const_bv(k, w), w))
             }
             other => Err(SmtError::Unsupported(format!("indexed operator '{other}'"))),
         }
@@ -882,6 +887,53 @@ mod tests {
         // Byte-identical redeclaration stays tolerated (concatenated logs).
         let ok = "(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(declare-const a (_ BitVec 8))\n(assert (= a #x00))\n(check-sat)\n";
         assert!(super::solve_str(ok).is_ok());
+    }
+
+    // rivet: verifies VER-049
+    /// Soundness regression (0.22.1): satisfiable shift/rotate queries at
+    /// NON-power-of-two widths. Each pins the operands to concrete values, so
+    /// `sat` is certain; 0.22.0 release builds answered `unsat` (with a valid
+    /// certificate for a wrongly encoded CNF).
+    #[test]
+    fn non_power_of_two_shifts_and_rotates_are_not_falsely_unsat() {
+        let cases = [
+            // width 3: 1 << 1 = 2
+            "(declare-const y (_ BitVec 3))(assert (= y #b001))(assert (distinct (bvshl y #b001) #b000))(check-sat)",
+            // width 24: 0x100 >> 8 = 1
+            "(declare-const y (_ BitVec 24))(assert (= y #x000100))(assert (= (bvlshr y #x000008) #x000001))(check-sat)",
+            // width 6: ashr of a negative value keeps the sign fill
+            "(declare-const y (_ BitVec 6))(assert (= y #b100000))(assert (= (bvashr y #b000010) #b111000))(check-sat)",
+            // width 6: rotate_right 2 of 1 = 0b010000
+            "(declare-const y (_ BitVec 6))(assert (= y #b000001))(assert (= ((_ rotate_right 2) y) #b010000))(check-sat)",
+            // width 6: rotate_left 1 of 0b100000 wraps to 1
+            "(declare-const y (_ BitVec 6))(assert (= y #b100000))(assert (= ((_ rotate_left 1) y) #b000001))(check-sat)",
+            // width 5: rotate_right by k >= 2^w is k mod w (9 mod 5 = 4)
+            "(declare-const y (_ BitVec 5))(assert (= y #b00001))(assert (= ((_ rotate_right 9) y) #b00010))(check-sat)",
+        ];
+        for src in cases {
+            assert!(
+                matches!(verdict(src), CheckResult::Sat(_)),
+                "expected sat: {src}"
+            );
+        }
+    }
+
+    /// The other direction: valid identities at non-power-of-two widths stay
+    /// certified UNSAT after the fix (rotl undoes rotr for a VARIABLE amount;
+    /// a shift by exactly the width is zero).
+    #[test]
+    fn non_power_of_two_identities_stay_certified_unsat() {
+        let cases = [
+            "(declare-const x (_ BitVec 5))(declare-const b (_ BitVec 5))(assert (distinct ((_ rotate_left 2) ((_ rotate_right 2) x)) x))(check-sat)",
+            "(declare-const x (_ BitVec 12))(assert (distinct (bvshl x #x00c) #x000))(check-sat)",
+            "(declare-const x (_ BitVec 7))(declare-const b (_ BitVec 7))(assert (bvult b #b0000111))(assert (distinct (bvlshr (bvshl x b) b) (bvand x (bvlshr #b1111111 b))))(check-sat)",
+        ];
+        for src in cases {
+            match verdict(src) {
+                CheckResult::Unsat(cert) => cert.recheck().expect("certificate re-checks"),
+                other => panic!("expected certified unsat for {src}, got {other:?}"),
+            }
+        }
     }
 
     #[test]

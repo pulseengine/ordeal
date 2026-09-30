@@ -1,20 +1,33 @@
 //! Shifts and rotate (DES-007): barrel shifter with SMT-LIB out-of-range
-//! semantics; bvrotr rotates by amount mod width.
+//! semantics; bvrotr rotates by amount mod width. Correct at EVERY width
+//! 1..=128 — see the soundness note on [`stage_count`].
 
-use crate::aig::{Aig, Lit, Word};
+use crate::aig::{Aig, Lit, Word, word_const};
+use crate::blast::muldiv::blast_urem;
 
-/// Number of barrel stages (`log2 w`), checking the shared preconditions:
-/// both operands have the same width `w`, and `w` is a power of two.
+/// Number of barrel stages: the amount bits needed to express every
+/// in-range shift `0..w`, i.e. `ceil(log2 w)` (0 for `w = 1`). Stage `k`
+/// shifts by `2^k`, and `2^(stages-1) < w`, so no single stage exceeds the
+/// width; any combined amount `>= w` shifts every bit out (fill), which is
+/// exactly SMT-LIB's out-of-range result. For a power-of-two width this is
+/// `log2 w`, so those circuits are unchanged.
+///
+/// SOUNDNESS (fixed 0.22.1): this used to be `w.trailing_zeros()`, guarded
+/// only by a `debug_assert!(w.is_power_of_two())`. Release builds therefore
+/// built too few stages at non-power-of-two widths (zero at w = 3) and a
+/// wrong out-of-range test, so e.g. `(bvshl #b001 #b001)` at width 3 was
+/// encoded as 0 and a satisfiable query came back `unsat` — with a VALID
+/// certificate, because the checker certifies the CNF it is given.
 fn stage_count(a: &Word, b: &Word) -> usize {
     let w = a.len();
     debug_assert_eq!(w, b.len(), "shift operands must share a width");
-    debug_assert!(w.is_power_of_two(), "shift width must be a power of two");
-    w.trailing_zeros() as usize
+    assert!(w > 0, "shift operands must be non-empty");
+    (usize::BITS - (w - 1).leading_zeros()) as usize
 }
 
-/// `amount >= width`: OR of the amount bits above the barrel stages. Because
-/// the width is a power of two, an amount is in range iff every bit at
-/// position `log2 w` and above is clear.
+/// `amount >= 2^stages`: OR of the amount bits above the barrel stages.
+/// Together with the barrel itself (which shifts everything out for any
+/// combined amount in `w..2^stages`) this realises `amount >= w`.
 fn out_of_range(aig: &mut Aig, b: &Word, stages: usize) -> Lit {
     b[stages..]
         .iter()
@@ -71,13 +84,23 @@ pub fn blast_ashr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
     barrel_right(aig, a, b, sign)
 }
 
-/// `bvrotr` — rotate right by amount mod width. Only the low `log2 w` amount
-/// bits matter: the width is a power of two, so higher bits vanish mod `w`.
+/// `bvrotr` — rotate right by amount mod width. For a power-of-two width only
+/// the low `log2 w` amount bits matter (higher bits vanish mod `w`). For any
+/// other width the amount is first reduced `mod w` with the (untrusted,
+/// separately tested) unsigned-remainder blaster; each stage then rotates by
+/// `2^k mod w`, and the selected stages sum to the reduced amount `< w`.
 pub fn blast_rotr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
     let w = a.len();
     let stages = stage_count(a, b);
+    let reduced;
+    let amount: &Word = if w.is_power_of_two() {
+        b
+    } else {
+        reduced = blast_urem(aig, b, &word_const(w as u128, w as u32));
+        &reduced
+    };
     let mut cur = a.clone();
-    for (k, &sel) in b.iter().enumerate().take(stages) {
+    for (k, &sel) in amount.iter().enumerate().take(stages) {
         let s = 1usize << k;
         cur = (0..w)
             .map(|i| aig.mux(sel, cur[(i + s) % w], cur[i]))
@@ -168,7 +191,11 @@ mod tests {
     /// amounts, exactly-`w`, and huge (far out-of-range) amounts.
     fn randomized(w: u32, seed: u64) {
         let (aig, ops) = blast_all(w);
-        let mask = (1u128 << w) - 1;
+        let mask = if w == 128 {
+            u128::MAX
+        } else {
+            (1u128 << w) - 1
+        };
         let mut rng = XorShift64(seed);
         for case in 0..200u32 {
             let a = rng.next_u128() & mask;
@@ -193,5 +220,32 @@ mod tests {
     #[test]
     fn randomized_width_64() {
         randomized(64, 0xDE50_0702);
+    }
+
+    // rivet: verifies VER-049
+    /// Soundness regression (0.22.1): EXHAUSTIVE at every width 1..=7 —
+    /// all `(a, b)` pairs, including every out-of-range amount. Before the
+    /// fix, release builds encoded non-power-of-two widths wrongly (zero
+    /// barrel stages at w = 3); the existing tests only ever tried 8/32/64.
+    #[test]
+    fn exhaustive_every_width_1_to_7() {
+        for w in 1u32..=7 {
+            let (aig, ops) = blast_all(w);
+            for a in 0u128..(1 << w) {
+                for b in 0u128..(1 << w) {
+                    check(&aig, &ops, a, b, w);
+                }
+            }
+        }
+    }
+
+    /// Soundness regression (0.22.1): 200 seeded cases per op at EVERY
+    /// width 9..=128 (power-of-two or not), mixing in-range, exactly-`w`
+    /// and far out-of-range amounts.
+    #[test]
+    fn randomized_every_width_9_to_128() {
+        for w in 9u32..=128 {
+            randomized(w, 0xDE50_0800 ^ u64::from(w));
+        }
     }
 }

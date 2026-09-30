@@ -103,6 +103,8 @@ artifacts:
         target: FEAT-008
       - type: allocated-from
         target: FEAT-012
+      - type: allocated-from
+        target: TR-049
   - id: ARC-004
     type: sw-arch-component
     title: ordeal-cnf (Tseitin CNF encoder)

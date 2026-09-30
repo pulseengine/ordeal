@@ -108,18 +108,24 @@ pub fn bvneg(x: BvTerm, width: u32) -> BvTerm {
     BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(x))
 }
 
-/// Rotate-left (`bvrotl`) by a variable amount: `rotr(a, 0 - b)`.
+/// Rotate-left (`bvrotl`) by a variable amount, exact at every width.
 ///
-/// Rotating left by `b` equals rotating right by `-b` (mod `width`). The core
-/// [`BvTerm::Rotr`] rotates by its amount taken modulo the width, and the
-/// negation `0 - b` is `2^width - b` (mod `2^width`). This is exact precisely
-/// when `2^width ≡ 0 (mod width)`, i.e. when `width` is a power of two — which
-/// holds for every target width (8, 32, 64). For a non-power-of-two `width`
-/// the reduction of the rotate amount would differ and this identity would not
-/// hold; such widths are outside the validated fragment.
+/// For a power-of-two `width`, rotating left by `b` equals rotating right by
+/// `0 - b`: the core [`BvTerm::Rotr`] reduces its amount mod `width`, and
+/// `2^width ≡ 0 (mod width)`, so `(0 - b) mod width = (width - b mod width)
+/// mod width`. That identity FAILS for any other width (fixed 0.22.1: the
+/// SMT-LIB front end applied it at every width), so there the amount is
+/// computed explicitly as `(width - b mod width) mod width` — both operands
+/// of the subtraction are `<= width`, so it never wraps.
 pub fn bvrotl(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
-    let neg_b = BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(b));
-    BvTerm::Rotr(Box::new(a), Box::new(neg_b))
+    let amount = if width.is_power_of_two() {
+        BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(b))
+    } else {
+        let w = || Box::new(const_bv(width as u128, width));
+        let b_mod_w = BvTerm::Urem(Box::new(b), w());
+        BvTerm::Urem(Box::new(BvTerm::Sub(w(), Box::new(b_mod_w))), w())
+    };
+    BvTerm::Rotr(Box::new(a), Box::new(amount))
 }
 
 /// Unsigned remainder (`bvurem`) — the native fragment op.
@@ -205,6 +211,31 @@ pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Soundness regression (0.22.1): `bvrotl` equals the SMT-LIB
+    /// rotate-left (evaluated directly as a left rotation by `b mod w`) at
+    /// EVERY width 1..=10, exhaustively; before the fix the `rotr(a, 0 - b)`
+    /// identity was applied at non-power-of-two widths where it is false.
+    #[test]
+    fn bvrotl_exact_at_every_width() {
+        use crate::eval::{Env, eval_bv};
+        for w in 1u32..=10 {
+            let m = (1u128 << w) - 1;
+            for a in 0u128..(1 << w) {
+                for b in 0u128..(1 << w) {
+                    let got = eval_bv(&bvrotl(const_bv(a, w), const_bv(b, w), w), &Env::new())
+                        .expect("eval");
+                    let r = (b % w as u128) as u32;
+                    let want = if r == 0 {
+                        a
+                    } else {
+                        ((a << r) | (a >> (w - r))) & m
+                    };
+                    assert_eq!(got, want, "rotl w={w} a={a:#x} b={b:#x}");
+                }
+            }
+        }
+    }
     use crate::eval::{Env, bv_sort, eval_bv};
 
     /// A Z3-free reference for the SMT-LIB div/rem family, computed directly on
