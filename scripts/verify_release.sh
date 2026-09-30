@@ -104,4 +104,15 @@ for c in ordeal ordeal-lrat; do
   V=$(curl -s -H "User-Agent: ordeal-release-verify (release-verify)" "https://crates.io/api/v1/crates/$c" | python3 -c 'import json,sys; print(json.load(sys.stdin)["crate"]["max_version"])' 2>/dev/null)
   [ "$V" = "$BARE" ] && ok "crates.io $c = $V" || bad "crates.io $c = '$V' (want $BARE)"
 done
+# 6. the wasm32-wasip2 component (#189, from v0.23.0): listed in the signed
+#    sums, and it solves (certified unsat) under wasmtime when available.
+if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 23, 0) else 1)"; then
+  W="ordeal-$TAG-wasm32-wasip2.wasm"
+  [ -f "$W" ] && grep -q " ./$W\$" SHA256SUMS.txt && ok "wasm component listed in SHA256SUMS: $W" || bad "wasm component missing or unlisted: $W"
+  if command -v wasmtime >/dev/null 2>&1 && [ -f "$W" ]; then
+    printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' > wq.smt2
+    wasmtime run --dir . "$W" check wq.smt2 2>/dev/null | head -1 | grep -qx unsat && ok "published wasm component: certified unsat" || bad "wasm component smoke"
+  else skip "wasmtime not installed: wasm component not executed"; fi
+else skip "wasm component published from v0.23.0 on"; fi
+
 echo "=== result: $([ $fail = 0 ] && echo ALL PASS || echo FAILURES PRESENT)"; exit $fail

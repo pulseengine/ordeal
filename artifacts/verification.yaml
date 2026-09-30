@@ -1329,3 +1329,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-054
+
+  - id: VER-055
+    type: sw-verification
+    title: Exact checker pin enforced; wasm component reproducible (TR-055)
+    status: verified
+    release: v0.23.0
+    description: "scripts/check_exact_lrat_pin.py in the CI Test job reads cargo metadata and fails unless ordeal's normal dependency on ordeal-lrat is exactly =<workspace version>. Negative control: the caret requirement fails. The wasm component is built twice in separate target dirs and must be byte-identical, and the wasm-native differential runs on those bytes in the release job."
+    tags: [supply-chain, negative-control]
+    fields:
+      coverage: exact-pin guard with a caret negative control; wasm reproducibility across target dirs; wasm component smoke
+      method: automated-test
+      steps: "run: python3 scripts/check_exact_lrat_pin.py"
+    links:
+      - type: verifies
+        target: TR-055

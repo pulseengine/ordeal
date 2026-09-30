@@ -143,7 +143,8 @@ jobs:
 
       - name: Install cross
         if: matrix.cross
-        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+        # #189: pinned rev — the same cross CI's aarch64-musl job tests.
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev 74e99b2223de06166f8cdcc1af7f1308ec52baf4 --locked
 
       - name: Build ordeal (native)
         if: ${{ !matrix.cross }}
@@ -235,9 +236,59 @@ jobs:
           retention-days: 7
 
   # ── Create the GitHub Release: checksums + provenance ─────────────────
+  # ── wasm32-wasip2 component (#189) ─────────────────────────────────────
+  # Published inside the cosign-signed SHA256SUMS so consumers (loom, relay,
+  # ...) can pin the exact component ordeal tested instead of rebuilding
+  # their own. Built twice in separate target dirs and required to be
+  # byte-identical, then the wasm↔native behavioral differential runs on the
+  # EXACT bytes that are published.
+  build-wasm:
+    name: Build wasm32-wasip2 component
+    needs: [gate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Add wasm32-wasip2 target
+        run: rustup target add wasm32-wasip2
+      - name: Build twice, require identical bytes
+        run: |
+          set -euo pipefail
+          cargo build --release -p ordeal --target wasm32-wasip2 --target-dir target/a
+          cargo build --release -p ordeal --target wasm32-wasip2 --target-dir target/b
+          a=$(sha256sum target/a/wasm32-wasip2/release/ordeal.wasm | cut -d' ' -f1)
+          b=$(sha256sum target/b/wasm32-wasip2/release/ordeal.wasm | cut -d' ' -f1)
+          echo "wasm sha256: $a / $b"
+          test "$a" = "$b" || { echo "::error::wasm component is not reproducible"; exit 1; }
+      - name: Build native (release) for the differential
+        run: cargo build --release -p ordeal
+      - name: Install wasmtime
+        uses: bytecodealliance/actions/wasmtime/setup@v1
+        with:
+          version: "27.0.0"
+      - name: wasm ↔ native differential on the published bytes
+        run: |
+          scripts/wasm_native_differential.sh \
+            target/release/ordeal \
+            wasmtime run --dir . target/a/wasm32-wasip2/release/ordeal.wasm
+      - name: Stage the component
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          mkdir -p wasm-out
+          cp target/a/wasm32-wasip2/release/ordeal.wasm "wasm-out/ordeal-${VERSION}-wasm32-wasip2.wasm"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: wasm-component
+          path: wasm-out/*.wasm
+
   create-release:
     name: Create GitHub Release
-    needs: [build-binaries]
+    needs: [build-binaries, build-wasm]
     runs-on: ubuntu-latest
     permissions:
       # Release-asset upload needs contents: write; SLSA build-provenance
@@ -264,6 +315,7 @@ jobs:
           set -euo pipefail
           mkdir -p release-assets
           find artifacts -type f -name "*.tar.gz" -exec cp {} release-assets/ \;
+          find artifacts -type f -name "*.wasm" -exec cp {} release-assets/ \;
           ls -la release-assets/
 
       # ── CycloneDX SBOM (#144 / TR-040) ─────────────────────────────────
@@ -277,7 +329,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-cyclonedx
-        run: cargo install --locked cargo-cyclonedx
+        run: cargo install --locked cargo-cyclonedx --version 0.5.9
 
       - name: Generate toolchain SBOM (CycloneDX)
         env:
@@ -313,7 +365,7 @@ jobs:
       # vex-reissue.yml and never touch these signed sums.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2
 
       - name: Generate VEX (CycloneDX 1.5)
         env:
@@ -376,7 +428,9 @@ jobs:
       - name: Generate SLSA build provenance
         uses: actions/attest-build-provenance@v4
         with:
-          subject-path: "release-assets/*.tar.gz"
+          subject-path: |
+            release-assets/*.tar.gz
+            release-assets/*.wasm
 
       # ── Release note from the trace (rivet, ASPICE 11-03) ───────────────
       # The GitHub Release body is COMPOSED, never hand-typed: (1) the tag
