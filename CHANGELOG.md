@@ -43,6 +43,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   widths, the reference `rotr` is wrong for amounts at or above the width,
   and its Lean theorem assumes a power-of-two width. That gap is documented
   and tracked in #201.
+- **Verification evidence is recorded, not asserted** (TR-054, #188).
+  - New error rules require every software and unit verification measure to
+    carry a recorded verdict. Nine were `verified` with no result, and all
+    nine were re-executed and recorded.
+  - Six unit verdicts that pre-dated the code they cover were re-run.
+  - CI now fails a PR commit that combines `Trace: skip` with
+    `Implements`/`Verifies` trailers, which silently cancelled them. Orphan
+    commits and broken references fail too. An opt-in commit-msg hook
+    enforces the same rule locally.
+  - Eight roadmap features are now verified by their real measures, not only
+    by the phase review.
 - **`Solver::check_cnf` now re-checks a `Sat` model in release builds**
   (TR-050, #184). The documented self-check was a `debug_assert`, so release
   builds returned the SAT assignment unchecked. The model now goes through

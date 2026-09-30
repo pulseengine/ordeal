@@ -1488,3 +1488,21 @@ artifacts:
         target: TR-049
       - type: allocated-to
         target: ARC-003
+  - id: TR-054
+    type: sw-req
+    title: Verification evidence is recorded, current and traceable, not asserted (#188)
+    status: verified
+    release: v0.23.0
+    description: "Defect #188 (2026-09-30 audit): Trace: skip cancelled real Implements/Verifies trailers on 27 of 60 commits and nothing enforced trailers; 9 measures were verified with no recorded result; 8 features were verified only by a phase review; several unit verdicts pre-dated the code they cover. The requirement: every non-draft software and unit measure has at least one recorded verdict (severity-error rule); a PR commit may not combine Trace: skip with artifact trailers, and orphan commits or broken references fail CI; the features are verified by their real measures; stale unit verdicts are re-executed."
+    tags: [evidence, rivet, traceability, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "rivet validate fails with the new verdict rules while the 9 measures lack results, and passes once each carries a recorded, re-executed verdict; check_commit_trailers.sh passes on the post-fix main range and fails on a range containing Trace: skip plus Implements; the commit-msg hook rejects the combination."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: traces-to
+        target: TR-047
+      - type: allocated-to
+        target: ARC-014

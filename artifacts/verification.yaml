@@ -145,6 +145,8 @@ artifacts:
         target: TR-003
       - type: verifies
         target: TR-001
+      - type: verifies
+        target: FEAT-004
     fields:
       method: formal-verification
       steps:
@@ -166,6 +168,8 @@ artifacts:
         target: TR-005
       - type: verifies
         target: TR-006
+      - type: verifies
+        target: FEAT-002
     fields:
       method: automated-test
       steps:
@@ -186,6 +190,8 @@ artifacts:
     links:
       - type: verifies
         target: TR-004
+      - type: verifies
+        target: FEAT-001
     fields:
       method: automated-test
       steps:
@@ -207,6 +213,8 @@ artifacts:
     links:
       - type: verifies
         target: TR-008
+      - type: verifies
+        target: FEAT-003
     fields:
       method: automated-test
       steps:
@@ -229,6 +237,8 @@ artifacts:
         target: TR-009
       - type: verifies
         target: TR-007
+      - type: verifies
+        target: FEAT-005
     fields:
       method: automated-test
       steps:
@@ -253,6 +263,8 @@ artifacts:
         target: TR-010
       - type: verifies
         target: TR-002
+      - type: verifies
+        target: FEAT-000
     fields:
       method: automated-test
       steps:
@@ -380,6 +392,8 @@ artifacts:
         target: TR-013
       - type: verifies
         target: TR-006
+      - type: verifies
+        target: FEAT-002
     fields:
       method: formal-verification
       preconditions:
@@ -428,6 +442,8 @@ artifacts:
     links:
       - type: verifies
         target: TR-018
+      - type: verifies
+        target: FEAT-005
     fields:
       method: automated-test
       steps:
@@ -453,6 +469,8 @@ artifacts:
     links:
       - type: verifies
         target: TR-019
+      - type: verifies
+        target: FEAT-007
     fields:
       method: automated-test
       steps:
@@ -478,6 +496,8 @@ artifacts:
     links:
       - type: verifies
         target: TR-020
+      - type: verifies
+        target: FEAT-007
     fields:
       method: automated-test
       steps:
@@ -507,6 +527,8 @@ artifacts:
         target: TR-021
       - type: verifies
         target: TR-022
+      - type: verifies
+        target: FEAT-008
     fields:
       method: automated-test
       steps:
@@ -540,6 +562,8 @@ artifacts:
         target: TR-028
       - type: verifies
         target: FEAT-013
+      - type: verifies
+        target: FEAT-003
     fields:
       method: automated-test
       steps:
@@ -666,6 +690,8 @@ artifacts:
         target: TR-027
       - type: verifies
         target: FEAT-012
+      - type: verifies
+        target: FEAT-004
     fields:
       method: formal-verification
       steps:
@@ -1289,3 +1315,17 @@ artifacts:
     links:
       - type: verifies
         target: TR-051
+  - id: VER-054
+    type: sw-verification
+    title: "Evidence gates bite: verdict rules, commit-trailer gate and hook (TR-054)"
+    status: verified
+    release: v0.23.0
+    description: "The verdict rules flagged exactly the 9 measures named in #188 before their re-execution, and pass after. The commit-trailer gate passes on a clean range and fails on a pre-fix range (4 commits with Trace: skip plus Implements/Verifies). The commit-msg hook rejects the combination and accepts a clean message."
+    tags: [evidence, negative-control]
+    fields:
+      coverage: verdict rules over all sw-verification and unit-verification measures; trailer gate on clean and pre-fix ranges; hook on bad and good messages
+      method: automated-test
+      steps: "run: scripts/check_commit_trailers.sh 1a6275e..e6f8854 && ! scripts/check_commit_trailers.sh 6e4fe3f~20..6e4fe3f"
+    links:
+      - type: verifies
+        target: TR-054
