@@ -2107,3 +2107,27 @@ artifacts:
         target: VER-053
       - type: part-of-execution
         target: VE-039
+  - id: VE-040
+    type: verification-execution
+    title: Reference-vs-real blaster differential verified, with negative controls (VER-051)
+    status: implemented
+    description: "Implemented by a background agent, then re-run independently: cargo test -p ordeal --lib blast_kernel 3 passed (20.3 s debug), --release 3 passed (1.35 s). The rotr disagreement at non-power-of-two widths was reproduced independently with a scratch program (w=3 a=1 b=4: reference 0b1, SMT-LIB and real 0b100; w=3 b=1 and w=8 b=9 agree). The Lean theorems blast_shl/lshr/ashr/rotr_bitvec carry hpow (power-of-two width), confirmed by reading lean/BlasterShift.lean. Agent-reported negative controls: real blast_mul with an and changed to or fails all 3 tests; a real shift out_of_range ignoring the top amount bit fails the exhaustive and 9..16 tests; lifting the rotr restriction fails all 3."
+    fields:
+      environment: "note: macOS arm64, local; branch test/mirror-real-differential-all-widths @ fa4380f"
+      executor: local
+      timestamp: 2026-09-30T05:13:13Z
+      version: fa4380f
+
+  - id: VV-084
+    type: verification-verdict
+    title: VER-051 pass — reference and real blaster agree wherever the reference is claimed
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see the linked execution; the rotr gap at non-power-of-two widths is documented in #201"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-051
+      - type: part-of-execution
+        target: VE-040

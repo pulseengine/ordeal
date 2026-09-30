@@ -180,6 +180,17 @@ required job directly. (History: freshness was originally enforced by a
 separate drift-diff workflow — issue #44 — which this construction absorbed
 and retired; see `docs/design/checker-single-sourcing.md`.)
 
+**Width scope of the blaster proofs.** The shift and rotate theorems
+(`blast_shl_bitvec`, `blast_lshr_bitvec`, `blast_ashr_bitvec`,
+`blast_rotr_bitvec`) assume a power-of-two width (`hpow : 2 ^ stages = w`).
+At other widths shifts and rotations are covered by tests and the Z3
+differential only, not by proof. `blast_kernel.rs`'s `rotr` is wrong there
+for amounts `>= w`. The real blaster is right (#182). The
+reference-to-real differential test (VER-051) compares every mirrored op
+exhaustively at widths 1 to 8, sampled at 9 to 16, and sampled at wider
+widths up to 128. At non-power-of-two widths it compares `rotr` only for
+amounts `< w`. Tracked in #201.
+
 What this does **not** discharge: Charon/Aeneas translation faithfulness at
 the pinned revisions. That residual is the target of the adversarial
 dual-mechanisation work (issue #47 / TR-035).

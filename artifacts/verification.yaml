@@ -1275,3 +1275,17 @@ artifacts:
     links:
       - type: verifies
         target: TR-053
+  - id: VER-051
+    type: sw-verification
+    title: Reference blaster matches the real blaster on every op, widths 1..=8 exhaustive and sampled to 128 (TR-051)
+    status: verified
+    release: v0.23.0
+    description: "Three tests in blast_kernel.rs build every mirrored rule on both sides over shared inputs and compare every output bit via AIG simulation. They replace the width-8-only test. rotr at non-power-of-two widths is compared on amounts below the width only, because the reference copy (like its Lean theorem, which assumes a power-of-two width) does not reduce the amount mod w; the gap is tracked in #201."
+    tags: [blaster, differential, negative-control]
+    fields:
+      coverage: "and/or/xor/add/sub/mul/udiv/urem/udivrem, 8 comparisons, eq/ne, ite, shl/lshr/ashr, rotr, extract, concat, zero_ext, sign_ext: exhaustive w1..8, sampled w9..16 (4096/width) and 12 wider widths to 128 (128/width); negative controls on real mul and shift"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- blast_kernel::tests && cargo test --release -p ordeal --lib -- blast_kernel::tests"
+    links:
+      - type: verifies
+        target: TR-051

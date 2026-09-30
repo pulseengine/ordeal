@@ -1470,3 +1470,21 @@ artifacts:
         target: TR-047
       - type: allocated-to
         target: ARC-013
+  - id: TR-051
+    type: sw-req
+    title: The Lean-proven reference blaster is tied to the blaster the solver runs, at every width (#185)
+    status: verified
+    release: v0.23.0
+    description: "Defect #185 (2026-09-30 audit): the Lean blaster proofs cover blast_kernel.rs, a reference copy the solver never calls; the only tie to the real crate::blast rules was a width-8 differential missing shifts, concat, ite, rotl and most comparisons. The requirement: every mirrored rule is compared bit-for-bit with its real counterpart, exhaustively at widths 1..=8 and sampled at 9..=16 and at wider widths up to 128, and any width where the two cannot agree is documented rather than silently excluded."
+    tags: [trust-boundary, blaster, differential, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "The three mirror-vs-real tests pass in debug and release; a mutated real rule (mul, shift out-of-range) fails them; lifting the documented rotr restriction at non-power-of-two widths fails them, with the disagreement recorded in #201."
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-049
+      - type: allocated-to
+        target: ARC-003

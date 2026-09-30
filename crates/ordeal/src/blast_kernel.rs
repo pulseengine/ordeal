@@ -682,33 +682,17 @@ mod tests {
     //! semantics, unbounded. These tests establish: REAL BLASTER = MODEL, by
     //! differential simulation — the same operand values through the real
     //! `blast::*` rules (with structural hashing) and through this model
-    //! (without), asserting equal outputs. Exhaustive at width 8; the chain
+    //! (without), asserting equal outputs. Every mirrored rule, exhaustive at
+    //! every width 1..=8, seeded-sampled at every width 9..=16 and at a
+    //! spread of wide widths up to 128 (issue #185(b); this supersedes the
+    //! original width-8-only differential). The chain
     //!   real blaster =(this differential)= model =(Lean, all widths)= BitVec
     //! is what replaces "trust the mirroring was faithful". This link is
     //! test evidence (bounded), stated as such — not smuggled into the
-    //! unbounded claim.
+    //! unbounded claim. One known gap: `rotr` at non-power-of-two widths
+    //! agrees only on amounts `< w` (see `rotr_full_domain_at`).
 
     use super::*;
-
-    /// Simulate a model word under a concrete input assignment -> u128.
-    fn model_word_value(aig: &Aig, inputs: &[bool], word: &[Lit]) -> u128 {
-        let vals = simulate(aig, inputs);
-        let mut out = 0u128;
-        let mut i = 0usize;
-        while i < word.len() {
-            if eval_lit(&vals, word[i]) {
-                out |= 1u128 << i;
-            }
-            i += 1;
-        }
-        out
-    }
-
-    /// Simulate a single model literal -> bool.
-    fn model_lit_value(aig: &Aig, inputs: &[bool], l: Lit) -> bool {
-        let vals = simulate(aig, inputs);
-        eval_lit(&vals, l)
-    }
 
     /// Build two w-bit input words in the model, mirroring `word_input`.
     fn model_inputs(aig: &mut Aig, w: usize) -> (Vec<Lit>, Vec<Lit>) {
@@ -727,196 +711,351 @@ mod tests {
         (a, b)
     }
 
-    /// Exhaustive width-8 differential: every (a, b) pair through the real
-    /// blaster and the model; word-valued rules must agree bit-for-bit and
-    /// predicate rules literal-for-literal.
-    #[test]
-    fn model_matches_real_blaster_exhaustively_at_width_8() {
-        use crate::aig as real;
-        use crate::blast::{arith, bitwise};
-        const W: usize = 8;
+    /// One mirrored rule instantiated on both sides: the real output word
+    /// (predicates are 1-literal words) and the model output word.
+    struct DiffPair {
+        name: String,
+        real: Vec<crate::aig::Lit>,
+        model: Vec<Lit>,
+        /// Compare only when the `b` operand is `< w` (see
+        /// [`rotr_full_domain_at`]); every other pair compares always.
+        b_below_width_only: bool,
+    }
 
-        // Real side: one AIG, all rules blasted over shared inputs.
-        let mut raig = real::Aig::new();
-        let ra = real::word_input(&mut raig, W as u32);
-        let rb = real::word_input(&mut raig, W as u32);
-        let r_and = bitwise::blast_and(&mut raig, &ra, &rb);
-        let r_or = bitwise::blast_or(&mut raig, &ra, &rb);
-        let r_xor = bitwise::blast_xor(&mut raig, &ra, &rb);
-        let r_add = arith::blast_add(&mut raig, &ra, &rb);
-        let r_sub = arith::blast_sub(&mut raig, &ra, &rb);
-        let r_ult = arith::blast_ult(&mut raig, &ra, &rb);
-        let r_slt = arith::blast_slt(&mut raig, &ra, &rb);
-        let r_eq = bitwise::blast_eq(&mut raig, &ra, &rb);
-        let r_shl = crate::blast::shift::blast_shl(&mut raig, &ra, &rb);
-        let r_lshr = crate::blast::shift::blast_lshr(&mut raig, &ra, &rb);
-        let r_ashr = crate::blast::shift::blast_ashr(&mut raig, &ra, &rb);
-        let r_rotr = crate::blast::shift::blast_rotr(&mut raig, &ra, &rb);
-        let r_mul = crate::blast::muldiv::blast_mul(&mut raig, &ra, &rb);
-        let (r_quo, r_rem) = crate::blast::muldiv::blast_udivrem(&mut raig, &ra, &rb);
+    /// Both AIGs with every mirrored rule blasted once over shared inputs:
+    /// `a` = inputs `0..w`, `b` = inputs `w..2w`, `cond` = input `2w`.
+    struct DiffHarness {
+        w: usize,
+        raig: crate::aig::Aig,
+        maig: Aig,
+        pairs: Vec<DiffPair>,
+    }
 
-        // Model side: same shape.
-        let mut maig = aig_new();
-        let (ma, mb) = model_inputs(&mut maig, W);
-        let m_and = blast_and(&mut maig, &ma, &mb);
-        let m_or = blast_or(&mut maig, &ma, &mb);
-        let m_xor = blast_xor(&mut maig, &ma, &mb);
-        let m_add = blast_add(&mut maig, &ma, &mb);
-        let m_sub = blast_sub(&mut maig, &ma, &mb);
-        let m_ult = blast_ult(&mut maig, &ma, &mb);
-        let m_slt = blast_slt(&mut maig, &ma, &mb);
-        let m_eq = blast_eq(&mut maig, &ma, &mb);
-        let m_shl = blast_shl(&mut maig, &ma, &mb, 3);
-        let m_lshr = blast_lshr(&mut maig, &ma, &mb, 3);
-        let m_ashr = blast_ashr(&mut maig, &ma, &mb, 3);
-        let m_rotr = blast_rotr(&mut maig, &ma, &mb, 3);
-        let m_mul = blast_mul(&mut maig, &ma, &mb);
-        let (m_quo, m_rem) = blast_udivrem(&mut maig, &ma, &mb);
+    /// Barrel stages for width `w`: `ceil(log2 w)`, the formula of the real
+    /// `blast::shift::stage_count` (0 at `w = 1`). The mirror takes it as an
+    /// explicit argument; passing the real value is what makes the two
+    /// circuits comparable at every width.
+    fn stages_for(w: usize) -> usize {
+        (usize::BITS - (w - 1).leading_zeros()) as usize
+    }
 
-        for av in 0..=255u32 {
-            for bv in 0..=255u32 {
-                let mut inputs = [false; 2 * W];
-                let mut k = 0usize;
-                while k < W {
-                    inputs[k] = (av >> k) & 1 == 1;
-                    inputs[W + k] = (bv >> k) & 1 == 1;
-                    k += 1;
+    /// `(hi, lo)` extract ranges for width `w`: every range for `w <= 8`,
+    /// a representative set (full, top/bottom bit, middle, halves) above.
+    fn extract_ranges(w: usize) -> Vec<(usize, usize)> {
+        let mut out = Vec::new();
+        if w <= 8 {
+            for hi in 0..w {
+                for lo in 0..=hi {
+                    out.push((hi, lo));
                 }
-                let rvals = raig.simulate(&inputs);
-                let word = |wd: &real::Word| real::word_value(&raig, &rvals, wd);
-                let lit = |l: real::Lit| {
-                    let v = rvals[l.var() as usize];
-                    if l.is_complement() { !v } else { v }
-                };
+            }
+        } else {
+            for (hi, lo) in [
+                (w - 1, 0),
+                (w - 1, w - 1),
+                (0, 0),
+                (w / 2, w / 4),
+                (w - 1, w / 2),
+                (w / 2 - 1, 0),
+                (w - 2, 1),
+            ] {
+                if !out.contains(&(hi, lo)) {
+                    out.push((hi, lo));
+                }
+            }
+        }
+        out
+    }
 
-                assert_eq!(
-                    word(&r_and),
-                    model_word_value(&maig, &inputs, &m_and),
-                    "and {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_or),
-                    model_word_value(&maig, &inputs, &m_or),
-                    "or {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_xor),
-                    model_word_value(&maig, &inputs, &m_xor),
-                    "xor {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_add),
-                    model_word_value(&maig, &inputs, &m_add),
-                    "add {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_sub),
-                    model_word_value(&maig, &inputs, &m_sub),
-                    "sub {av} {bv}"
-                );
-                assert_eq!(
-                    lit(r_ult),
-                    model_lit_value(&maig, &inputs, m_ult),
-                    "ult {av} {bv}"
-                );
-                assert_eq!(
-                    lit(r_slt),
-                    model_lit_value(&maig, &inputs, m_slt),
-                    "slt {av} {bv}"
-                );
-                assert_eq!(
-                    lit(r_eq),
-                    model_lit_value(&maig, &inputs, m_eq),
-                    "eq {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_shl),
-                    model_word_value(&maig, &inputs, &m_shl),
-                    "shl {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_lshr),
-                    model_word_value(&maig, &inputs, &m_lshr),
-                    "lshr {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_ashr),
-                    model_word_value(&maig, &inputs, &m_ashr),
-                    "ashr {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_rotr),
-                    model_word_value(&maig, &inputs, &m_rotr),
-                    "rotr {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_mul),
-                    model_word_value(&maig, &inputs, &m_mul),
-                    "mul {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_quo),
-                    model_word_value(&maig, &inputs, &m_quo),
-                    "udiv {av} {bv}"
-                );
-                assert_eq!(
-                    word(&r_rem),
-                    model_word_value(&maig, &inputs, &m_rem),
-                    "urem {av} {bv}"
+    /// Build the harness at width `w`. `rotr` is compared on its full
+    /// amount domain only where the mirror and the real rule agree there
+    /// (see [`rotr_full_domain_at`]).
+    fn build_harness(w: usize) -> DiffHarness {
+        use crate::aig as real;
+        use crate::blast::{arith, bitwise, muldiv, shift, structural};
+
+        type RealWordOp = fn(&mut real::Aig, &real::Word, &real::Word) -> real::Word;
+        type ModelWordOp = fn(&mut Aig, &[Lit], &[Lit]) -> Vec<Lit>;
+        type RealPredOp = fn(&mut real::Aig, &real::Word, &real::Word) -> real::Lit;
+        type ModelPredOp = fn(&mut Aig, &[Lit], &[Lit]) -> Lit;
+
+        let wu = w as u32;
+        let stages = stages_for(w);
+        let mut raig = real::Aig::new();
+        let ra = real::word_input(&mut raig, wu);
+        let rb = real::word_input(&mut raig, wu);
+        let rc = raig.input();
+
+        let mut maig = aig_new();
+        let (ma, mb) = model_inputs(&mut maig, w);
+        let mc = push_input(&mut maig, 2 * w);
+
+        let mut pairs: Vec<DiffPair> = Vec::new();
+        let rotr_restricted = !rotr_full_domain_at(w);
+        let mut push = |name: String, real: Vec<real::Lit>, model: Vec<Lit>| {
+            assert_eq!(real.len(), model.len(), "{name} w={w}: width mismatch");
+            let b_below_width_only = rotr_restricted && name == "rotr";
+            pairs.push(DiffPair {
+                name,
+                real,
+                model,
+                b_below_width_only,
+            });
+        };
+
+        let word_ops: [(&str, RealWordOp, ModelWordOp); 9] = [
+            ("and", bitwise::blast_and, blast_and),
+            ("or", bitwise::blast_or, blast_or),
+            ("xor", bitwise::blast_xor, blast_xor),
+            ("add", arith::blast_add, blast_add),
+            ("sub", arith::blast_sub, blast_sub),
+            ("mul", muldiv::blast_mul, blast_mul),
+            ("udiv", muldiv::blast_udiv, blast_udiv),
+            ("urem", muldiv::blast_urem, blast_urem),
+            // Commuted operands exercise the rule asymmetrically.
+            (
+                "sub(b,a)",
+                |g, a, b| arith::blast_sub(g, b, a),
+                |g, a, b| blast_sub(g, b, a),
+            ),
+        ];
+        for (name, rf, mf) in word_ops {
+            let r = rf(&mut raig, &ra, &rb);
+            let m = mf(&mut maig, &ma, &mb);
+            push(name.to_string(), r, m);
+        }
+
+        let pred_ops: [(&str, RealPredOp, ModelPredOp); 10] = [
+            ("ult", arith::blast_ult, blast_ult),
+            ("ule", arith::blast_ule, blast_ule),
+            ("ugt", arith::blast_ugt, blast_ugt),
+            ("uge", arith::blast_uge, blast_uge),
+            ("slt", arith::blast_slt, blast_slt),
+            ("sle", arith::blast_sle, blast_sle),
+            ("sgt", arith::blast_sgt, blast_sgt),
+            ("sge", arith::blast_sge, blast_sge),
+            ("eq", bitwise::blast_eq, blast_eq),
+            ("ne", bitwise::blast_ne, blast_ne),
+        ];
+        for (name, rf, mf) in pred_ops {
+            let r = rf(&mut raig, &ra, &rb);
+            let m = mf(&mut maig, &ma, &mb);
+            push(name.to_string(), vec![r], vec![m]);
+        }
+
+        // udivrem returns both halves; compare each.
+        let (rq, rr) = muldiv::blast_udivrem(&mut raig, &ra, &rb);
+        let (mq, mr) = blast_udivrem(&mut maig, &ma, &mb);
+        push("udivrem.quo".to_string(), rq, mq);
+        push("udivrem.rem".to_string(), rr, mr);
+
+        let r = bitwise::blast_ite(&mut raig, rc, &ra, &rb);
+        let m = blast_ite(&mut maig, mc, &ma, &mb);
+        push("ite".to_string(), r, m);
+
+        // Shifts: the mirror gets the real stage count explicitly.
+        let r = shift::blast_shl(&mut raig, &ra, &rb);
+        let m = blast_shl(&mut maig, &ma, &mb, stages);
+        push("shl".to_string(), r, m);
+        let r = shift::blast_lshr(&mut raig, &ra, &rb);
+        let m = blast_lshr(&mut maig, &ma, &mb, stages);
+        push("lshr".to_string(), r, m);
+        let r = shift::blast_ashr(&mut raig, &ra, &rb);
+        let m = blast_ashr(&mut maig, &ma, &mb, stages);
+        push("ashr".to_string(), r, m);
+        let r = shift::blast_rotr(&mut raig, &ra, &rb);
+        let m = blast_rotr(&mut maig, &ma, &mb, stages);
+        // At non-power-of-two widths `push` restricts this pair to b < w.
+        push("rotr".to_string(), r, m);
+
+        // Structural plumbing (gate-free).
+        for (hi, lo) in extract_ranges(w) {
+            let r = structural::blast_extract(&ra, hi as u32, lo as u32);
+            let m = blast_extract(&ma, hi, lo);
+            push(format!("extract[{hi}:{lo}]"), r, m);
+        }
+        push(
+            "concat(a,b)".to_string(),
+            structural::blast_concat(&ra, &rb),
+            blast_concat(&ma, &mb),
+        );
+        push(
+            "concat(b,a)".to_string(),
+            structural::blast_concat(&rb, &ra),
+            blast_concat(&mb, &ma),
+        );
+        for by in [0usize, 1, 4, w] {
+            push(
+                format!("zero_ext({by})"),
+                structural::blast_zero_ext(&ra, by as u32),
+                blast_zero_ext(&ma, by),
+            );
+            push(
+                format!("sign_ext({by})"),
+                structural::blast_sign_ext(&ra, by as u32),
+                blast_sign_ext(&ma, by),
+            );
+        }
+
+        DiffHarness {
+            w,
+            raig,
+            maig,
+            pairs,
+        }
+    }
+
+    /// Whether the mirror's `blast_rotr` matches the real one over the FULL
+    /// amount domain at width `w`: power-of-two widths only. The real rule
+    /// (fixed in #182) reduces the amount mod `w` with `blast_urem` at
+    /// non-power-of-two widths; the mirror rotates by the low `stages`
+    /// amount bits with no reduction — its Lean precondition is a
+    /// power-of-two width with `stages = log2 w`. At non-power-of-two widths
+    /// the two agree exactly on in-range amounts `b < w` and disagree on
+    /// some `b >= w` (e.g. w=3, a=#b001, b=#b100: mirror #b001, real #b100,
+    /// SMT-LIB rotr by 4 mod 3 = 1 gives #b100). Recorded in issue #185;
+    /// the mirror is the Lean-proven model and is deliberately not changed
+    /// here, so rotr is compared on `b < w` only at those widths.
+    fn rotr_full_domain_at(w: usize) -> bool {
+        w.is_power_of_two()
+    }
+
+    /// Simulate one `(a, b, cond)` assignment on both sides and assert
+    /// every pair agrees bit-for-bit.
+    fn check_diff(h: &DiffHarness, a: u128, b: u128, cond: bool) {
+        let w = h.w;
+        let mut inputs = vec![false; 2 * w + 1];
+        for k in 0..w {
+            inputs[k] = (a >> k) & 1 == 1;
+            inputs[w + k] = (b >> k) & 1 == 1;
+        }
+        inputs[2 * w] = cond;
+        let rvals = h.raig.simulate(&inputs);
+        let mvals = simulate(&h.maig, &inputs);
+        for p in &h.pairs {
+            if p.b_below_width_only && b >= w as u128 {
+                continue;
+            }
+            let agree = p.real.len() == p.model.len()
+                && p.real
+                    .iter()
+                    .zip(&p.model)
+                    .all(|(&r, &m)| h.raig.lit_value(&rvals, r) == eval_lit(&mvals, m));
+            if !agree {
+                let rbits: String = p
+                    .real
+                    .iter()
+                    .rev()
+                    .map(|&l| {
+                        if h.raig.lit_value(&rvals, l) {
+                            '1'
+                        } else {
+                            '0'
+                        }
+                    })
+                    .collect();
+                let mbits: String = p
+                    .model
+                    .iter()
+                    .rev()
+                    .map(|&l| if eval_lit(&mvals, l) { '1' } else { '0' })
+                    .collect();
+                panic!(
+                    "mirror/real disagree: op={} w={w} a={a:#x} b={b:#x} cond={cond} \
+                     mirror=#b{mbits} real=#b{rbits}",
+                    p.name
                 );
             }
         }
     }
 
-    /// Structural rules are gate-free plumbing; check them on sampled values
-    /// against the real rules (same extraction/concat/extension semantics).
-    #[test]
-    fn model_structural_matches_real_blaster() {
-        use crate::aig as real;
-        use crate::blast::structural;
-        const W: usize = 8;
-
-        let mut raig = real::Aig::new();
-        let ra = real::word_input(&mut raig, W as u32);
-        let r_ex = structural::blast_extract(&ra, 6, 2);
-        let r_ze = structural::blast_zero_ext(&ra, 4);
-        let r_se = structural::blast_sign_ext(&ra, 4);
-
-        let mut maig = aig_new();
-        let mut ma: Vec<Lit> = Vec::new();
-        let mut i = 0usize;
-        while i < W {
-            ma.push(push_input(&mut maig, i));
-            i += 1;
+    fn width_mask(w: usize) -> u128 {
+        if w == 128 {
+            u128::MAX
+        } else {
+            (1u128 << w) - 1
         }
-        let m_ex = blast_extract(&ma, 6, 2);
-        let m_ze = blast_zero_ext(&ma, 4);
-        let m_se = blast_sign_ext(&ma, 4);
+    }
 
-        for av in 0..=255u32 {
-            let mut inputs = [false; W];
-            let mut k = 0usize;
-            while k < W {
-                inputs[k] = (av >> k) & 1 == 1;
-                k += 1;
+    /// xorshift64 — a fixed, dependency-free PRNG for reproducible sampling.
+    struct DiffRng(u64);
+
+    impl DiffRng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn next_u128(&mut self) -> u128 {
+            (u128::from(self.next()) << 64) | u128::from(self.next())
+        }
+    }
+
+    /// `n` seeded cases at width `w`, mixing uniform operands with the edge
+    /// amounts shifts and division care about: in-range `b < w`, exactly
+    /// `w`, zero, all-ones, and a set sign bit.
+    fn sampled_diff(w: usize, n: u32, seed: u64) {
+        let h = build_harness(w);
+        let mask = width_mask(w);
+        let mut rng = DiffRng(seed | 1);
+        for case in 0..n {
+            let a = rng.next_u128() & mask;
+            let raw = rng.next_u128() & mask;
+            let b = match case % 8 {
+                0 | 1 => raw,
+                2 | 3 => raw % w as u128,
+                4 => (w as u128) & mask,
+                5 => 0,
+                6 => mask,
+                _ => (1u128 << (w - 1)) | (raw >> 1),
+            };
+            let cond = rng.next() & 1 == 1;
+            check_diff(&h, a, b, cond);
+        }
+    }
+
+    // rivet: verifies VER-051
+    /// Issue #185(b): EXHAUSTIVE at every width 1..=8 — every `(a, b)` pair
+    /// through every mirrored rule on both sides (and/or/xor, add, sub,
+    /// ult/ule/ugt/uge, slt/sle/sgt/sge, eq/ne, ite, extract, concat,
+    /// zero_ext, sign_ext, shl/lshr/ashr, mul, udiv/urem/udivrem, rotr; at
+    /// non-power-of-two widths rotr only on amounts `b < w` — see
+    /// [`rotr_full_domain_at`]). `ite`'s
+    /// condition is exhaustive too: every pair runs under both values.
+    #[test]
+    fn model_matches_real_blaster_every_op_exhaustive_widths_1_to_8() {
+        for w in 1usize..=8 {
+            let h = build_harness(w);
+            for a in 0u128..(1 << w) {
+                for b in 0u128..(1 << w) {
+                    check_diff(&h, a, b, false);
+                    check_diff(&h, a, b, true);
+                }
             }
-            let rvals = raig.simulate(&inputs);
-            let word = |wd: &real::Word| real::word_value(&raig, &rvals, wd);
-            assert_eq!(
-                word(&r_ex),
-                model_word_value(&maig, &inputs, &m_ex),
-                "extract {av}"
-            );
-            assert_eq!(
-                word(&r_ze),
-                model_word_value(&maig, &inputs, &m_ze),
-                "zero_ext {av}"
-            );
-            assert_eq!(
-                word(&r_se),
-                model_word_value(&maig, &inputs, &m_se),
-                "sign_ext {av}"
-            );
+        }
+    }
+
+    // rivet: verifies VER-051
+    /// Issue #185(b): seeded sampling at every width 9..=16 (exhaustive is
+    /// 2^18..2^32 pairs there — infeasible in a debug `cargo test`).
+    #[test]
+    fn model_matches_real_blaster_every_op_sampled_widths_9_to_16() {
+        for w in 9usize..=16 {
+            sampled_diff(w, 4096, 0x185B_0900 ^ w as u64);
+        }
+    }
+
+    // rivet: verifies VER-051
+    /// Issue #185(b): seeded sampling at wide widths up to 128, power-of-two
+    /// and not (the #182 bug class lives at the non-power-of-two ones).
+    #[test]
+    fn model_matches_real_blaster_every_op_sampled_wide_widths() {
+        for w in [17usize, 24, 31, 32, 33, 48, 63, 64, 65, 96, 127, 128] {
+            sampled_diff(w, 128, 0x185B_1700 ^ w as u64);
         }
     }
 }

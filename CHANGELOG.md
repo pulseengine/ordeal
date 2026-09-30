@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `v*` tags can no longer be moved or deleted, and only admins can create
     them (repository rulesets).
   - A CI check enforces the job order.
+- **Trust claims now match what is proven** (#185). The Lean-proven
+  reference blaster is now compared with the blaster the solver runs, on
+  every op. The comparison is exhaustive at widths 1 to 8 and sampled up to
+  128 (TR-051). The only width limit on the comparison: at non-power-of-two
+  widths, the reference `rotr` is wrong for amounts at or above the width,
+  and its Lean theorem assumes a power-of-two width. That gap is documented
+  and tracked in #201.
 - **`Solver::check_cnf` now re-checks a `Sat` model in release builds**
   (TR-050, #184). The documented self-check was a `debug_assert`, so release
   builds returned the SAT assignment unchecked. The model now goes through
