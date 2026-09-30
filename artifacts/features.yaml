@@ -35,6 +35,10 @@ artifacts:
         target: TR-011
       - type: satisfies
         target: TR-012
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-002
     fields:
       req-type: functional
       priority: must
@@ -75,6 +79,14 @@ artifacts:
         target: TR-007
       - type: satisfies
         target: TR-010
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-004
+      - type: allocated-to
+        target: ARC-005
+      - type: allocated-to
+        target: ARC-007
     fields:
       req-type: functional
       priority: must
@@ -108,6 +120,10 @@ artifacts:
         target: TR-006
       - type: satisfies
         target: TR-013
+      - type: allocated-to
+        target: ARC-005
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: functional
       priority: must
@@ -155,6 +171,10 @@ artifacts:
         target: TR-017
       - type: traces-to
         target: VER-004
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-002
       - type: traces-to
         target: VER-016
     fields:
@@ -189,6 +209,10 @@ artifacts:
         target: SYS-004
       - type: satisfies
         target: TR-003
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: functional
       priority: should
@@ -225,6 +249,12 @@ artifacts:
         target: TR-018
       - type: traces-to
         target: VER-017
+      - type: allocated-to
+        target: ARC-002
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-005
     fields:
       req-type: performance
       priority: should
@@ -268,6 +298,8 @@ artifacts:
         target: TR-020
       - type: traces-to
         target: VER-018
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -311,6 +343,10 @@ artifacts:
         target: TR-022
       - type: traces-to
         target: VER-019
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -344,6 +380,8 @@ artifacts:
         target: SYS-006
       - type: satisfies
         target: TR-023
+      - type: allocated-to
+        target: ARC-010
     fields:
       req-type: functional
       priority: should
@@ -369,6 +407,10 @@ artifacts:
         target: SYS-007
       - type: satisfies
         target: TR-024
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -401,6 +443,8 @@ artifacts:
         target: TR-030
       - type: traces-to
         target: TR-026
+      - type: allocated-to
+        target: ARC-011
     fields:
       req-type: functional
       priority: should
@@ -428,6 +472,10 @@ artifacts:
         target: SYS-003
       - type: satisfies
         target: TR-027
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: functional
       priority: could
@@ -462,6 +510,8 @@ artifacts:
         target: SYS-006
       - type: satisfies
         target: TR-028
+      - type: allocated-to
+        target: ARC-002
     fields:
       req-type: functional
       priority: must
@@ -491,6 +541,10 @@ artifacts:
         target: SYS-002
       - type: satisfies
         target: TR-026
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-005
     fields:
       req-type: functional
       priority: should
@@ -525,6 +579,10 @@ artifacts:
         target: TR-030
       - type: traces-to
         target: TR-009
+      - type: allocated-to
+        target: ARC-011
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: functional
       priority: should

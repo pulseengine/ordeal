@@ -45,6 +45,8 @@ artifacts:
         target: FEAT-010
       - type: allocated-from
         target: FEAT-014
+      - type: allocated-from
+        target: TR-023
   - id: ARC-002
     type: sw-arch-component
     title: ordeal-term (QF_BV term graph and preprocessing)
@@ -73,6 +75,10 @@ artifacts:
         target: FEAT-005
       - type: allocated-from
         target: FEAT-013
+      - type: allocated-from
+        target: TR-019
+      - type: allocated-from
+        target: TR-020
   - id: ARC-003
     type: sw-arch-component
     title: ordeal-aig (bit-blaster and And-Inverter Graph)
@@ -107,6 +113,10 @@ artifacts:
         target: TR-049
       - type: allocated-from
         target: TR-051
+      - type: allocated-from
+        target: TR-018
+      - type: allocated-from
+        target: TR-021
   - id: ARC-004
     type: sw-arch-component
     title: ordeal-cnf (Tseitin CNF encoder)
@@ -155,6 +165,12 @@ artifacts:
         target: FEAT-014
       - type: allocated-from
         target: TR-050
+      - type: allocated-from
+        target: TR-017
+      - type: allocated-from
+        target: TR-031
+      - type: allocated-from
+        target: TR-032
   - id: ARC-006
     type: sw-arch-component
     title: ordeal-lrat (verified certificate checker)
@@ -179,6 +195,10 @@ artifacts:
         target: TR-034
       - type: allocated-from
         target: FEAT-002
+      - type: allocated-from
+        target: TR-025
+      - type: allocated-from
+        target: TR-030
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)

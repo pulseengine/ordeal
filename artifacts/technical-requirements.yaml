@@ -168,6 +168,8 @@ artifacts:
         target: TR-005
       - type: allocated-to
         target: ARC-005
+      - type: allocated-to
+        target: ARC-011
     fields:
       req-type: functional
       priority: should
@@ -332,6 +334,8 @@ artifacts:
         target: TR-009
       - type: allocated-to
         target: ARC-003
+      - type: allocated-to
+        target: ARC-002
     fields:
       req-type: performance
       priority: should
@@ -368,6 +372,8 @@ artifacts:
         target: SYS-007
       - type: allocated-to
         target: ARC-002
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -400,6 +406,8 @@ artifacts:
         target: TR-019
       - type: allocated-to
         target: ARC-002
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -551,6 +559,8 @@ artifacts:
         target: SYS-001
       - type: allocated-to
         target: ARC-003
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -622,6 +632,8 @@ artifacts:
         target: SYS-002
       - type: allocated-to
         target: ARC-001
+      - type: allocated-to
+        target: ARC-010
     fields:
       req-type: interface
       priority: should
@@ -650,6 +662,8 @@ artifacts:
         target: SYS-007
       - type: allocated-to
         target: ARC-001
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -681,6 +695,8 @@ artifacts:
         target: ARC-006
       - type: traces-to
         target: TR-030
+      - type: allocated-to
+        target: ARC-011
     fields:
       req-type: functional
       priority: should
@@ -705,6 +721,8 @@ artifacts:
         target: SYS-002
       - type: allocated-to
         target: ARC-005
+      - type: allocated-to
+        target: ARC-001
     fields:
       req-type: interface
       priority: should
@@ -730,6 +748,8 @@ artifacts:
         target: SYS-003
       - type: allocated-to
         target: ARC-003
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: functional
       priority: could
@@ -787,6 +807,12 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-006
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-002
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: should
@@ -824,6 +850,8 @@ artifacts:
         target: TR-025
       - type: traces-to
         target: VER-029
+      - type: allocated-to
+        target: ARC-011
     fields:
       req-type: functional
       priority: should
@@ -864,6 +892,8 @@ artifacts:
         target: TR-002
       - type: traces-to
         target: TR-009
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: functional
       priority: should
@@ -940,6 +970,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+      - type: allocated-to
+        target: ARC-013
     fields:
       req-type: constraint
       priority: must
@@ -973,6 +1005,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-003
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: constraint
       priority: should
@@ -1013,6 +1047,8 @@ artifacts:
         target: SYS-003
       - type: refines
         target: TR-034
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: constraint
       priority: could
@@ -1044,6 +1080,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-006
+      - type: allocated-to
+        target: ARC-010
     fields:
       req-type: interface
       priority: should
@@ -1074,6 +1112,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-006
+      - type: allocated-to
+        target: ARC-010
     fields:
       req-type: interface
       priority: should
@@ -1112,6 +1152,8 @@ artifacts:
         target: SYS-002
       - type: refines
         target: TR-025
+      - type: allocated-to
+        target: ARC-006
     fields:
       req-type: functional
       priority: could
@@ -1144,13 +1186,15 @@ artifacts:
       surface at a release cut. Ships with the v0.20.0 cut; verified
       against v0.20.0's published assets (TR-033 pattern).
     status: verified
-    release: v0.21.0
+    release: v0.20.0
     tags: [release, musl, portability, varve, field-report]
     links:
       - type: derives-from
         target: SYS-005
       - type: traces-to
         target: TR-033
+      - type: allocated-to
+        target: ARC-013
     fields:
       req-type: constraint
       priority: should
@@ -1179,13 +1223,15 @@ artifacts:
       Ships with the v0.20.0 cut; verified against v0.20.0's published
       assets (TR-033 pattern).
     status: verified
-    release: v0.21.0
+    release: v0.20.0
     tags: [release, sbom, cyclonedx, supply-chain, varve, field-report]
     links:
       - type: derives-from
         target: SYS-005
       - type: traces-to
         target: TR-033
+      - type: allocated-to
+        target: ARC-013
     fields:
       req-type: constraint
       priority: should
@@ -1226,6 +1272,8 @@ artifacts:
         target: SYS-005
       - type: derives-from
         target: SYS-001
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: constraint
       priority: should
@@ -1257,6 +1305,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-003
+      - type: allocated-to
+        target: ARC-014
     fields:
       req-type: constraint
       priority: should
@@ -1293,6 +1343,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-005
+      - type: allocated-to
+        target: ARC-013
     fields:
       req-type: constraint
       priority: should
@@ -1326,6 +1378,8 @@ artifacts:
 
       - type: traces-to
         target: TR-034
+      - type: allocated-to
+        target: ARC-006
   - id: TR-045
     type: sw-req
     title: Both verdict directions are evidence at the CLI — the SAT witness ships in the dependency-free binary (in-tree SHA-256)
@@ -1347,6 +1401,10 @@ artifacts:
         target: TR-044
       - type: traces-to
         target: TR-041
+      - type: allocated-to
+        target: ARC-010
+      - type: allocated-to
+        target: ARC-011
   - id: TR-046
     type: sw-req
     title: The Kani blaster-proof layer completes again — tiered by cost, harness coverage gated, preemption-isolated
@@ -1362,6 +1420,8 @@ artifacts:
       - type: derives-from
         target: SYS-002
 
+      - type: allocated-to
+        target: ARC-014
   - id: TR-047
     type: sw-req
     title: Full level-matched ASPICE V-closure gates the release
@@ -1377,6 +1437,8 @@ artifacts:
       - type: derives-from
         target: SYS-005
 
+      - type: allocated-to
+        target: ARC-014
   - id: TR-048
     type: sw-req
     title: rivet ingests the ordeal SAT witness as evidence — the self-checked warning downgrades on a re-checked witness
@@ -1396,6 +1458,8 @@ artifacts:
       - type: traces-to
         target: TR-030
 
+      - type: allocated-to
+        target: ARC-011
   - id: TR-049
     type: sw-req
     title: "Shift and rotate encodings are exact at every bit-width 1..=128 (soundness, #182)"
@@ -1413,6 +1477,8 @@ artifacts:
       - type: traces-to
         target: TR-001
 
+      - type: allocated-to
+        target: ARC-003
   - id: TR-050
     type: sw-req
     title: check_cnf returns Sat only after the trusted kernel re-checks the model, in every build profile (#184)
