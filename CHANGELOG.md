@@ -25,6 +25,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The exhaustive float-to-int trap test (VER-019) now runs nightly.
 - New read-only `Solver::assertions()` and
   `smtlib::assertions_at_check_sat`, used by the semantic fuzz oracle.
+- **Nothing in a release runs before the release gate** (TR-053, #186).
+  - A new first job checks three things: the tagged commit is on main, its
+    CI run succeeded, and the rivet V-closure gate passes. Every other job
+    depends on it, so builds, cosign signing and the SLSA attestation all
+    come after it.
+  - crates.io publishing moved into the release workflow as its last job. It
+    used to run on the tag push independently, and v0.22.0 reached crates.io
+    before its gate ran.
+  - `v*` tags can no longer be moved or deleted, and only admins can create
+    them (repository rulesets).
+  - A CI check enforces the job order.
 - **`Solver::check_cnf` now re-checks a `Sat` model in release builds**
   (TR-050, #184). The documented self-check was a `debug_assert`, so release
   builds returned the SAT assignment unchecked. The model now goes through

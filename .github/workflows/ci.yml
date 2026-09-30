@@ -93,6 +93,11 @@ jobs:
       # is a vacuous-green citation (the VER-016/017 class).
       - name: Check rivet verification citations
         run: scripts/check_verification_citations.sh
+      # rivet: verifies VER-053
+      # #186: nothing in the release may run, sign, attest or publish
+      # before the release gate job.
+      - name: Check release workflow order
+        run: python3 scripts/check_release_order.py
 
   # ── Reproducible build (VER-003 / SYS-005) ────────────────────────────
   # Two release builds of the same commit in different target dirs must be

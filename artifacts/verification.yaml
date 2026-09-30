@@ -1261,3 +1261,17 @@ artifacts:
         target: UV-016
       - type: traces-to
         target: UV-018
+  - id: VER-053
+    type: sw-verification
+    title: Release workflow order enforced by a structural check in CI (TR-053)
+    status: verified
+    release: v0.23.0
+    description: "scripts/check_release_order.py, run in the CI Test job, parses release.yml and publish-to-crates-io.yml and fails unless the gate job exists and runs the on-main, CI-success and rivet checks, every other job transitively needs it, the gate holds no signing or publishing step, and crates.io publishing is reachable only through a job that needs create-release. Negative control: on the pre-fix workflows it reports 6 failures."
+    tags: [release, gate, negative-control]
+    fields:
+      coverage: job dependency graph of release.yml; publish workflow triggers; gate step contents; negative control on the pre-fix workflows
+      method: automated-test
+      steps: "run: python3 scripts/check_release_order.py"
+    links:
+      - type: verifies
+        target: TR-053
