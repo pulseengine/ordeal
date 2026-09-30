@@ -642,8 +642,12 @@ pub fn ordeal_engine(assertions: &[BoolTerm]) -> EngineVerdict {
 
 // ─── Seeded corpus generation ────────────────────────────────────────────────
 
-/// The variable widths the loom/synth fragment declares.
-const WIDTHS: [u32; 3] = [8, 32, 64];
+/// Variable widths for the corpus: the loom/synth fragment's 8/32/64 PLUS
+/// non-power-of-two widths. Until 0.22.1 this was `[8, 32, 64]` only, which
+/// is why the Z3 differential — the one semantic cross-check of the encoding
+/// against an independent solver — could not see the non-power-of-two
+/// shift/rotate soundness bug. Model extraction supports widths <= 64.
+const WIDTHS: [u32; 7] = [3, 5, 8, 12, 24, 32, 64];
 
 /// Maximum term depth for generated queries.
 const MAX_DEPTH: u32 = 5;

@@ -1562,7 +1562,7 @@ artifacts:
     type: verification-verdict
     title: VER-006 pass — every operator's blast rule proven against BitVec semantics (Lean, unbounded width)
     status: implemented
-    description: "Executed pass, and stronger than the 2026-07 criterion (widths 8/32/64): the Lean proofs hold at every width (the shift family at every power-of-two width, which covers 8/32/64 — non-power-of-two shift widths are covered by the Kani/unit/differential layers, not by this proof). Discharged by the Lean route that replaced the Kani P4 plan as the primary evidence; the Kani harnesses remain the independent width-8 witness."
+    description: "Executed pass, and stronger than the 2026-07 criterion (widths 8/32/64): the Lean proofs hold at every width (the shift family at every power-of-two width, which covers 8/32/64 — CORRECTED 2026-09-30: this verdict originally claimed non-power-of-two shift widths were covered by the Kani/unit/differential layers; none of them exercised such widths, and the shipped shifter was in fact wrong there (#182, fixed by TR-049 in v0.22.1). The Lean proofs also cover the blast_kernel mirror, linked to the shipped blaster by a width-8 differential). Discharged by the Lean route that replaced the Kani P4 plan as the primary evidence; the Kani harnesses remain the independent width-8 witness."
     fields:
       evidence: "job 107662741351: Blaster*.lean build success; 28 blast_*_bitvec theorems covering all 17 BV operators and all 10 comparisons of term.rs; axiom-pinned; shifts proven at widths 2^stages (8/32/64 included)"
       verdict: pass
@@ -1572,6 +1572,8 @@ artifacts:
       - type: part-of-execution
         target: VE-029
 
+      - type: traces-to
+        target: TR-049
   - id: VE-030
     type: verification-execution
     title: Local re-execution of the TR-014/015/016 and SYS-006 evidence (VER-044..046, VER-004)
@@ -2001,3 +2003,28 @@ artifacts:
         target: VER-048
       - type: part-of-execution
         target: VE-035
+
+  - id: VE-036
+    type: verification-execution
+    title: Non-power-of-two shift/rotate soundness fix verified, with negative controls (VER-049)
+    status: implemented
+    description: "Reproduced first on the published v0.22.0 binary: width-3 shl and width-24 lshr pinned queries returned unsat, Z3 sat; published CLIs v0.8.0..v0.21.0 give the same wrong answer. With the fix: blast::shift tests 6 passed (exhaustive w=1..7, seeded w=9..128), bvrotl exhaustive w=1..10 passed, smtlib non-power-of-two tests 2 passed (6 sat cases and 3 certified-unsat identities, each expectation confirmed against Z3), Z3 differential over the widened corpus (widths 3,5,8,12,24,32,64) 12 oracle tests passed; workspace 229 tests passed; native-vs-wasm differential 21 invocations byte-identical including the two new fixtures; power-of-two encodings byte-identical to published v0.22.0 on all 22 existing fixture invocations (text and JSON, certificates included). Negative controls with the pre-fix stage count: the exhaustive test fails at shl w=3 a=1 b=1 (release build) and the Z3 differential reports corpus query 125 as engine unsat / Z3 sat."
+    fields:
+      environment: "note: macOS arm64, rustc 1.98.1, Z3 5.1.0 via Homebrew; fix branch on main @ 1a6275e"
+      executor: local
+      timestamp: 2026-09-30T06:45:00Z
+      version: 1a6275e
+
+  - id: VV-080
+    type: verification-verdict
+    title: VER-049 pass — shifts and rotates exact at every width; the independent-solver differential now sees non-power-of-two widths
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see the linked execution: all layers pass; both negative controls fail as designed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-049
+      - type: part-of-execution
+        target: VE-036

@@ -1212,3 +1212,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-048
+
+  - id: VER-049
+    type: sw-verification
+    title: Shift/rotate exact at every width; Z3 differential covers non-power-of-two widths (TR-049)
+    status: verified
+    release: v0.22.1
+    description: "Confirms TR-049 at every layer that missed the defect: the unit tests (now every width), the solver level (the exact reported queries, plus certified-unsat identities so the fix does not trade false unsat for false sat), and the independent-solver differential (widened corpus). The negative control is recorded: with the old stage count the exhaustive test fails at shl w=3 a=1 b=1 and the Z3 differential reports corpus query 125 as an ordeal-unsat / Z3-sat disagreement."
+    tags: [soundness, shift, rotate, negative-control]
+    fields:
+      coverage: blaster vs evaluator exhaustive w=1..7 and seeded w=9..128; bvrotl exhaustive w=1..10; solver-level sat and certified-unsat cases confirmed against Z3; Z3 differential over widths 3,5,8,12,24,32,64; negative control against the pre-fix stage count
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- blast::shift lowering::tests::bvrotl smtlib::tests::non_power && cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus"
+    links:
+      - type: verifies
+        target: TR-049
