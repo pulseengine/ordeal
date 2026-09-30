@@ -632,11 +632,12 @@ impl Solver {
     ///   feature model is inconsistent), with a checked certificate over
     ///   *exactly* `formula.clauses`.
     /// - [`CheckResult::Sat`] ⟹ satisfiable; the model binds `"v1".."vN"` to
-    ///   `0`/`1` (a consistent configuration). The assignment is self-checked
-    ///   against the formula before return, exactly as [`Solver::check`] does.
+    ///   `0`/`1` (a consistent configuration). The assignment is re-checked by
+    ///   `ordeal_lrat::check_sat` (the trusted, machine-checked kernel) before
+    ///   return, in release builds too.
     /// - [`CheckResult::Unknown`] ⟹ conservative — only if the checker
-    ///   rejects ordeal's own certificate (an ordeal bug, never a wrong
-    ///   verdict).
+    ///   rejects ordeal's own certificate or model (an ordeal bug, never a
+    ///   wrong verdict).
     ///
     /// Variables are `1..=formula.num_vars`; a literal `±v` refers to variable
     /// `v`. No bit-blaster, no term graph — the caller supplies clauses.
@@ -658,18 +659,16 @@ impl Solver {
                 }
             }
             SatResult::Sat(assignment) => {
-                // Self-check the model against the formula, mirroring the
-                // guarantee `check` makes for BV models.
+                // Re-check the model with the TRUSTED kernel before return, in
+                // every build profile (issue #184: this was a debug_assert, so
+                // release builds returned `Sat` unchecked). A rejected model is
+                // an ordeal bug and degrades to `Unknown`, never a wrong `Sat`.
+                let verdict = cnf_sat_verdict(formula, &assignment);
                 debug_assert!(
-                    formula.eval(&assignment),
+                    matches!(verdict, CheckResult::Sat(_)),
                     "SAT model must satisfy the formula — ordeal bug"
                 );
-                let assignments = assignment
-                    .iter()
-                    .enumerate()
-                    .map(|(i, &b)| (format!("v{}", i + 1), b as u128))
-                    .collect();
-                CheckResult::Sat(Model { assignments })
+                verdict
             }
         }
     }
@@ -1066,6 +1065,21 @@ fn check_var_widths_bv<'t>(
     }
 }
 
+/// The `check_cnf` SAT gate (issue #184): `Sat` only if the trusted kernel's
+/// `ordeal_lrat::check_sat` accepts `assignment` against `formula`, otherwise
+/// the conservative `Unknown`. A runtime check in every build profile.
+fn cnf_sat_verdict(formula: &crate::cnf::CnfFormula, assignment: &[bool]) -> CheckResult {
+    if ordeal_lrat::check_sat(&formula.clauses, assignment).is_err() {
+        return CheckResult::Unknown;
+    }
+    let assignments = assignment
+        .iter()
+        .enumerate()
+        .map(|(i, &b)| (format!("v{}", i + 1), b as u128))
+        .collect();
+    CheckResult::Sat(Model { assignments })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1388,6 +1402,36 @@ mod tests {
     /// The propositional path agrees with the bit-blaster path on a query
     /// expressible both ways: a single boolean variable `p`, asserted as
     /// `p ∧ ¬p`, is UNSAT whether encoded as CNF or as a BV1 equality.
+    // rivet: verifies VER-050
+    /// Issue #184: the `check_cnf` SAT gate is a runtime check, not a
+    /// `debug_assert`. A model that violates a clause must degrade to
+    /// `Unknown` in every build profile (CI runs this under `--release`).
+    #[test]
+    fn check_cnf_sat_gate_rejects_a_wrong_model_in_every_profile() {
+        let f = crate::cnf::CnfFormula {
+            num_vars: 2,
+            clauses: vec![vec![1, 2], vec![-1]],
+        };
+        // v1 = true violates the unit clause (-1).
+        assert!(matches!(
+            cnf_sat_verdict(&f, &[true, true]),
+            CheckResult::Unknown
+        ));
+        // A model that does not bind every variable is rejected too.
+        assert!(matches!(
+            cnf_sat_verdict(&f, &[false]),
+            CheckResult::Unknown
+        ));
+        // The real model is accepted with its bindings.
+        match cnf_sat_verdict(&f, &[false, true]) {
+            CheckResult::Sat(m) => assert_eq!(
+                m.assignments,
+                vec![("v1".to_string(), 0), ("v2".to_string(), 1)]
+            ),
+            other => panic!("expected Sat, got {other:?}"),
+        }
+    }
+
     #[test]
     fn check_cnf_agrees_with_the_bitblaster_on_a_shared_query() {
         // CNF form: p ∧ ¬p.

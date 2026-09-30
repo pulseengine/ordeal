@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`Solver::check_cnf` now re-checks a `Sat` model in release builds**
+  (TR-050, #184). The documented self-check was a `debug_assert`, so release
+  builds returned the SAT assignment unchecked. The model now goes through
+  `ordeal_lrat::check_sat`, the trusted kernel, before return. A rejected
+  model degrades to `Unknown`.
+
 ## [0.22.1] - 2026-09-30
 
 **Soundness fix** (TR-049; issue #182). Upgrade is strongly recommended.

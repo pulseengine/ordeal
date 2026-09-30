@@ -1412,3 +1412,22 @@ artifacts:
         target: SYS-001
       - type: traces-to
         target: TR-001
+
+  - id: TR-050
+    type: sw-req
+    title: check_cnf returns Sat only after the trusted kernel re-checks the model, in every build profile (#184)
+    status: verified
+    release: v0.23.0
+    description: "Defect #184 (2026-09-30 claims-vs-tests audit): Solver::check_cnf documented that its SAT assignment is self-checked against the formula, but the check was a debug_assert, removed in release builds, so a release-build Sat was returned unchecked. That is the path rivet#693 needs for certified feature-model consistency. The requirement: a Sat from check_cnf is returned only if ordeal_lrat::check_sat (the trusted, machine-checked kernel) accepts the model against exactly the caller's clauses; otherwise the verdict degrades to the conservative Unknown."
+    tags: [soundness, check-cnf, sat-witness, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "A model that violates a clause, and a model that binds too few variables, both yield Unknown from the check_cnf SAT gate in debug and release builds; a satisfying model yields Sat with bindings v1..vN. Negative control: disabling the gate makes the test fail in a release build."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: traces-to
+        target: TR-026
+      - type: allocated-to
+        target: ARC-005
