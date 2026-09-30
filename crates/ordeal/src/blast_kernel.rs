@@ -1071,6 +1071,7 @@ mod tests {
     }
 
     // rivet: verifies VER-051
+    // rivet: verifies VER-056
     /// Issue #185(b): EXHAUSTIVE at every width 1..=8 — every `(a, b)` pair
     /// through every mirrored rule on both sides (and/or/xor, add, sub,
     /// ult/ule/ugt/uge, slt/sle/sgt/sge, eq/ne, ite, extract, concat,
@@ -1091,6 +1092,7 @@ mod tests {
     }
 
     // rivet: verifies VER-051
+    // rivet: verifies VER-056
     /// Issue #185(b): seeded sampling at every width 9..=16 (exhaustive is
     /// 2^18..2^32 pairs there — infeasible in a debug `cargo test`).
     #[test]
@@ -1101,6 +1103,7 @@ mod tests {
     }
 
     // rivet: verifies VER-051
+    // rivet: verifies VER-056
     /// Issue #185(b): seeded sampling at wide widths up to 128, power-of-two
     /// and not (the #182 bug class lives at the non-power-of-two ones).
     #[test]

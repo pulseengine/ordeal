@@ -1612,3 +1612,22 @@ artifacts:
         target: TR-051
       - type: allocated-to
         target: ARC-003
+
+  - id: TR-057
+    type: sw-req
+    title: A release's test evidence comes from the tagged commit's own CI run, not from hand-written verdicts (#203)
+    status: verified
+    release: v0.24.0
+    description: "Split from #188: every verification execution and verdict was written by hand, while CI ran the same tests on every change and nothing fed its results into the graph. The requirement: CI emits JUnit for the test run, maps each test to the measures its source markers name (failing on a marker that matches no test), and uploads the mapped results; the release gate downloads them from the tagged commit's own successful main CI run, fails on any failed result, and fails if an in-scope measure that runs cargo test has no CI result; rivet imports them."
+    tags: [evidence, ci, junit, rivet]
+    fields:
+      priority: should
+      req-type: functional
+      verification-criteria: junit_to_rivet.py maps 56 (test, artifact) results from a workspace nextest run and exits non-zero on a dead marker; check_release_results.py passes for v0.24.0 on real results and fails when an in-scope measure's results are removed or one is failed; rivet import-results ingests the mapped XML with artifact IDs as keys; actionlint clean; release order unchanged.
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: traces-to
+        target: TR-054
+      - type: allocated-to
+        target: ARC-014

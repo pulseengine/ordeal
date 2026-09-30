@@ -40,7 +40,6 @@ fn unknown_flag_exits_two_with_usage_on_stderr() {
     assert!(out.stdout.is_empty(), "errors do not pollute stdout");
 }
 
-// rivet: verifies VER-034
 fn ordeal_stdin(args: &[&str], input: &str) -> std::process::Output {
     use std::io::Write;
     use std::process::Stdio;
@@ -79,6 +78,7 @@ const SAT_SCRIPT: &str = "(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n\
 /// text mode, and the unsat object carries the FULL checkable pair — which
 /// this test re-checks with the trusted checker, making the JSON itself
 /// evidence rather than a claim.
+// rivet: verifies VER-034
 #[test]
 fn format_json_unsat_carries_a_recheckable_pair() {
     let out = ordeal_stdin(&["check", "-", "--format", "json"], UNSAT_SCRIPT);
@@ -105,6 +105,7 @@ fn format_json_unsat_carries_a_recheckable_pair() {
     ordeal_lrat::check(&cnf, lrat).expect("the emitted pair re-checks independently");
 }
 
+// rivet: verifies VER-034
 #[test]
 fn format_json_sat_and_unknown_shapes() {
     let out = ordeal_stdin(&["check", "-", "--format", "json"], SAT_SCRIPT);
@@ -120,6 +121,7 @@ fn format_json_sat_and_unknown_shapes() {
     assert_eq!(parsed % 5, 3, "model must satisfy a % 5 == 3, got {val}");
 }
 
+// rivet: verifies VER-034
 #[test]
 fn format_json_verdicts_match_text_mode() {
     for script in [UNSAT_SCRIPT, SAT_SCRIPT] {
@@ -136,6 +138,7 @@ fn format_json_verdicts_match_text_mode() {
     }
 }
 
+// rivet: verifies VER-034
 #[test]
 fn format_json_is_advertised_in_top_level_help() {
     let out = ordeal(&["--help"]);
@@ -146,6 +149,7 @@ fn format_json_is_advertised_in_top_level_help() {
     );
 }
 
+// rivet: verifies VER-034
 #[test]
 fn unknown_format_value_exits_two() {
     let out = ordeal_stdin(&["check", "-", "--format", "yaml"], SAT_SCRIPT);

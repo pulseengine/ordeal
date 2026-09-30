@@ -1,0 +1,4 @@
+# Markers the default-features nextest run (plus cert-bundle) cannot cover.
+# Format: <file> <ARTIFACT-ID>   # reason and where it IS run
+crates/ordeal/src/blast/proofs.rs VER-044   # Kani harnesses (cfg(kani)), not unit tests; kani.yml runs them
+crates/ordeal/src/solver.rs VER-008         # needs features cadical+oracle (C++ build, Z3); the "CaDiCaL backend" and "Z3 Oracle" CI jobs run it

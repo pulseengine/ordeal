@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Test results are release evidence** (TR-057, #203).
+  - CI runs the test suite through cargo-nextest with JUnit output.
+    `scripts/junit_to_rivet.py` maps each test to the rivet measures named
+    by its `// rivet: verifies <ID>` markers, and CI uploads the result.
+  - A marker that matches no test fails CI. Markers the default run can't
+    cover are listed, with reasons, in `scripts/junit_to_rivet.skip`.
+  - The release gate downloads those results from the tagged commit's own
+    main CI run. It fails on any failed result, or if an in-scope measure
+    that runs `cargo test` has no result. `rivet import-results` ingests
+    the results.
+
 ### Fixed
 - **Shift and rotate proofs now cover every width** (#201). The Lean
   theorems `blast_shl_bitvec`, `blast_lshr_bitvec`, `blast_ashr_bitvec` and

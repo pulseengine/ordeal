@@ -560,7 +560,6 @@ mod tests {
     }
 
     // ── TR-038: the independently re-checkable SAT witness ──────────────
-    // rivet: verifies VER-037
 
     fn a_sat_query() -> Solver {
         use crate::{BoolTerm, BvTerm, Sort};
@@ -591,6 +590,7 @@ mod tests {
         }
     }
 
+    // rivet: verifies VER-037
     #[test]
     fn sat_witness_rechecks_end_to_end() {
         let cert = a_sat_witness();
@@ -610,6 +610,7 @@ mod tests {
         assert_eq!(back.model.assignments, cert.model.assignments);
     }
 
+    // rivet: verifies VER-037
     #[test]
     fn sat_witness_is_deterministic() {
         let a = a_sat_witness().to_cert_v1(&attests());
@@ -617,6 +618,7 @@ mod tests {
         assert_eq!(a, b, "witness bundles must be byte-identical run to run");
     }
 
+    // rivet: verifies VER-037
     #[test]
     fn tampered_witness_assignment_is_rejected_at_ingestion() {
         let json = a_sat_witness().to_cert_v1(&attests());
@@ -640,6 +642,7 @@ mod tests {
         }
     }
 
+    // rivet: verifies VER-037
     #[test]
     fn tampered_model_is_caught_by_recheck_not_parsing() {
         // The model block is deliberately not content-hashed: its guarantee
@@ -660,6 +663,7 @@ mod tests {
         }
     }
 
+    // rivet: verifies VER-037
     #[test]
     fn truncated_assignment_fails_recheck() {
         let mut cert = a_sat_witness();
@@ -670,6 +674,7 @@ mod tests {
         );
     }
 
+    // rivet: verifies VER-037
     #[test]
     fn witness_entry_reports_unsat_with_a_checked_certificate() {
         use crate::{BoolTerm, BvTerm, Sort};
