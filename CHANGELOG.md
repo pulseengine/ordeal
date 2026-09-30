@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-09-30
+
+**Trust-integrity release** (#184–#189). Every claim ordeal makes about
+what is checked is now either checked or stated exactly. No change to what
+the solver decides at any width, except that a release-build `check_cnf`
+`Sat` is now re-checked by the trusted kernel.
+
 ### Fixed
 - **Supply chain and portability** (TR-055, #189).
   - Every release and CI tool is pinned. CI and the release now use the same
@@ -1192,7 +1199,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.22.1...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.23.0
 [0.22.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.1
 [0.22.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.22.0
 [0.21.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.21.0
