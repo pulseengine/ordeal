@@ -528,6 +528,10 @@ jobs:
     name: Z3 Oracle (optional)
     runs-on: ubuntu-latest
     continue-on-error: true
+    # Normally ~2 min. On 2026-09-30 main's run hung in "Install Z3" for
+    # ~2 h; push runs share a no-cancel concurrency group, so the hang
+    # blocked the next main commit's CI. Bound it.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
