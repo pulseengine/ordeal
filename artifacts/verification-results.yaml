@@ -2519,3 +2519,28 @@ artifacts:
         target: VER-058
       - type: part-of-execution
         target: VE-047
+
+  - id: VE-048
+    type: verification-execution
+    title: "Kani wide tier on CI: 8 width-32/64 rules proven, 2 cancelled by the runner (VER-043, #169)"
+    status: implemented
+    description: "workflow_dispatch of kani.yml on main 81fe397 (run 36759511157, ubuntu-latest, Kani 0.68), with --max-field-sensitivity-array-size 1024 for the wide tier (#214). SUCCESS: xor_32 3m41s, and_32 1m49s, or_32 2m27s, add_32 8m56s, sub_32 9m00s, xor_64 8m20s, and_64 4m14s, or_64 4m34s (job wall time). Also SUCCESS in the same run: harness coverage, fast tier (width 8), heavy mul_8. add_64 and sub_64 were cancelled by the runner mid-Kani ('The operation was canceled') at 35m14s and 31m55s, inside the 75-minute job timeout: the runner-shutdown signature, not a Kani failure. Both are moved back to UNSCHEDULED with that reason; locally they complete (1019 s / 940 s, about 5.3 GB). Before #214, xor_32 did not finish in 88 minutes on CI."
+    fields:
+      environment: "note: GitHub Actions ubuntu-latest, Kani 0.68, CBMC via kani-github-action; run https://github.com/pulseengine/ordeal/actions/runs/36759511157"
+      executor: ci
+      timestamp: 2026-09-30T20:34:27Z
+      version: 81fe397
+
+  - id: VV-105
+    type: verification-verdict
+    title: VER-043 pass — width-32/64 light rules proven by Kani on CI
+    status: implemented
+    description: Executed pass for the 8 scheduled wide harnesses, recorded in the linked execution. add_64 and sub_64 are not claimed; they are unscheduled with the measured reason.
+    fields:
+      evidence: see VE-048
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-043
+      - type: part-of-execution
+        target: VE-048

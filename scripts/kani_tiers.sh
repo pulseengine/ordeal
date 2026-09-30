@@ -49,7 +49,11 @@ HEAVY=(mul_8)
 # Limit sweep on add_32: 256 -> 209 s, 1024 -> 238 s, 16384 -> 310 s (5.7 GB);
 # 1024 is the setting every number above was measured with. Promote more
 # 32/64 harnesses here only with a timed run under WIDE_CBMC.
-WIDE=(xor_32 and_32 or_32 add_32 sub_32 xor_64 and_64 or_64 add_64 sub_64)
+# CI (ubuntu-latest, Kani 0.68), dispatch run 36759511157 on main 81fe397,
+# 2026-09-30: all 8 below SUCCESS — job wall time xor_32 3m41s, and_32 1m49s,
+# or_32 2m27s, add_32 8m56s, sub_32 9m00s, xor_64 8m20s, and_64 4m14s,
+# or_64 4m34s. add_64 and sub_64 were cancelled by the runner (see below).
+WIDE=(xor_32 and_32 or_32 add_32 sub_32 xor_64 and_64 or_64)
 WIDE_CBMC="-Z unstable-options --cbmc-args --max-field-sensitivity-array-size 1024"
 
 # Deliberately not scheduled — each with its reason. Promote a harness out
@@ -63,6 +67,13 @@ UNSCHEDULED=(
   # blast_udivrem_bitvec / blast_udiv_bitvec / blast_urem_bitvec proofs at
   # unbounded width. Tracked in #169.
   udiv_8 urem_8
+  # Complete locally under WIDE_CBMC (add_64 1019 s / 5.2 GB, sub_64 940 s
+  # / 5.3 GB) but on ubuntu-latest dispatch run 36759511157 the runner
+  # cancelled both mid-Kani ("The operation was canceled") at 35m14s /
+  # 31m55s, well inside the 75-min job timeout: the runner-shutdown
+  # signature, not a Kani failure. Needs a bigger runner or a lighter
+  # encoding. Tracked in #169.
+  add_64 sub_64
   # CBMC/SAT-infeasible: multiplier/divider at 32/64 (same coverage).
   mul_32 mul_64 udiv_32 udiv_64 urem_32 urem_64
   # Unmeasured at 32/64 (barrel shifters, comparators, structural rules,
