@@ -1,4 +1,7 @@
-# Publishes the workspace crates to crates.io on every `v*` tag push.
+# Publishes the workspace crates to crates.io. Called by release.yml AFTER
+# its gate and the GitHub Release (#186); it no longer runs on tag push by
+# itself. workflow_dispatch remains for a manual re-publish of an already
+# released tag (e.g. after a crates.io 500), which is a deliberate human act.
 #
 # Trust model: the org-wide CRATES_IO_TOKEN secret (set at the pulseengine
 # GitHub organization, inherited by this repo — the same secret synth
@@ -15,9 +18,12 @@ concurrency:
   cancel-in-progress: false
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.23.0)"
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag:

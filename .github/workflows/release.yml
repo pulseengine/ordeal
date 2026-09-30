@@ -28,6 +28,66 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # ── Release gate (#186, TR-047/TR-053) — runs FIRST ──────────────────
+  # Nothing is built, signed, attested or published unless (1) the tagged
+  # commit is on main, (2) that commit's own CI run on main concluded
+  # `success`, and (3) the V-model is closed at every ASPICE level
+  # (`rivet validate`, severity-error rules in schemas/ordeal-v-closure.yaml)
+  # and the release scope is cuttable (`rivet release status`). Before #186
+  # the rivet gate ran AFTER cosign signing and SLSA attestation, and the
+  # crates.io publish was a separate workflow with no dependency on it:
+  # v0.22.0 reached crates.io 15 minutes before its gate ran.
+  gate:
+    name: Release gate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Tagged commit is on main with a successful CI run
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          git fetch -q origin main
+          if ! git merge-base --is-ancestor "$SHA" origin/main; then
+            echo "::error::tagged commit $SHA is not on main"
+            exit 1
+          fi
+          CONCLUSION="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${SHA}&branch=main&event=push" \
+            --jq '[.workflow_runs[] | select(.status == "completed")][0].conclusion // "none"')"
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::CI on main for $SHA concluded '$CONCLUSION', not success"
+            exit 1
+          fi
+          echo "::notice::$SHA is on main and its CI run concluded success"
+
+      - name: Install rivet from the pinned varve layer (varve.toml)
+        env:
+          VARVE_VERSION: v0.38.0
+        run: |
+          bash scripts/install_varve.sh
+          ~/.varve/bin/varve run rivet --version
+
+      # rivet: verifies VER-047
+      - name: Release gate — full V-closure and scope readiness (TR-047)
+        # `rivet release status` is scope-only, so a broken chain on an
+        # out-of-scope component would leave it green (VER-047's recorded
+        # finding); `rivet validate` covers the whole graph.
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          rivet validate
+          rivet release status "$VERSION"
+
   # ── Cross-platform binary builds ──────────────────────────────────────
   # The `ordeal` bin builds with the default feature set (no `oracle`/Z3):
   # z3-sys vendors and compiles Z3 from source, needs network + a large C++
@@ -35,6 +95,7 @@ jobs:
   # makes the release build fast and hermetic.
   build-binaries:
     name: Build ${{ matrix.target }}
+    needs: [gate]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -339,23 +400,6 @@ jobs:
           bash scripts/install_varve.sh
           ~/.varve/bin/varve run rivet --version
 
-      # rivet: verifies VER-047
-      - name: Release gate — full V-closure and scope readiness (TR-047)
-        # Nothing is published unless the V-model is closed at every ASPICE
-        # level (schemas/ordeal-v-closure.yaml, severity error: `rivet
-        # validate` exits non-zero on any open chain, in or out of the release
-        # scope) AND the release scope itself is cuttable. Both are needed:
-        # `rivet release status` is scope-only, so a broken chain on an
-        # out-of-scope component would leave it green (VER-047's recorded
-        # finding).
-        env:
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          set -euo pipefail
-          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
-          rivet validate
-          rivet release status "$VERSION"
-
       - name: Compose the release body
         env:
           INPUT_TAG: ${{ inputs.tag }}
@@ -405,3 +449,16 @@ jobs:
               --notes-file /tmp/release-body.md \
               release-assets/*
           fi
+
+  # ── crates.io publish (#186) — only after the gated GitHub Release ────
+  # Formerly publish-to-crates-io.yml, triggered by the same tag push with
+  # no dependency on this workflow. A crates.io upload cannot be undone, so
+  # it now runs last, behind the gate and the Release.
+  publish-crates-io:
+    name: Publish to crates.io
+    needs: [create-release]
+    if: github.repository == 'pulseengine/ordeal'
+    uses: ./.github/workflows/publish-to-crates-io.yml
+    with:
+      tag: ${{ inputs.tag || github.ref_name }}
+    secrets: inherit

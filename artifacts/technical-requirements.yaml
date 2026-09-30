@@ -1452,3 +1452,21 @@ artifacts:
         target: SYS-004
       - type: traces-to
         target: VER-019
+  - id: TR-053
+    type: sw-req
+    title: Nothing in a release is built, signed, attested or published before the release gate passes (#186)
+    status: verified
+    release: v0.23.0
+    description: "Defect #186 (2026-09-30 audit): the crates.io publish ran in a separate workflow on the same tag push with no dependency on the release gate (v0.22.0 reached crates.io 15 minutes before its gate ran); cosign signing and SLSA attestation ran before the gate; tags could be created on any commit and moved or deleted. The requirement: a release gate job runs first and requires the tagged commit to be on main with a successful CI run, plus rivet validate and rivet release status; every other job depends on it; crates.io publishing runs only after the gated GitHub Release; v* tags cannot be moved or deleted and only admins can create them."
+    tags: [release, gate, supply-chain, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: scripts/check_release_order.py passes on the workflows and fails on the pre-fix workflows (6 findings); actionlint is clean; the tag rulesets are active; the first release cut after this change (v0.23.0) shows the gate job completing before any build, signing or publish job.
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: traces-to
+        target: TR-047
+      - type: allocated-to
+        target: ARC-013

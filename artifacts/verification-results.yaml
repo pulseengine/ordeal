@@ -2083,3 +2083,27 @@ artifacts:
         target: VER-052
       - type: part-of-execution
         target: VE-038
+  - id: VE-039
+    type: verification-execution
+    title: Release-order guard verified, with negative control (VER-053)
+    status: implemented
+    description: "check_release_order.py: PASS on the fixed workflows; on the pre-fix workflows it exits 1 with 6 findings (no gate job; build-binaries and create-release can run before it; no gated publish job; publish-to-crates-io still triggers on push; not reusable). actionlint 1.7.12 clean on release.yml and publish-to-crates-io.yml. Tag rulesets created and active: release-tags-immutable (deletion, non_fast_forward, update; no bypass) and release-tags-admin-create (creation; admin bypass). The rulesets were not exercised live, since a live test would have to move or delete a release tag; the end-to-end evidence is the v0.23.0 release run."
+    fields:
+      environment: "note: macOS arm64, local; branch fix/release-pipeline-order on main @ e6f8854"
+      executor: local
+      timestamp: 2026-09-30T05:11:07Z
+      version: e6f8854
+
+  - id: VV-083
+    type: verification-verdict
+    title: VER-053 pass — no release job can run before the gate
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see the linked execution: guard passes on the fix, fails on the pre-fix workflows"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-053
+      - type: part-of-execution
+        target: VE-039
