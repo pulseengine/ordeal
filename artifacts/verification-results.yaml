@@ -2012,7 +2012,7 @@ artifacts:
     fields:
       environment: "note: macOS arm64, rustc 1.98.1, Z3 5.1.0 via Homebrew; fix branch on main @ 1a6275e"
       executor: local
-      timestamp: 2026-09-30T06:45:00Z
+      timestamp: 2026-09-30T03:41:21Z
       version: 1a6275e
 
   - id: VV-080
@@ -2028,3 +2028,28 @@ artifacts:
         target: VER-049
       - type: part-of-execution
         target: VE-036
+
+  - id: VE-037
+    type: verification-execution
+    title: check_cnf SAT gate verified in debug and release, with negative control (VER-050)
+    status: implemented
+    description: "cargo test -p ordeal --lib check_cnf: 6 passed; cargo test --release -p ordeal --lib check_cnf: 6 passed (includes check_cnf_sat_gate_rejects_a_wrong_model_in_every_profile). Negative control: with the gate condition forced false, the new test fails in a release build (panicked at the Unknown assertion, 0 passed / 1 failed). cargo clippy --all-targets clean; cargo fmt clean."
+    fields:
+      environment: "note: macOS arm64, local; branch fix/check-cnf-sat-gate on main @ 9bcdf32"
+      executor: local
+      timestamp: 2026-09-30T04:45:06Z
+      version: 9bcdf32
+
+  - id: VV-081
+    type: verification-verdict
+    title: VER-050 pass — check_cnf never returns an unchecked Sat, in any build profile
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see the linked execution: debug and release pass; negative control fails as designed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-050
+      - type: part-of-execution
+        target: VE-037

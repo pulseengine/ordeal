@@ -1227,3 +1227,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-049
+
+  - id: VER-050
+    type: sw-verification
+    title: check_cnf SAT gate rejects a wrong model in release builds (TR-050)
+    status: verified
+    release: v0.23.0
+    description: "Unit test of the check_cnf SAT gate, independent of debug_assert: a clause-violating model and an under-binding model both give Unknown; the real model gives Sat with the expected bindings. Runs in debug and --release. Negative control: with the gate disabled, the test fails in a release build."
+    tags: [soundness, check-cnf, negative-control]
+    fields:
+      coverage: cnf_sat_verdict on violating, under-binding and satisfying models, debug and release; negative control with the gate disabled
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib check_cnf && cargo test --release -p ordeal --lib check_cnf"
+    links:
+      - type: verifies
+        target: TR-050

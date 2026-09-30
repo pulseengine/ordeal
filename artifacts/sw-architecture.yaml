@@ -151,6 +151,8 @@ artifacts:
         target: FEAT-005
       - type: allocated-from
         target: FEAT-014
+      - type: allocated-from
+        target: TR-050
   - id: ARC-006
     type: sw-arch-component
     title: ordeal-lrat (verified certificate checker)
