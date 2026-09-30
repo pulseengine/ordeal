@@ -104,9 +104,9 @@ artifacts:
         target: ARC-005
       - type: satisfies
         target: TR-004
-      - type: traces-to
+      - type: satisfies
         target: TR-005
-      - type: traces-to
+      - type: satisfies
         target: TR-011
     fields:
       unit: crates/ordeal/src/sat.rs
@@ -282,7 +282,7 @@ artifacts:
         target: ARC-006
       - type: satisfies
         target: TR-006
-      - type: traces-to
+      - type: satisfies
         target: TR-013
     fields:
       unit: crates/ordeal-lrat/src/lib.rs
@@ -352,9 +352,9 @@ artifacts:
       - type: traces-to
         target: DES-004
       - type: traces-to
-        target: TR-013
-      - type: traces-to
         target: FEAT-002
+      - type: satisfies
+        target: TR-013
     fields:
       unit: crates/ordeal/src/lrat.rs
       function: "emit_lrat(n_orig, trace) -> String"

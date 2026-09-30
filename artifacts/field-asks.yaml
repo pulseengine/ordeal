@@ -31,6 +31,12 @@ artifacts:
         target: TR-015
       - type: satisfies
         target: TR-016
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-003
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: must
@@ -55,6 +61,10 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-001
+      - type: allocated-to
+        target: ARC-002
+      - type: allocated-to
+        target: ARC-003
     fields:
       req-type: functional
       priority: must
@@ -79,6 +89,8 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-007
+      - type: allocated-to
+        target: ARC-012
     fields:
       req-type: functional
       priority: must
@@ -101,6 +113,10 @@ artifacts:
     links:
       - type: derives-from
         target: SYS-002
+      - type: allocated-to
+        target: ARC-001
+      - type: allocated-to
+        target: ARC-005
     fields:
       req-type: functional
       priority: must

@@ -419,6 +419,8 @@ artifacts:
     links:
       - type: verifies
         target: TR-017
+      - type: verifies
+        target: FEAT-003
     fields:
       method: automated-test
       steps:

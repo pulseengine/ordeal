@@ -22,6 +22,10 @@ artifacts:
         target: STK-005
       - type: derives-from
         target: STK-002
+      - type: allocated-to
+        target: SA-001
+      - type: allocated-to
+        target: SA-003
     fields:
       req-type: functional
       priority: must
@@ -43,6 +47,10 @@ artifacts:
     links:
       - type: derives-from
         target: STK-003
+      - type: allocated-to
+        target: SA-002
+      - type: allocated-to
+        target: SA-004
     fields:
       req-type: functional
       priority: must
@@ -64,6 +72,10 @@ artifacts:
     links:
       - type: derives-from
         target: STK-003
+      - type: allocated-to
+        target: SA-002
+      - type: allocated-to
+        target: SA-004
     fields:
       req-type: safety
       priority: must
@@ -86,6 +98,8 @@ artifacts:
         target: STK-003
       - type: derives-from
         target: STK-001
+      - type: allocated-to
+        target: SA-006
     fields:
       req-type: functional
       priority: must
@@ -107,6 +121,10 @@ artifacts:
     links:
       - type: derives-from
         target: STK-001
+      - type: allocated-to
+        target: SA-003
+      - type: allocated-to
+        target: SA-005
     fields:
       req-type: constraint
       priority: must
@@ -126,6 +144,10 @@ artifacts:
     links:
       - type: derives-from
         target: STK-004
+      - type: allocated-to
+        target: SA-001
+      - type: allocated-to
+        target: SA-005
     fields:
       req-type: interface
       priority: must
@@ -147,6 +169,8 @@ artifacts:
     links:
       - type: derives-from
         target: STK-005
+      - type: allocated-to
+        target: SA-001
     fields:
       req-type: constraint
       priority: must
