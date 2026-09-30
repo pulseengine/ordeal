@@ -25,6 +25,13 @@ if not gate:
     errors.append("release.yml has no `gate` job")
 else:
     runs = "\n".join(s.get("run", "") for s in gate.get("steps", []))
+    # install_varve.sh verifies with cosign: the installer must come first
+    # (the v0.23.0 tag run failed without it).
+    uses = [s.get("uses", "") for s in gate.get("steps", [])]
+    varve_at = next((i for i, s in enumerate(gate.get("steps", [])) if "install_varve.sh" in s.get("run", "")), None)
+    cosign_at = next((i for i, u in enumerate(uses) if u.startswith("sigstore/cosign-installer")), None)
+    if varve_at is not None and (cosign_at is None or cosign_at > varve_at):
+        errors.append("gate job runs install_varve.sh without installing cosign first")
     for needle in ("rivet validate", "rivet release status", "merge-base --is-ancestor", "actions/workflows/ci.yml/runs"):
         if needle not in runs:
             errors.append(f"gate job does not run `{needle}`")

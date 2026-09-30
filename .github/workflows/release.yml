@@ -68,6 +68,15 @@ jobs:
           fi
           echo "::notice::$SHA is on main and its CI run concluded success"
 
+      # install_varve.sh verifies varve's signed sums with cosign. The v0.23.0
+      # tag run failed here (exit 127: cosign not found): before #186 moved
+      # the gate into its own job, cosign had been installed earlier in the
+      # same job for checksum signing.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+        with:
+          cosign-release: 'v2.4.1'
+
       - name: Install rivet from the pinned varve layer (varve.toml)
         env:
           VARVE_VERSION: v0.38.0
