@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Gates that could pass while checking nothing now fail closed** (TR-052,
+  #187):
+  - The verification-citation checker crashed on string-shaped `steps` yet
+    exited 0. It also read only one artifact file. It now reads every
+    artifact file, checks positional filters and `--test` targets, and exits
+    non-zero on any error. It immediately found two citations that ran zero
+    tests (UV-016 and UV-018), now repointed. The `ite` unit test now also
+    covers what UV-016 claims: exhaustive at width 8, randomized at 32 and 64.
+  - The fuzz target gains a semantic oracle. Every `unsat` with at most 16
+    declared bits is brute-forced through the evaluator, which shares no
+    code with the bit-blaster. With the pre-#182 shifter it finds the bug.
+  - The dependency-freedom check now counts build-dependencies and matches
+    exact crate names.
+  - The fuzz job fails if the fuzz crate or its target list is missing.
+  - The exhaustive float-to-int trap test (VER-019) now runs nightly.
+- New read-only `Solver::assertions()` and
+  `smtlib::assertions_at_check_sat`, used by the semantic fuzz oracle.
 - **`Solver::check_cnf` now re-checks a `Sat` model in release builds**
   (TR-050, #184). The documented self-check was a `debug_assert`, so release
   builds returned the SAT assignment unchecked. The model now goes through

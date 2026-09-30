@@ -1431,3 +1431,24 @@ artifacts:
         target: TR-026
       - type: allocated-to
         target: ARC-005
+
+  - id: TR-052
+    type: sw-req
+    title: "Verification gates fail closed: no gate may pass while checking nothing (#187)"
+    status: verified
+    release: v0.23.0
+    description: "Defect class #187 (2026-09-30 audit): the citation checker crashed on string-shaped steps yet exited 0 and read only one artifact file; the fuzz soundness oracle only re-checked certificates against ordeal's own CNF, so it could not see an encoding bug like #182; the dependency-freedom check ignored build-dependencies and matched crate names by prefix; the fuzz loop ran zero targets if cargo fuzz list failed; VER-019's exhaustive test ran in no workflow. The requirement: each of these gates fails, rather than passes, when it cannot perform its check, and the fuzz target has an oracle independent of the bit-blaster."
+    tags: [gates, vacuous-green, fuzz, ci, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: The citation checker reads every artifacts/*.yaml, handles both steps shapes, checks positional filters and --test targets, exits 1 on a rotted citation and non-zero on any internal error; the fuzz target brute-forces every Unsat with at most 16 declared bits through the evaluator and trips on the pre-#182 stage count; the dependency check fails on a crate named ordeal-evil; the fuzz loop fails on an empty target list; a nightly workflow runs the ignored exhaustive trunc test and fails unless exactly one test passed.
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: allocated-to
+        target: ARC-014
+      - type: derives-from
+        target: SYS-004
+      - type: traces-to
+        target: VER-019

@@ -55,10 +55,13 @@ jobs:
         id: detect
         run: |
           set -euo pipefail
+          # #187: the fuzz crate is committed; its absence is a broken gate,
+          # not a reason to skip green.
           if [ -f fuzz/Cargo.toml ]; then
             echo "have_fuzz=true" >> "$GITHUB_OUTPUT"
           else
-            echo "have_fuzz=false" >> "$GITHUB_OUTPUT"
+            echo "::error::fuzz/Cargo.toml missing — the fuzz gate would check nothing"
+            exit 1
           fi
 
       - name: Install cargo-fuzz
@@ -74,7 +77,14 @@ jobs:
           # Force the GNU target — cargo-fuzz defaults to musl on Linux, whose
           # statically-linked libc is incompatible with ASan (on by default in
           # libfuzzer-sys). The GNU target has a dynamic libc and works.
-          for target in $(cargo +nightly fuzz list); do
+          # #187: a failed or empty `fuzz list` must fail the job; inside
+          # `for ... in $(...)` its exit status is ignored even under set -e.
+          targets="$(cargo +nightly fuzz list)"
+          if [ -z "$targets" ]; then
+            echo "::error::cargo fuzz list returned no targets — nothing would be fuzzed"
+            exit 1
+          fi
+          for target in $targets; do
             echo "::group::fuzz $target"
             mkdir -p "fuzz/corpus/$target"
             # Seeds start the mutator from real solvable scripts plus the

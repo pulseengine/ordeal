@@ -184,9 +184,7 @@ artifacts:
         target: DES-017
     fields:
       method: automated-test
-      steps:
-        run: "cargo test -p ordeal blast::ite && cargo test -p ordeal --features oracle ite_diff"
-        coverage: "Exhaustive w8; randomized w32/64; Z3 differential"
+      steps: "run: cargo test -p ordeal --lib -- blast::bitwise::tests::ite_selects && cargo test -p ordeal --features oracle ite_diff"
 
   - id: UV-017
     type: unit-verification
@@ -223,6 +221,4 @@ artifacts:
         target: DES-019
     fields:
       method: automated-test
-      steps:
-        run: "cargo test -p ordeal solver::check_with_limit"
-        coverage: "Exhaustion → Unknown; within-budget = check(); A5 bounded"
+      steps: "run: cargo test -p ordeal --lib -- solver::tests::bounded_check solver::tests::zero_budget_forces_unknown solver::tests::a5_mul_commutativity"

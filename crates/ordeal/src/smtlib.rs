@@ -727,6 +727,17 @@ pub fn solve_str_with_witness(input: &str) -> Result<WitnessOutcome, SmtError> {
     run_script(input, |solver| solver.check_with_witness())
 }
 
+/// The assertions active at the script's last `check-sat`, plus the declared
+/// variables, without solving. Same reader as [`solve_str`]. The fuzz target
+/// uses this to brute-force small queries through the evaluator, an oracle
+/// independent of the bit-blaster that can see encoding bugs (#187, #182).
+#[allow(clippy::type_complexity)] // (assertions, declarations); an alias obscures more than it helps
+pub fn assertions_at_check_sat(
+    input: &str,
+) -> Result<(Option<Vec<crate::term::BoolTerm>>, Vec<(String, u32)>), SmtError> {
+    run_script(input, |solver| solver.assertions().to_vec())
+}
+
 /// [`solve_str_with_witness`]'s result: the last `check-sat`'s
 /// witness-carrying verdict (if any) plus the declared variables.
 pub type WitnessOutcome = (

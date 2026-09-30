@@ -2053,3 +2053,33 @@ artifacts:
         target: VER-050
       - type: part-of-execution
         target: VE-037
+
+  - id: VE-038
+    type: verification-execution
+    title: Vacuous-gate hardening verified with negative controls (VER-052)
+    status: implemented
+    description: "Citation checker: clean tree exit 0 (46 cargo-test legs checked, 17 feature legs skipped and counted); a citation filter renamed to a non-existent test exits 1; steps replaced by a list exits 1 (non-zero). Before the fix it found UV-016 (blast::ite) and UV-018 (solver::check_with_limit) each running 0 tests, confirmed by running them. Fuzz: with the pre-#182 stage count, cargo fuzz run smtlib_parse on the width-3 shl seed panics 'certified Unsat, but the evaluator satisfies every assertion with {x: 1}'; with the fix it and the width-5 rotate seed pass. cargo tree exact-name check: 0 on the real tree, 1 on a synthetic ordeal-evil line. ite test exhaustive at w8 plus randomized w32/w64 passes. Exhaustive f32->i32 trunc test measured at 345 s in --release (nightly workflow). ordeal lib: 197 passed; clippy -D warnings clean."
+    fields:
+      environment: "note: macOS arm64, local, cargo-fuzz 0.13.1 nightly; branch fix/vacuous-gates on main @ e6f8854"
+      executor: local
+      timestamp: 2026-09-30T05:06:35Z
+      version: e6f8854
+    links:
+      - type: traces-to
+        target: UV-016
+
+      - type: traces-to
+        target: UV-018
+  - id: VV-082
+    type: verification-verdict
+    title: VER-052 pass — every hardened gate fails when it cannot check
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: "see the linked execution: each negative control fails as designed"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-052
+      - type: part-of-execution
+        target: VE-038
