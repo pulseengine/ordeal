@@ -46,14 +46,20 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
   └─────────────────────────────────────────────────┘
 ```
 
-- The **solver is untrusted.** A bug anywhere in bit-blasting, AIG
-  construction, CNF encoding, or the SAT search can, at worst, cause ordeal to
-  *fail to produce a valid certificate*. It can **never** cause a wrong answer
-  to be accepted, because —
-- The **checker is the only trusted component.** It replays the LRAT proof
-  against the CNF and confirms the empty clause is derivable. It is small
-  enough to formally verify — and it is verified: its soundness theorem is
-  discharged in Lean 4, sorry-free and CI-gated (see below).
+- The **SAT search is untrusted.** A bug in the CDCL search or the proof
+  emitter can, at worst, cause ordeal to *fail to produce a valid
+  certificate*. It cannot make the checker accept a wrong verdict *for the CNF
+  it was given*.
+- The **checker is the only proven component.** It replays the LRAT proof
+  against the CNF and confirms the empty clause is derivable. Its soundness
+  theorem is discharged in Lean 4, sorry-free and CI-gated (see below).
+- The **query-to-CNF translation is trusted but not proven.** That covers the
+  front ends, rewriting, bit-blasting, AIG construction and Tseitin encoding.
+  The checker certifies the CNF, not the query, so a bug here yields a
+  *certified* wrong answer. #182 was exactly that. The defence is tests at
+  every width and the Z3 differential. The structural fix is tracked in #192.
+  See [docs/formal-verification.md](docs/formal-verification.md) for the exact
+  scope.
 
 ### Verifying the checker: Aeneas → Lean
 

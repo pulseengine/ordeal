@@ -160,7 +160,8 @@ Two developer notes:
 
 With the theorem discharged, an `Unsat` from ordeal is backed by a certificate
 whose acceptance criterion is **formally proved** to imply unsatisfiability
-(modulo the residual trust base above) — not merely validated by a
+of the CNF it was checked against (modulo the residual trust base above;
+that the CNF encodes the intended query is not proved, see #182/#192) — not merely validated by a
 mutation-tested Rust checker. There is no open mathematics and no open
 freshness gap: the model is regenerated under the same required CI job that
 proves it.
