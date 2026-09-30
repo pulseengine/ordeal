@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Shift and rotate proofs now cover every width** (#201). The Lean
+  theorems `blast_shl_bitvec`, `blast_lshr_bitvec`, `blast_ashr_bitvec` and
+  `blast_rotr_bitvec` assumed a power-of-two width (`2 ^ stages = w`); at
+  any other width they said nothing, and the Lean-proven reference copy of
+  the blaster (`blast_kernel.rs`) rotated wrongly there for amounts `>= w`
+  (e.g. width 3, `a = #b001`, `b = #b100`: reference `#b001`, SMT-LIB and
+  the shipped blaster `#b100`). The reference copy now mirrors the shipped
+  blaster exactly — `ceil(log2 w)` stages computed by a halving loop
+  (proved exact), the out-of-range test over the amount bits above the
+  stages, and `rotr` reducing the amount mod `w` with `blast_urem` at
+  non-power-of-two widths — and the four theorems take only `0 < w`: no
+  width hypothesis remains. The rotate capstone lives in the new
+  `lean/BlasterRotr.lean` (it composes the barrel with the divider);
+  `AxiomCheck.lean` pins all four capstones axiom-clean. The mirror-to-real
+  differential compares `rotr` on its full amount domain at every width,
+  and a new test pins the mirror's stage count against the shipped formula
+  and `is_power_of_two`. No change to what the solver decides.
+
 ## [0.23.0] - 2026-09-30
 
 **Trust-integrity release** (#184–#189). Every claim ordeal makes about

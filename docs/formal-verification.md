@@ -180,16 +180,24 @@ required job directly. (History: freshness was originally enforced by a
 separate drift-diff workflow — issue #44 — which this construction absorbed
 and retired; see `docs/design/checker-single-sourcing.md`.)
 
-**Width scope of the blaster proofs.** The shift and rotate theorems
-(`blast_shl_bitvec`, `blast_lshr_bitvec`, `blast_ashr_bitvec`,
-`blast_rotr_bitvec`) assume a power-of-two width (`hpow : 2 ^ stages = w`).
-At other widths shifts and rotations are covered by tests and the Z3
-differential only, not by proof. `blast_kernel.rs`'s `rotr` is wrong there
-for amounts `>= w`. The real blaster is right (#182). The
-reference-to-real differential test (VER-051) compares every mirrored op
-exhaustively at widths 1 to 8, sampled at 9 to 16, and sampled at wider
-widths up to 128. At non-power-of-two widths it compares `rotr` only for
-amounts `< w`. Tracked in #201.
+**Width scope of the blaster proofs.** Every blaster theorem holds at
+every width `w >= 1`, the shift and rotate theorems included. Until #201
+the four of them (`blast_shl_bitvec`, `blast_lshr_bitvec`,
+`blast_ashr_bitvec`, `blast_rotr_bitvec`) assumed a power-of-two width
+(`hpow : 2 ^ stages = w`), and the reference copy's `rotr` was wrong at
+other widths for amounts `>= w`. Now the reference copy mirrors the real
+blaster (#182/#183) exactly: `stage_count` is `ceil(log2 w)` (proved exact
+in `stage_count_spec`: `2^(stages-1) < w <= 2^stages`), the out-of-range
+test covers the amount bits above the stages, and `rotr` reduces the
+amount mod `w` with `blast_urem` at non-power-of-two widths. The three
+shift theorems (`lean/BlasterShift.lean`) and the rotate theorem
+(`lean/BlasterRotr.lean`, after the divider proofs it composes with) take
+only `0 < w` and a capacity bound; there is no width hypothesis left. The
+reference-to-real differential test (VER-051) compares every mirrored op,
+`rotr` on its full amount domain, exhaustively at widths 1 to 8, sampled
+at 9 to 16, and sampled at wider widths up to 128; it also pins the
+mirror's `stage_count` against the real formula and `is_power_of_two` at
+every width up to 4096 and at the `usize` extremes.
 
 What this does **not** discharge: Charon/Aeneas translation faithfulness at
 the pinned revisions. That residual is the target of the adversarial
