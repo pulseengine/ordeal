@@ -14,6 +14,10 @@ project:
     - aspice
     # Per-level ASPICE V-closure at severity error (TR-047) — schemas/ordeal-v-closure.yaml
     - ordeal-v-closure
+    # Dogfooding (#191): ordeal records its own certificate bundles and its
+    # release supply chain with the evidence types it asks consumers to use.
+    - ordeal-certificate
+    - supply-chain
 
 # Release readiness (TR-047). `require: coverage` also derives readiness from
 # the V-closure rules; the TEETH are the error-severity rules in
@@ -53,48 +57,8 @@ commits:
     - scripts/
     - lean/
 
-externals:
-  loom:
-    git: https://github.com/pulseengine/loom.git
-    ref: main
-    prefix: loom
-
-  synth:
-    git: https://github.com/pulseengine/synth.git
-    ref: main
-    prefix: synth
-
-  gale:
-    git: https://github.com/pulseengine/gale.git
-    ref: main
-    prefix: gale
-
-  kiln:
-    git: https://github.com/pulseengine/kiln.git
-    ref: main
-    prefix: kiln
-
-  sigil:
-    git: https://github.com/pulseengine/sigil.git
-    ref: main
-    prefix: sigil
-
-  scry:
-    git: https://github.com/pulseengine/scry.git
-    ref: main
-    prefix: scry
-
-  jess:
-    git: https://github.com/pulseengine/jess.git
-    ref: main
-    prefix: jess
-
-  relay:
-    git: https://github.com/pulseengine/relay.git
-    ref: main
-    prefix: relay
-
-  witness:
-    git: https://github.com/pulseengine/witness.git
-    ref: main
-    prefix: witness
+# Externals removed 2026-09-30 (#191, maintainer decision). The 9 entries
+# floated on ref: main with no rivet.lock, CI never synced them, ordeal had
+# no outbound prefix:ID links, and their unprefixed IDs produced false
+# cross-repo backlinks (rivet#1015). Re-add a specific repo, locked and
+# synced in CI, when ordeal actually links into it.

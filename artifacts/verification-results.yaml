@@ -2494,3 +2494,28 @@ artifacts:
         target: VER-057
       - type: part-of-execution
         target: VE-046
+
+  - id: VE-047
+    type: verification-execution
+    title: Dogfooded evidence verified with negative controls (VER-058)
+    status: implemented
+    description: "Both bundles deleted and regenerated from their recorded recheck commands: rc 0, 534 and 2904 clauses re-checked by ordeal-lrat, bytes identical to the cited-source sha256 stamps. Z3 reports both queries unsat. Tampering one bundle byte: rivet validate reports the cited-source sha256 mismatch (warning severity). Removing verification-result from a certificate: rivet validate FAIL with V-ordeal-cert-recheck-gates-verifies. gh attestation verify on all 7 v0.23.0 release assets (6 archives + wasm): verified, predicate https://slsa.dev/provenance/v1. SBOM digest and components read from the published ordeal-0.23.0.cdx.json. rivet validate with both schemas loaded and externals removed: PASS, 0 warnings, and the 'cross-refs NOT CHECKED' notice is gone."
+    fields:
+      environment: "note: macOS arm64, local, rivet 0.39.0, gh attestation, Z3 via Homebrew; branch chore/rivet-externals-schemas-191 on main @ dda8e3e"
+      executor: local
+      timestamp: 2026-09-30T17:09:40Z
+      version: dda8e3e
+
+  - id: VV-104
+    type: verification-verdict
+    title: VER-058 pass — ordeal's own evidence validates, regenerates and re-checks
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-047
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-058
+      - type: part-of-execution
+        target: VE-047
