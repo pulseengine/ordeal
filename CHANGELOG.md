@@ -14,7 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Shifts and rotations at non-power-of-two widths were mis-encoded**
   (`bvshl`, `bvlshr`, `bvashr`, `rotate_left`, `rotate_right`, and the
-  `bvrotl` lowering). This affected every release from 0.8.0 through 0.22.0.
+  `bvrotl` lowering). This affected every published release from 0.2.0
+  through 0.22.0: the library API since 0.2.0, and the `ordeal check` CLI in
+  every release that has it. (An earlier draft of this entry said 0.8.0; that
+  was only the oldest CLI tested.)
   - The barrel shifter used too few stages at widths such as 3, 5, 12 or 24.
   - Release builds could answer `unsat` to a satisfiable query, *with a
     certificate that re-checks*: the checker certifies the CNF it is given,
