@@ -22,6 +22,7 @@ import BlasterCmp
 import BlasterShift
 import BlasterMul
 import BlasterDiv
+import BlasterRotr
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -48,6 +49,21 @@ import BlasterDiv
 /-- info: 'blast_kernel.spec.blast_sign_ext_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms blast_kernel.spec.blast_sign_ext_bitvec
+
+-- The shift / rotate family at EVERY width (issue #201): the three shift
+-- capstones (BlasterShift.lean) and the rotate capstone (BlasterRotr.lean,
+-- which composes the barrel with the divider's `blast_urem`).
+/-- info: 'blast_kernel.spec.blast_shl_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.blast_shl_bitvec
+
+/-- info: 'blast_kernel.spec.blast_lshr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.blast_lshr_bitvec
+
+/-- info: 'blast_kernel.spec.blast_ashr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.blast_ashr_bitvec
 
 /-- info: 'blast_kernel.spec.blast_rotr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in

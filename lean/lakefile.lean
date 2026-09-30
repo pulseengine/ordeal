@@ -41,10 +41,11 @@ lean_lib «Sound» {}
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterCmp» {}
 
--- Correctness of the barrel-shifter blaster family (issue #68):
--- out_of_range, barrel_right/left/rotr stages, barrel_right, and
--- blast_shl / blast_lshr / blast_ashr / blast_rotr against BitVec
--- semantics (<<<' / >>> / sshiftRight / rotateRight), width w = 2^stages.
+-- Correctness of the barrel-shifter blaster family (issue #68, every width
+-- since #201): stage_count (ceil log2 w, exact), word_const, out_of_range,
+-- barrel_right/left/rotr stages, barrel_right, rotr_stages, and
+-- blast_shl / blast_lshr / blast_ashr against BitVec semantics
+-- (<<< / >>> / sshiftRight), for EVERY width w ≥ 1.
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterShift» {}
 
@@ -60,6 +61,12 @@ lean_lib «Sound» {}
 -- core's umod already has the SMT-LIB x%0 = x semantics), unbounded width.
 -- Same discipline as BlasterProof: `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterDiv» {}
+
+-- Correctness of blast_rotr at EVERY width w ≥ 1 (issue #201): the rotate
+-- capstone composes the rotate barrel (BlasterShift) with the divider
+-- (BlasterDiv) — at a non-power-of-two width the amount is reduced mod w
+-- by blast_urem first — so it lives after both. `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterRotr» {}
 
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —

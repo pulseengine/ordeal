@@ -2444,3 +2444,28 @@ artifacts:
         target: VER-055
       - type: part-of-execution
         target: VE-044
+
+  - id: VE-045
+    type: verification-execution
+    title: Every-width shift/rotate proofs re-verified independently (VER-056)
+    status: implemented
+    description: "Implemented by a background agent; re-run independently in its worktree: generated models deleted and regenerated with lean/regen.sh all (rc 0; Kernel.lean 0 axioms, BlastKernel.lean 0 axioms); cd lean && lake build: Build completed successfully (1714 jobs), 0 'declaration uses sorry'; scripts/axiom_check.sh: capstones depend only on propext / Classical.choice / Quot.sound; no theorem hypothesis named hpow remains (the remaining occurrences are local derived facts). cargo test -p ordeal --lib blast_kernel: 4 passed debug (after forcing a rebuild: the first debug run reused a stale binary from the agent's negative control and failed at rotr w=3 a=1 b=4; the committed source passes) and 4 passed release; full ordeal lib 199 passed. Agent-reported negative control: forcing the no-reduction rotr path fails at w=3 a=0x1 b=0x4, mirror #b001, real #b100."
+    fields:
+      environment: "note: macOS arm64, local, pinned Charon/Aeneas via nix; branch proof/non-pow2-shift-rotate-201 @ 62ed5d2 on main 8647b3b"
+      executor: local
+      timestamp: 2026-09-30T14:26:51Z
+      version: 62ed5d2
+
+  - id: VV-102
+    type: verification-verdict
+    title: VER-056 pass — shift and rotate proven at every width
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-045
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-056
+      - type: part-of-execution
+        target: VE-045

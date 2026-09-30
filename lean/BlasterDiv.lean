@@ -2085,7 +2085,8 @@ theorem blast_sub_frame (aig : Aig) (a b : Slice Lit)
       p.1.val.length = a.val.length ∧
       aig.nodes.val <+: p.2.nodes.val ∧
       p.2.nodes.val.length = aig.nodes.val.length + 9 * a.val.length ∧
-      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ⦄ := by
+      (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
+      (∀ l ∈ p.1.val, l.node.val < p.2.nodes.val.length) ⦄ := by
   unfold blast_sub
   step with (word_not_spec b) as ⟨nb, hnb⟩
   have hderef : (alloc.vec.Vec.deref nb).val = nb.val := rfl
@@ -2105,8 +2106,8 @@ theorem blast_sub_frame (aig : Aig) (a b : Slice Lit)
       < aig.nodes.val.length := by scalar_tac
   step with (ripple_carry_spec aig a (alloc.vec.Vec.deref nb) _
     (by omega) hcap ha hnbrng hcin) as
-    ⟨sum, carry, aig1, h1, h2, h3, h4, _, _, _, _⟩
-  exact ⟨h1, h2, h3, h4⟩
+    ⟨sum, carry, aig1, h1, h2, h3, h4, h5, _, _, _⟩
+  exact ⟨h1, h2, h3, h4, h5⟩
 
 /-- `blast_udiv`, frame AND semantics in one spec (via `spec_and`): the
     #101 composition needs the structural facts to thread the later
@@ -2244,7 +2245,7 @@ theorem blast_urem_bitvec (aig : Aig) (a b : Slice Lit)
       (by omega) (by omega) ha2 hprng' hne2)
     (blast_sub_bitvec aig2 a (alloc.vec.Vec.deref prod)
       (by omega) (by omega) ha2 hprng' hne2 h02 A (A.smtUDiv B * B)))
-  rintro ⟨out, aig3⟩ ⟨⟨_, hpre3, _, hwf3⟩, hsimS⟩
+  rintro ⟨out, aig3⟩ ⟨⟨_, hpre3, _, hwf3, _⟩, hsimS⟩
   intro inputs hwfI
   have hwfI1 : AigWF aig1.nodes.val inputs.val.length := hwf1 _ hwfI
   have hwfI2 : AigWF aig2.nodes.val inputs.val.length := hwf2 _ hwfI1

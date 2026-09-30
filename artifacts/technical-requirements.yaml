@@ -1546,7 +1546,7 @@ artifacts:
     fields:
       priority: must
       req-type: safety
-      verification-criteria: "The three mirror-vs-real tests pass in debug and release; a mutated real rule (mul, shift out-of-range) fails them; lifting the documented rotr restriction at non-power-of-two widths fails them, with the disagreement recorded in #201."
+      verification-criteria: "The mirror-vs-real tests pass in debug and release; a mutated real rule (mul, shift out-of-range) fails them; every pair, rotr included, is compared on its full operand domain at every width (the rotr restriction at non-power-of-two widths recorded in #201 is lifted, the reference copy now reducing the amount mod w like the real blaster)."
     links:
       - type: derives-from
         target: SYS-003
@@ -1591,3 +1591,24 @@ artifacts:
         target: TR-053
       - type: allocated-to
         target: ARC-013
+
+  - id: TR-056
+    type: sw-req
+    title: The shift and rotate blaster proofs hold at every width, and the Lean-proven reference matches the shipped blaster there (#201)
+    status: verified
+    release: v0.24.0
+    description: "Defect #201 (found by the #185 mirror-to-real differential): the Lean theorems blast_shl/lshr/ashr/rotr_bitvec assumed a power-of-two width (hpow), so shifts and rotations at other widths, where #182 lived, had no proof; the reference blaster's rotr did not reduce the amount mod w and was wrong there for amounts >= w. The requirement: the reference copy computes ceil(log2 w) stages and reduces rotr amounts mod w exactly as the shipped blaster does, and the four headline theorems hold for every width w > 0 with no width hypothesis, axiom-clean."
+    tags: [soundness, lean, blaster, shift, rotate, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: lake build succeeds from freshly regenerated models with zero sorry and zero axioms in the generated models; AxiomCheck pins all four capstones to propext/Classical.choice/Quot.sound; no theorem carries hpow; the mirror-to-real differential compares rotr on its full amount domain at every width and passes in debug and release; forcing the old no-reduction path fails it at w=3 a=1 b=4.
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-049
+      - type: traces-to
+        target: TR-051
+      - type: allocated-to
+        target: ARC-003

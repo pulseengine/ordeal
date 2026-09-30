@@ -393,8 +393,54 @@ pub fn blast_sign_ext(a: &[Lit], by: usize) -> Vec<Lit> {
     out
 }
 
-/// `amount >= width`: OR of the amount bits at position `log2 w` and above
-/// (width is a power of two). Mirrors `blast/shift.rs::out_of_range`.
+/// Barrel stages for a width `w >= 1`, and whether `w` is a power of two.
+/// Mirrors `blast/shift.rs::stage_count` — `ceil(log2 w)`, the bit length
+/// of `w - 1`, which the real blaster spells `usize::BITS - (w - 1)
+/// .leading_zeros()`; `leading_zeros` has no Aeneas model, so the mirror
+/// halves `w - 1` to zero and counts the rounds. `w` is a power of two
+/// exactly when every bit of `w - 1` below that length is set (`w - 1 =
+/// 2^stages - 1`), which the same loop records — the real `blast_rotr`
+/// tests `w.is_power_of_two()`. Stage `k` shifts by `2^k`, `2^(stages-1)
+/// < w <= 2^stages`, so `stages <= w` and no stage exceeds the width
+/// (issue #201; the Lean spec `stage_count_spec` proves all of this).
+pub fn stage_count(w: usize) -> (usize, bool) {
+    let mut t = w - 1;
+    let mut stages = 0usize;
+    let mut pow2 = true;
+    while t > 0 {
+        // `% 2 == 1`, not `is_multiple_of`: that std call has no Aeneas
+        // model (it would extract as an opaque `axiom`, which CI rejects).
+        pow2 = pow2 && t % 2 == 1;
+        t /= 2;
+        stages += 1;
+    }
+    (stages, pow2)
+}
+
+/// The `w`-bit constant word for `value` (bit `k` is `value`'s bit `k`,
+/// LSB first, as TRUE / FALSE literals). Mirrors `aig::word_const`; the
+/// bits are peeled off with `% 2` / `/ 2` (no shifts, so no width limit
+/// and nothing outside the Aeneas fragment). No gates.
+pub fn word_const(value: usize, w: usize) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let mut v = value;
+    let mut k = 0usize;
+    while k < w {
+        if v % 2 == 1 {
+            out.push(lit_true());
+        } else {
+            out.push(lit_false());
+        }
+        v /= 2;
+        k += 1;
+    }
+    out
+}
+
+/// `amount >= 2^stages`: OR of the amount bits above the barrel stages.
+/// Together with the barrel itself (which shifts everything out for any
+/// combined amount in `w..2^stages`) this realises `amount >= w`. Mirrors
+/// `blast/shift.rs::out_of_range`.
 pub fn out_of_range(aig: &mut Aig, b: &[Lit], stages: usize) -> Lit {
     let mut acc = lit_false();
     let w = b.len();
@@ -421,13 +467,13 @@ pub fn barrel_right_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize, fill: 
     next
 }
 
-/// Barrel right-shifter with SMT-LIB out-of-range semantics: `stages`
-/// mux-stages then an all-`fill` mux on out-of-range. Mirrors
-/// `blast/shift.rs::barrel_right`. Width must be a power of two with
-/// `stages = log2 w` (the Lean spec hypothesizes it).
-pub fn barrel_right(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize, fill: Lit) -> Vec<Lit> {
+/// Barrel right-shifter with SMT-LIB out-of-range semantics:
+/// `ceil(log2 w)` mux-stages then an all-`fill` mux on out-of-range.
+/// Mirrors `blast/shift.rs::barrel_right` at every width `w >= 1`.
+pub fn barrel_right(aig: &mut Aig, a: &[Lit], b: &[Lit], fill: Lit) -> Vec<Lit> {
     let mut cur: Vec<Lit> = Vec::new();
     let w = a.len();
+    let (stages, _pow2) = stage_count(w);
     let mut i = 0usize;
     while i < w {
         cur.push(a[i]);
@@ -466,9 +512,11 @@ pub fn barrel_left_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize) -> Vec<
 }
 
 /// `bvshl` — barrel left-shifter; zero when the amount is >= width.
-pub fn blast_shl(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+/// Mirrors `blast/shift.rs::blast_shl` at every width `w >= 1`.
+pub fn blast_shl(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let mut cur: Vec<Lit> = Vec::new();
     let w = a.len();
+    let (stages, _pow2) = stage_count(w);
     let mut i = 0usize;
     while i < w {
         cur.push(a[i]);
@@ -493,14 +541,14 @@ pub fn blast_shl(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit>
 }
 
 /// `bvlshr` — zero-fill right shift.
-pub fn blast_lshr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
-    barrel_right(aig, a, b, stages, lit_false())
+pub fn blast_lshr(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    barrel_right(aig, a, b, lit_false())
 }
 
 /// `bvashr` — sign-fill right shift; all sign when the amount is >= width.
-pub fn blast_ashr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+pub fn blast_ashr(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let sign = a[a.len() - 1];
-    barrel_right(aig, a, b, stages, sign)
+    barrel_right(aig, a, b, sign)
 }
 
 /// One rotate-right stage by `2^k` gated on `sel`: bit i becomes
@@ -518,9 +566,10 @@ pub fn rotr_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize) -> Vec<Lit> {
     next
 }
 
-/// `bvrotr` — rotate right by amount mod width; only the low `log2 w` amount
-/// bits matter (power-of-two width).
-pub fn blast_rotr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit> {
+/// The rotate-right barrel: `stages` rounds, round `k` rotating by `2^k`
+/// gated on `amount[k]`. Rotates by the value of the low `stages` amount
+/// bits (mod `w`).
+pub fn rotr_stages(aig: &mut Aig, a: &[Lit], amount: &[Lit], stages: usize) -> Vec<Lit> {
     let mut cur: Vec<Lit> = Vec::new();
     let w = a.len();
     let mut i = 0usize;
@@ -531,10 +580,28 @@ pub fn blast_rotr(aig: &mut Aig, a: &[Lit], b: &[Lit], stages: usize) -> Vec<Lit
     let mut k = 0usize;
     while k < stages {
         let s = 1usize << k;
-        cur = rotr_stage(aig, &cur, b[k], s);
+        cur = rotr_stage(aig, &cur, amount[k], s);
         k += 1;
     }
     cur
+}
+
+/// `bvrotr` — rotate right by amount mod width, at every width `w >= 1`.
+/// Mirrors `blast/shift.rs::blast_rotr`: for a power-of-two width only the
+/// low `log2 w` amount bits matter (higher bits vanish mod `w`); for any
+/// other width the amount is first reduced mod `w` with `blast_urem`
+/// against the constant word `w`, and the reduced amount `< w <=
+/// 2^stages` drives the barrel (issue #201).
+pub fn blast_rotr(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let w = a.len();
+    let (stages, pow2) = stage_count(w);
+    if pow2 {
+        rotr_stages(aig, a, b, stages)
+    } else {
+        let modulus = word_const(w, w);
+        let reduced = blast_urem(aig, b, &modulus);
+        rotr_stages(aig, a, &reduced, stages)
+    }
 }
 
 /// Full adder: `(sum, carry_out)` for one bit column. Mirrors
@@ -689,10 +756,33 @@ mod tests {
     //!   real blaster =(this differential)= model =(Lean, all widths)= BitVec
     //! is what replaces "trust the mirroring was faithful". This link is
     //! test evidence (bounded), stated as such — not smuggled into the
-    //! unbounded claim. One known gap: `rotr` at non-power-of-two widths
-    //! agrees only on amounts `< w` (see `rotr_full_domain_at`).
+    //! unbounded claim. Every pair — `rotr` included — is compared on the
+    //! FULL operand domain at every width (issue #201 closed the last
+    //! restriction, `rotr` on amounts `< w` at non-power-of-two widths).
 
     use super::*;
+
+    /// The mirror's `stage_count` IS the real `blast::shift::stage_count`
+    /// (`ceil(log2 w)` as `usize::BITS - (w - 1).leading_zeros()`) and its
+    /// power-of-two flag IS `usize::is_power_of_two`, at every width the
+    /// solver accepts and well beyond — the two functions the mirror can
+    /// not call (no Aeneas model) pinned against their std spellings.
+    #[test]
+    fn stage_count_matches_real_formula_and_is_power_of_two() {
+        for w in 1usize..=4096 {
+            let real = (usize::BITS - (w - 1).leading_zeros()) as usize;
+            assert_eq!(stage_count(w), (real, w.is_power_of_two()), "w={w}");
+        }
+        for w in [
+            usize::MAX / 2,
+            usize::MAX / 2 + 1,
+            usize::MAX / 2 + 2,
+            usize::MAX,
+        ] {
+            let real = (usize::BITS - (w - 1).leading_zeros()) as usize;
+            assert_eq!(stage_count(w), (real, w.is_power_of_two()), "w={w}");
+        }
+    }
 
     /// Build two w-bit input words in the model, mirroring `word_input`.
     fn model_inputs(aig: &mut Aig, w: usize) -> (Vec<Lit>, Vec<Lit>) {
@@ -717,9 +807,6 @@ mod tests {
         name: String,
         real: Vec<crate::aig::Lit>,
         model: Vec<Lit>,
-        /// Compare only when the `b` operand is `< w` (see
-        /// [`rotr_full_domain_at`]); every other pair compares always.
-        b_below_width_only: bool,
     }
 
     /// Both AIGs with every mirrored rule blasted once over shared inputs:
@@ -729,14 +816,6 @@ mod tests {
         raig: crate::aig::Aig,
         maig: Aig,
         pairs: Vec<DiffPair>,
-    }
-
-    /// Barrel stages for width `w`: `ceil(log2 w)`, the formula of the real
-    /// `blast::shift::stage_count` (0 at `w = 1`). The mirror takes it as an
-    /// explicit argument; passing the real value is what makes the two
-    /// circuits comparable at every width.
-    fn stages_for(w: usize) -> usize {
-        (usize::BITS - (w - 1).leading_zeros()) as usize
     }
 
     /// `(hi, lo)` extract ranges for width `w`: every range for `w <= 8`,
@@ -767,9 +846,8 @@ mod tests {
         out
     }
 
-    /// Build the harness at width `w`. `rotr` is compared on its full
-    /// amount domain only where the mirror and the real rule agree there
-    /// (see [`rotr_full_domain_at`]).
+    /// Build the harness at width `w`. Every pair, `rotr` included, is
+    /// compared on its full operand domain.
     fn build_harness(w: usize) -> DiffHarness {
         use crate::aig as real;
         use crate::blast::{arith, bitwise, muldiv, shift, structural};
@@ -780,7 +858,6 @@ mod tests {
         type ModelPredOp = fn(&mut Aig, &[Lit], &[Lit]) -> Lit;
 
         let wu = w as u32;
-        let stages = stages_for(w);
         let mut raig = real::Aig::new();
         let ra = real::word_input(&mut raig, wu);
         let rb = real::word_input(&mut raig, wu);
@@ -791,16 +868,9 @@ mod tests {
         let mc = push_input(&mut maig, 2 * w);
 
         let mut pairs: Vec<DiffPair> = Vec::new();
-        let rotr_restricted = !rotr_full_domain_at(w);
         let mut push = |name: String, real: Vec<real::Lit>, model: Vec<Lit>| {
             assert_eq!(real.len(), model.len(), "{name} w={w}: width mismatch");
-            let b_below_width_only = rotr_restricted && name == "rotr";
-            pairs.push(DiffPair {
-                name,
-                real,
-                model,
-                b_below_width_only,
-            });
+            pairs.push(DiffPair { name, real, model });
         };
 
         let word_ops: [(&str, RealWordOp, ModelWordOp); 9] = [
@@ -853,19 +923,19 @@ mod tests {
         let m = blast_ite(&mut maig, mc, &ma, &mb);
         push("ite".to_string(), r, m);
 
-        // Shifts: the mirror gets the real stage count explicitly.
+        // Shifts and rotate: both sides derive the stage count (and the
+        // rotr mod-w reduction) from the width themselves.
         let r = shift::blast_shl(&mut raig, &ra, &rb);
-        let m = blast_shl(&mut maig, &ma, &mb, stages);
+        let m = blast_shl(&mut maig, &ma, &mb);
         push("shl".to_string(), r, m);
         let r = shift::blast_lshr(&mut raig, &ra, &rb);
-        let m = blast_lshr(&mut maig, &ma, &mb, stages);
+        let m = blast_lshr(&mut maig, &ma, &mb);
         push("lshr".to_string(), r, m);
         let r = shift::blast_ashr(&mut raig, &ra, &rb);
-        let m = blast_ashr(&mut maig, &ma, &mb, stages);
+        let m = blast_ashr(&mut maig, &ma, &mb);
         push("ashr".to_string(), r, m);
         let r = shift::blast_rotr(&mut raig, &ra, &rb);
-        let m = blast_rotr(&mut maig, &ma, &mb, stages);
-        // At non-power-of-two widths `push` restricts this pair to b < w.
+        let m = blast_rotr(&mut maig, &ma, &mb);
         push("rotr".to_string(), r, m);
 
         // Structural plumbing (gate-free).
@@ -905,21 +975,6 @@ mod tests {
         }
     }
 
-    /// Whether the mirror's `blast_rotr` matches the real one over the FULL
-    /// amount domain at width `w`: power-of-two widths only. The real rule
-    /// (fixed in #182) reduces the amount mod `w` with `blast_urem` at
-    /// non-power-of-two widths; the mirror rotates by the low `stages`
-    /// amount bits with no reduction — its Lean precondition is a
-    /// power-of-two width with `stages = log2 w`. At non-power-of-two widths
-    /// the two agree exactly on in-range amounts `b < w` and disagree on
-    /// some `b >= w` (e.g. w=3, a=#b001, b=#b100: mirror #b001, real #b100,
-    /// SMT-LIB rotr by 4 mod 3 = 1 gives #b100). Recorded in issue #185;
-    /// the mirror is the Lean-proven model and is deliberately not changed
-    /// here, so rotr is compared on `b < w` only at those widths.
-    fn rotr_full_domain_at(w: usize) -> bool {
-        w.is_power_of_two()
-    }
-
     /// Simulate one `(a, b, cond)` assignment on both sides and assert
     /// every pair agrees bit-for-bit.
     fn check_diff(h: &DiffHarness, a: u128, b: u128, cond: bool) {
@@ -933,9 +988,6 @@ mod tests {
         let rvals = h.raig.simulate(&inputs);
         let mvals = simulate(&h.maig, &inputs);
         for p in &h.pairs {
-            if p.b_below_width_only && b >= w as u128 {
-                continue;
-            }
             let agree = p.real.len() == p.model.len()
                 && p.real
                     .iter()
@@ -1022,9 +1074,8 @@ mod tests {
     /// Issue #185(b): EXHAUSTIVE at every width 1..=8 — every `(a, b)` pair
     /// through every mirrored rule on both sides (and/or/xor, add, sub,
     /// ult/ule/ugt/uge, slt/sle/sgt/sge, eq/ne, ite, extract, concat,
-    /// zero_ext, sign_ext, shl/lshr/ashr, mul, udiv/urem/udivrem, rotr; at
-    /// non-power-of-two widths rotr only on amounts `b < w` — see
-    /// [`rotr_full_domain_at`]). `ite`'s
+    /// zero_ext, sign_ext, shl/lshr/ashr, mul, udiv/urem/udivrem, rotr —
+    /// rotr on its FULL amount domain at every width, #201). `ite`'s
     /// condition is exhaustive too: every pair runs under both values.
     #[test]
     fn model_matches_real_blaster_every_op_exhaustive_widths_1_to_8() {

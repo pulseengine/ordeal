@@ -1308,7 +1308,7 @@ artifacts:
     title: Reference blaster matches the real blaster on every op, widths 1..=8 exhaustive and sampled to 128 (TR-051)
     status: verified
     release: v0.23.0
-    description: "Three tests in blast_kernel.rs build every mirrored rule on both sides over shared inputs and compare every output bit via AIG simulation. They replace the width-8-only test. rotr at non-power-of-two widths is compared on amounts below the width only, because the reference copy (like its Lean theorem, which assumes a power-of-two width) does not reduce the amount mod w; the gap is tracked in #201."
+    description: "Three tests in blast_kernel.rs build every mirrored rule on both sides over shared inputs and compare every output bit via AIG simulation. They replace the width-8-only test. Originally rotr at non-power-of-two widths was compared on amounts below the width only, because the reference copy (like its Lean theorem, which assumed a power-of-two width) did not reduce the amount mod w (#201). Since #201 the reference copy mirrors the real blaster at every width (ceil(log2 w) stages; rotr reduces the amount mod w with blast_urem), every pair including rotr is compared on its full operand domain, and a fourth test pins the mirror's stage_count against the real formula and is_power_of_two."
     tags: [blaster, differential, negative-control]
     fields:
       coverage: "and/or/xor/add/sub/mul/udiv/urem/udivrem, 8 comparisons, eq/ne, ite, shl/lshr/ashr, rotr, extract, concat, zero_ext, sign_ext: exhaustive w1..8, sampled w9..16 (4096/width) and 12 wider widths to 128 (128/width); negative controls on real mul and shift"
@@ -1346,3 +1346,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-055
+
+  - id: VER-056
+    type: sw-verification
+    title: Shift/rotate capstones proven at every width, axiom-clean; reference matches shipped blaster on the full rotr domain (TR-056)
+    status: verified
+    release: v0.24.0
+    description: "Lean: blast_shl_bitvec, blast_lshr_bitvec, blast_ashr_bitvec (lean/BlasterShift.lean) and blast_rotr_bitvec (lean/BlasterRotr.lean) take 0 < w and no power-of-two hypothesis; AxiomCheck.lean pins all four. Rust: the blast_kernel differential compares every op including rotr on the full amount domain at every tested width, plus a test pinning the reference stage count against the shipped formula."
+    tags: [lean, proof, differential]
+    fields:
+      coverage: 4 generalized capstones with axiom pins; regenerated models 0 axioms; mirror-vs-real differential full domain w1..8 exhaustive, sampled to 128; stage-count test
+      method: automated-test
+      steps: "run: cd lean && lake build && cd .. && bash scripts/axiom_check.sh && cargo test -p ordeal --lib -- blast_kernel::tests"
+    links:
+      - type: verifies
+        target: TR-056
