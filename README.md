@@ -166,15 +166,21 @@ formula → bit-blast → AIG → CNF → SAT solver ──unsat──▶ LRAT p
 
 Only `ordeal-lrat` is trusted. It is a small, dependency-free crate. The Rust
 source is translated to Lean 4 with [Aeneas](https://github.com/AeneasVerif/aeneas)
-and proven sound: an accepted proof means the formula really is unsatisfiable,
-and an accepted assignment really satisfies it. The bit-blasting rules are
-proven against Lean's `BitVec` semantics too. CI regenerates the Lean model
-from the Rust source before every proof build, so the proof cannot drift from
-the code.
+and proven sound: an accepted proof means the **CNF** really is
+unsatisfiable, and an accepted assignment really satisfies it. CI regenerates
+the Lean model from the Rust source before every proof build, so the proof
+cannot drift from the checker's code.
 
-A bug anywhere else can make ordeal fail to answer, but cannot make a wrong
-answer pass the checker. Details and exact scope:
-[docs/formal-verification.md](docs/formal-verification.md).
+**What the checker does not cover.** It certifies the CNF it is given, not
+your original query. The translation from query to CNF (parsing, rewriting,
+bit-blasting, CNF encoding) is not proven. A bug there can produce a wrong
+answer with a valid certificate; [#182](https://github.com/pulseengine/ordeal/issues/182)
+was such a bug. The bit-blasting rules are proven against Lean's `BitVec`
+semantics, but for a reference copy of the blaster, not the one the solver
+runs. A differential test ties the two together. That translation step is
+defended by tests and by a differential against Z3, not by proof.
+Closing that gap is tracked in [#192](https://github.com/pulseengine/ordeal/issues/192).
+Details and exact scope: [docs/formal-verification.md](docs/formal-verification.md).
 
 ## Documentation
 

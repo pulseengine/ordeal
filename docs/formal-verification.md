@@ -156,8 +156,15 @@ Qualifications, in the same spirit as for the UNSAT theorem:
   of `check_steps` plus the CNF being the one you intended.
 - **DIMACS parsing** (the `cnf: &[Vec<i32>]` is passed in already parsed).
 - **I/O, the WebAssembly component boundary, and the host embedding.**
-- **The solver.** ordeal's QF_BV engine that *emits* certificates is untrusted
-  by design; nothing about it is proved, and it never needs to be.
+- **The SAT search.** The CDCL engine that *emits* certificates is untrusted
+  by design. A bug there can only produce a certificate the checker rejects.
+- **The query-to-CNF translation.** The front ends, rewriting, the bit-blaster
+  the solver actually runs, AIG construction and Tseitin encoding are *not*
+  proven. This path is trusted: an encoding bug gives a **certified wrong
+  answer**, because the checker certifies the CNF it is given (#182). The
+  `BlastKernel.lean` proofs cover `blast_kernel.rs`, a reference copy of the
+  blaster. They reach the real blaster only through a differential test.
+  Closing the gap is tracked in #192.
 
 ## Model freshness: generated, not checked (TR-034)
 
