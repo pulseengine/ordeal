@@ -68,7 +68,7 @@ jobs:
         if: steps.detect.outputs.have_fuzz == 'true'
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-fuzz
+          tool: cargo-fuzz@0.13.2
 
       - name: Run each fuzz target for 60s
         if: steps.detect.outputs.have_fuzz == 'true'

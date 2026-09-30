@@ -100,7 +100,7 @@ jobs:
       - uses: taiki-e/install-action@v2
         if: steps.rel.outputs.skip != 'true'
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2
 
       - name: Re-generate and compare
         id: cmp

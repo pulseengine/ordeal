@@ -98,6 +98,10 @@ jobs:
       # before the release gate job.
       - name: Check release workflow order
         run: python3 scripts/check_release_order.py
+      # rivet: verifies VER-055
+      # #189: the trusted checker is pinned exactly (=X.Y.Z) by the solver.
+      - name: Check exact ordeal-lrat pin
+        run: python3 scripts/check_exact_lrat_pin.py
 
   # ── Reproducible build (VER-003 / SYS-005) ────────────────────────────
   # Two release builds of the same commit in different target dirs must be
@@ -124,7 +128,7 @@ jobs:
       # green, advisory red.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
       - name: Advisories — shipped closure (BLOCKING)
         run: cargo deny --exclude-dev check advisories
       - name: Advisories — full lockfile incl. dev/bench/optional (advisory)
@@ -191,6 +195,31 @@ jobs:
             target/release/ordeal \
             wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm
 
+  # ── macOS build + smoke (#189) ─────────────────────────────────────────
+  # Both darwin release archives were only ever built at tag time, so a
+  # darwin break first surfaced during a release cut. This builds and
+  # EXECUTES the release binary on the same runner family the release uses,
+  # and runs the CLI baseline tests.
+  macos:
+    name: macOS build + smoke
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: macos
+      - name: Build (release) and smoke the binary
+        run: |
+          set -euo pipefail
+          cargo build --release -p ordeal
+          BIN=target/release/ordeal
+          "$BIN" --version
+          printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' | "$BIN" check - | head -1 | grep -qx unsat
+          printf '(declare-const x (_ BitVec 3))\n(assert (= (bvshl x #b001) #b010))\n(check-sat)\n' | "$BIN" check - | head -1 | grep -qx sat
+      - name: CLI baseline tests
+        run: cargo test -p ordeal --test cli_baseline
+
   # ── musl build + SBOM smoke (#143/#144 de-risk) ───────────────────────
   # The release matrix's musl legs and the SBOM step only run at tag time;
   # this job proves both mechanisms on every PR so a breakage cannot first
@@ -218,7 +247,7 @@ jobs:
       - name: SBOM generation smoke (cargo-cyclonedx)
         run: |
           set -euo pipefail
-          cargo install --locked cargo-cyclonedx
+          cargo install --locked cargo-cyclonedx --version 0.5.9
           cargo cyclonedx --manifest-path crates/ordeal/Cargo.toml --format json --spec-version 1.5
           SBOM=$(find crates/ordeal -maxdepth 2 -name '*.cdx.json' | head -1)
           test -n "$SBOM" && test -f "$SBOM"
@@ -229,7 +258,7 @@ jobs:
       # at a tag cut (the #135 lesson).
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2
       - name: VEX generation smoke (release recipe)
         run: |
           set -euo pipefail
@@ -248,9 +277,10 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cross
+      # #189: the same pinned cross rev the release builds the shipped
+      # aarch64 binaries with (release.yml), not crates.io's 0.2.5.
+      - name: Install cross (pinned rev)
+        run: cargo install cross --git https://github.com/cross-rs/cross --rev 74e99b2223de06166f8cdcc1af7f1308ec52baf4 --locked
       - uses: Swatinem/rust-cache@v2
         with:
           key: cross-aarch64-musl
@@ -349,7 +379,7 @@ jobs:
           fi
       - name: Install elan
         run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh \
+          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/v4.2.4/elan-init.sh \
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - uses: actions/cache@v6

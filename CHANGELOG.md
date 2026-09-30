@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Supply chain and portability** (TR-055, #189).
+  - Every release and CI tool is pinned. CI and the release now use the same
+    `cross` revision, so CI tests the tool that builds the shipped aarch64
+    binaries.
+  - A macOS CI job builds and runs the binary on every change.
+  - `ordeal` now requires `ordeal-lrat = "=X.Y.Z"`, enforced in CI. A caret
+    requirement let consumers pair the solver with an untested checker
+    patch.
+  - Releases publish the `wasm32-wasip2` component inside the signed sums.
+    It must build byte-identically twice, and the wasm-native differential
+    runs on the exact published bytes.
 - **Gates that could pass while checking nothing now fail closed** (TR-052,
   #187):
   - The verification-citation checker crashed on string-shaped `steps` yet

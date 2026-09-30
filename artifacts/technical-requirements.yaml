@@ -1506,3 +1506,22 @@ artifacts:
         target: TR-047
       - type: allocated-to
         target: ARC-014
+
+  - id: TR-055
+    type: sw-req
+    title: Release tooling is pinned, darwin is built in CI, the checker is pinned exactly, and the wasm component ships signed (#189)
+    status: verified
+    release: v0.23.0
+    description: "Defect #189 (2026-09-30 audit): cross built the shipped aarch64 binaries from git HEAD while CI tested crates.io cross 0.2.5; cargo-cyclonedx, cargo-audit, cargo-deny and cargo-fuzz installed at latest; elan-init.sh came from master; macOS was never built in CI; ordeal depended on its trusted checker with a caret requirement, so a consumer could pair it with an untested checker patch; no wasm component was published, so consumers rebuilt their own untested one. The requirement: every release and CI tool is pinned, with CI and the release using the same cross rev; a macOS job builds and executes the binary on every change; ordeal requires ordeal-lrat =X.Y.Z, enforced in CI; the release publishes a reproducible wasm32-wasip2 component inside the signed sums, differentially tested on the exact published bytes."
+    tags: [supply-chain, release, wasm, defect]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: check_exact_lrat_pin.py passes and fails on a caret requirement; two wasm builds in separate target dirs are byte-identical; the published-command smoke gives unsat under wasmtime; actionlint is clean; check_release_order.py still passes with the wasm job; the v0.23.0 release run and verify_release.sh show the wasm component listed in the signed sums.
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: traces-to
+        target: TR-053
+      - type: allocated-to
+        target: ARC-013

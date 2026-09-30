@@ -2419,3 +2419,28 @@ artifacts:
         target: VER-054
       - type: part-of-execution
         target: VE-043
+
+  - id: VE-044
+    type: verification-execution
+    title: Supply-chain pins verified locally (VER-055)
+    status: implemented
+    description: "check_exact_lrat_pin.py: PASS with =0.22.1; with the previous caret requirement it fails (^0.22.1, exit 1). Two wasm32-wasip2 release builds in separate target dirs: identical sha256 23781f7128886016390615a436f542f20183d04b823e2342f191b7a81f7adcfb. The staged smoke command returns unsat under wasmtime. actionlint clean on ci.yml, release.yml, fuzz-smoke.yml, vex-reissue.yml. check_release_order.py PASS with build-wasm behind the gate. Tool pins match the versions CI resolved on 2026-09-30 (cargo-fuzz 0.13.2, cargo-deny 0.20.2, cargo-audit 0.22.2, cargo-cyclonedx 0.5.9, cross rev 74e99b2, elan v4.2.4). The macOS job and the published wasm are exercised first by CI on this change and by the v0.23.0 release."
+    fields:
+      environment: "note: macOS arm64, local; branch fix/supply-chain-pins on main @ 5d92120"
+      executor: local
+      timestamp: 2026-09-30T09:21:09Z
+      version: 5d92120
+
+  - id: VV-101
+    type: verification-verdict
+    title: VER-055 pass — checker pinned exactly; wasm component reproducible
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-044
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-055
+      - type: part-of-execution
+        target: VE-044
