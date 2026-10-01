@@ -1730,3 +1730,22 @@ artifacts:
         target: ARC-006
       - type: allocated-to
         target: ARC-011
+
+  - id: TR-063
+    type: sw-req
+    title: The trusted checker fails closed on arithmetic overflow in release builds, matching the proven model (#225)
+    status: verified
+    release: v0.27.0
+    description: The ordeal-lrat Lean proofs are about the Aeneas model, where every arithmetic operation fails on overflow. Release builds wrapped silently, so a missed overflow would make the shipped checker diverge from the proven model. The workspace release profile now enables overflow-checks for ordeal-lrat only, so overflow panics. This covers ordeal's own CLI and wasm builds; downstream workspaces that depend on ordeal-lrat must set the same profile override themselves, because Cargo applies profiles only from the root workspace (documented in consuming-ordeal.md).
+    tags: [soundness, checker, overflow]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "A release-profile test that overflows usize in ordeal-lrat panics, and passes only with the override (negative control: overflow-checks = false makes it fail); ordeal check output byte-identical on the fixture corpus; checker-heavy query (30 MB LRAT) slowdown under 2%."
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-062
+      - type: allocated-to
+        target: ARC-006

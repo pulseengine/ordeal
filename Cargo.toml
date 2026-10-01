@@ -13,3 +13,10 @@ authors = ["PulseEngine <https://github.com/pulseengine>"]
 opt-level = 3
 lto = true
 codegen-units = 1
+
+# #225: the trusted checker's Lean proofs are about the Aeneas model, where
+# every arithmetic operation FAILS on overflow. Release builds otherwise wrap
+# silently, so a missed overflow would make the shipped checker diverge from
+# the proven model. Fail closed instead: overflow panics.
+[profile.release.package.ordeal-lrat]
+overflow-checks = true

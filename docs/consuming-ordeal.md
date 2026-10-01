@@ -305,3 +305,19 @@ classifies the new advisory and a re-issue is published as
 `ordeal-<ver>.vex.r<N>.json` with its own cosign bundle (signing identity:
 the `vex-reissue.yml` workflow). Take the highest revision present; the
 release-time VEX is never overwritten, so the signed sums stay valid.
+
+## Building the trusted checker yourself (overflow checks)
+
+The `ordeal-lrat` soundness proofs are about a model in which every
+arithmetic operation fails on overflow. ordeal's own release builds (the CLI,
+the wasm component) enable `overflow-checks` for `ordeal-lrat`, so an
+overflow panics instead of wrapping (#225). Cargo applies profile settings
+only from the **root** workspace, so if you build `ordeal-lrat` (directly or
+through `ordeal`) in your own release profile, add the same override:
+
+```toml
+[profile.release.package.ordeal-lrat]
+overflow-checks = true
+```
+
+The measured cost is under 1% on a checker-heavy query (30 MB LRAT proof).
