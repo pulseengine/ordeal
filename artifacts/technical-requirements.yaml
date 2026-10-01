@@ -1688,3 +1688,22 @@ artifacts:
         target: TR-059
       - type: allocated-to
         target: ARC-003
+
+  - id: TR-061
+    type: sw-req
+    title: The solver lowers through a proven term-DAG encoder and a proven folding/hashing pass; an accepted certificate refutes the term DAG (#192 phase 3)
+    status: verified
+    release: v0.26.0
+    description: "Phase 3 of #192: the canonicalized assertions become a hash-consed term DAG (dag.rs, untrusted glue); the Lean-proven blast_kernel::encode builds the raw AIG by calling the proven rule for every node (encode_sound, over a DAG semantics defined directly on Lean BitVec); the proven blast_kernel::compact applies the constant folding and structural hashing (compact_sound, for ANY hints: the hints are untrusted advice it checks); the proven blast_kernel::tseitin emits the CNF; dag_refuted composes the three with lrat_check_sound, so a certificate the checker accepts refutes the DAG, not only the CNF. The phase-2 replay bridge leaves the production path. Shipped output must be unchanged."
+    tags: [soundness, blaster, "192"]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: lake build and the axiom gate pass from regenerated models with encode_sound, compact_sound, dag_refuted and dag_refuted_raw pinned axiom-clean; each capstone has a negative control (a one-line kernel mutation fails its proof); ordeal check --format json is byte-identical to the previous release binary on every fixture; production CNF digests identical over 1211 queries; compact with the computed hints is node-identical to the Aig::and replay and the kernel Tseitin is clause-identical to cnf::tseitin; Z3 differential passes; Kani tier check passes.
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-060
+      - type: allocated-to
+        target: ARC-003
