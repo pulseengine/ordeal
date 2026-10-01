@@ -87,6 +87,9 @@ jobs:
       - name: Run Kani (fast tier)
         uses: model-checking/kani-github-action@v1
         with:
+          # Pinned (#189 class): "latest" made the action query crates.io,
+          # and a failed lookup failed a job (run 36821560393, and_32).
+          kani-version: "0.68.0"
           args: ${{ steps.tier.outputs.args }}
 
   heavy:
@@ -111,6 +114,9 @@ jobs:
       - name: Run Kani (${{ matrix.harness }})
         uses: model-checking/kani-github-action@v1
         with:
+          # Pinned (#189 class): "latest" made the action query crates.io,
+          # and a failed lookup failed a job (run 36821560393, and_32).
+          kani-version: "0.68.0"
           args: ${{ steps.tier.outputs.args }}
 
   wide:
@@ -136,4 +142,7 @@ jobs:
       - name: Run Kani (${{ matrix.harness }})
         uses: model-checking/kani-github-action@v1
         with:
+          # Pinned (#189 class): "latest" made the action query crates.io,
+          # and a failed lookup failed a job (run 36821560393, and_32).
+          kani-version: "0.68.0"
           args: ${{ steps.tier.outputs.args }}
