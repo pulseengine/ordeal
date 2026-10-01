@@ -1,5 +1,12 @@
 //! `ordeal-cert/v1` — the stable certificate bundle (issue #91 / TR-025,
-//! ordeal half of the FEAT-011 evidence spine).
+//! ordeal half of the FEAT-011 evidence spine) — and, since #192 phase 4,
+//! `ordeal-cert/v2`: the same envelope plus a `query` block, so a reader
+//! certifies the QUERY (`QueryCertificate::from_cert_v2` + `recheck`,
+//! through the trusted `ordeal_lrat::check_query`) and not only the CNF.
+//! v1 bundles are untouched: `Certificate::to_cert_v1` / `from_cert_v1`
+//! emit and read exactly what they did; v2 is opt-in and carries its own
+//! `format` string, so a v1 reader refuses it rather than silently
+//! ignoring the query.
 //!
 //! Implements the envelope **pinned on issue #67 and built against by rivet**
 //! (rivet#693): a JSON wrapper around the trusted payload —
@@ -22,6 +29,10 @@
 //!   [`UnsatBundle::recheck`] re-runs the trusted checker — a tampered or
 //!   internally-inconsistent bundle never yields a usable [`Certificate`].
 
+use crate::query::{
+    QUERY_ENCODING, QueryCertificate, QueryDag, QueryRecheckError, bits_from_string, bits_string,
+    node_from_op, node_op,
+};
 use crate::sha256::sha256_hex;
 use crate::solver::{Certificate, Model};
 use crate::witness::{assignment_bitstring, bit_map_canonical_text, cnf_text};
@@ -109,7 +120,9 @@ impl UnsatBundle {
 pub enum BundleError {
     /// Not valid JSON, or not the expected envelope shape.
     Malformed(String),
-    /// The `format` field is not `ordeal-cert/v1`.
+    /// The `format` field is not the one this reader accepts
+    /// (`ordeal-cert/v1` for `from_cert_v1`, `ordeal-cert/v2` for
+    /// `from_cert_v2`).
     WrongFormat(String),
     /// The `verdict` field does not match the requested reading.
     WrongVerdict(String),
@@ -125,7 +138,7 @@ impl std::fmt::Display for BundleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             BundleError::Malformed(m) => write!(f, "malformed bundle: {m}"),
-            BundleError::WrongFormat(g) => write!(f, "not ordeal-cert/v1 (format: {g})"),
+            BundleError::WrongFormat(g) => write!(f, "unexpected bundle format: {g}"),
             BundleError::WrongVerdict(g) => write!(f, "unexpected verdict: {g}"),
             BundleError::HashMismatch(which) => {
                 write!(
@@ -215,6 +228,239 @@ impl Certificate {
             certificate: Certificate {
                 lrat: env.proof.body.into_bytes(),
                 cnf: env.problem.clauses,
+            },
+            attests: env.attests,
+            produced_by: env.produced_by,
+        })
+    }
+}
+
+// ── ordeal-cert/v2: the query-carrying UNSAT bundle (#192 phase 4) ──────
+
+/// The `query` block of an `ordeal-cert/v2` UNSAT bundle: the lowered term
+/// DAG the certificate refutes, in the [`QUERY_ENCODING`] spelling, with
+/// its own content hash. Everything the trusted `ordeal_lrat::check_query`
+/// consumes, nothing else.
+#[derive(Serialize, Deserialize)]
+struct QueryBlock {
+    encoding: String,
+    num_nodes: usize,
+    /// `["op", arg, …]` per node (see `query::node_op`).
+    nodes: Vec<serde_json::Value>,
+    /// The constant table as a `0`/`1` string.
+    bits: String,
+    roots: Vec<usize>,
+    hints: Vec<usize>,
+    /// `sha256` of `QueryDag::canonical_text`.
+    sha256: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RecheckBlockV2 {
+    tool: String,
+    min_version: String,
+    cmd: String,
+    problem_sha256: String,
+    proof_sha256: String,
+}
+
+/// The v2 envelope: v1's fields plus `query`. Field order is the v1 order
+/// with `query` after `proof`, so a v2 bundle reads as a v1 bundle with
+/// one more block and a different `format`.
+#[derive(Serialize, Deserialize)]
+struct UnsatEnvelopeV2 {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    proof: ProofBlock,
+    query: QueryBlock,
+    recheck: RecheckBlockV2,
+}
+
+/// A parsed, hash-verified `ordeal-cert/v2` UNSAT bundle: the v1 pair plus
+/// the query it refutes.
+#[derive(Debug)]
+pub struct QueryBundle {
+    /// The certificate with its query, reconstructed.
+    pub certificate: QueryCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl QueryBundle {
+    /// Re-run the trusted QUERY re-check (`ordeal_lrat::check_query`) over
+    /// the reconstructed DAG and proof — the operation a v2-aware consumer
+    /// performs to turn this bundle into a verification link about the
+    /// query. The v1 (CNF-level) recheck stays available as
+    /// `certificate.certificate.recheck()`.
+    pub fn recheck(&self) -> Result<(), QueryRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+fn node_to_json(node: &ordeal_lrat::blast_kernel::DagNode) -> serde_json::Value {
+    let (op, args) = node_op(node);
+    let mut v = Vec::with_capacity(1 + args.len());
+    v.push(serde_json::Value::String(op.into()));
+    v.extend(args.into_iter().map(serde_json::Value::from));
+    serde_json::Value::Array(v)
+}
+
+fn node_from_json(
+    v: &serde_json::Value,
+) -> Result<ordeal_lrat::blast_kernel::DagNode, BundleError> {
+    let malformed = || BundleError::Malformed(format!("query node {v} is not [\"op\", arg…]"));
+    let items = v.as_array().ok_or_else(malformed)?;
+    let op = items
+        .first()
+        .and_then(|o| o.as_str())
+        .ok_or_else(malformed)?;
+    let mut args = Vec::with_capacity(items.len().saturating_sub(1));
+    for a in &items[1..] {
+        let n = a.as_u64().ok_or_else(malformed)?;
+        args.push(usize::try_from(n).map_err(|_| malformed())?);
+    }
+    node_from_op(op, &args).ok_or_else(malformed)
+}
+
+impl QueryCertificate {
+    /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v2`
+    /// UNSAT bundle: the v1 envelope (same `problem` and `proof` blocks,
+    /// same hashes) plus the `query` block, `format: "ordeal-cert/v2"`.
+    /// A v1 reader rejects it by format (opt-in, no silent downgrade);
+    /// `Certificate::to_cert_v1` on `self.certificate` still produces the
+    /// v1 bundle unchanged.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v2(&self, attests: &Attests) -> String {
+        let cert = &self.certificate;
+        let problem_text = cnf_text(&cert.cnf);
+        let proof_text = cert.lrat_text().unwrap_or_default().to_string();
+        let q = &self.query;
+        let env = UnsatEnvelopeV2 {
+            format: "ordeal-cert/v2".into(),
+            verdict: "unsat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: cert.cnf.len(),
+                clauses: cert.cnf.clone(),
+            },
+            proof: ProofBlock {
+                encoding: "lrat".into(),
+                body: proof_text.clone(),
+            },
+            query: QueryBlock {
+                encoding: QUERY_ENCODING.into(),
+                num_nodes: q.nodes.len(),
+                nodes: q.nodes.iter().map(node_to_json).collect(),
+                bits: bits_string(&q.bits),
+                roots: q.roots.clone(),
+                hints: q.hints.clone(),
+                sha256: q.sha256(),
+            },
+            recheck: RecheckBlockV2 {
+                tool: "ordeal-lrat".into(),
+                min_version: "0.27.0".into(),
+                cmd: "ordeal_lrat::check_query(query.nodes, query.bits, query.roots, \
+                      query.hints, proof.body) == Ok(problem.clauses)"
+                    .into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+                proof_sha256: sha256_hex(proof_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v2` UNSAT bundle, verifying all three content
+    /// hashes (problem, proof, query) BEFORE returning. The caller then
+    /// runs [`QueryBundle::recheck`] — the hash check proves integrity,
+    /// the recheck proves the mathematics about the query. A v1 bundle
+    /// (no `query` block) is [`BundleError::WrongFormat`]: read it with
+    /// `Certificate::from_cert_v1`.
+    pub fn from_cert_v2(json: &str) -> Result<QueryBundle, BundleError> {
+        // Format first, so a v1 bundle is reported as such rather than as
+        // "missing field query".
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some("ordeal-cert/v2") => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        let env: UnsatEnvelopeV2 =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.verdict != "unsat" {
+            return Err(BundleError::WrongVerdict(env.verdict));
+        }
+        if env.problem.encoding != "dimacs-cnf" {
+            return Err(BundleError::Unsupported(format!(
+                "problem encoding {}",
+                env.problem.encoding
+            )));
+        }
+        if env.proof.encoding != "lrat" {
+            return Err(BundleError::Unsupported(format!(
+                "proof encoding {}",
+                env.proof.encoding
+            )));
+        }
+        if env.query.encoding != QUERY_ENCODING {
+            return Err(BundleError::Unsupported(format!(
+                "query encoding {}",
+                env.query.encoding
+            )));
+        }
+        // Integrity first: all three hashes must match their payloads.
+        let problem_text = cnf_text(&env.problem.clauses);
+        if sha256_hex(problem_text.as_bytes()) != env.recheck.problem_sha256 {
+            return Err(BundleError::HashMismatch("problem"));
+        }
+        if sha256_hex(env.proof.body.as_bytes()) != env.recheck.proof_sha256 {
+            return Err(BundleError::HashMismatch("proof"));
+        }
+        let mut nodes = Vec::with_capacity(env.query.nodes.len());
+        for n in &env.query.nodes {
+            nodes.push(node_from_json(n)?);
+        }
+        if nodes.len() != env.query.num_nodes {
+            return Err(BundleError::Malformed(format!(
+                "query.num_nodes {} but {} nodes",
+                env.query.num_nodes,
+                nodes.len()
+            )));
+        }
+        let bits = bits_from_string(&env.query.bits).ok_or_else(|| {
+            BundleError::Malformed("query bits contain a character other than '0'/'1'".into())
+        })?;
+        let query = QueryDag {
+            nodes,
+            bits,
+            roots: env.query.roots,
+            hints: env.query.hints,
+        };
+        if query.sha256() != env.query.sha256 {
+            return Err(BundleError::HashMismatch("query"));
+        }
+        Ok(QueryBundle {
+            certificate: QueryCertificate {
+                certificate: Certificate {
+                    lrat: env.proof.body.into_bytes(),
+                    cnf: env.problem.clauses,
+                },
+                query,
             },
             attests: env.attests,
             produced_by: env.produced_by,
@@ -672,6 +918,220 @@ mod tests {
             cert.recheck().is_err(),
             "truncated assignment must not re-check"
         );
+    }
+
+    // ── #192 phase 4: ordeal-cert/v2, the query-carrying bundle ─────────
+
+    /// `(x + 5 = 3) ∧ (x ≠ 254)` at width 8: UNSAT, and every constant bit
+    /// matters to the refutation.
+    fn a_query_certificate() -> QueryCertificate {
+        use crate::{BoolTerm, BvTerm, QueryCheckResult, Sort};
+        let var = |name: &str| BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(8),
+        };
+        let konst = |v: u128| BvTerm::Const {
+            value: v,
+            sort: Sort::new(8),
+        };
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(
+            Box::new(BvTerm::Add(Box::new(var("x")), Box::new(konst(5)))),
+            Box::new(konst(3)),
+        ));
+        s.assert(BoolTerm::Ne(Box::new(var("x")), Box::new(konst(254))));
+        match s.check_with_query() {
+            QueryCheckResult::Unsat(c) => c,
+            other => panic!("expected Unsat with query, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-062
+    /// Round trip: emit v2 → parse → three hashes verify → the trusted
+    /// QUERY re-check passes; the v1 pair inside still re-checks too, and
+    /// the v1 serialization of the same certificate is the v1 bundle.
+    #[test]
+    fn v2_bundle_round_trips_and_rechecks_the_query() {
+        let cert = a_query_certificate();
+        let json = cert.to_cert_v2(&attests());
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["format"], "ordeal-cert/v2");
+        assert_eq!(v["query"]["encoding"], QUERY_ENCODING);
+        assert_eq!(v["query"]["sha256"], cert.query.sha256());
+        assert_eq!(v["query"]["num_nodes"], cert.query.nodes.len());
+        let bundle = QueryCertificate::from_cert_v2(&json).expect("v2 bundle parses");
+        assert_eq!(bundle.attests, attests());
+        assert!(bundle.certificate.query == cert.query);
+        bundle.recheck().expect("query re-check passes");
+        bundle
+            .certificate
+            .certificate
+            .recheck()
+            .expect("the v1 pair inside re-checks");
+        // Same problem, proof and hashes as the v1 bundle of the same
+        // certificate; v1 carries no query block.
+        let v1: serde_json::Value =
+            serde_json::from_str(&cert.certificate.to_cert_v1(&attests())).unwrap();
+        assert_eq!(v1["problem"], v["problem"]);
+        assert_eq!(v1["proof"], v["proof"]);
+        assert_eq!(
+            v1["recheck"]["problem_sha256"],
+            v["recheck"]["problem_sha256"]
+        );
+        assert_eq!(v1["recheck"]["proof_sha256"], v["recheck"]["proof_sha256"]);
+        assert!(v1.get("query").is_none());
+    }
+
+    // rivet: verifies VER-062
+    /// The phase-4 acceptance criterion at the bundle level: flip ONE
+    /// constant bit in the `query` block (hash recomputed, so integrity
+    /// passes) — the CNF and the proof are untouched, and the recheck
+    /// FAILS, because the trusted crate re-encodes the DAG it was given.
+    #[test]
+    fn v2_flipped_query_bit_fails_recheck_with_cnf_and_proof_untouched() {
+        let cert = a_query_certificate();
+        let json = cert.to_cert_v2(&attests());
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let bits = v["query"]["bits"].as_str().unwrap().to_string();
+        assert!(!bits.is_empty());
+        let flipped: String = bits
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == 0 {
+                    if c == '0' { '1' } else { '0' }
+                } else {
+                    c
+                }
+            })
+            .collect();
+        v["query"]["bits"] = serde_json::Value::String(flipped.clone());
+        // Stale hash: integrity failure at parse, before any recheck.
+        match QueryCertificate::from_cert_v2(&v.to_string()) {
+            Err(BundleError::HashMismatch("query")) => {}
+            other => panic!("stale query hash must be a query-hash mismatch, got {other:?}"),
+        }
+        // Recomputed hash: parses, then the trusted recheck rejects.
+        let mut tampered_query = cert.query.clone();
+        tampered_query.bits[0] = !tampered_query.bits[0];
+        v["query"]["sha256"] = serde_json::Value::String(tampered_query.sha256());
+        let bundle = QueryCertificate::from_cert_v2(&v.to_string())
+            .expect("consistent tamper passes the integrity check");
+        assert_eq!(bundle.certificate.certificate.cnf, cert.certificate.cnf);
+        assert_eq!(bundle.certificate.certificate.lrat, cert.certificate.lrat);
+        let r = bundle.recheck();
+        assert!(
+            r.is_err(),
+            "flipped constant bit must fail the recheck: {r:?}"
+        );
+        // …while the v1 (CNF-level) recheck of the same bundle still passes:
+        // this is precisely the gap v2 closes.
+        bundle
+            .certificate
+            .certificate
+            .recheck()
+            .expect("the untouched CNF/proof pair still re-checks at the CNF level");
+    }
+
+    // rivet: verifies VER-062
+    /// Tampering with the proof or the problem of a v2 bundle is caught by
+    /// the v1 hashes exactly as before; a wrong query encoding, a malformed
+    /// node and a wrong node count are refused at parse.
+    #[test]
+    fn v2_integrity_and_shape_checks() {
+        let cert = a_query_certificate();
+        let json = cert.to_cert_v2(&attests());
+        let pristine: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        let mut t = pristine.clone();
+        t["proof"]["body"] =
+            serde_json::Value::String(format!("9 {}", t["proof"]["body"].as_str().unwrap()));
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::HashMismatch("proof"))
+        ));
+
+        let mut t = pristine.clone();
+        let lit = t["problem"]["clauses"][0][0].as_i64().unwrap();
+        t["problem"]["clauses"][0][0] = serde_json::json!(-lit);
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::HashMismatch("problem"))
+        ));
+
+        let mut t = pristine.clone();
+        t["query"]["encoding"] = serde_json::Value::String("other-dag/v9".into());
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::Unsupported(_))
+        ));
+
+        let mut t = pristine.clone();
+        t["query"]["nodes"][0] = serde_json::json!(["bvfoo", 1, 2]);
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::Malformed(_))
+        ));
+
+        let mut t = pristine.clone();
+        t["query"]["num_nodes"] = serde_json::json!(0);
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::Malformed(_))
+        ));
+
+        let mut t = pristine.clone();
+        t["verdict"] = serde_json::Value::String("sat".into());
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::WrongVerdict(_))
+        ));
+    }
+
+    // rivet: verifies VER-062
+    /// Format discipline: a v2 bundle is refused by the v1 reader and a v1
+    /// bundle by the v2 reader — nobody silently downgrades or upgrades.
+    #[test]
+    fn v1_and_v2_readers_refuse_each_others_format() {
+        let cert = a_query_certificate();
+        let v2 = cert.to_cert_v2(&attests());
+        assert!(matches!(
+            Certificate::from_cert_v1(&v2),
+            Err(BundleError::WrongFormat(f)) if f == "ordeal-cert/v2"
+        ));
+        let v1 = cert.certificate.to_cert_v1(&attests());
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&v1),
+            Err(BundleError::WrongFormat(f)) if f == "ordeal-cert/v1"
+        ));
+    }
+
+    // rivet: verifies VER-062
+    /// v1 regression: the shipped v1 bundles under evidence/certs/ (emitted
+    /// by v0.23.0) still parse and re-check through `from_cert_v1`
+    /// unchanged, and the v2 reader reports them as v1 rather than
+    /// misreading them.
+    #[test]
+    fn shipped_v1_bundles_still_parse_and_recheck() {
+        for (name, json) in [
+            (
+                "rotl_decompose_w12",
+                include_str!("../../../evidence/certs/rotl_decompose_w12.json"),
+            ),
+            (
+                "shl_lshr_mask_w24",
+                include_str!("../../../evidence/certs/shl_lshr_mask_w24.json"),
+            ),
+        ] {
+            let bundle = Certificate::from_cert_v1(json).unwrap_or_else(|e| panic!("{name}: {e}"));
+            bundle
+                .recheck()
+                .unwrap_or_else(|e| panic!("{name}: v1 recheck: {e}"));
+            assert!(matches!(
+                QueryCertificate::from_cert_v2(json),
+                Err(BundleError::WrongFormat(f)) if f == "ordeal-cert/v1"
+            ));
+        }
     }
 
     // rivet: verifies VER-037

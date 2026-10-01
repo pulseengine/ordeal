@@ -16,7 +16,7 @@ import BlasterRotr
 import BlasterFrame
 open Aeneas Aeneas.Std Result
 set_option maxHeartbeats 1000000
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════════════ THE PURE MAP ══════════════════════════ -/
 
@@ -627,4 +627,4 @@ theorem compact_sound_lit (aig : Aig) (hints : Slice Std.Usize) (L : Nat)
   · intro inp l hl
     exact pEvalLit_pMapLit (h7 inp) l (by omega)
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

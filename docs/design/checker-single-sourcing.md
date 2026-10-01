@@ -17,6 +17,11 @@ sources, with proofs stated *about the generated models*:
 | `crates/ordeal-lrat/src/kernel.rs`    | `lean/Kernel.lean`       | `lean/regen.sh`     | `Sound.lean` (`lrat_check_sound`)  | #44 drift guard (required CI check) |
 | `crates/ordeal/src/blast_kernel.rs`   | `lean/BlastKernel.lean`  | `lean/regen-blaster.sh` | `BlasterProof.lean` (rule ≡ BitVec semantics) | **NONE** |
 
+*(Historical table. Since #192 phase 4 — `docs/design/query-cnf-gap.md` —
+the blaster lives in `crates/ordeal-lrat/src/blast_kernel.rs` as a
+`#[path]` submodule of `kernel.rs`, and `lean/regen.sh` produces ONE model,
+`lean/Kernel.lean`, for both; there is no `BlastKernel.lean` any more.)*
+
 If a model is stale, the proof certifies code that no longer runs. Today
 this is prevented by *checking* (and for the blaster: by discipline alone —
 a live gap found while writing this design, 2026-08-12). #48's bar is

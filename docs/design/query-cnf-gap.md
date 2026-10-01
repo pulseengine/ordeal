@@ -1,9 +1,10 @@
 # Design: close the query→CNF gap — a proven re-encoder beside the checker
 
 **Issue:** #192 · **Milestones:** v0.25.0 (phases 1 and 2), v0.26.0
-(phase 3) · **Decision:** option (b), maintainer, 2026-10-01 · **Status:**
-phases 1–3 delivered (this document records all three); phases 4–5
-planned.
+(phase 3), v0.27.0 (phase 4) · **Decision:** option (b), maintainer,
+2026-10-01; phase 4 ships `ordeal-cert/v2` *alongside* v1 (maintainer,
+2026-10-01) · **Status:** phases 1–4 delivered (this document records all
+four); phase 5 planned.
 
 ## The claim being protected
 
@@ -20,18 +21,19 @@ The trusted base grows, but only by proven code.
 
 ## Pipeline map (claims checked against the code)
 
-| Stage | Assurance before #192 | After phase 1 | After phase 2 | After phase 3 |
-|---|---|---|---|---|
-| SMT-LIB / Verus front ends | tests and the Z3 differential | unchanged | unchanged | unchanged |
-| lowering of derived ops | tests (exhaustive at width 8) and Z3 | unchanged | unchanged | unchanged |
-| sliver (array/UF) | tests only | unchanged | unchanged | unchanged |
-| canon (including constant folding via `eval.rs`) | tests only | unchanged | unchanged | unchanged |
-| term walk | tests only | unchanged | unchanged (it now *calls* the proven rules, but is itself unproven) | split in two: the **DAG builder** (`dag.rs`, term → `DagNode` list; untrusted glue, tests only) and the **encoder** (`blast_kernel::encode`, **proven**: `encode_sound`) |
-| blast rules | proven in Lean via the `blast_kernel.rs` mirror, plus a mirror/real differential (#202, #210) | mirror is now **gate-identical** to the shipped rules (XOR shape fixed; replay test, every op, widths 1..=16) | **the solver runs the proven rules** — `blast_kernel.rs` is the only implementation; the hand-written copies are deleted | unchanged (called by the proven encoder) |
-| bridge (reference arena → shipped arena replay) | — | — | new, unproven: ~100 lines in `blast/mod.rs`; pinned by the gate-identity tests and the byte-identity digests | **out of the production path** (test harness for the per-family differentials) |
-| AIG folding and hashing | tests only | tests only (benchmarked below) | tests only (now applied at replay time; same gates, same CNF) | **proven** as a separate pass (`blast_kernel::compact`, `compact_sound`); the strash decisions come from untrusted hints the pass checks |
-| Tseitin | randomised brute-force test | **proven** on the mirror (`tseitin_sat_preserving`), mirror pinned to `cnf.rs` clause for clause | unchanged | **the solver runs the proven encoder** (`blast_kernel::tseitin`); `cnf.rs` is out of the production path |
-| LRAT / SAT-witness check | proven, axiom-clean | unchanged; now composed with the encoder proof (`tseitin_refutes_outputs`) | unchanged | composed all the way to the DAG: `dag_refuted` |
+| Stage | Assurance before #192 | After phase 1 | After phase 2 | After phase 3 | After phase 4 |
+|---|---|---|---|---|---|
+| SMT-LIB / Verus front ends | tests and the Z3 differential | unchanged | unchanged | unchanged | unchanged |
+| lowering of derived ops | tests (exhaustive at width 8) and Z3 | unchanged | unchanged | unchanged | unchanged (still lowered to the closed core *before* the DAG; the v2 bundle carries the lowered DAG) |
+| sliver (array/UF) | tests only | unchanged | unchanged | unchanged | unchanged |
+| canon (including constant folding via `eval.rs`) | tests only | unchanged | unchanged | unchanged | unchanged |
+| term walk | tests only | unchanged | unchanged (it now *calls* the proven rules, but is itself unproven) | split in two: the **DAG builder** (`dag.rs`, term → `DagNode` list; untrusted glue, tests only) and the **encoder** (`blast_kernel::encode`, **proven**: `encode_sound`) | the DAG builder stays untrusted, but its output is now **in the certificate** (`ordeal-cert/v2` `query`), so a consumer sees the question that was lowered; the encoder runs **inside the trusted crate** |
+| blast rules | proven in Lean via the `blast_kernel.rs` mirror, plus a mirror/real differential (#202, #210) | mirror is now **gate-identical** to the shipped rules (XOR shape fixed; replay test, every op, widths 1..=16) | **the solver runs the proven rules** — `blast_kernel.rs` is the only implementation; the hand-written copies are deleted | unchanged (called by the proven encoder) | moved into `ordeal-lrat` (`kernel::blast_kernel`); the solver re-exports them — one source |
+| bridge (reference arena → shipped arena replay) | — | — | new, unproven: ~100 lines in `blast/mod.rs`; pinned by the gate-identity tests and the byte-identity digests | **out of the production path** (test harness for the per-family differentials) | unchanged |
+| AIG folding and hashing | tests only | tests only (benchmarked below) | tests only (now applied at replay time; same gates, same CNF) | **proven** as a separate pass (`blast_kernel::compact`, `compact_sound`); the strash decisions come from untrusted hints the pass checks | the hints travel in the certificate; the trusted re-check compacts with them (and checks them) |
+| Tseitin | randomised brute-force test | **proven** on the mirror (`tseitin_sat_preserving`), mirror pinned to `cnf.rs` clause for clause | unchanged | **the solver runs the proven encoder** (`blast_kernel::tseitin`); `cnf.rs` is out of the production path | unchanged, in the trusted crate |
+| `DagWF` side condition | — | — | — | assumed by `encode_sound` / `dag_refuted` (the builder meets it by construction; no proven code checks it) | **checked by proven code**: `kernel::dag_wf`, `dag_wf_spec` (Ok iff `DagWF`) |
+| LRAT / SAT-witness check | proven, axiom-clean | unchanged; now composed with the encoder proof (`tseitin_refutes_outputs`) | unchanged | composed all the way to the DAG: `dag_refuted` | **one trusted entry point for the query**: `kernel::check_query`, `check_query_sound` (no side conditions left: well-formedness and every capacity bound are checked at run time) |
 
 The SAT path already re-checks the model against the query, via `eval.rs`.
 The UNSAT path has no such check, and that is the gap.
@@ -51,13 +53,15 @@ The UNSAT path has no such check, and that is the gap.
   exactly, so folding can't go inside `push_and`. `encode_sound` is
   composed with `lrat_check_sound` (`dag_refuted`). Acceptance: shipped
   bytes unchanged.
-- **v0.27.0.** Move the encoder into `ordeal-lrat` as `check_query`, with
-  an `ordeal-cert/v2` `query` block. Derived ops become proven DAG
-  constructs. Acceptance: flipping one constant bit in `query` fails the
-  recheck even though the CNF and proof are untouched.
+- **v0.27.0 — phase 4 (delivered, below).** Move the encoder into
+  `ordeal-lrat` as `check_query`, with an `ordeal-cert/v2` `query` block
+  *alongside* v1 (no breaking change; consumers opt in). Acceptance:
+  flipping one constant bit in `query` fails the recheck even though the
+  CNF and proof are untouched; default output byte-identical. Derived ops
+  are **not** DAG constructs yet (see "what phase 4 does not claim").
 - **v0.28.0+.** A query-level SAT check, so `eval.rs` leaves the trust
-  path; the sliver; the SMT-LIB parser stays trusted, mitigated by a round
-  trip and Z3.
+  path; the sliver; derived ops as proven DAG constructs; the SMT-LIB
+  parser stays trusted, mitigated by a round trip and Z3.
 
 (The milestones moved up by one against the first plan: phases 1 and 2
 both shipped in v0.25.0.)
@@ -666,14 +670,200 @@ it decides gate sharing, never a value — and is pinned to the old strash
 only by the byte-identity evidence above. `docs/formal-verification.md`
 states the same boundary.
 
-## Open risks (not yet verified)
+## Phase 4: what was delivered
 
-- Aeneas/Charon at the pinned revision with a single translation unit
+### Design: one translation unit, one entry point, one more block
+
+**The encoder lives in the trusted crate.** `crates/ordeal/src/blast_kernel.rs`
+moved to `crates/ordeal-lrat/src/blast_kernel.rs` (the proven code is the
+same file; only its header comment changed and the `pub` fields and
+variants gained the doc comments the trusted crate's `missing_docs` lint
+requires). `crates/ordeal/src/blast_kernel.rs` is now a re-export
+(`pub use ordeal_lrat::blast_kernel::*;`) plus the solver-side
+differential tests it always had — they compare the kernel against the
+solver's `aig.rs` / `cnf.rs` references, which the trusted crate must not
+depend on, so the tests stay on the solver side. Nothing else in the
+solver changed: `solver.rs::lower_with`, `dag.rs`, `blast/*.rs` and the
+Kani harnesses keep calling `crate::blast_kernel::*`. `ordeal-lrat` still
+declares no dependencies (its manifest guard test is unchanged).
+
+**The single translation unit is a `#[path]` submodule.** The pinned
+Charon/Aeneas translate one crate root per run (`regen.sh`'s open risk
+below). `kernel.rs` now declares `#[path = "blast_kernel.rs"] pub mod
+blast_kernel;`, which resolves to the same file whether `kernel.rs` is a
+module of the cargo crate or the crate root Charon is handed, so `regen.sh
+kernel` (now the only mode; `all` and `blaster` are aliases) translates
+checker and lowering together into one `lean/Kernel.lean` (6.4 k lines,
+0 axioms). The Lean names are `kernel.*` for the checker, exactly as
+before, and `kernel.blast_kernel.*` for the lowering; the thirteen
+`Blaster*.lean` developments were migrated by changing their `import
+BlastKernel` to `import Kernel` and their `namespace blast_kernel.spec`
+to `namespace kernel.blast_kernel.spec` — no theorem was restated and no
+proof was touched (`lake build`: 1722 jobs, unchanged, before the new
+file was added). `BlastKernel.lean` and its lakefile target are gone.
+
+**`kernel::check_query`** (`crates/ordeal-lrat/src/kernel.rs`, the
+string-free core; `ordeal_lrat::check_query` is the text-facing entry
+that parses the LRAT exactly as `check` does):
+
+```rust
+pub fn check_query(ns: &[DagNode], bits: &[bool], roots: &[usize],
+                   hints: &[usize], steps: &[Step]) -> Result<Vec<Vec<i32>>, QueryError>
+```
+
+1. `dag_wf(ns, bits.len())` — every node against the widths of the nodes
+   before it (`node_wf`, a 32-arm match mirroring the Lean `DagNodeWF`:
+   operands are earlier nodes of agreeing, positive widths; boolean
+   operands have width 1; extract ranges and constant slices fit) and the
+   node's width (`node_width`, mirroring `dagNodeWidth`), returning the
+   width list. The only thing it rejects that `DagWF` admits is a
+   `Concat` / `ZeroExt` / `SignExt` whose width sum passes `usize::MAX`
+   (rejected, never wrapped).
+2. `roots_wf` — every root is a width-1 node.
+3. The capacity hypotheses the theorems carry, computed without overflow:
+   `encode_fits(max_width, n)` is `1 + n · gateBound(W) ≤ usize::MAX`
+   (every product bounded by a division first), the arena length is
+   `≤ i32::MAX`, `tseitin_fits` is `1 + 3·|nodes| + |outs| < usize::MAX`,
+   and `|cnf| + |steps| ≤ usize::MAX`. A query past these bounds is
+   `QueryError::TooLarge`; nothing of that size is ever produced, and
+   rejecting is sound.
+4. `aig_new` → `encode` → `compact(hints)` → `map_word` → `tseitin` —
+   the same four calls, in the same order, as `solver.rs::lower_with`.
+5. `check_steps` on that CNF. `Ok` carries the re-encoded CNF so a bundle
+   reader can confirm it is the CNF the bundle also carries for v1
+   readers (`QueryRecheckError::CnfMismatch` otherwise); the soundness
+   statement does not depend on the payload.
+
+**`ordeal-cert/v2`** (`cert_bundle.rs`, `cert-bundle` feature) is the v1
+envelope with `format: "ordeal-cert/v2"` and one more block after
+`proof`:
+
+```json
+"query": {
+  "encoding": "ordeal-dag/v1",
+  "num_nodes": 7,
+  "nodes": [["const",0,8],["var",8],["add",0,1],["const",8,8],["eq",2,3],["const",16,8],["ne",1,5]],
+  "bits": "101000001100000001111111",
+  "roots": [4, 6],
+  "hints": [0, 1, 2, ...],
+  "sha256": "<sha256 of QueryDag::canonical_text>"
+}
+```
+
+`nodes` is the `DagNode` list as `[op, args…]` in constructor-argument
+order (`["const", start, width]`, `["extract", hi, lo, a]`, `["zero_ext",
+a, by]`, `["ite", c, t, e]`, `["not", a]`, binary ops `[op, a, b]`);
+`bits` is the constant table as a `0`/`1` string; `hints` are the
+compaction hints the solver used (`dag::strash_hints`), one per raw arena
+node. `problem`, `proof` and their hashes are byte-for-byte v1's;
+`recheck.min_version` is `0.27.0` and `recheck.cmd` names
+`ordeal_lrat::check_query`. The canonical text the hash covers is in
+`query.rs` (`QueryDag::canonical_text`): the encoding tag, `nodes <n>`,
+one `<op> <args…>` line per node, `bits …`, `roots …`, `hints …`.
+
+The API: `Solver::check_with_query()` returns
+`QueryCheckResult::Unsat(QueryCertificate { certificate, query })` —
+the trusted `check_query` runs *before* `Unsat` is returned, symmetric
+with the witness gate, so a certificate it would reject degrades to
+`Unknown`. `QueryCertificate::to_cert_v2` / `from_cert_v2` /
+`QueryBundle::recheck` are the v2 counterparts of the v1 trio; the CLI
+emits the block under `ordeal check <f> --format json --with-query`
+(JSON only; the flag is refused in text mode). Everything v1 is
+untouched: `check`, `check_with_witness`, `to_cert_v1`, `from_cert_v1`,
+the default CLI output. A v1 reader refuses a v2 bundle by its `format`
+and the v2 reader refuses a v1 bundle — nobody silently downgrades or
+upgrades; the two shipped v1 bundles under `evidence/certs/` parse and
+re-check through `from_cert_v1` as before (`shipped_v1_bundles_still_parse_and_recheck`).
+
+### The theorems
+
+`lean/QueryCheck.lean` (namespace `kernel.spec`; the exact statements are
+in the file and in `docs/formal-verification.md`):
+
+- `dag_wf_spec`: `kernel.dag_wf ns nbits` returns `Ok ws` **iff** `DagWF
+  ns nbits` holds and every width fits `usize`, with `ws` the `dagWidths`
+  of the DAG — the side condition phase 3 assumed is now decided by proven
+  code.
+- `check_query_sound`: `kernel.check_query ns bits roots hints steps = ok
+  (Ok cnf)` ⟹ for every input assignment, not every root is true — the
+  conclusion of `dag_refuted`, with **no hypotheses left**: `dag_wf_spec`
+  discharges `DagWF`, `roots_wf_spec` the roots condition,
+  `max_width_spec` + `encode_fits_spec` the gate budget, the run-time
+  tests the `i32` / `usize` capacities, and `dag_refuted` does the rest.
+- `check_query_refutes_cnf`: the returned CNF is `unsat` (from
+  `lrat_check_sound`).
+
+Both capstones are pinned axiom-clean in `lean/AxiomCheck.lean`
+(`propext`, `Classical.choice`, `Quot.sound` only).
+
+### Negative controls
+
+One-line mutations of `crates/ordeal-lrat/src/kernel.rs`, each followed
+by `lean/regen.sh kernel` and `lake build QueryCheck` (the proof must
+fail), then a byte-for-byte restore, `touch`, regen and a clean full
+build:
+
+| mutation | proof that fails |
+|---|---|
+| `node_wf`'s `Ite` arm drops `ws[c] == 1` | `QueryCheck` (`node_wf_spec`, hence `dag_wf_spec`) |
+| `check_query` runs `tseitin(&aig, &outs)` — the un-mapped root literals on the compacted arena | `QueryCheck` (`check_query_sound`) |
+
+And the bundle-level control the phase was specified by: flip one
+constant bit of a v2 bundle's `query` (hash recomputed, so integrity
+passes), leave `problem` and `proof` untouched — `QueryBundle::recheck`
+fails, while the v1 recheck of the same pair still passes
+(`v2_flipped_query_bit_fails_recheck_with_cnf_and_proof_untouched`;
+`flipping_one_constant_bit_fails_the_recheck_with_cnf_and_proof_untouched`
+in `query.rs` does it for *every* bit of the test query, at the API). A
+stale `query.sha256` fails at parse (`HashMismatch("query")`), as do a
+forged proof or problem; a wrong encoding, an unknown op or a wrong node
+count are `Unsupported` / `Malformed`.
+
+### Acceptance: the shipped bytes are unchanged
+
+For every `.smt2` under `crates/ordeal/tests/fixtures/differential/`,
+`evidence/certs/` and `fuzz/seeds/smtlib/` (24 files) the SHA-256 of
+`ordeal check <f> --format json` (stdout + stderr + exit code) from the
+v0.26.0 release binary built from `4bf1430` (origin/main) equals the one
+from this branch: 24 same, 0 differ; the same in text mode. The `query`
+block appears only under `--with-query`, and `sat` output is identical
+with and without the flag (`with_query_is_opt_in_and_json_only`).
+
+### What phase 4 does not claim
+
+The trusted re-check certifies the **lowered** DAG a bundle carries.
+Still unproven, in the order phase 5 takes them: the DAG builder
+(`dag.rs`: which `DagNode` is made for which term, variable sharing by
+name, hash-consing) — a wrong decision changes the question asked, but it
+is now *visible* in the certificate, so a consumer (or a round trip from
+SMT-LIB to the DAG and back) can audit it; canon (`canon.rs`, including
+constant folding via `eval.rs`); **the lowering of the derived ops**
+(`lowering.rs`: `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem`, … are
+still rewritten into the closed core *before* the DAG is built, so a v2
+bundle carries the rewritten query, not the derived op — "derived ops
+become proven DAG constructs" is deferred to phase 5 because `DagNode` is
+the closed `term.rs` fragment and adding an operator means adding a
+proven rule); the sliver; the SMT-LIB and Verus front ends. The hints
+stay untrusted *by design* (`compact_sound` holds for any hints); a wrong
+hint set changes gate sharing, so the re-encoded CNF differs from the
+carried one and the bundle is rejected as inconsistent rather than
+accepted on a different formula (`hints_are_advice_not_trust`).
+
+## Open risks
+
+- ~~Aeneas/Charon at the pinned revision with a single translation unit
   holding both the kernel and the encoder (`regen.sh` translates one file
-  per crate root). Phase 1 kept the encoder in `blast_kernel.rs` (the
-  blaster's translation unit) and the proof file imports both generated
-  models (`BlastKernel`, via `BlasterProof`, and `Kernel`, via `Sound`) —
-  that works today because the two models live in separate namespaces of
-  the same lake package. Moving the encoder *into* `ordeal-lrat` (phase 4)
-  is where a single-unit translation is needed.
+  per crate root).~~ **Resolved in phase 4** by the `#[path]` submodule
+  (above): the pinned Charon follows rustc's module loading, and Aeneas
+  emits the submodule under `kernel.blast_kernel.*` in the same file.
+  Phases 1–3 had kept the encoder in `blast_kernel.rs` (the blaster's own
+  translation unit) with the proof files importing both generated models.
 - The performance cost of going without hashing — measured above.
+- `check_with_query` lowers twice (solve, then the trusted re-check);
+  opt-in, so `check` pays nothing. A `cfg(debug_assertions)` note: the
+  trusted crate's arithmetic is modelled by Aeneas as failing on overflow,
+  while a release build wraps; the new `check_query` code reaches no
+  arithmetic that can overflow (every sum and product is bounded by a
+  comparison or a division first) — the earlier kernels' `usize` sums are
+  bounded by the slices' sizes, as `docs/formal-verification.md`'s `hfit`
+  note explains.

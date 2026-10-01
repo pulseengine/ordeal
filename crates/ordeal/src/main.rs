@@ -16,7 +16,7 @@ use std::process::ExitCode;
 
 use ordeal::smtlib;
 use ordeal::verus;
-use ordeal::{CheckResult, WitnessCheckResult};
+use ordeal::{CheckResult, QueryCheckResult, QueryDag, WitnessCheckResult};
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!(
-                "Usage: ordeal check [FILE | -] [--format json]   (reads stdin if FILE is '-' or omitted)"
+                "Usage: ordeal check [FILE | -] [--format json] [--with-query]   (reads stdin if FILE is '-' or omitted)"
             );
             eprintln!(
                 "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]"
@@ -99,6 +99,16 @@ fn run_check(args: &[String]) -> ExitCode {
         Ok(pair) => pair,
         Err(code) => return code,
     };
+    // `--with-query` (#192 phase 4): the JSON certificate also carries the
+    // lowered query (the `ordeal-cert/v2` `query` block), re-checked by the
+    // trusted crate before `unsat` is printed. Opt-in: without the flag the
+    // output is byte-identical to earlier releases.
+    let with_query = rest.contains(&"--with-query");
+    let rest: Vec<&str> = rest.into_iter().filter(|a| *a != "--with-query").collect();
+    if with_query && format != Format::Json {
+        eprintln!("ordeal: --with-query requires --format json");
+        return ExitCode::from(2);
+    }
     let path = rest.first().copied();
     let input = match path {
         None | Some("-") => {
@@ -118,6 +128,18 @@ fn run_check(args: &[String]) -> ExitCode {
         },
     };
 
+    if with_query {
+        // The query-carrying solve (#192 phase 4): an `unsat` is only ever
+        // printed after the trusted crate re-encoded the query and
+        // re-checked the proof against ITS CNF.
+        return match smtlib::solve_str_with_query(&input) {
+            Ok((result, declared)) => print_query_outcome_json(result.as_ref(), &declared),
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     // The witness-carrying solve (TR-038): a `sat` is only ever printed
     // after the trusted crate re-checked its witness, and `--format json`
     // carries that witness so the consumer can re-check it too (#162).
@@ -131,6 +153,68 @@ fn run_check(args: &[String]) -> ExitCode {
             eprintln!("{e}");
             ExitCode::from(2)
         }
+    }
+}
+
+/// The `query` block (#192 phase 4) as a JSON object body — the same
+/// fields, spelling and hash as the `ordeal-cert/v2` bundle's `query`
+/// block (`QueryDag::canonical_text` / `sha256`), so rivet's mapping
+/// applies to CLI output too.
+fn query_json(q: &QueryDag) -> String {
+    let nodes: Vec<String> = q
+        .nodes
+        .iter()
+        .map(|n| {
+            let (op, args) = ordeal::query::node_op(n);
+            let mut items = vec![format!("\"{op}\"")];
+            items.extend(args.iter().map(ToString::to_string));
+            format!("[{}]", items.join(","))
+        })
+        .collect();
+    let list = |xs: &[usize]| {
+        xs.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    format!(
+        "{{\"encoding\":\"{}\",\"num_nodes\":{},\"nodes\":[{}],\"bits\":\"{}\",\"roots\":[{}],\"hints\":[{}],\"sha256\":\"{}\"}}",
+        ordeal::query::QUERY_ENCODING,
+        q.nodes.len(),
+        nodes.join(","),
+        ordeal::query::bits_string(&q.bits),
+        list(&q.roots),
+        list(&q.hints),
+        q.sha256()
+    )
+}
+
+/// `--format json --with-query`: [`print_outcome_json`]'s shape, with the
+/// `unsat` certificate additionally carrying the `query` block. `sat` and
+/// `unknown` print exactly as without the flag.
+fn print_query_outcome_json(
+    result: Option<&QueryCheckResult>,
+    declared: &[(String, u32)],
+) -> ExitCode {
+    match result {
+        Some(QueryCheckResult::Unsat(cert)) => {
+            let lrat = cert.certificate.lrat_text().unwrap_or_default();
+            println!(
+                "{{\"tool\":\"ordeal\",\"version\":\"{}\",\"verdict\":\"unsat\",\"certificate\":{{\"clauses\":[{}],\"lrat\":\"{}\",\"query\":{}}}}}",
+                env!("CARGO_PKG_VERSION"),
+                clauses_json(&cert.certificate.cnf),
+                json_escape(lrat),
+                query_json(&cert.query)
+            );
+            ExitCode::SUCCESS
+        }
+        Some(QueryCheckResult::Sat(w)) => {
+            print_outcome_json(Some(&WitnessCheckResult::Sat(w.clone())), declared)
+        }
+        Some(QueryCheckResult::Unknown) => {
+            print_outcome_json(Some(&WitnessCheckResult::Unknown), declared)
+        }
+        None => print_outcome_json(None, declared),
     }
 }
 
@@ -330,6 +414,9 @@ fn banner() {
     println!("  --format json              structured verdict on stdout (check and");
     println!("                             verus); unsat carries the full checkable");
     println!("                             pair (CNF clauses + LRAT text)");
+    println!("  --with-query               (check, with --format json) the unsat");
+    println!("                             certificate also carries the lowered");
+    println!("                             query, re-checked by the trusted crate");
     println!();
     println!("engine: certificate-checked pipeline (bit-blast -> AIG -> Tseitin ->");
     println!("own CDCL core -> LRAT). SAT verdicts carry self-checked models;");

@@ -28,6 +28,7 @@ import BlasterFrame
 import BlasterCompact
 import BlasterDag
 import BlasterCapstone
+import QueryCheck
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -43,59 +44,59 @@ import BlasterCapstone
 #print axioms kernel.spec.kernel_refines_pure
 
 -- One capstone rule theorem per blaster proof development.
-/-- info: 'blast_kernel.spec.blast_xor_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_xor_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_xor_bitvec
+#print axioms kernel.blast_kernel.spec.blast_xor_bitvec
 
-/-- info: 'blast_kernel.spec.blast_ult_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_ult_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_ult_bitvec
+#print axioms kernel.blast_kernel.spec.blast_ult_bitvec
 
-/-- info: 'blast_kernel.spec.blast_sign_ext_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_sign_ext_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_sign_ext_bitvec
+#print axioms kernel.blast_kernel.spec.blast_sign_ext_bitvec
 
 -- The shift / rotate family at EVERY width (issue #201): the three shift
 -- capstones (BlasterShift.lean) and the rotate capstone (BlasterRotr.lean,
 -- which composes the barrel with the divider's `blast_urem`).
-/-- info: 'blast_kernel.spec.blast_shl_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_shl_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_shl_bitvec
+#print axioms kernel.blast_kernel.spec.blast_shl_bitvec
 
-/-- info: 'blast_kernel.spec.blast_lshr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_lshr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_lshr_bitvec
+#print axioms kernel.blast_kernel.spec.blast_lshr_bitvec
 
-/-- info: 'blast_kernel.spec.blast_ashr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_ashr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_ashr_bitvec
+#print axioms kernel.blast_kernel.spec.blast_ashr_bitvec
 
-/-- info: 'blast_kernel.spec.blast_rotr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_rotr_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_rotr_bitvec
+#print axioms kernel.blast_kernel.spec.blast_rotr_bitvec
 
-/-- info: 'blast_kernel.spec.blast_mul_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_mul_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_mul_bitvec
+#print axioms kernel.blast_kernel.spec.blast_mul_bitvec
 
-/-- info: 'blast_kernel.spec.blast_urem_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.blast_urem_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.blast_urem_bitvec
+#print axioms kernel.blast_kernel.spec.blast_urem_bitvec
 
 -- The model Tseitin encoder (BlasterTseitin.lean, issue #192 phase 1): the
 -- satisfiability-preservation capstone, its `unsat`-form restatement, and
 -- its composition with `lrat_check_sound` (the two proven halves meeting).
-/-- info: 'blast_kernel.spec.tseitin_sat_preserving' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.tseitin_sat_preserving' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.tseitin_sat_preserving
+#print axioms kernel.blast_kernel.spec.tseitin_sat_preserving
 
-/-- info: 'blast_kernel.spec.tseitin_satisfiable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.tseitin_satisfiable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.tseitin_satisfiable
+#print axioms kernel.blast_kernel.spec.tseitin_satisfiable
 
-/-- info: 'blast_kernel.spec.tseitin_refutes_outputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.tseitin_refutes_outputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.tseitin_refutes_outputs
+#print axioms kernel.blast_kernel.spec.tseitin_refutes_outputs
 
 -- The term-DAG encoder, the folding + hashing pass and their composition
 -- with the checker (issue #192 phase 3 / v0.26.0): `encode_sound`
@@ -103,21 +104,38 @@ import BlasterCapstone
 -- capstones `dag_refuted` / `dag_refuted_raw` (BlasterCapstone.lean) —
 -- an accepted LRAT certificate against the CNF the shipped lowering
 -- pipeline produced refutes the term DAG itself.
-/-- info: 'blast_kernel.spec.encode_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.encode_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.encode_sound
+#print axioms kernel.blast_kernel.spec.encode_sound
 
-/-- info: 'blast_kernel.spec.compact_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.compact_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.compact_sound
+#print axioms kernel.blast_kernel.spec.compact_sound
 
-/-- info: 'blast_kernel.spec.dag_refuted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.dag_refuted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.dag_refuted
+#print axioms kernel.blast_kernel.spec.dag_refuted
 
-/-- info: 'blast_kernel.spec.dag_refuted_raw' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+/-- info: 'kernel.blast_kernel.spec.dag_refuted_raw' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
-#print axioms blast_kernel.spec.dag_refuted_raw
+#print axioms kernel.blast_kernel.spec.dag_refuted_raw
+
+-- The query re-check (QueryCheck.lean, issue #192 phase 4): `dag_wf_spec`
+-- (the well-formedness check is exactly `DagWF` + "every width fits"),
+-- `check_query_sound` (an accepted query has no satisfying assignment —
+-- no hypothesis beyond the acceptance) and `check_query_refutes_cnf` (the
+-- returned CNF is the one the checker refuted).
+/-- info: 'kernel.spec.dag_wf_spec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.dag_wf_spec
+
+/-- info: 'kernel.spec.check_query_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_query_sound
+
+/-- info: 'kernel.spec.check_query_refutes_cnf' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_query_refutes_cnf
 
 -- The SAT-witness checker (SatWitness.lean, TR-044 / VER-039). These pins
 -- are what surfaced the TR-038 regression: `clause_satisfied` used

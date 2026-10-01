@@ -238,10 +238,11 @@ solver.
 
 | Path | Purpose |
 |------|---------|
-| `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4). |
+| `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4) and, since #192 phase 4, the proven lowering (`blast_kernel.rs`, a `#[path]` submodule of `kernel.rs`: one Aeneas translation unit) plus `check_query`, the query-level re-check an `ordeal-cert/v2` bundle is verified with (`lean/QueryCheck.lean`). |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat` interface; result / certificate / model types. |
-| `crates/ordeal/src/blast_kernel.rs` | THE lowering (one implementation; #192 phases 2–3): the Aeneas-translatable core, proven in Lean (`BlastKernel.lean` / `Blaster*.lean`) — the blast rules, the term-DAG encoder (`encode`), the folding + hashing pass (`compact`) and the Tseitin encoder (`tseitin`) the solver runs. |
+| `crates/ordeal/src/blast_kernel.rs` | The solver's view of THE lowering (one implementation; #192 phases 2–4): a re-export of `ordeal_lrat::blast_kernel` — the blast rules, the term-DAG encoder (`encode`), the folding + hashing pass (`compact`) and the Tseitin encoder (`tseitin`) the solver runs, proven in Lean (`Kernel.lean` / `Blaster*.lean`) — plus the solver-side differential and gate-identity tests. |
+| `crates/ordeal/src/query.rs` | The certificate-carried query (#192 phase 4): `QueryDag` (nodes, constant bits, roots, hints), `QueryCertificate` with the trusted `recheck()` through `ordeal_lrat::check_query`, and `Solver::check_with_query`. Always compiled; the `ordeal-cert/v2` JSON lives in `cert_bundle.rs`. |
 | `crates/ordeal/src/dag.rs` | The term DAG the proven encoder consumes (#192 phase 3): the hash-consed builder from assertions and the untrusted structural-hashing hints `compact` checks. |
 | `crates/ordeal/src/blast/` | The phase-2 per-rule bridge (`mod.rs`: run a rule on a reference arena, replay it into `aig::Aig` through `Aig::and`) — since phase 3 a test harness, not the production path: one-line per-op-family entry points for the evaluator differentials (`arith`, `bitwise`, `muldiv`, `shift`, `structural` — no rule bodies) + the Kani proof harnesses (`proofs.rs`). |
 | `crates/ordeal/src/aig.rs` | And-Inverter Graph with structural sharing + const-folding (the gate-identity reference for `blast_kernel::compact`; test path since #192 phase 3). |

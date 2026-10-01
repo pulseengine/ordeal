@@ -29,7 +29,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /-- `aig_new` yields the one-node arena: node 0 is the constant, no inputs. -/
 theorem aig_new_fresh (aig0 : Aig) (h : aig_new = ok aig0) :
@@ -193,4 +193,4 @@ theorem dag_refuted_raw (ns : Slice DagNode) (bits : Slice Bool) (roots : Slice 
   rw [hosem inp k hk, getD_eq_getElem_of_lt hk']
   exact hall k hk'
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

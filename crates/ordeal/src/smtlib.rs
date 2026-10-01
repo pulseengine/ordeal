@@ -730,6 +730,19 @@ pub fn solve_str_with_witness(input: &str) -> Result<WitnessOutcome, SmtError> {
     run_script(input, |solver| solver.check_with_witness())
 }
 
+/// The query-carrying twin of [`solve_str_with_witness`] (#192 phase 4):
+/// `check-sat` runs [`Solver::check_with_query`], so an `Unsat` comes back
+/// as a [`crate::query::QueryCertificate`] (the certificate plus the
+/// lowered query the trusted crate re-checked). The CLI runs this under
+/// `--with-query`.
+pub fn solve_str_with_query(input: &str) -> Result<QueryOutcome, SmtError> {
+    run_script(input, |solver| solver.check_with_query())
+}
+
+/// [`solve_str_with_query`]'s result: the last `check-sat`'s query-carrying
+/// verdict (if any) plus the declared variables.
+pub type QueryOutcome = (Option<crate::query::QueryCheckResult>, Vec<(String, u32)>);
+
 /// The assertions active at the script's last `check-sat`, plus the declared
 /// variables, without solving. Same reader as [`solve_str`]. The fuzz target
 /// uses this to brute-force small queries through the evaluator, an oracle

@@ -179,10 +179,16 @@ was such a bug. Since #192 phase 3 the lowering from the term DAG to the
 CNF is proven end to end and is the code the solver runs: the proven
 rules, the proven DAG encoder, the proven folding + hashing pass and the
 proven Tseitin encoder, composed with the checker's soundness theorem
-(`dag_refuted`: an accepted certificate refutes the term DAG). Everything
-above the DAG — building the DAG from the terms, rewriting, the front
-ends — is defended by tests and by a differential against Z3, not by
-proof.
+(`dag_refuted`: an accepted certificate refutes the term DAG). Since
+phase 4 that proven lowering lives in the trusted crate and a certificate
+can carry the term DAG (`ordeal-cert/v2`, `Solver::check_with_query`,
+`ordeal check --with-query`): `ordeal_lrat::check_query` re-encodes the
+DAG itself and checks the proof against the CNF it produced
+(`check_query_sound`, no side conditions), so a consumer re-checking a v2
+bundle certifies the query, not a CNF it has to take on faith. Everything
+above the DAG — building the DAG from the terms, rewriting, the derived
+ops, the front ends — is defended by tests and by a differential against
+Z3, not by proof.
 Closing that gap is tracked in [#192](https://github.com/pulseengine/ordeal/issues/192).
 Details and exact scope: [docs/formal-verification.md](docs/formal-verification.md).
 

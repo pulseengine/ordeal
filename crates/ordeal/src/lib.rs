@@ -39,12 +39,11 @@
 
 pub mod aig;
 pub mod blast;
-/// The Aeneas translation target for the bit-blaster's correctness proof
-/// (issue #68, v0.15.0). Not the production blaster — a self-contained,
-/// Charon-translatable *model* whose Aeneas-generated Lean (`lean/Blaster.lean`)
-/// is proven equal to the formal `BitVec` semantics for all widths, replacing
-/// the Kani-bounded evidence with an unbounded proof. Kept out of the public
-/// API surface: it exists to be translated, not called.
+/// The proven lowering the solver runs (issue #68 / #192): since phase 4
+/// a re-export of `ordeal_lrat::blast_kernel` (the Aeneas translation
+/// target lives in the trusted crate so `check_query` re-encodes with the
+/// same code), plus the solver-side differential tests. Kept out of the
+/// public API surface.
 #[doc(hidden)]
 pub mod blast_kernel;
 /// The TR-031 BMC-shaped benchmark corpus (spar#350). Not API — exists for
@@ -66,6 +65,9 @@ pub mod eval;
 pub mod layout;
 pub mod lowering;
 pub mod lrat;
+/// The certificate-carried query (#192 phase 4, `ordeal-cert/v2`) — always
+/// compiled; the JSON envelope is in `cert_bundle`.
+pub mod query;
 pub mod sat;
 /// In-tree SHA-256 for `ordeal-cert/v1` content hashes (#162 / TR-045):
 /// integrity only, never part of the soundness argument.
@@ -85,6 +87,7 @@ pub mod oracle;
 #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
 pub mod sat_cadical;
 
+pub use query::{QueryCertificate, QueryCheckResult, QueryDag, QueryRecheckError};
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};
 pub use witness::{SatCertificate, SatRecheckError, WitnessCheckResult};

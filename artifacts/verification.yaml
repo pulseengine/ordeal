@@ -1438,3 +1438,20 @@ artifacts:
         target: TR-061
       - type: part-of-execution
         target: VE-051
+
+  - id: VER-062
+    type: sw-verification
+    title: The trusted crate re-checks the query — check_query proven, ordeal-cert/v2 alongside v1, output unchanged (TR-062)
+    status: verified
+    release: v0.27.0
+    description: lean/QueryCheck.lean proves dag_wf_spec (the Rust well-formedness check returns Ok iff the Lean DagWF predicate holds and every width fits usize) and check_query_sound (an accepted check_query run ⟹ no assignment to the DAG's variables makes every root true), composed from dag_wf_spec, encode_sound, compact_sound, tseitin_refutes_outputs and lrat_check_sound through dag_refuted; AxiomCheck.lean pins both. Rust tests exercise the v2 bundle round trip and the trusted query recheck, the negative control (one flipped constant bit in the query fails the recheck with the CNF and proof untouched, at the API and at the bundle level), hash tampering at parse, the v1/v2 format discipline, the shipped v1 bundles re-checking unchanged, the CLI --with-query block re-checked through ordeal_lrat::check_query with an independent SHA-256, and the opt-in byte identity of the default output.
+    tags: [lean, checker, cert-bundle, negative-control, regression]
+    fields:
+      coverage: 2 new capstones axiom-pinned (dag_wf_spec, check_query_sound) plus every earlier one; 2 Lean negative controls (dropped Ite width check, unmapped Tseitin literals, each fails its proof); bundle negative controls (query bit flip, stale query hash, forged proof/problem, wrong encoding/node/count/verdict); v1 fixtures under evidence/certs re-check; 24 fixture queries byte-identical vs v0.26.0 (JSON and text)
+      method: automated-test
+      steps: "run: cd lean && lake build && cd .. && bash scripts/axiom_check.sh && cargo test -p ordeal-lrat --lib -- kernel::tests::check_query && cargo test -p ordeal --lib -- query::tests && cargo test -p ordeal --features cert-bundle cert_bundle::tests && cargo test -p ordeal --test cli_baseline -- with_query"
+    links:
+      - type: verifies
+        target: TR-062
+      - type: part-of-execution
+        target: VE-052

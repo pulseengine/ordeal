@@ -10,6 +10,10 @@ require aeneas from git
 package «ordeal-lrat-proof» {}
 
 -- The generated model (regen.sh) — this is the CI gate: it must elaborate.
+-- ONE translation unit since #192 phase 4: the checker (`kernel.*`) and the
+-- proven lowering (`kernel.blast_kernel.*`, from blast_kernel.rs, a
+-- `#[path]` submodule of kernel.rs) are modelled in this single file, so
+-- `kernel.check_query` — checker and lowering composed — is in it too.
 @[default_target] lean_lib «Kernel» {}
 
 -- The spec + soundness proof (issue #12), `sorry`-free. `lrat_check_sound`
@@ -19,9 +23,6 @@ package «ordeal-lrat-proof» {}
 -- like the mathematical core `pure_check_sound`.
 -- Scope + trust boundary: docs/formal-verification.md. Build: `lake build Sound`.
 lean_lib «Sound» {}
-
--- The generated bit-blaster model (regen-blaster.sh) — must elaborate.
-@[default_target] lean_lib «BlastKernel» {}
 
 -- Correctness of the bitwise blaster family against BitVec semantics
 -- (issue #68): blast_and / blast_or / blast_xor, unbounded width.
@@ -98,6 +99,17 @@ lean_lib «Sound» {}
 @[default_target] lean_lib «BlasterCompact» {}
 @[default_target] lean_lib «BlasterDag» {}
 @[default_target] lean_lib «BlasterCapstone» {}
+
+-- Issue #192 phase 4: the query re-check. `check_query_sound` — the kernel's
+-- `check_query` (dag_wf + roots_wf + the capacity checks + the proven
+-- lowering + check_steps, in ONE translation unit) accepts only
+-- unsatisfiable term DAGs, with NO hypothesis beyond the acceptance:
+-- `dag_wf_spec` proves the well-formedness check is exactly `DagWF`, and
+-- the capacity checks discharge every `usize` / `i32` hypothesis of
+-- phase 3's `dag_refuted`. `check_query_refutes_cnf` says the returned CNF
+-- is the one the checker refuted. `sorry`-free, axiom-clean (pinned in
+-- AxiomCheck.lean).
+@[default_target] lean_lib «QueryCheck» {}
 
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —

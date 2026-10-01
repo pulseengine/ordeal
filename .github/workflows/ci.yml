@@ -341,8 +341,9 @@ jobs:
   #      leaf may silently regress to `sorry` and no new gap may appear.
   # This is a real gate (no continue-on-error): a broken proof or a widened
   # sorry budget fails CI.
-  # TR-034 (issue #48): the models (Kernel.lean, BlastKernel.lean) are BUILD
-  # PRODUCTS — this job regenerates them from the Rust sources (pinned
+  # TR-034 (issue #48): the model (Kernel.lean — checker + proven lowering in
+  # one translation unit since #192 phase 4) is a BUILD PRODUCT — this job
+  # regenerates it from the Rust sources (pinned
   # Charon/Aeneas via nix, lean/toolchain-pins.env) before every proof
   # build, so the proofs always certify the translation of the code that
   # ships; a stale committed model is unrepresentable (none is committed).
@@ -376,7 +377,8 @@ jobs:
           start=$(date +%s)
           bash lean/regen.sh all
           echo "regen.sh all wall time: $(( $(date +%s) - start ))s"
-          test -f lean/Kernel.lean && test -f lean/BlastKernel.lean
+          # One translation unit since #192 phase 4 (kernel + lowering).
+          test -f lean/Kernel.lean
       - name: Generated models carry no axioms
         # TR-044 finding: a Rust std call Aeneas has no model of is emitted
         # into the generated model as an opaque `axiom` (TR-038 re-introduced
@@ -386,11 +388,9 @@ jobs:
         run: |
           set -uo pipefail
           k=$(grep -c '^axiom' lean/Kernel.lean || true)
-          b=$(grep -c '^axiom' lean/BlastKernel.lean || true)
           echo "axioms in lean/Kernel.lean: $k"
-          echo "axioms in lean/BlastKernel.lean: $b"
-          if [ "$k" -ne 0 ] || [ "$b" -ne 0 ]; then
-            grep -n '^axiom' lean/Kernel.lean lean/BlastKernel.lean || true
+          if [ "$k" -ne 0 ]; then
+            grep -n '^axiom' lean/Kernel.lean || true
             echo "::error::a generated model declares an axiom — a Rust call the pinned Aeneas cannot model; route it through modelled code (see lean/README.md)"
             exit 1
           fi
@@ -416,8 +416,9 @@ jobs:
       - name: Build the bit-blaster model + correctness proofs (issue #68)
         working-directory: lean
         # Plain `lake build` compiles every @[default_target] lib — the Aeneas-
-        # generated BlastKernel and all Blaster* proof developments — so a rule
-        # proof that regresses (or a regen that breaks a proof) fails CI here.
+        # generated Kernel (checker + lowering), all Blaster* proof
+        # developments and QueryCheck — so a rule proof that regresses (or a
+        # regen that breaks a proof) fails CI here.
         run: lake build
       - name: Axiom gate (TR-042 — AxiomCheck.lean, #guard_msgs-pinned axiom lists)
         working-directory: lean
@@ -428,7 +429,8 @@ jobs:
           # #138: the scope is DERIVED from the tree, not a hand-typed list —
           # a renamed or newly added proof file cannot silently escape the
           # guard, and a shrunken inventory is itself a failure. Excluded:
-          # the generated models (Kernel/BlastKernel — definitions only),
+          # the generated model (Kernel — definitions only; BlastKernel is
+          # kept in the pattern for old branches),
           # DiffCheck (an exe with its own differential gate), AxiomCheck
           # (fails the build directly via #guard_msgs), lakefile.
           # Counting uses LEAN'S OWN `declaration uses `sorry`` warnings via

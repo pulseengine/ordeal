@@ -63,7 +63,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════ THE PURE SHIFT AMOUNT ══════════════════ -/
 
@@ -2102,4 +2102,4 @@ theorem rotr_stages_spec (aig : Aig) (a amount : Slice Lit)
   rintro ⟨out, aig1⟩ ⟨h11, h12, h13, h14, h15, h16⟩
   exact ⟨h14, h12, h11, h13, h15, h16⟩
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

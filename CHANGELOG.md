@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The trusted checker re-checks the query, not only the CNF** (#192,
+phase 4). The proven lowering moved into `ordeal-lrat`, which gains
+`check_query`: a proven well-formedness check of the term DAG, the
+re-encoding through the same proven code the solver runs, and the LRAT
+check against *that* CNF — `check_query_sound` has no side conditions
+left. `ordeal-cert/v2` carries the query alongside the v1 pair; v1 is
+untouched and default output is byte-identical to v0.26.0.
+
+### Added
+- **`ordeal_lrat::check_query`** (`kernel::check_query`, #192 phase 4):
+  given a term DAG (`DagNode` list, constant bits, roots), the solver's
+  compaction hints and an LRAT certificate, it checks the DAG well-formed
+  (`dag_wf`), re-runs `encode` / `compact` / `map_word` / `tseitin` and
+  checks the certificate against the CNF it produced, returning that CNF.
+  `lean/QueryCheck.lean` proves `dag_wf_spec` (the Rust check returns
+  `Ok` iff the Lean `DagWF` predicate holds and every width fits `usize`)
+  and the capstone `check_query_sound` (an accepted run ⟹ no assignment
+  to the DAG's variables makes every root true), composed from
+  `dag_wf_spec`, `encode_sound`, `compact_sound`, `tseitin_refutes_outputs`
+  and `lrat_check_sound` through phase 3's `dag_refuted`; both pinned
+  axiom-clean in `AxiomCheck.lean`, each with a negative control recorded
+  in `docs/design/query-cnf-gap.md`.
+- **`ordeal-cert/v2`** (`cert_bundle.rs`, `cert-bundle` feature): the v1
+  envelope plus a `query` block (`ordeal-dag/v1`: nodes as `[op, args…]`,
+  constant bits, roots, hints, `sha256`) and `format: "ordeal-cert/v2"`.
+  `QueryCertificate::to_cert_v2` / `from_cert_v2` (all three hashes
+  verified before returning) / `QueryBundle::recheck` (the trusted
+  `check_query`, plus a check that the re-encoded CNF is the carried one).
+  Flipping one constant bit of the query fails the recheck while the CNF
+  and the proof are untouched; a stale query hash fails at parse.
+- **`Solver::check_with_query`** and `ordeal::query` (`QueryDag`,
+  `QueryCertificate`, `QueryCheckResult`, always compiled): the opt-in
+  entry that returns the certificate together with the lowered query,
+  re-checked by the trusted crate before `Unsat` is returned.
+- **`ordeal check <f> --format json --with-query`**: the unsat certificate
+  also carries the `query` block (same fields and hash as the bundle).
+  JSON only; without the flag the output is byte-identical to v0.26.0.
+- rivet: TR-062 / VER-062 / VE-052 / VV-109.
+
+### Changed
+- **The proven lowering lives in the trusted crate.**
+  `crates/ordeal/src/blast_kernel.rs` moved to
+  `crates/ordeal-lrat/src/blast_kernel.rs` (a `#[path]` submodule of
+  `kernel.rs`, so Charon/Aeneas translate checker and lowering as ONE unit
+  into `lean/Kernel.lean`: `kernel.*` and `kernel.blast_kernel.*`);
+  `ordeal::blast_kernel` re-exports it and keeps the solver-side
+  differential tests. `lean/regen.sh` has one mode (`kernel`; `all` /
+  `blaster` are aliases), `BlastKernel.lean` is gone, and the thirteen
+  `Blaster*.lean` developments only changed their `import` and
+  `namespace` lines (no theorem restated). `ordeal-lrat` still declares
+  no dependencies.
+- `BundleError::WrongFormat`'s message no longer hard-codes v1 (the v2
+  reader uses it too).
+
 ## [0.26.0] - 2026-10-01
 
 **Every query is lowered through proven code** (#192, phase 3). A proven

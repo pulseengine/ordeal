@@ -42,7 +42,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════════ THE PURE CARRY CHAIN ══════════════════════ -/
 
@@ -688,4 +688,4 @@ theorem blast_ult_bitvec (aig : Aig) (a b : Slice Lit)
     haw, pCarry_eq_carry ⟨hal, hAj⟩ hnbD true w (by omega),
     ← BitVec.ult_eq_not_carry, BitVec.ult_eq_decide_lt]
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

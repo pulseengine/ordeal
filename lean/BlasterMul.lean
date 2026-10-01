@@ -60,7 +60,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════ WORDS OF LITERALS AS BOOLEAN WORDS ══════════════════ -/
 
@@ -871,4 +871,4 @@ theorem blast_mul_bitvec (aig : Aig) (a b : Slice Lit)
   rw [← getD_eq_getElem_of_lt hj dLit, hbit j hja, hal,
     (pMulAcc_denotesBits hpa hpb w).2 j, pAccBV_last]
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec
