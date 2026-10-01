@@ -78,6 +78,27 @@ lean_lib «Sound» {}
 -- `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterTseitin» {}
 
+-- Issue #192 phase 3 (v0.26.0): the proven term-DAG encoder and the
+-- proven folding + hashing pass.
+--   BlasterFrame    — structural "frame" lemmas (prefix, gate budget, AigWF,
+--                     output range) for every rule that lacked one, plus the
+--                     leaf specs of the encoder's new helpers.
+--   BlasterCompact  — `compact_sound`: the compaction pass preserves every
+--                     literal's simulation value under every input, whatever
+--                     the (untrusted, checked) hashing hints say.
+--   BlasterDag      — the DAG semantics over Lean `BitVec` (`dagSim`) and
+--                     `encode_sound`: the encoder's words denote the DAG's
+--                     values; every asserted output literal is its root's
+--                     boolean value.
+--   BlasterCapstone — `dag_refuted`: encode + compact + tseitin + an
+--                     accepted LRAT certificate ⟹ the DAG's roots are
+--                     unsatisfiable (composed with `lrat_check_sound`).
+-- All `sorry`-free, axiom-clean (pinned in AxiomCheck.lean).
+@[default_target] lean_lib «BlasterFrame» {}
+@[default_target] lean_lib «BlasterCompact» {}
+@[default_target] lean_lib «BlasterDag» {}
+@[default_target] lean_lib «BlasterCapstone» {}
+
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —
 -- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),

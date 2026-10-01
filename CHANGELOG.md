@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The solver's lowering is proven from the term DAG to the CNF** (#192,
+phase 3). A proven DAG encoder and a proven folding + hashing pass replace
+the phase-2 replay bridge; the CNF is now produced by the proven Tseitin
+encoder; and one theorem states that a certificate the checker accepts
+refutes the query's term DAG, not only the CNF. What the solver decides is
+unchanged: output is byte-identical to v0.25.0.
+
+### Added
+- **A proven term-DAG encoder** (`blast_kernel::encode`, #192 phase 3).
+  The input is a topologically ordered DAG of `blast_kernel::DagNode`s
+  (the closed `term.rs` fragment); the encoder calls the Lean-proven rule
+  for every node. `lean/BlasterDag.lean` defines the DAG's semantics
+  directly over Lean `BitVec` (`dagSim`) and proves `encode_sound`: under
+  every primary-input assignment, every node's word denotes its value and
+  every asserted output literal is its root's boolean value.
+- **A proven folding + structural-hashing pass** (`blast_kernel::compact`).
+  It rebuilds the raw arena with the shipped `Aig::and` folds and shares
+  gates through hints that it checks (`hint_matches`); a wrong hint costs
+  a duplicate gate, never a wrong value. `lean/BlasterCompact.lean`
+  proves `compact_sound` for any hints.
+- **The query→CNF capstone** `dag_refuted` (`lean/BlasterCapstone.lean`):
+  `encode` + `compact` + `map_word` + `tseitin` + an accepted LRAT
+  certificate ⟹ no input assignment satisfies the DAG's roots — composed
+  with `lrat_check_sound`. `dag_refuted_raw` is the same without
+  compaction. All new capstones are pinned axiom-clean in
+  `AxiomCheck.lean`, each with a negative control recorded in
+  `docs/design/query-cnf-gap.md`.
+- Structural frame lemmas for every blast rule that lacked one
+  (`lean/BlasterFrame.lean`).
+
+### Changed
+- **The solver lowers through the proven encoder** (#192 phase 3). The
+  canonicalized assertions become a hash-consed term DAG (`dag.rs`,
+  untrusted glue), `blast_kernel::encode` builds the AIG, the untrusted
+  `dag::strash_hints` reproduces the strash decisions, `blast_kernel::compact`
+  folds and hashes, and `blast_kernel::tseitin` emits the CNF. The phase-2
+  replay bridge (`blast/mod.rs`) and `cnf.rs`/`aig.rs` are out of the
+  production path and serve the per-family differentials and the
+  gate-identity tests. The shipped CNF and certificate bytes are
+  unchanged: `ordeal check --format json` is byte-identical to the
+  v0.25.0 binary on all 24 fixtures, and the `cnf_gap_digest` digests over
+  1211 queries (44.6 M clauses) are identical to the phase-2 record.
+
 ## [0.25.0] - 2026-10-01
 
 **The solver runs the Lean-proven blast rules** (#192, phases 1 and 2).

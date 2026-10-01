@@ -1421,3 +1421,20 @@ artifacts:
     links:
       - type: verifies
         target: TR-060
+
+  - id: VER-061
+    type: sw-verification
+    title: Proven DAG encoder and compaction run in the solver; the CNF refutes the DAG; output unchanged (TR-061)
+    status: verified
+    release: v0.26.0
+    description: lean/BlasterDag.lean proves encode_sound, lean/BlasterCompact.lean compact_sound, lean/BlasterCapstone.lean dag_refuted and dag_refuted_raw (composed with lrat_check_sound); AxiomCheck.lean pins all four. Rust tests check that compact with the computed hints reproduces the Aig::and replay node for node with the kernel Tseitin equal to cnf::tseitin clause for clause, and that wrong hints only cost sharing; a byte-for-byte comparison of ordeal check --format json against the v0.25.0 binary and the production CNF digest over 1211 queries show no shipped change.
+    tags: [lean, blaster, negative-control, regression]
+    fields:
+      coverage: 4 capstones axiom-pinned, 3 negative controls (encoder rule swap, dropped fold, dropped negation each fail their proof); compaction node-identical to the replay and Tseitin clause-identical on a shared query; wrong hints preserve the output over 4096 assignments; 24 fixture queries byte-identical vs v0.25.0; CNF digest over 1211 queries (44.6M clauses) identical
+      method: automated-test
+      steps: "run: cd lean && lake build && cd .. && bash scripts/axiom_check.sh && cargo test -p ordeal --lib -- dag::tests"
+    links:
+      - type: verifies
+        target: TR-061
+      - type: part-of-execution
+        target: VE-051

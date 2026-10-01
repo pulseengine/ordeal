@@ -1,8 +1,9 @@
 # Design: close the query→CNF gap — a proven re-encoder beside the checker
 
-**Issue:** #192 · **Milestones:** v0.25.0 (phase 1), v0.26.0 (phase 2) ·
-**Decision:** option (b), maintainer, 2026-10-01 · **Status:** phases 1
-and 2 delivered (this document records both); phases 3–5 planned.
+**Issue:** #192 · **Milestones:** v0.25.0 (phases 1 and 2), v0.26.0
+(phase 3) · **Decision:** option (b), maintainer, 2026-10-01 · **Status:**
+phases 1–3 delivered (this document records all three); phases 4–5
+planned.
 
 ## The claim being protected
 
@@ -19,18 +20,18 @@ The trusted base grows, but only by proven code.
 
 ## Pipeline map (claims checked against the code)
 
-| Stage | Assurance before #192 | After phase 1 | After phase 2 |
-|---|---|---|---|
-| SMT-LIB / Verus front ends | tests and the Z3 differential | unchanged | unchanged |
-| lowering of derived ops | tests (exhaustive at width 8) and Z3 | unchanged | unchanged |
-| sliver (array/UF) | tests only | unchanged | unchanged |
-| canon (including constant folding via `eval.rs`) | tests only | unchanged | unchanged |
-| term walk | tests only | unchanged | unchanged (it now *calls* the proven rules, but is itself unproven) |
-| blast rules | proven in Lean via the `blast_kernel.rs` mirror, plus a mirror/real differential (#202, #210) | mirror is now **gate-identical** to the shipped rules (XOR shape fixed; replay test, every op, widths 1..=16) | **the solver runs the proven rules** — `blast_kernel.rs` is the only implementation; the hand-written copies are deleted |
-| bridge (reference arena → shipped arena replay) | — | — | new, unproven: ~100 lines in `blast/mod.rs`; pinned by the gate-identity tests and the byte-identity digests |
-| AIG folding and hashing | tests only | tests only (benchmarked below) | tests only (now applied at replay time; same gates, same CNF) |
-| Tseitin | randomised brute-force test | **proven** on the mirror (`tseitin_sat_preserving`), mirror pinned to `cnf.rs` clause for clause | unchanged |
-| LRAT / SAT-witness check | proven, axiom-clean | unchanged; now composed with the encoder proof (`tseitin_refutes_outputs`) | unchanged |
+| Stage | Assurance before #192 | After phase 1 | After phase 2 | After phase 3 |
+|---|---|---|---|---|
+| SMT-LIB / Verus front ends | tests and the Z3 differential | unchanged | unchanged | unchanged |
+| lowering of derived ops | tests (exhaustive at width 8) and Z3 | unchanged | unchanged | unchanged |
+| sliver (array/UF) | tests only | unchanged | unchanged | unchanged |
+| canon (including constant folding via `eval.rs`) | tests only | unchanged | unchanged | unchanged |
+| term walk | tests only | unchanged | unchanged (it now *calls* the proven rules, but is itself unproven) | split in two: the **DAG builder** (`dag.rs`, term → `DagNode` list; untrusted glue, tests only) and the **encoder** (`blast_kernel::encode`, **proven**: `encode_sound`) |
+| blast rules | proven in Lean via the `blast_kernel.rs` mirror, plus a mirror/real differential (#202, #210) | mirror is now **gate-identical** to the shipped rules (XOR shape fixed; replay test, every op, widths 1..=16) | **the solver runs the proven rules** — `blast_kernel.rs` is the only implementation; the hand-written copies are deleted | unchanged (called by the proven encoder) |
+| bridge (reference arena → shipped arena replay) | — | — | new, unproven: ~100 lines in `blast/mod.rs`; pinned by the gate-identity tests and the byte-identity digests | **out of the production path** (test harness for the per-family differentials) |
+| AIG folding and hashing | tests only | tests only (benchmarked below) | tests only (now applied at replay time; same gates, same CNF) | **proven** as a separate pass (`blast_kernel::compact`, `compact_sound`); the strash decisions come from untrusted hints the pass checks |
+| Tseitin | randomised brute-force test | **proven** on the mirror (`tseitin_sat_preserving`), mirror pinned to `cnf.rs` clause for clause | unchanged | **the solver runs the proven encoder** (`blast_kernel::tseitin`); `cnf.rs` is out of the production path |
+| LRAT / SAT-witness check | proven, axiom-clean | unchanged; now composed with the encoder proof (`tseitin_refutes_outputs`) | unchanged | composed all the way to the DAG: `dag_refuted` |
 
 The SAT path already re-checks the model against the query, via `eval.rs`.
 The UNSAT path has no such check, and that is the gap.
@@ -41,19 +42,25 @@ The UNSAT path has no such check, and that is the gap.
   to `aig::xor`. Prove Tseitin satisfiability preservation in Lean. Fix the
   stale `rotate_left` doc in `smtlib.rs`. Benchmark CNF size and time with
   no folding, folding only, and folding plus hashing.
-- **v0.26.0 — phase 2 (delivered, below).** The shipped walk calls the
-  proven rules directly, and the duplicate rule bodies are deleted.
-  Acceptance: `cli_baseline` CNF and certificate bytes are unchanged.
-- **v0.27.0.** A proven DAG walk, plus a proven folding/hashing pass after
-  encoding. The proofs count nodes exactly, so folding can't go inside
-  `push_and`. `encode_sound` is composed with `lrat_check_sound`.
-- **v0.28.0.** Move the encoder into `ordeal-lrat` as `check_query`, with
+- **v0.25.0 — phase 2 (delivered, below; shipped with phase 1).** The
+  shipped walk calls the proven rules directly, and the duplicate rule
+  bodies are deleted. Acceptance: `cli_baseline` CNF and certificate bytes
+  are unchanged.
+- **v0.26.0 — phase 3 (delivered, below).** A proven DAG walk, plus a
+  proven folding/hashing pass after encoding. The proofs count nodes
+  exactly, so folding can't go inside `push_and`. `encode_sound` is
+  composed with `lrat_check_sound` (`dag_refuted`). Acceptance: shipped
+  bytes unchanged.
+- **v0.27.0.** Move the encoder into `ordeal-lrat` as `check_query`, with
   an `ordeal-cert/v2` `query` block. Derived ops become proven DAG
   constructs. Acceptance: flipping one constant bit in `query` fails the
   recheck even though the CNF and proof are untouched.
-- **v0.29.0+.** A query-level SAT check, so `eval.rs` leaves the trust
+- **v0.28.0+.** A query-level SAT check, so `eval.rs` leaves the trust
   path; the sliver; the SMT-LIB parser stays trusted, mitigated by a round
   trip and Z3.
+
+(The milestones moved up by one against the first plan: phases 1 and 2
+both shipped in v0.25.0.)
 
 ## Phase 1: what was delivered
 
@@ -413,6 +420,251 @@ composed with `tseitin_sat_preserving`); the term walk (phase 3's proven
 DAG walk); `cnf.rs` (the shipped encoder; its reference is proven and
 pinned clause for clause); canon, lowering, the sliver and the front ends
 (phases 4–5). `docs/formal-verification.md` states the same boundary.
+
+## Phase 3: what was delivered
+
+### Design: the lowering is three proven kernel functions in a row
+
+Option (a) of the phase-1 plan, as the stepping stone to (b). The
+production path (`solver.rs::lower_with`) is now:
+
+1. **DAG builder** (`dag.rs`, untrusted glue). The canonicalized
+   assertions become a `Vec<blast_kernel::DagNode>` in post-order —
+   operands before operators, the same left-to-right visit the old walk
+   made — hash-consed on `(operator, operand indices)`, constants interned
+   by `(value, width)` into a flat bit table, variables shared by name.
+   `DagNode` is the closed `term.rs` fragment with operands as node
+   indices: `Var(w)`, `Const(start, w)`, the twelve binary word ops,
+   `Extract`, `Concat`, `ZeroExt`, `SignExt`, `Ite(c, t, e)`, the ten
+   comparisons, `Not`, `BoolAnd`, `BoolOr`. The roots are the asserted
+   boolean nodes.
+2. **Proven encoder** (`blast_kernel::encode`). Walks the DAG once,
+   calling the Lean-proven rule for every node on the append-only
+   reference arena (`Var` takes the next `w` primary inputs, in order;
+   `Const` is a word of constant literals; the boolean connectives are
+   one `push_and` / `push_or`). Returns every node's word and the root
+   literals.
+3. **Proven compaction** (`blast_kernel::compact`). Rebuilds the raw
+   arena node by node with the shipped `Aig::and`'s constant folds in its
+   order, its operand-order normalisation, and gate sharing driven by
+   *hints*: `hints[i]` names an earlier raw node whose compacted gate
+   node `i` may reuse; `hint_matches` checks the named gate really has
+   the operands at hand and otherwise pushes a fresh gate. The hints come
+   from the untrusted `dag::strash_hints`, which is the old `HashMap`
+   strash run over the same fold logic — so the sharing decisions are
+   the ones `Aig::and` used to make, gate for gate — but the proof holds
+   for *any* hints (`wrong_hints_only_cost_sharing` exercises that:
+   hints to node 0, to a pseudo-random earlier node, past the end and an
+   empty hint list all give a correct arena).
+4. **Proven Tseitin** (`blast_kernel::tseitin`) over the compacted arena
+   and the mapped root literals. `cnf.rs` no longer runs in production.
+
+Why the bridge could go: phase 2's replay was `Aig::and` applied to the
+reference arena gate by gate; `compact_and` is `Aig::and` spelled in the
+Aeneas fragment (the `HashMap` replaced by the checked hint), so
+compacting the concatenation of the per-rule reference arenas is the same
+computation as replaying each of them. Hash-consing the DAG changes
+nothing in the arena either: the old walk re-blasted a repeated subterm,
+but every one of those `Aig::and` calls hit the strash and added no node.
+`dag::tests::compact_matches_replay_on_a_shared_query` pins the first
+claim (the compacted arena is node-for-node the `Aig::and` replay — inputs,
+gates, operands, the map of every raw node — and the kernel Tseitin on it is
+`cnf::tseitin` on the replay clause for clause, under the production
+options and under folding only); the acceptance below pins both on the
+shipped bytes.
+
+### The theorems
+
+`lean/BlasterDag.lean` defines the DAG semantics directly over Lean
+`BitVec`: `dagSim inp bits ns` folds over the node list, giving each node
+a width-tagged `BitVec` (`DVal`) computed from the earlier nodes' values
+and the running primary-input counter; `dagWidths` is the width
+projection, `DagWF` the syntactic well-formedness (operands are earlier
+nodes of agreeing, positive widths; extract ranges fit; boolean operands
+have width 1), `dagBool` a root's boolean value. The per-node theorem
+`encode_node_spec` is a 32-arm case split, each arm gluing the rule's
+structural frame (`lean/BlasterFrame.lean`, new for every rule that
+lacked one) to its `_bitvec` capstone with `spec_and` and harvesting the
+pure-simulator fact for an arbitrary input list (`harvest`:
+`simulate_spec_pSim` plus input-list congruence under `AigWF`). The
+headline:
+
+```lean
+theorem encode_sound (aig : Aig) (ns : Slice DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (W : Nat)
+    (hne : 0 < aig.nodes.val.length) (h0 : aig.nodes.val[0]'hne = Node.False)
+    (hwf0 : AigWF aig.nodes.val 0)
+    (hdag : DagWF ns.val bits.val.length)
+    (hW : ∀ w ∈ dagWidths ns.val, w ≤ W)
+    (hcap : aig.nodes.val.length + ns.val.length * gateBound W ≤ Usize.max)
+    (hroots : ∀ r ∈ roots.val, r.val < ns.val.length ∧ (dagWidths ns.val).getD r.val 0 = 1) :
+    encode aig ns bits roots ⦃ p =>
+      aig.nodes.val <+: p.2.nodes.val ∧
+      AigWF p.2.nodes.val (dagNin ns.val) ∧
+      p.1.1.val.length = ns.val.length ∧
+      (∀ (inp : List Bool) (j : Nat) (hj : j < p.1.1.val.length),
+        Denotes (pSim inp p.2.nodes.val) (p.1.1.val[j]).val
+          ((dagSim inp bits.val ns.val).getD j dDflt).1
+          ((dagSim inp bits.val ns.val).getD j dDflt).2) ∧
+      p.1.2.val.length = roots.val.length ∧
+      (∀ l ∈ p.1.2.val, l.node.val < p.2.nodes.val.length) ∧
+      ∀ (inp : List Bool) (k : Nat) (hk : k < p.1.2.val.length),
+        pEvalLit (pSim inp p.2.nodes.val) p.1.2.val[k]
+          = dagBool inp bits.val ns.val (roots.val.getD k 0#usize).val ⦄
+```
+
+`gateBound W = 25·W² + 20·W + 1` is one node's gate budget at operand
+widths ≤ W (the worst case is `rotr` at a non-power-of-two width); the
+capacity hypothesis is the only place the width bound enters.
+
+`lean/BlasterCompact.lean`:
+
+```lean
+theorem compact_sound (aig : Aig) (hints : Slice Std.Usize) (L : Nat)
+    (hwf : AigWF aig.nodes.val L)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False) :
+    compact aig hints ⦃ p =>
+      p.2.val.length = aig.nodes.val.length ∧
+      AigWF p.1.nodes.val L ∧
+      0 < p.1.nodes.val.length ∧
+      p.1.nodes.val[0]? = some Node.False ∧
+      p.1.nodes.val.length ≤ aig.nodes.val.length ∧
+      (∀ l ∈ p.2.val, l.node.val < p.1.nodes.val.length) ∧
+      ∀ (inp : List Bool) (j : Nat) (hj : j < p.2.val.length),
+        pEvalLit (pSim inp p.1.nodes.val) p.2.val[j]
+          = (pSim inp aig.nodes.val).getD j false ⦄
+```
+
+(`compact_sound_lit` restates it per literal through `pMapLit`.)
+
+`lean/BlasterCapstone.lean` composes `encode_sound`, `compact_sound_lit`,
+`map_word_spec` and phase 1's `tseitin_refutes_outputs` (which already
+carries `lrat_check_sound`):
+
+```lean
+theorem dag_refuted (ns : Slice DagNode) (bits : Slice Bool) (roots : Slice Std.Usize) (W : Nat)
+    (hdag : DagWF ns.val bits.val.length) (hW : ∀ w ∈ dagWidths ns.val, w ≤ W)
+    (hcap : 1 + ns.val.length * gateBound W ≤ Usize.max)
+    (hroots : ∀ r ∈ roots.val, r.val < ns.val.length ∧ (dagWidths ns.val).getD r.val 0 = 1)
+    (aig0 : Aig) (hnew : aig_new = ok aig0)
+    (words : alloc.vec.Vec (alloc.vec.Vec Lit)) (outs : alloc.vec.Vec Lit) (aig1 : Aig)
+    (henc : encode aig0 ns bits roots = ok ((words, outs), aig1))
+    (hints : Slice Std.Usize) (aig2 : Aig) (map : alloc.vec.Vec Lit)
+    (hcomp : compact aig1 hints = ok (aig2, map))
+    (outs2 : alloc.vec.Vec Lit)
+    (hmap : map_word (alloc.vec.Vec.deref map) (alloc.vec.Vec.deref outs) = ok outs2)
+    (hi32 : (aig2.nodes.val.length : Int) ≤ I32.max)
+    (hcapT : 1 + 3 * aig2.nodes.val.length + outs2.val.length < Usize.max)
+    (cnf : alloc.vec.Vec (alloc.vec.Vec Std.I32))
+    (htse : tseitin aig2 (alloc.vec.Vec.deref outs2) = ok cnf)
+    (steps : Slice kernel.Step)
+    (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
+    (hchk : kernel.check_steps ⟨cnf.val, cnf.property⟩ steps = ok (core.result.Result.Ok ())) :
+    ∀ inp : List Bool, ¬ (∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp bits.val ns.val (roots.val[k]).val = true)
+```
+
+`dag_refuted_raw` is the same with `encode` straight into `tseitin`. All
+four capstones are pinned in `lean/AxiomCheck.lean` (axioms: `propext`,
+`Classical.choice`, `Quot.sound` only). `lake build`: 1724 jobs, no
+`sorry`; `Kernel.lean` / `BlastKernel.lean`: 0 axioms.
+
+### Negative controls
+
+One-line mutations of `blast_kernel.rs`, each followed by `lean/regen.sh
+blaster` and a build of the named library (the proof must fail), then a
+byte-for-byte restore, `touch`, `regen.sh all` and a clean full build:
+
+| mutation | proof that fails |
+|---|---|
+| `encode_node`'s `Add` arm calls `blast_sub` | `BlasterDag` (`encode_node_spec`, the `Add` arm's semantics) |
+| `compact_and` drops the `x & !x = 0` fold | `BlasterCompact` (`compact_and_spec`) |
+| `map_lit` forgets the negation | `BlasterCompact` (`map_lit_spec`) |
+
+### Acceptance: the shipped bytes are unchanged
+
+1. For every `.smt2` under `crates/ordeal/tests/fixtures/differential/`,
+   `evidence/certs/` and `fuzz/seeds/smtlib/` (24 files) the SHA-256 of
+   `ordeal check <f> --format json` (stdout + stderr + exit code) from the
+   v0.25.0 release binary built from `65aa715` equals the one from this
+   branch: 24 same, 0 differ.
+2. The `cnf_gap_digest` test over the bench and oracle corpora prints the
+   four phase-2 digests unchanged:
+
+| corpus | queries | clauses | sha256 of every production CNF (v0.25.0 = phase 3) |
+|---|---:|---:|---|
+| benches/latency.rs corpus | 6 | 112352 | `78aaa670cd461529af79ccf2c8ec780d88671f23f8a51aa75abd7bc311b620bb` |
+| benches/bmc.rs corpus | 5 | 86344 | `5c14a69e452c4fbfb736c98dade24c06547968e06ec853194e8262a9e26826b5` |
+| oracle::gen_corpus(0x192, 200) | 200 | 10272352 | `a1d80de907c207a589d7fd1bb7b4a2d7751764776d85d75e6184d43e64e52597` |
+| oracle::gen_corpus(0xC0FFEE, 1000) | 1000 | 34117473 | `42d44115dec319b317cf34e64494b33f29404653a5cbabd4c8334c2b27570f7c` |
+
+3. `dag::tests::compact_matches_replay_on_a_shared_query` (above) and the
+   phase-1/2 gate-identity and Tseitin differentials, which still pass on
+   the bridge path, now a test harness.
+
+### Cost: blast+Tseitin time
+
+Same harness as the phase-1 and phase-2 tables (`cnf_gap_measurement`,
+Apple M4, macOS 27.0, release; each cell is the median of 7 `lower_with`
+runs; production configuration), "v0.25.0" being the same test run in a
+checkout of `65aa715`. Two processes per side this time, both shown; the
+ratio takes the better of the two on each side, because the run-to-run
+scatter on this machine was larger than in the phase-2 measurement (up to
+1.5× on the same binary — the v0.25.0 numbers here are themselves 10–50%
+slower than the phase-2 record). Gate and clause counts are identical on
+both sides, as the digests above require.
+
+| query | AIG ANDs | CNF clauses | v0.25.0 blast+Tseitin (run 1, run 2) | phase 3 blast+Tseitin (run 1, run 2) | ratio (best of 2) |
+|---|---:|---:|---:|---:|---:|
+| srem_vc_32 | 18413 | 55241 | 1921.2 µs, 1444.4 µs | 1941.5 µs, 1710.4 µs | 1.18× |
+| urem_vc_32 | 17286 | 51860 | 1649.3 µs, 1402.4 µs | 2321.8 µs, 2160.3 µs | 1.54× |
+| layout_roundtrip_32 | 0 | 2 | 14.0 µs, 4.8 µs | 5.3 µs, 5.3 µs | 1.10× |
+| trap_vc_32 | 31 | 95 | 8.8 µs, 8.3 µs | 7.7 µs, 7.7 µs | 0.93× |
+| ult_cycle_64 | 1716 | 5152 | 123.7 µs, 91.0 µs | 146.4 µs, 141.5 µs | 1.55× |
+| shl1_eq_add_64 | 0 | 2 | 13.8 µs, 14.6 µs | 20.4 µs, 17.0 µs | 1.23× |
+| queue_overflow_k16 | 3005 | 9034 | 259.0 µs, 241.8 µs | 359.1 µs, 356.2 µs | 1.47× |
+| queue_overflow_k32 | 5873 | 17654 | 638.5 µs, 457.6 µs | 798.8 µs, 695.1 µs | 1.52× |
+| queue_overflow_k64 | 11477 | 34498 | 1456.9 µs, 940.2 µs | 1543.3 µs, 1324.7 µs | 1.41× |
+| deadlock_k24 | 2763 | 8391 | 955.2 µs, 788.9 µs | 1038.6 µs, 905.8 µs | 1.15× |
+| deadlock_k48 | 5523 | 16767 | 2077.2 µs, 1571.1 µs | 1934.2 µs, 1790.1 µs | 1.14× |
+| oracle::gen_corpus(0x192, 200), sum of per-query medians | 3423916 | 10272352 | 219.4 ms, 201.1 ms | 378.7 ms, 372.7 ms | 1.85× |
+| oracle::gen_corpus(0x192, 200), median per query | — | — | 124.9 µs, 105.4 µs | 170.6 µs, 168.4 µs | 1.60× |
+
+**Reading.** The proven path costs 1.1–1.55× of phase 2's blast+Tseitin
+time on the bench queries and 1.85× on the oracle corpus's total (1.6× on
+its median query). The mechanism is structural, not a bug: phase 2
+folded and hashed each rule's gates as they were replayed, so a query
+whose circuits fold away never materialised more than one rule's raw
+arena at a time; phase 3 builds the whole query's raw arena first
+(`encode`), then walks it twice more (`strash_hints` with a `HashMap`,
+then `compact`), and the DAG builder's own hash-consing maps are a new
+fixed cost per query — which is why the small oracle queries pay the
+most. The two fold-away queries are no worse (`layout_roundtrip_32`
+1.10×, within the scatter; `trap_vc_32` 0.93×). As in phase 2, this is
+the stage that is a small share of a solve: `deadlock_k48` spends ~2 ms
+here against a SAT search measured in seconds by `benches/bmc.rs`.
+Accepted as the cost of running the proven code; the obvious mitigation,
+if it ever matters, is to fuse the hint computation into the untrusted
+DAG builder (it knows the operands before `encode` runs) and to size the
+kernel's `Vec`s from the DAG (not expressible in the Aeneas fragment
+today — `Vec::with_capacity` has no model).
+
+### What phase 3 does not claim
+
+The proofs cover `encode`, `compact` and `tseitin` and their composition
+with the checker, for a well-formed DAG. Still unproven, in the order the
+remaining phases take them: the DAG builder (`dag.rs`: which node is made
+for which term, variable sharing by name, hash-consing — a wrong decision
+changes the question asked, exactly as the old walk could) and the
+`DagWF` side condition, which the builder meets by construction but no
+proven code checks (phase 4, where an untrusted certificate carries the
+DAG, adds a proven `dag_wf` checker and the `check_query` entry point in
+`ordeal-lrat`); canon, lowering, the sliver and the front ends (phases
+4–5). The hint generator `dag::strash_hints` is untrusted *by design* —
+it decides gate sharing, never a value — and is pinned to the old strash
+only by the byte-identity evidence above. `docs/formal-verification.md`
+states the same boundary.
 
 ## Open risks (not yet verified)
 

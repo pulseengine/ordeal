@@ -57,6 +57,11 @@ pub mod canon;
 #[cfg(feature = "cert-bundle")]
 pub mod cert_bundle;
 pub mod cnf;
+/// The term DAG the proven encoder consumes (issue #192 phase 3): the
+/// hash-consed builder from assertions and the structural-hashing hints
+/// for `blast_kernel::compact`. Untrusted glue; not API.
+#[doc(hidden)]
+pub mod dag;
 pub mod eval;
 pub mod layout;
 pub mod lowering;

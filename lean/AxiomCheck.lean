@@ -24,6 +24,10 @@ import BlasterMul
 import BlasterDiv
 import BlasterRotr
 import BlasterTseitin
+import BlasterFrame
+import BlasterCompact
+import BlasterDag
+import BlasterCapstone
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -92,6 +96,28 @@ import BlasterTseitin
 /-- info: 'blast_kernel.spec.tseitin_refutes_outputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms blast_kernel.spec.tseitin_refutes_outputs
+
+-- The term-DAG encoder, the folding + hashing pass and their composition
+-- with the checker (issue #192 phase 3 / v0.26.0): `encode_sound`
+-- (BlasterDag.lean), `compact_sound` (BlasterCompact.lean) and the two
+-- capstones `dag_refuted` / `dag_refuted_raw` (BlasterCapstone.lean) —
+-- an accepted LRAT certificate against the CNF the shipped lowering
+-- pipeline produced refutes the term DAG itself.
+/-- info: 'blast_kernel.spec.encode_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.encode_sound
+
+/-- info: 'blast_kernel.spec.compact_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.compact_sound
+
+/-- info: 'blast_kernel.spec.dag_refuted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.dag_refuted
+
+/-- info: 'blast_kernel.spec.dag_refuted_raw' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.dag_refuted_raw
 
 -- The SAT-witness checker (SatWitness.lean, TR-044 / VER-039). These pins
 -- are what surfaced the TR-038 regression: `clause_satisfied` used

@@ -2594,3 +2594,28 @@ artifacts:
         target: VER-060
       - type: part-of-execution
         target: VE-050
+
+  - id: VE-051
+    type: verification-execution
+    title: "#192 phase 3 verified (VER-061)"
+    status: implemented
+    description: "Models regenerated from the kernel (lean/regen.sh all): Kernel.lean and BlastKernel.lean 0 axioms; lake build: Build completed successfully (1724 jobs), 0 'declaration uses sorry' in BlasterFrame/BlasterCompact/BlasterDag/BlasterCapstone; scripts/axiom_check.sh passes with encode_sound, compact_sound, dag_refuted and dag_refuted_raw pinned to propext / Classical.choice / Quot.sound. Negative controls (one-line kernel mutations, model regenerated each time): the encoder calling blast_sub for Add fails BlasterDag; dropping the x&!x fold fails BlasterCompact; dropping map_lit's negation fails BlasterCompact; source restored byte-for-byte, touched, regenerated and rebuilt clean. cargo test --workspace: 210 lib + 34 other tests pass, debug and release; nextest 255 passed / 3 skipped, junit_to_rivet mapped 71 results with no dead marker; clippy default and --features oracle,cert-bundle clean; fmt clean; Z3 differential (oracle::) 12 passed; kani_tiers.sh check passes (82 harnesses in exactly one tier); wasm32-wasip2 release build succeeds; check_verification_citations.sh passes. ordeal check --format json on 24 queries (differential fixtures, evidence/certs, fuzz seeds): byte-identical (stdout, stderr, exit code) between the v0.25.0 release binary built from 65aa715 and the branch binary; cnf_gap_digest over 1211 queries (44.6M clauses) prints the four phase-2 digests unchanged (78aaa670…, 5c14a69e…, a1d80de9…, 42d44115…)."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2; branch proof/192-phase3 on 65aa715 (v0.25.0)"
+      executor: local
+      timestamp: 2026-10-01T15:00:46Z
+      version: 65aa715+phase3
+
+  - id: VV-108
+    type: verification-verdict
+    title: VER-061 pass — proven DAG encoder and compaction run; the CNF refutes the DAG; output unchanged
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-051
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-061
+      - type: part-of-execution
+        target: VE-051

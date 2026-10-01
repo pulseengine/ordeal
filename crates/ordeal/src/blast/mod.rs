@@ -1,17 +1,21 @@
-//! Bit-blasting (DES-005..DES-009): the shipped walk's bridge to the
-//! Lean-proven rules.
+//! Bit-blasting (DES-005..DES-009): the per-rule bridge to the Lean-proven
+//! rules — since issue #192 phase 3 a TEST harness, not the production path.
 //!
 //! Since issue #192 phase 2 there is ONE implementation of every rule: the
 //! Aeneas-translated, Lean-proven `crate::blast_kernel`. The five op-family
 //! modules below hold no rule bodies any more — each `blast_*` there is a
 //! one-line bridge that runs the proven rule through [`word2`] / [`pred2`]
-//! / friends, and `solver.rs`'s term walk names the `blast_kernel` rule it
-//! runs at every arm. They stay as modules so the per-family evaluator
-//! differentials (UV-005..UV-009, VER-049) keep their homes and keep
-//! exercising the code that runs. The Kani harnesses (`proofs.rs`) target
-//! the `blast_kernel` rules on the reference arena directly: through this
-//! bridge they do not terminate under CBMC (the reason and the measurements
-//! are in `proofs.rs`).
+//! / friends. Phase 2 ran the solver's term walk through this bridge; since
+//! phase 3 the solver lowers the whole query through the proven
+//! `blast_kernel::encode` / `compact` / `tseitin` instead (`crate::dag`,
+//! `solver.rs::lower_with`), so the replay below no longer runs in
+//! production. The modules stay so the per-family evaluator differentials
+//! (UV-005..UV-009, VER-049) and the gate-identity tests in
+//! `blast_kernel.rs` keep their homes and keep exercising the rules one at
+//! a time on the shipped `aig::Aig`. The Kani harnesses (`proofs.rs`)
+//! target the `blast_kernel` rules on the reference arena directly:
+//! through this bridge they do not terminate under CBMC (the reason and
+//! the measurements are in `proofs.rs`).
 //!
 //! # How the bridge keeps the shipped CNF byte-identical
 //!

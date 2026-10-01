@@ -241,10 +241,11 @@ solver.
 | `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4). |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat` interface; result / certificate / model types. |
-| `crates/ordeal/src/blast_kernel.rs` | THE bit-blasting rules (one implementation; #192 phase 2): the Aeneas-translatable core, proven in Lean (`BlastKernel.lean` / `Blaster*.lean`) and called by the solver's term walk. |
-| `crates/ordeal/src/blast/` | The bridge from the walk to the proven rules (`mod.rs`: run a rule on a reference arena, replay it into the shipped AIG through `Aig::and`), one-line per-op-family entry points for the evaluator differentials (`arith`, `bitwise`, `muldiv`, `shift`, `structural` — no rule bodies) + the Kani proof harnesses (`proofs.rs`). |
-| `crates/ordeal/src/aig.rs` | And-Inverter Graph with structural sharing + const-folding. |
-| `crates/ordeal/src/cnf.rs` | Tseitin CNF encoding. |
+| `crates/ordeal/src/blast_kernel.rs` | THE lowering (one implementation; #192 phases 2–3): the Aeneas-translatable core, proven in Lean (`BlastKernel.lean` / `Blaster*.lean`) — the blast rules, the term-DAG encoder (`encode`), the folding + hashing pass (`compact`) and the Tseitin encoder (`tseitin`) the solver runs. |
+| `crates/ordeal/src/dag.rs` | The term DAG the proven encoder consumes (#192 phase 3): the hash-consed builder from assertions and the untrusted structural-hashing hints `compact` checks. |
+| `crates/ordeal/src/blast/` | The phase-2 per-rule bridge (`mod.rs`: run a rule on a reference arena, replay it into `aig::Aig` through `Aig::and`) — since phase 3 a test harness, not the production path: one-line per-op-family entry points for the evaluator differentials (`arith`, `bitwise`, `muldiv`, `shift`, `structural` — no rule bodies) + the Kani proof harnesses (`proofs.rs`). |
+| `crates/ordeal/src/aig.rs` | And-Inverter Graph with structural sharing + const-folding (the gate-identity reference for `blast_kernel::compact`; test path since #192 phase 3). |
+| `crates/ordeal/src/cnf.rs` | Tseitin CNF encoding (the clause-for-clause reference for `blast_kernel::tseitin`; test path since #192 phase 3). |
 | `crates/ordeal/src/sat.rs` | The in-tree pure-Rust CDCL core (primary engine, all targets; LRAT trace). |
 | `crates/ordeal/src/sat_cadical.rs` | Optional CaDiCaL accelerator (`cadical` feature; never load-bearing). |
 | `crates/ordeal/src/lrat.rs` | LRAT proof formatting from the CDCL trace. |

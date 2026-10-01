@@ -112,12 +112,79 @@ theorem tseitin_refutes_outputs … (henc : tseitin aig outputs = ok cnf)
       pEvalLit (pSim inp aig.nodes.val) l = true)
 ```
 
-Scope, stated plainly: this is a theorem about the *reference* encoder over
-the *reference* AIG. The shipped `cnf.rs` and `aig.rs` are reached through
-the differential tests in `blast_kernel.rs` (gate identity and clause-for-
-clause equality), not by proof. The reference XOR gadget is gate-identical
-to `aig::xor` since this phase (it was the same function as a different
-three-gate circuit before — the same CNF only up to equisatisfiability).
+Scope, stated plainly: this is a theorem about the kernel encoder over the
+kernel AIG. In phase 1 that was a *reference* copy of the shipped
+`cnf.rs` / `aig.rs`, reached only through the differential tests in
+`blast_kernel.rs` (gate identity and clause-for-clause equality); since
+phase 3 (below) the kernel encoder is the one the solver runs, and
+`cnf.rs` / `aig.rs` are out of the production path. The reference XOR
+gadget is gate-identical to `aig::xor` since phase 1 (it was the same
+function as a different three-gate circuit before — the same CNF only up
+to equisatisfiability).
+
+## The term-DAG encoder and the compaction pass (issue #192, phase 3)
+
+Three more hand-written files close the query→CNF gap from the term DAG
+down (`sorry`-free, axiom-clean, pinned in `AxiomCheck.lean`, default
+`lake build` targets):
+
+- `BlasterFrame.lean` — structural "frame" lemmas (prefix, gate budget,
+  `AigWF`, output range) for every rule that lacked one, and the leaf
+  specs of the encoder's helpers (`word_inputs`, `word_bits`, `lit_word`).
+- `BlasterDag.lean` — the DAG semantics directly over Lean `BitVec`
+  (`dagSim`, `dagWidths`, `DagWF`) and the encoder's soundness:
+
+```lean
+theorem encode_sound (aig : Aig) (ns : Slice DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (W : Nat)
+    (hne : 0 < aig.nodes.val.length) (h0 : aig.nodes.val[0]'hne = Node.False)
+    (hwf0 : AigWF aig.nodes.val 0)
+    (hdag : DagWF ns.val bits.val.length)
+    (hW : ∀ w ∈ dagWidths ns.val, w ≤ W)
+    (hcap : aig.nodes.val.length + ns.val.length * gateBound W ≤ Usize.max)
+    (hroots : ∀ r ∈ roots.val, r.val < ns.val.length ∧ (dagWidths ns.val).getD r.val 0 = 1) :
+    encode aig ns bits roots ⦃ p =>
+      aig.nodes.val <+: p.2.nodes.val ∧
+      AigWF p.2.nodes.val (dagNin ns.val) ∧
+      p.1.1.val.length = ns.val.length ∧
+      (∀ (inp : List Bool) (j : Nat) (hj : j < p.1.1.val.length),
+        Denotes (pSim inp p.2.nodes.val) (p.1.1.val[j]).val
+          ((dagSim inp bits.val ns.val).getD j dDflt).1
+          ((dagSim inp bits.val ns.val).getD j dDflt).2) ∧
+      p.1.2.val.length = roots.val.length ∧
+      (∀ l ∈ p.1.2.val, l.node.val < p.2.nodes.val.length) ∧
+      ∀ (inp : List Bool) (k : Nat) (hk : k < p.1.2.val.length),
+        pEvalLit (pSim inp p.2.nodes.val) p.1.2.val[k]
+          = dagBool inp bits.val ns.val (roots.val.getD k 0#usize).val ⦄
+```
+
+- `BlasterCompact.lean` — the folding + hashing pass preserves every
+  literal's simulation value, whatever the (untrusted, checked) hints say:
+
+```lean
+theorem compact_sound (aig : Aig) (hints : Slice Std.Usize) (L : Nat)
+    (hwf : AigWF aig.nodes.val L)
+    (hne : 0 < aig.nodes.val.length)
+    (h0 : aig.nodes.val[0]'hne = Node.False) :
+    compact aig hints ⦃ p =>
+      p.2.val.length = aig.nodes.val.length ∧
+      AigWF p.1.nodes.val L ∧
+      0 < p.1.nodes.val.length ∧
+      p.1.nodes.val[0]? = some Node.False ∧
+      p.1.nodes.val.length ≤ aig.nodes.val.length ∧
+      (∀ l ∈ p.2.val, l.node.val < p.1.nodes.val.length) ∧
+      ∀ (inp : List Bool) (j : Nat) (hj : j < p.2.val.length),
+        pEvalLit (pSim inp p.1.nodes.val) p.2.val[j]
+          = (pSim inp aig.nodes.val).getD j false ⦄
+```
+
+- `BlasterCapstone.lean` — `dag_refuted` (and `dag_refuted_raw`, without
+  the compaction): `encode` + `compact` + `map_word` + `tseitin` + an
+  accepted `check_steps` run ⟹ `∀ inp, ¬ (∀ k, dagBool inp bits ns roots[k]
+  = true)`. The full statement is in `docs/formal-verification.md`. The
+  solver runs exactly this composition (`solver.rs::lower_with`); what
+  stays unproven above it is the DAG builder (`dag.rs`), canon, lowering,
+  the sliver and the front ends.
 
 ## The SAT-witness checker (TR-038 → TR-044 / VER-039)
 

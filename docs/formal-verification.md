@@ -158,32 +158,74 @@ Qualifications, in the same spirit as for the UNSAT theorem:
 - **I/O, the WebAssembly component boundary, and the host embedding.**
 - **The SAT search.** The CDCL engine that *emits* certificates is untrusted
   by design. A bug there can only produce a certificate the checker rejects.
-- **The query-to-CNF translation, apart from the blast rules.** This path
-  is trusted: an encoding bug gives a **certified wrong answer**, because
-  the checker certifies the CNF it is given (#182). What *is* proven here,
-  since #192 phase 2: the bit-blasting rules the solver runs are the
-  `blast_kernel.rs` rules themselves — the term walk in `solver.rs` calls
-  `blast_kernel::blast_*` at every arm (there is no second copy of any
-  rule any more) — and `lean/Blaster*.lean` proves each of them equal to
-  the `BitVec` semantics at every width. The rules build on the reference
-  arena, whose `push_and` appends exactly one node (the proofs count
-  nodes); the bridge in `blast/mod.rs` replays that arena into the shipped
-  `aig::Aig` through `Aig::and`. What is *not* proven: the term walk and
-  that bridge; the constant folding and structural hashing inside
-  `Aig::and` (the replay is the point where they happen); canon
-  (`canon.rs`, including constant folding via `eval.rs`); lowering of the
-  derived ops; the sliver (`sliver.rs`); the SMT-LIB and Verus front ends;
-  and the Tseitin encoder the solver runs (`cnf.rs`) — its reference copy
-  `blast_kernel::tseitin` is proven satisfiability-preserving in
-  `lean/BlasterTseitin.lean` and composed with `lrat_check_sound` as
-  `tseitin_refutes_outputs` (#192 phase 1), but reaches `cnf.rs` only
-  through a clause-for-clause differential test. Evidence for the unproven
-  pieces is tests and the Z3 differential; closing them is #192 phases
-  3–5, planned in `docs/design/query-cnf-gap.md`. The Kani harnesses
-  (`blast/proofs.rs`, bounded at widths 8/32/64) target the same
-  `blast_kernel` rules on the reference arena, so they are a second,
-  independent witness of the rule theorems — not of the bridge or the
-  shipped fold/hash, which they cannot model (see `proofs.rs`).
+- **The query-to-CNF translation, above the term DAG.** An encoding bug
+  gives a **certified wrong answer**, because the checker certifies the
+  CNF it is given (#182). Since #192 phase 3 the lowering from the term
+  DAG to the CNF *is* proven, end to end, over the Aeneas model of
+  `blast_kernel.rs` — the code the solver runs (`solver.rs::lower_with`):
+  `encode` builds the AIG from a `DagNode` list by calling the proven rule
+  for every node (`encode_sound`, `lean/BlasterDag.lean`, against a DAG
+  semantics defined directly over Lean `BitVec`); `compact` applies the
+  constant folding and structural hashing (`compact_sound`,
+  `lean/BlasterCompact.lean`, for any hints — the hints only steer
+  sharing and are checked); `tseitin` emits the CNF
+  (`tseitin_sat_preserving`, `lean/BlasterTseitin.lean`); and
+  `dag_refuted` (`lean/BlasterCapstone.lean`) composes the three with
+  `lrat_check_sound`:
+
+  ```lean
+  theorem dag_refuted (ns : Slice DagNode) (bits : Slice Bool) (roots : Slice Std.Usize) (W : Nat)
+      (hdag : DagWF ns.val bits.val.length) (hW : ∀ w ∈ dagWidths ns.val, w ≤ W)
+      (hcap : 1 + ns.val.length * gateBound W ≤ Usize.max)
+      (hroots : ∀ r ∈ roots.val, r.val < ns.val.length ∧ (dagWidths ns.val).getD r.val 0 = 1)
+      (aig0 : Aig) (hnew : aig_new = ok aig0)
+      (words : alloc.vec.Vec (alloc.vec.Vec Lit)) (outs : alloc.vec.Vec Lit) (aig1 : Aig)
+      (henc : encode aig0 ns bits roots = ok ((words, outs), aig1))
+      (hints : Slice Std.Usize) (aig2 : Aig) (map : alloc.vec.Vec Lit)
+      (hcomp : compact aig1 hints = ok (aig2, map))
+      (outs2 : alloc.vec.Vec Lit)
+      (hmap : map_word (alloc.vec.Vec.deref map) (alloc.vec.Vec.deref outs) = ok outs2)
+      (hi32 : (aig2.nodes.val.length : Int) ≤ I32.max)
+      (hcapT : 1 + 3 * aig2.nodes.val.length + outs2.val.length < Usize.max)
+      (cnf : alloc.vec.Vec (alloc.vec.Vec Std.I32))
+      (htse : tseitin aig2 (alloc.vec.Vec.deref outs2) = ok cnf)
+      (steps : Slice kernel.Step)
+      (hfit : cnf.val.length + steps.val.length ≤ Std.Usize.max)
+      (hchk : kernel.check_steps ⟨cnf.val, cnf.property⟩ steps = ok (core.result.Result.Ok ())) :
+      ∀ inp : List Bool, ¬ (∀ (k : Nat) (hk : k < roots.val.length),
+        dagBool inp bits.val ns.val (roots.val[k]).val = true)
+  ```
+
+  `dagBool inp bits ns r` is the boolean value of root `r` under the DAG
+  semantics `dagSim` (variables read their bits off `inp` in node order,
+  constants off the table `bits`); the conclusion is "no input assignment
+  makes every asserted root true", i.e. the DAG is unsatisfiable. The
+  side conditions are the DAG's well-formedness (`DagWF`: operands are
+  earlier nodes of agreeing, positive widths — what the sort checker
+  guarantees and the DAG builder produces by construction), a width bound
+  `W` for the gate budget, and the `usize`/`i32` capacities every kernel
+  function carries. All four new capstones (`encode_sound`,
+  `compact_sound`, `dag_refuted`, `dag_refuted_raw`) are pinned
+  axiom-clean in `lean/AxiomCheck.lean`.
+
+  What is *not* proven: the DAG builder (`dag.rs`: which `DagNode` is
+  made for which term, variable sharing by name, hash-consing) — a wrong
+  decision there changes the question asked, as the old term walk could;
+  the `DagWF` side condition is assumed, not checked by proven code
+  (phase 4 adds a proven checker so an untrusted certificate can carry the
+  DAG); canon (`canon.rs`, including constant folding via `eval.rs`);
+  lowering of the derived ops; the sliver (`sliver.rs`); the SMT-LIB and
+  Verus front ends. `dag::strash_hints` is untrusted by design: it only
+  reproduces the sharing decisions of the old `Aig::and` strash so the
+  shipped CNF stays byte-identical, and `compact_sound` holds for any
+  hints. The shipped `cnf.rs` and `aig.rs` are no longer on the
+  production path (they serve the per-family differentials and the
+  gate-identity tests). Evidence for the unproven pieces is tests and the
+  Z3 differential; closing them is #192 phases 4–5, planned in
+  `docs/design/query-cnf-gap.md`. The Kani harnesses (`blast/proofs.rs`,
+  bounded at widths 8/32/64) target the same `blast_kernel` rules on the
+  reference arena, so they are a second, independent witness of the rule
+  theorems — not of the encoder or the compaction pass (see `proofs.rs`).
 
 ## Model freshness: generated, not checked (TR-034)
 

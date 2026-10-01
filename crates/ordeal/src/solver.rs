@@ -40,10 +40,10 @@
 //! [`DISABLED_OPS`] and every query containing it returns `Unknown` until
 //! the rule is fixed — the solver reverts to conservative, never guesses.
 
-use crate::aig::{Aig, AigOptions, Lit, Word, word_input};
-use crate::blast;
+use crate::aig::AigOptions;
 use crate::blast_kernel as k;
-use crate::cnf::{CnfFormula, TseitinMap, tseitin};
+use crate::cnf::CnfFormula;
+use crate::dag::{DagBuilder, no_hints, strash_hints};
 use crate::eval::{self, Env, EvalError};
 use crate::sat::{SatResult, SatSolver};
 use crate::term::{BoolTerm, BvTerm};
@@ -264,172 +264,28 @@ fn bool_uses_disabled(term: &BoolTerm) -> bool {
     DISABLED_OPS.contains(&op) || kids_disabled
 }
 
-/// Blasting context: variable words are shared across assertions by name.
+/// The lowered query (issue #192 phase 3): the arena the CNF was encoded
+/// from — built by the Lean-proven `blast_kernel::encode` over the term
+/// DAG and compacted by the proven `blast_kernel::compact` — and the word
+/// of every variable in it, for model decoding.
 struct Blaster {
-    aig: Aig,
-    /// The bridge's working memory (issue #192 phase 2): every rule runs on
-    /// the proven `blast_kernel` and is replayed into `aig` from here.
-    scratch: blast::Scratch,
-    vars: HashMap<String, Word>,
+    /// Read by the #192 measurement harness only.
+    #[cfg_attr(not(test), allow(dead_code))]
+    aig: k::Aig,
+    vars: HashMap<String, Vec<k::Lit>>,
     /// Input-creation order, for model decoding.
     var_order: Vec<(String, u32)>,
 }
 
 impl Blaster {
-    /// A blaster over an arena with the given simplification settings
-    /// (issue #192 phase 1: the CNF-gap measurement runs the production
-    /// rules with folding / hashing switched off; the production path,
-    /// `lower()`, always passes `AigOptions::default()`).
-    fn with_options(options: AigOptions) -> Self {
-        Blaster {
-            aig: Aig::with_options(options),
-            scratch: blast::Scratch::default(),
-            vars: HashMap::new(),
-            var_order: Vec::new(),
-        }
-    }
-
-    fn var_word(&mut self, name: &str, width: u32) -> Word {
-        if let Some(w) = self.vars.get(name) {
-            return w.clone();
-        }
-        let w = word_input(&mut self.aig, width);
-        self.vars.insert(name.to_string(), w.clone());
-        self.var_order.push((name.to_string(), width));
-        w
-    }
-
-    fn blast_bv(&mut self, term: &BvTerm) -> Result<Word, EvalError> {
-        // Sort-check once at the top of each recursion step; this also
-        // rejects width mismatches before any rule sees them.
-        let width = eval::bv_sort(term)?.width;
-        Ok(match term {
-            BvTerm::Const { value, .. } => crate::aig::word_const(*value, width),
-            BvTerm::Var { name, .. } => self.var_word(name, width),
-            BvTerm::Add(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_add)
-            }
-            BvTerm::Sub(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sub)
-            }
-            BvTerm::Mul(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_mul)
-            }
-            BvTerm::Udiv(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_udiv)
-            }
-            BvTerm::Urem(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_urem)
-            }
-            BvTerm::And(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_and)
-            }
-            BvTerm::Or(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_or)
-            }
-            BvTerm::Xor(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_xor)
-            }
-            BvTerm::Shl(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_shl)
-            }
-            BvTerm::Lshr(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_lshr)
-            }
-            BvTerm::Ashr(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ashr)
-            }
-            BvTerm::Rotr(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_rotr)
-            }
-            BvTerm::Extract { hi, lo, arg } => {
-                let w = self.blast_bv(arg)?;
-                blast::extract(&mut self.scratch, &w, *hi, *lo)
-            }
-            BvTerm::Concat(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::concat(&mut self.scratch, &wa, &wb)
-            }
-            BvTerm::ZeroExt { by, arg } => {
-                let w = self.blast_bv(arg)?;
-                blast::extend(&mut self.scratch, &w, *by, k::blast_zero_ext)
-            }
-            BvTerm::SignExt { by, arg } => {
-                let w = self.blast_bv(arg)?;
-                blast::extend(&mut self.scratch, &w, *by, k::blast_sign_ext)
-            }
-            BvTerm::Ite { cond, then_, else_ } => {
-                let c = self.blast_bool(cond)?;
-                let (wt, we) = (self.blast_bv(then_)?, self.blast_bv(else_)?);
-                blast::ite(&mut self.aig, &mut self.scratch, c, &wt, &we)
-            }
-        })
-    }
-
-    fn blast_bool(&mut self, term: &BoolTerm) -> Result<Lit, EvalError> {
-        Ok(match term {
-            BoolTerm::Eq(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_eq)
-            }
-            BoolTerm::Ne(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ne)
-            }
-            BoolTerm::Ult(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ult)
-            }
-            BoolTerm::Ule(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ule)
-            }
-            BoolTerm::Ugt(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ugt)
-            }
-            BoolTerm::Uge(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_uge)
-            }
-            BoolTerm::Slt(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_slt)
-            }
-            BoolTerm::Sle(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sle)
-            }
-            BoolTerm::Sgt(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sgt)
-            }
-            BoolTerm::Sge(a, b) => {
-                let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sge)
-            }
-            BoolTerm::Not(t) => self.blast_bool(t)?.not(),
-            BoolTerm::And(a, b) => {
-                let (la, lb) = (self.blast_bool(a)?, self.blast_bool(b)?);
-                self.aig.and(la, lb)
-            }
-            BoolTerm::Or(a, b) => {
-                let (la, lb) = (self.blast_bool(a)?, self.blast_bool(b)?);
-                self.aig.or(la, lb)
-            }
-        })
+    /// The number of AND gates in the arena (the #192 measurements).
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn num_ands(&self) -> usize {
+        self.aig
+            .nodes
+            .iter()
+            .filter(|n| matches!(n, k::Node::And(..)))
+            .count()
     }
 }
 
@@ -732,7 +588,7 @@ impl Solver {
             // An empty conjunction is trivially satisfiable by the empty model.
             return Pipeline::Sat(Env::new());
         }
-        let Some((blaster, cnf, map)) = self.lower() else {
+        let Some((blaster, cnf)) = self.lower() else {
             return Pipeline::Unknown;
         };
         let mut sat_solver = SatSolver::new();
@@ -772,22 +628,34 @@ impl Solver {
                     }
                 }
             }
-            SatResult::Sat(assignment) => self.decode_and_check(&blaster, &map, &assignment),
+            SatResult::Sat(assignment) => self.decode_and_check(&blaster, &assignment),
         }
     }
 
     /// The pipeline's front half — validation, canonicalization, blasting,
     /// Tseitin — shared by every backend. `None` means conservative Unknown
     /// (disabled ops or ill-sorted input; `validate()` diagnoses).
-    fn lower(&self) -> Option<(Blaster, CnfFormula, TseitinMap)> {
+    fn lower(&self) -> Option<(Blaster, CnfFormula)> {
         self.lower_with(AigOptions::default())
     }
 
-    /// `lower` over an arena with explicit simplification settings. The
-    /// production path is `lower()` (= the default options); the other
-    /// settings exist for the #192 CNF-size / time measurement
+    /// `lower` with explicit simplification settings. The production path
+    /// is `lower()` (= the default options: folding and hashing); the
+    /// other settings exist for the #192 CNF-size / time measurement
     /// (`cnf_gap_measurement` below) and yield a simulation-identical AIG.
-    fn lower_with(&self, options: AigOptions) -> Option<(Blaster, CnfFormula, TseitinMap)> {
+    ///
+    /// Issue #192 phase 3: this is the formally covered path. The
+    /// canonicalized assertions become a term DAG (`dag::DagBuilder`,
+    /// untrusted glue), the Lean-proven `blast_kernel::encode` builds the
+    /// raw AIG by calling the proven rule for every node
+    /// (`encode_sound`), the proven `blast_kernel::compact` folds and
+    /// hashes it (`compact_sound`; the hints are untrusted advice it
+    /// checks), and the proven `blast_kernel::tseitin` emits the CNF
+    /// (`tseitin_sat_preserving`). `dag_refuted` in
+    /// `lean/BlasterCapstone.lean` composes the three with
+    /// `lrat_check_sound`: a certificate the checker accepts refutes the
+    /// DAG, not only the CNF.
+    fn lower_with(&self, options: AigOptions) -> Option<(Blaster, CnfFormula)> {
         if self.assertions.iter().any(bool_uses_disabled) {
             return None;
         }
@@ -795,8 +663,7 @@ impl Solver {
         if self.validate().is_err() {
             return None;
         }
-        let mut blaster = Blaster::with_options(options);
-        let mut roots = Vec::with_capacity(self.assertions.len());
+        let mut builder = DagBuilder::new(options.strash);
         for a in &self.assertions {
             // Untrusted canonicalization above the AIG (issue #35 / TR-009):
             // commutative-operand ordering + const-folding so equal-but-
@@ -804,31 +671,63 @@ impl Solver {
             // — Unsat stays LRAT-checked, and the SAT model self-check
             // re-evaluates against the ORIGINAL assertions.
             let a = crate::canon::canonicalize_bool(a);
-            match blaster.blast_bool(&a) {
-                Ok(lit) => roots.push(lit),
-                Err(_) => return None,
+            if builder.assert_root(&a).is_err() {
+                return None;
             }
         }
-        let (cnf, map) = tseitin(&blaster.aig, &roots);
-        Some((blaster, cnf, map))
+        let dag = builder.finish();
+        let mut raw = k::aig_new();
+        let (words, outs) = k::encode(&mut raw, &dag.nodes, &dag.bits, &dag.roots);
+        let (aig, outs, var_words): (k::Aig, Vec<k::Lit>, Vec<Vec<k::Lit>>) = if options.fold {
+            let hints = if options.strash {
+                strash_hints(&raw)
+            } else {
+                no_hints(&raw)
+            };
+            let (aig, map) = k::compact(&raw, &hints);
+            let outs = k::map_word(&map, &outs);
+            let var_words = dag
+                .vars
+                .iter()
+                .map(|(_, _, n)| k::map_word(&map, &words[*n]))
+                .collect();
+            (aig, outs, var_words)
+        } else {
+            let var_words = dag.vars.iter().map(|(_, _, n)| words[*n].clone()).collect();
+            (raw, outs, var_words)
+        };
+        let clauses = k::tseitin(&aig, &outs);
+        let cnf = CnfFormula {
+            num_vars: aig.nodes.len() as u32,
+            clauses,
+        };
+        let mut vars = HashMap::new();
+        let mut var_order = Vec::with_capacity(dag.vars.len());
+        for ((name, width, _), word) in dag.vars.iter().zip(var_words) {
+            vars.insert(name.clone(), word);
+            var_order.push((name.clone(), *width));
+        }
+        Some((
+            Blaster {
+                aig,
+                vars,
+                var_order,
+            },
+            cnf,
+        ))
     }
 
     /// Decode a SAT assignment into a model and self-check it against the
     /// ORIGINAL assertions — shared by every backend. A failing self-check
     /// means an ordeal bug; the outcome degrades to Unknown, never a wrong
     /// Sat.
-    fn decode_and_check(
-        &self,
-        blaster: &Blaster,
-        map: &TseitinMap,
-        assignment: &[bool],
-    ) -> Pipeline {
+    fn decode_and_check(&self, blaster: &Blaster, assignment: &[bool]) -> Pipeline {
         let mut env = Env::new();
         for (name, _width) in &blaster.var_order {
             let word = &blaster.vars[name];
             let mut value = 0u128;
             for (i, lit) in word.iter().enumerate() {
-                let cnf_lit = map.cnf_lit(*lit);
+                let cnf_lit = k::cnf_lit(*lit);
                 let v = assignment[(cnf_lit.unsigned_abs() - 1) as usize];
                 let bit = if cnf_lit > 0 { v } else { !v };
                 value |= (bit as u128) << i;
@@ -872,7 +771,7 @@ impl Solver {
                 bit_map: Vec::new(),
             });
         }
-        let Some((blaster, cnf, map)) = self.lower() else {
+        let Some((blaster, cnf)) = self.lower() else {
             return WitnessCheckResult::Unknown;
         };
         let mut sat_solver = SatSolver::new();
@@ -892,7 +791,7 @@ impl Solver {
                 }
             }
             SatResult::Sat(assignment) => {
-                let Pipeline::Sat(env) = self.decode_and_check(&blaster, &map, &assignment) else {
+                let Pipeline::Sat(env) = self.decode_and_check(&blaster, &assignment) else {
                     return WitnessCheckResult::Unknown;
                 };
                 let mut assignments: Vec<(String, u128)> = env.into_iter().collect();
@@ -900,7 +799,7 @@ impl Solver {
                 let mut bit_map: Vec<(String, u32, Vec<i32>)> = Vec::new();
                 for (name, width) in &blaster.var_order {
                     let word = &blaster.vars[name];
-                    let bits: Vec<i32> = word.iter().map(|l| map.cnf_lit(*l)).collect();
+                    let bits: Vec<i32> = word.iter().map(|l| k::cnf_lit(*l)).collect();
                     bit_map.push((name.clone(), *width, bits));
                 }
                 let cert = SatCertificate {
@@ -943,7 +842,7 @@ impl Solver {
         if self.assertions.is_empty() {
             return Pipeline::Sat(Env::new());
         }
-        let Some((blaster, cnf, map)) = self.lower() else {
+        let Some((blaster, cnf)) = self.lower() else {
             return Pipeline::Unknown;
         };
         match sat_cadical::solve(&cnf) {
@@ -953,9 +852,7 @@ impl Solver {
                 certificate: Some(lrat.into_bytes()),
                 cnf: cnf.clauses,
             },
-            Ok(CadicalVerdict::Sat(assignment)) => {
-                self.decode_and_check(&blaster, &map, &assignment)
-            }
+            Ok(CadicalVerdict::Sat(assignment)) => self.decode_and_check(&blaster, &assignment),
             // Every CaDiCaL error is conservative no-verdict.
             Err(_) => Pipeline::Unknown,
         }
@@ -1229,7 +1126,7 @@ mod cnf_gap_measurement {
             let lowered = s.lower_with(opts).expect("corpus query must lower");
             times.push(t0.elapsed());
             sample = Some(Sample {
-                ands: u64::from(lowered.0.aig.num_ands()),
+                ands: lowered.0.num_ands() as u64,
                 vars: u64::from(lowered.1.num_vars),
                 clauses: lowered.1.clauses.len() as u64,
                 median: Duration::ZERO,
@@ -1324,7 +1221,7 @@ mod cnf_gap_measurement {
             for a in q {
                 s.assert(a.clone());
             }
-            let (_, cnf, _) = s
+            let (_, cnf) = s
                 .lower_with(AigOptions::default())
                 .expect("corpus query must lower");
             bytes.extend_from_slice(&cnf.num_vars.to_le_bytes());
@@ -2344,18 +2241,8 @@ mod cadical_parity_tests {
             }
 
             // CaDiCaL: the identical CNF the pipeline solves, rebuilt through
-            // the same canonicalize → blast → Tseitin steps.
-            let mut blaster = Blaster::with_options(AigOptions::default());
-            let mut roots = Vec::new();
-            let mut blast_ok = true;
-            for a in assertions {
-                match blaster.blast_bool(&crate::canon::canonicalize_bool(a)) {
-                    Ok(lit) => roots.push(lit),
-                    Err(_) => blast_ok = false,
-                }
-            }
-            assert!(blast_ok, "corpus query {i} failed to blast");
-            let (cnf, _map) = tseitin(&blaster.aig, &roots);
+            // the same canonicalize → encode → compact → Tseitin steps.
+            let (_, cnf) = solver.lower().expect("a decided query lowers");
             let cadical = match sat_cadical::solve_with_conflict_limit(&cnf, 200_000) {
                 Ok(v) => v,
                 Err(sat_cadical::CadicalError::Inconclusive) => {

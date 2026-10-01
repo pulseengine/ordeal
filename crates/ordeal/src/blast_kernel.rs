@@ -1,6 +1,6 @@
 //! THE bit-blasting rules, Aeneas-translatable and Lean-proven (issue #68,
-//! v0.15.0 — the assurance capstone; issue #192 phase 2 — the rules the
-//! solver runs).
+//! v0.15.0 — the assurance capstone; issue #192 phases 2 and 3 — the code
+//! the solver runs).
 //!
 //! This is what `crates/ordeal-lrat/src/kernel.rs` is for the checker: a
 //! self-contained Rust core, written in the translatable subset Charon +
@@ -10,16 +10,24 @@
 //! `BitVec` semantics for ALL widths — the unbounded evidence that replaces
 //! the Kani-bounded harnesses.
 //!
-//! Since #192 phase 2 the solver's term walk (`solver.rs`) calls these rules
-//! directly — there is no second copy of any rule. The shipped `aig.rs`
-//! applies constant folding and structural hashing (a `HashMap`) in
-//! `Aig::and` as a *performance* optimisation that changes which gates are
-//! shared, never what a gate computes. The proofs count nodes exactly
-//! (`push_and` appends one node), so that simplification cannot live here:
-//! the bridge in `blast/mod.rs` runs a rule on this append-only arena and
-//! replays it node by node through `Aig::and`. The `aig.rs` names in the
-//! docs below (`aig::or`, `aig::xor`, `aig::mux`, `word_const`) are the
-//! shipped one-gate helpers whose shape each gadget reproduces.
+//! Since #192 phase 3 the solver's lowering (`solver.rs::lower_with`) runs
+//! three functions of this file end to end: [`encode`] walks a term DAG
+//! ([`DagNode`]) calling the proven rule for every node (`encode_sound`,
+//! `lean/BlasterDag.lean`), [`compact`] applies the constant folding and
+//! structural hashing the shipped `aig::Aig::and` used to apply gate by
+//! gate (`compact_sound`, `lean/BlasterCompact.lean`; the sharing is driven
+//! by untrusted hints it checks), and [`tseitin`] emits the CNF
+//! (`tseitin_sat_preserving`, `lean/BlasterTseitin.lean`). The three
+//! compose with the checker's `lrat_check_sound` into `dag_refuted`
+//! (`lean/BlasterCapstone.lean`): a certificate the checker accepts
+//! refutes the DAG. The rules build on an append-only arena — the proofs
+//! count nodes exactly (`push_and` appends one node) — which is why
+//! folding and hashing are a separate, separately proven pass. The
+//! `aig.rs` names in the docs below (`aig::or`, `aig::xor`, `aig::mux`,
+//! `word_const`) are the shipped one-gate helpers whose shape each gadget
+//! reproduces; `aig.rs` and `blast/mod.rs` (the phase-2 replay bridge)
+//! now serve the per-family differentials and the gate-identity tests
+//! only.
 
 /// A literal: an AIG node index plus a negation flag. Mirrors `aig::Lit`.
 #[derive(Clone, Copy)]
@@ -812,6 +820,282 @@ pub fn tseitin(aig: &Aig, outputs: &[Lit]) -> Vec<Vec<i32>> {
     clauses
 }
 
+// ───────────────── The term-DAG encoder (issue #192 phase 3) ─────────────────
+
+/// A node of a term DAG (issue #192 phase 3): the closed QF_BV fragment of
+/// `term.rs`, with every operand an index of an EARLIER node (topological
+/// order). Bitvector nodes denote words; the comparison and boolean nodes
+/// denote one-literal words. Leaves: `Var(w)` is a fresh `w`-bit variable
+/// (its bits become the next `w` primary inputs, in order), `Const(s, w)`
+/// is the `w`-bit constant whose LSB-first bits are `bits[s..s + w]` of the
+/// constant table `encode` is given (a table, not a payload, so the node
+/// stays `Copy` — the Aeneas fragment, as `Node`). `Extract(hi, lo, a)`,
+/// `ZeroExt(a, by)` / `SignExt(a, by)` carry their parameters; `Ite(c, t,
+/// e)` takes a boolean node `c`. `lean/BlasterDag.lean` defines the
+/// semantics directly over Lean `BitVec` (`dagSim`) and proves
+/// `encode_sound`: every node's word denotes its value.
+#[derive(Clone, Copy)]
+pub enum DagNode {
+    Var(usize),
+    Const(usize, usize),
+    Add(usize, usize),
+    Sub(usize, usize),
+    Mul(usize, usize),
+    Udiv(usize, usize),
+    Urem(usize, usize),
+    And(usize, usize),
+    Or(usize, usize),
+    Xor(usize, usize),
+    Shl(usize, usize),
+    Lshr(usize, usize),
+    Ashr(usize, usize),
+    Rotr(usize, usize),
+    Extract(usize, usize, usize),
+    Concat(usize, usize),
+    ZeroExt(usize, usize),
+    SignExt(usize, usize),
+    Ite(usize, usize, usize),
+    Eq(usize, usize),
+    Ne(usize, usize),
+    Ult(usize, usize),
+    Ule(usize, usize),
+    Ugt(usize, usize),
+    Uge(usize, usize),
+    Slt(usize, usize),
+    Sle(usize, usize),
+    Sgt(usize, usize),
+    Sge(usize, usize),
+    Not(usize),
+    BoolAnd(usize, usize),
+    BoolOr(usize, usize),
+}
+
+/// `w` fresh primary inputs numbered `first .. first + w`, as a word.
+pub fn word_inputs(aig: &mut Aig, first: usize, w: usize) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let mut j = 0usize;
+    while j < w {
+        let l = push_input(aig, first + j);
+        out.push(l);
+        j += 1;
+    }
+    out
+}
+
+/// The constant word whose bit `j` is `bits[s + j]` (TRUE / FALSE
+/// literals, no gates): the `Const(s, w)` leaf.
+pub fn word_bits(bits: &[bool], s: usize, w: usize) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let mut j = 0usize;
+    while j < w {
+        if bits[s + j] {
+            out.push(lit_true());
+        } else {
+            out.push(lit_false());
+        }
+        j += 1;
+    }
+    out
+}
+
+/// A one-literal word (the boolean nodes' denotation).
+#[allow(clippy::vec_init_then_push)]
+pub fn lit_word(l: Lit) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    out.push(l);
+    out
+}
+
+/// Encode ONE DAG node, given the words of every earlier node (`words[i]`
+/// is node `i`'s) and the next free primary-input number `nin`; returns
+/// the node's word and the updated input counter. Every arm is a call to
+/// the proven rule for that operator — this function adds no gate of its
+/// own beyond `push_and` / `push_or` for the boolean connectives.
+pub fn encode_node(
+    aig: &mut Aig,
+    words: &[Vec<Lit>],
+    bits: &[bool],
+    nin: usize,
+    node: DagNode,
+) -> (Vec<Lit>, usize) {
+    match node {
+        DagNode::Var(w) => {
+            let out = word_inputs(aig, nin, w);
+            (out, nin + w)
+        }
+        DagNode::Const(s, w) => (word_bits(bits, s, w), nin),
+        DagNode::Add(a, b) => (blast_add(aig, &words[a], &words[b]), nin),
+        DagNode::Sub(a, b) => (blast_sub(aig, &words[a], &words[b]), nin),
+        DagNode::Mul(a, b) => (blast_mul(aig, &words[a], &words[b]), nin),
+        DagNode::Udiv(a, b) => (blast_udiv(aig, &words[a], &words[b]), nin),
+        DagNode::Urem(a, b) => (blast_urem(aig, &words[a], &words[b]), nin),
+        DagNode::And(a, b) => (blast_and(aig, &words[a], &words[b]), nin),
+        DagNode::Or(a, b) => (blast_or(aig, &words[a], &words[b]), nin),
+        DagNode::Xor(a, b) => (blast_xor(aig, &words[a], &words[b]), nin),
+        DagNode::Shl(a, b) => (blast_shl(aig, &words[a], &words[b]), nin),
+        DagNode::Lshr(a, b) => (blast_lshr(aig, &words[a], &words[b]), nin),
+        DagNode::Ashr(a, b) => (blast_ashr(aig, &words[a], &words[b]), nin),
+        DagNode::Rotr(a, b) => (blast_rotr(aig, &words[a], &words[b]), nin),
+        DagNode::Extract(hi, lo, a) => (blast_extract(&words[a], hi, lo), nin),
+        DagNode::Concat(a, b) => (blast_concat(&words[a], &words[b]), nin),
+        DagNode::ZeroExt(a, by) => (blast_zero_ext(&words[a], by), nin),
+        DagNode::SignExt(a, by) => (blast_sign_ext(&words[a], by), nin),
+        DagNode::Ite(c, t, e) => (blast_ite(aig, words[c][0], &words[t], &words[e]), nin),
+        DagNode::Eq(a, b) => (lit_word(blast_eq(aig, &words[a], &words[b])), nin),
+        DagNode::Ne(a, b) => (lit_word(blast_ne(aig, &words[a], &words[b])), nin),
+        DagNode::Ult(a, b) => (lit_word(blast_ult(aig, &words[a], &words[b])), nin),
+        DagNode::Ule(a, b) => (lit_word(blast_ule(aig, &words[a], &words[b])), nin),
+        DagNode::Ugt(a, b) => (lit_word(blast_ugt(aig, &words[a], &words[b])), nin),
+        DagNode::Uge(a, b) => (lit_word(blast_uge(aig, &words[a], &words[b])), nin),
+        DagNode::Slt(a, b) => (lit_word(blast_slt(aig, &words[a], &words[b])), nin),
+        DagNode::Sle(a, b) => (lit_word(blast_sle(aig, &words[a], &words[b])), nin),
+        DagNode::Sgt(a, b) => (lit_word(blast_sgt(aig, &words[a], &words[b])), nin),
+        DagNode::Sge(a, b) => (lit_word(blast_sge(aig, &words[a], &words[b])), nin),
+        DagNode::Not(a) => (lit_word(lit_not(words[a][0])), nin),
+        DagNode::BoolAnd(a, b) => (lit_word(push_and(aig, words[a][0], words[b][0])), nin),
+        DagNode::BoolOr(a, b) => (lit_word(push_or(aig, words[a][0], words[b][0])), nin),
+    }
+}
+
+/// The proven term-DAG encoder (issue #192 phase 3): encodes every node of
+/// a topologically ordered DAG in order, returning every node's word and
+/// the asserted output literals — the first (only) literal of each root
+/// node's word. The arena is append-only (`push_and`, one node per gate):
+/// `compact` applies the folding and hashing afterwards. Semantics and
+/// proof: `lean/BlasterDag.lean` (`encode_sound`).
+pub fn encode(
+    aig: &mut Aig,
+    ns: &[DagNode],
+    bits: &[bool],
+    roots: &[usize],
+) -> (Vec<Vec<Lit>>, Vec<Lit>) {
+    let mut words: Vec<Vec<Lit>> = Vec::new();
+    let mut nin = 0usize;
+    let n = ns.len();
+    let mut i = 0usize;
+    while i < n {
+        let node = ns[i];
+        let (w, nin1) = encode_node(aig, &words, bits, nin, node);
+        words.push(w);
+        nin = nin1;
+        i += 1;
+    }
+    let mut outs: Vec<Lit> = Vec::new();
+    let m = roots.len();
+    let mut r = 0usize;
+    while r < m {
+        outs.push(words[roots[r]][0]);
+        r += 1;
+    }
+    (words, outs)
+}
+
+// ───────────── The folding + hashing pass (issue #192 phase 3) ─────────────
+
+/// Structural literal equality (`Lit` carries no derive, the fragment
+/// compares fields).
+pub fn lit_eq(a: Lit, b: Lit) -> bool {
+    a.node == b.node && a.neg == b.neg
+}
+
+/// `a.raw() <= b.raw()` in the shipped arena's AIGER encoding (`node * 2 +
+/// neg`), spelled without the multiplication: the operand order the
+/// shipped `Aig::and` stores.
+pub fn lit_le(a: Lit, b: Lit) -> bool {
+    a.node < b.node || (a.node == b.node && (!a.neg || b.neg))
+}
+
+/// The literal of the compacted arena that a literal of the source arena
+/// maps to (`map[node]`, negated if the literal is).
+pub fn map_lit(map: &[Lit], l: Lit) -> Lit {
+    let m = map[l.node];
+    if l.neg { lit_not(m) } else { m }
+}
+
+/// A word of the source arena carried over to the compacted arena, literal
+/// by literal (`map_lit`): the asserted outputs after `compact`.
+pub fn map_word(map: &[Lit], word: &[Lit]) -> Vec<Lit> {
+    let mut out: Vec<Lit> = Vec::new();
+    let w = word.len();
+    let mut i = 0usize;
+    while i < w {
+        out.push(map_lit(map, word[i]));
+        i += 1;
+    }
+    out
+}
+
+/// Whether `cand` is a positive literal of an existing gate of `out` whose
+/// stored operands are exactly `(p, q)` — the check that makes a hashing
+/// hint safe: a wrong hint is rejected and a fresh gate is pushed instead.
+pub fn hint_matches(out: &Aig, cand: Lit, p: Lit, q: Lit) -> bool {
+    if cand.neg || cand.node >= out.nodes.len() {
+        false
+    } else {
+        match out.nodes[cand.node] {
+            Node::False => false,
+            Node::Input(_) => false,
+            Node::And(cx, cy) => lit_eq(cx, p) && lit_eq(cy, q),
+        }
+    }
+}
+
+/// One AND of the compaction pass over already-mapped operands: the
+/// shipped `Aig::and`'s constant folds (`x&0 = 0`, `x&!x = 0`, `1&x = x`,
+/// `x&1 = x`, `x&x = x`) in its order, then its operand-order
+/// normalisation, then the hashing hint — `hint` names a SOURCE node whose
+/// mapped gate is claimed to have the same operands; it is checked, never
+/// trusted — and otherwise one fresh gate.
+pub fn compact_and(out: &mut Aig, map: &[Lit], rx: Lit, ry: Lit, hint: usize) -> Lit {
+    if lit_eq(rx, lit_false()) || lit_eq(ry, lit_false()) || lit_eq(rx, lit_not(ry)) {
+        lit_false()
+    } else if lit_eq(rx, lit_true()) {
+        ry
+    } else if lit_eq(ry, lit_true()) || lit_eq(rx, ry) {
+        rx
+    } else {
+        let p = if lit_le(rx, ry) { rx } else { ry };
+        let q = if lit_le(rx, ry) { ry } else { rx };
+        if hint < map.len() && hint_matches(out, map[hint], p, q) {
+            map[hint]
+        } else {
+            push_and(out, p, q)
+        }
+    }
+}
+
+/// The proven folding + structural-hashing pass (issue #192 phase 3):
+/// rebuilds `aig` node by node into a fresh arena, keeping the inputs'
+/// numbering, folding every AND gate's constants and sharing gates through
+/// checked `hints` (`hints[i]` = an earlier source node whose compacted
+/// gate node `i` may reuse; `i` itself, or anything wrong, means "no
+/// sharing"). Returns the new arena and, for every source node, the
+/// literal of the new arena that carries its value. `lean/BlasterDag.lean`
+/// proves `compact_sound`: every source literal and its image simulate to
+/// the same value under every input assignment, whatever the hints say.
+pub fn compact(aig: &Aig, hints: &[usize]) -> (Aig, Vec<Lit>) {
+    let mut out = aig_new();
+    let mut map: Vec<Lit> = Vec::new();
+    let n = aig.nodes.len();
+    let mut i = 0usize;
+    while i < n {
+        let node = aig.nodes[i];
+        let hint = if i < hints.len() { hints[i] } else { i };
+        let l = match node {
+            Node::False => lit_false(),
+            Node::Input(k) => push_input(&mut out, k),
+            Node::And(x, y) => {
+                let rx = map_lit(&map, x);
+                let ry = map_lit(&map, y);
+                compact_and(&mut out, &map, rx, ry, hint)
+            }
+        };
+        map.push(l);
+        i += 1;
+    }
+    (out, map)
+}
+
 #[cfg(test)]
 mod tests {
     //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68;
@@ -820,19 +1104,22 @@ mod tests {
     //! The Lean proof (`lean/Blaster*.lean`) establishes: these rules =
     //! BitVec semantics, unbounded, on the append-only reference arena.
     //! Since #192 phase 2 the solver runs these very rules, so there is no
-    //! second implementation to compare against; what remains unproven is
-    //! the bridge (`blast/mod.rs`) and the folding + hashing the shipped
-    //! `Aig::and` applies as the reference arena is replayed. These tests
-    //! establish, by differential simulation, that BRIDGED (`blast::*`,
-    //! replayed with folding + hashing) = REFERENCE (this arena, raw): the
-    //! same operand values through both, asserting equal outputs. Every
-    //! rule, exhaustive at every width 1..=8, seeded-sampled at every width
-    //! 9..=16 and at a spread of wide widths up to 128 (issue #185(b)). The
-    //! chain
-    //!   shipped (bridge + fold + hash) =(this differential)= rules =(Lean)= BitVec
-    //! is test evidence (bounded) for the unproven link, stated as such —
-    //! not smuggled into the unbounded claim. Every pair — `rotr` included —
-    //! is compared on the FULL operand domain at every width (issue #201).
+    //! second implementation to compare against. Since phase 3 the solver
+    //! lowers through the proven `encode` / `compact` / `tseitin` instead
+    //! of the per-rule bridge (`blast/mod.rs`), and the folding + hashing
+    //! is proven (`compact_sound`); the bridge is a test harness. These
+    //! tests establish, by differential simulation, that BRIDGED
+    //! (`blast::*`, replayed with the shipped `Aig::and`'s folding +
+    //! hashing) = REFERENCE (this arena, raw): the same operand values
+    //! through both, asserting equal outputs. Every rule, exhaustive at
+    //! every width 1..=8, seeded-sampled at every width 9..=16 and at a
+    //! spread of wide widths up to 128 (issue #185(b)). The chain
+    //!   shipped Aig::and (bridge + fold + hash) =(this differential)= rules =(Lean)= BitVec
+    //! is bounded test evidence that the shipped `aig::Aig` — the
+    //! gate-identity reference `dag::tests` compare `compact` against —
+    //! agrees with the rules, stated as such — not smuggled into the
+    //! unbounded claim. Every pair — `rotr` included — is compared on the
+    //! FULL operand domain at every width (issue #201).
 
     use super::*;
 
@@ -1212,8 +1499,10 @@ mod tests {
     //    a DEFAULT `aig::Aig` (folding + hashing) by the test's own `replay`
     //    is node-identical to the bridged rule on a default arena: the same
     //    `and_gates()` sequence, the same output literals. This is the
-    //    statement "shipped = fold_and_hash(reference)" that v0.27.0's
-    //    proven folding/hashing pass will turn into a theorem.
+    //    statement "shipped = fold_and_hash(reference)" that phase 3's
+    //    proven pass `compact` realises (`compact_sound` for the value,
+    //    `dag::tests::compact_matches_replay_on_a_shared_query` for the
+    //    node-for-node identity with this replay).
     //
     // Result: every op is identical under both notions (`push_xor` was the
     // one phase-1 mismatch — `(x|y)&!(x&y)` vs the shipped `(x&!y)|(!x&y)`
