@@ -79,8 +79,14 @@ UNSCHEDULED=(
   # / 5.3 GB) but on ubuntu-latest dispatch run 36759511157 the runner
   # cancelled both mid-Kani ("The operation was canceled") at 35m14s /
   # 31m55s, well inside the 75-min job timeout: the runner-shutdown
-  # signature, not a Kani failure. Needs a bigger runner or a lighter
-  # encoding. Tracked in #169.
+  # signature, not a Kani failure. The org self-hosted rust-cpu pool was
+  # tried too (2026-10-01): run 36813381641 timed out at 90 min, and run
+  # 36821560393 ran about 3 h until the runner itself dropped. Neither left
+  # a log. Maintainer decision: accept the gap. blast_add/blast_sub are
+  # proven at every width in Lean (BlasterArith.lean); since #192 phase 2
+  # those proofs cover the rule code that runs. They are also tested
+  # exhaustively at width 8 and randomized at 32/64. Local Kani completes
+  # (add_64 1019 s, sub_64 940 s).
   add_64 sub_64
   # CBMC/SAT-infeasible: multiplier/divider at 32/64 (same coverage).
   mul_32 mul_64 udiv_32 udiv_64 urem_32 urem_64
