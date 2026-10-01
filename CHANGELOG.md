@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-01
+
+**Every query is lowered through proven code** (#192, phase 3). A proven
+term-DAG encoder and a proven folding/hashing pass now run in the solver.
+`dag_refuted` states that a CNF the checker accepts a refutation for comes
+from an unsatisfiable term DAG. Output is byte-identical to v0.25.0, and
+lowering is 1.1-1.85x slower.
+
 **The solver's lowering is proven from the term DAG to the CNF** (#192,
 phase 3). A proven DAG encoder and a proven folding + hashing pass replace
 the phase-2 replay bridge; the CNF is now produced by the proven Tseitin
@@ -1358,7 +1366,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.26.0
 [0.25.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.25.0
 [0.24.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.24.0
 [0.23.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.23.0
