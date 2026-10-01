@@ -1,42 +1,35 @@
-//! Structural ops (DES-009): extract, concat, zero_ext, sign_ext.
-//! Pure word plumbing — no gates.
+//! Structural ops (DES-009): extract, concat, zero_ext, sign_ext — bridges
+//! to the Lean-proven rules in `crate::blast_kernel` (issue #192 phase 2;
+//! the rule bodies that used to live here are gone, see `blast/mod.rs`).
+//! Pure word plumbing — no gates, so no arena.
 //!
 //! Words are LSB-first, so `extract` is a slice, `concat` puts the SMT-LIB
 //! FIRST operand (the high bits) *after* the second in the vector, and the
 //! extensions append literals above the MSB. All rules are verified against
 //! the concrete evaluator (DES-001) per UV-009.
 
-use crate::aig::{Lit, Word};
+use crate::aig::Word;
+use crate::blast::{Scratch, concat, extend, extract};
+use crate::blast_kernel as k;
 
 /// `extract[hi:lo]` (inclusive) — slice of the LSB-first word.
 pub fn blast_extract(a: &Word, hi: u32, lo: u32) -> Word {
-    debug_assert!(
-        hi >= lo && (hi as usize) < a.len(),
-        "blast_extract: bad range [{hi}:{lo}] for width {}",
-        a.len()
-    );
-    a[lo as usize..=hi as usize].to_vec()
+    extract(&mut Scratch::default(), a, hi, lo)
 }
 
 /// `concat` — SMT-LIB: the FIRST operand becomes the high bits.
 pub fn blast_concat(hi_part: &Word, lo_part: &Word) -> Word {
-    lo_part.iter().chain(hi_part).copied().collect()
+    concat(&mut Scratch::default(), hi_part, lo_part)
 }
 
 /// `zero_ext` — append `by` FALSE literals above the MSB.
 pub fn blast_zero_ext(a: &Word, by: u32) -> Word {
-    let mut out = a.clone();
-    out.resize(a.len() + by as usize, Lit::FALSE);
-    out
+    extend(&mut Scratch::default(), a, by, k::blast_zero_ext)
 }
 
 /// `sign_ext` — replicate the sign literal `by` times.
 pub fn blast_sign_ext(a: &Word, by: u32) -> Word {
-    debug_assert!(!a.is_empty(), "blast_sign_ext: empty word");
-    let sign = *a.last().expect("blast_sign_ext: empty word");
-    let mut out = a.clone();
-    out.resize(a.len() + by as usize, sign);
-    out
+    extend(&mut Scratch::default(), a, by, k::blast_sign_ext)
 }
 
 #[cfg(test)]

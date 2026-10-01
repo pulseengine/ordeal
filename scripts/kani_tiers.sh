@@ -8,6 +8,14 @@
 #   scripts/kani_tiers.sh json wide                          # kani.yml matrix
 #   scripts/kani_tiers.sh check                              # coverage gate (CI)
 #
+# #192 phase 2 (2026-10-01): the harnesses in proofs.rs now call the proven
+# `blast_kernel` rules on the reference arena and simulate with the kernel's
+# own forward fold; they no longer go through `aig::Aig::and` (the replay
+# bridge path does not terminate under CBMC — the reason and measurements
+# are in proofs.rs). The tier lists below are unchanged; the timings quoted
+# in the comments were measured on the pre-phase-2 harnesses and are kept as
+# the record of what CI last ran — re-measure before promoting anything.
+#
 # Why a script and not a list in the workflow: #153 found the Kani job had
 # not completed since 2026-07-16 — urem_8 sat in the PR "fast" tier after
 # v0.10.0 made the divider native, and 44 of the 82 harnesses in

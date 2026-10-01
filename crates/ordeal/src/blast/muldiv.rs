@@ -1,143 +1,52 @@
-//! Multiplication and unsigned division (DES-008): shift-add partial
-//! products; restoring long division with the SMT-LIB divide-by-zero case
-//! (divisor = 0 ⇒ all-ones quotient) merged via a divisor-is-zero mux.
+//! Multiplication and unsigned division (DES-008) — bridges to the
+//! Lean-proven rules in `crate::blast_kernel` (issue #192 phase 2; the
+//! rule bodies that used to live here are gone, see `blast/mod.rs`).
 //!
-//! The adder/comparator primitives are duplicated locally rather than shared
-//! with the arith family so this module stands alone; they are a handful of
-//! gates and the structural hash collapses any overlap at the AIG level.
+//! `bvmul` is a shift-add partial-product sum; `bvudiv`/`bvurem` come from a
+//! restoring long division with the SMT-LIB divide-by-zero case (divisor =
+//! 0 ⇒ all-ones quotient, remainder = dividend) merged via a divisor-is-zero
+//! mux. Proven in `lean/BlasterMul.lean` / `lean/BlasterDiv.lean`.
+//!
+//! `bvurem` is MULTIPLICATIVE: `a - (a udiv b) * b` at the circuit level
+//! (issue #101; the unsigned twin of the #97 fix). The divider's remainder
+//! output computes the same function, but a consumer equivalence VC pits it
+//! against a multiplicative model (`a - (a/b)*b` — synth's rem_u, loom's
+//! WASM form), and a divider-remainder-vs-multiplier cross-circuit proof is
+//! exponential: under 1 s on the 0.9.1 derived form became over 7 m 48 s
+//! (killed) on the divider form, per synth's #101 measurements. This shape
+//! aligns structurally with those models (the shared `udiv` sub-circuit
+//! strashes), restoring propagation-speed VCs. Exact for ALL inputs
+//! including division by zero, with no special case: SMT-LIB `a udiv 0` is
+//! all-ones, and `all-ones * 0 = 0`, so the result is `a - 0 = a`.
+//!
+//! The SIGNED forms (`bvsdiv`/`bvsrem`) are deliberately NOT blasted here:
+//! they stay derived ops, lowered onto this core at the term level (see
+//! `crate::lowering`) — sign corrections over `bvudiv`/`bvurem`.
 
-use crate::aig::{Aig, Lit, Word};
-
-/// One-bit full adder: returns `(sum, carry_out)`.
-fn full_adder(aig: &mut Aig, a: Lit, b: Lit, cin: Lit) -> (Lit, Lit) {
-    let a_xor_b = aig.xor(a, b);
-    let sum = aig.xor(a_xor_b, cin);
-    let and_ab = aig.and(a, b);
-    let and_prop = aig.and(a_xor_b, cin);
-    let cout = aig.or(and_ab, and_prop);
-    (sum, cout)
-}
-
-/// Ripple subtraction `a - b` computed as `a + !b + 1`: returns the w-bit
-/// difference and the final carry, which is 1 iff `a >= b` (no borrow).
-fn sub_with_uge(aig: &mut Aig, a: &Word, b: &Word) -> (Word, Lit) {
-    debug_assert_eq!(a.len(), b.len(), "sub_with_uge: operand width mismatch");
-    let mut carry = Lit::TRUE;
-    let mut diff = Word::with_capacity(a.len());
-    for (&x, &y) in a.iter().zip(b) {
-        let (s, c) = full_adder(aig, x, y.not(), carry);
-        diff.push(s);
-        carry = c;
-    }
-    (diff, carry)
-}
+use crate::aig::{Aig, Word};
+use crate::blast::{Scratch, udivrem, word2};
+use crate::blast_kernel as k;
 
 /// `bvmul` — truncated shift-add partial-product sum.
-///
-/// Row `i` adds `(a << i) & b[i]` into an accumulator; only the low `w` bits
-/// of each partial sum are computed (row `i` touches bits `i..w`, and the
-/// carry out of bit `w-1` is dropped), matching modular semantics.
 pub fn blast_mul(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    debug_assert_eq!(a.len(), b.len(), "blast_mul: operand width mismatch");
-    let w = a.len();
-    let mut acc: Word = vec![Lit::FALSE; w];
-    for (i, &bi) in b.iter().enumerate() {
-        let mut carry = Lit::FALSE;
-        for j in i..w {
-            let pp = aig.and(a[j - i], bi);
-            let (sum, cout) = full_adder(aig, acc[j], pp, carry);
-            acc[j] = sum;
-            carry = cout;
-        }
-    }
-    acc
+    word2(aig, &mut Scratch::default(), a, b, k::blast_mul)
 }
 
-/// `bvudiv` / `bvurem` — restoring long division returning both quotient and
-/// remainder, each with its SMT-LIB divide-by-zero case (quotient all-ones,
-/// remainder = dividend).
-///
-/// The dividend is consumed MSB-first into a w-bit partial remainder. Each
-/// step conceptually widens the remainder to w+1 bits when shifting left;
-/// instead of materializing that column, the shifted-out top bit alone
-/// decides the comparison — if it is set the (w+1)-bit remainder is at least
-/// 2^w > divisor, otherwise a plain w-bit `remainder >= divisor` compare
-/// suffices. The w-bit modular difference is correct in both cases because
-/// the invariant `remainder < divisor` before the shift bounds the true
-/// difference below 2^w. After the last step the partial remainder holds the
-/// true remainder.
+/// `bvudiv` / `bvurem` — restoring long division returning both quotient
+/// and remainder, each with its SMT-LIB divide-by-zero case.
 pub fn blast_udivrem(aig: &mut Aig, a: &Word, b: &Word) -> (Word, Word) {
-    debug_assert_eq!(a.len(), b.len(), "blast_udivrem: operand width mismatch");
-    let w = a.len();
-    let mut rem: Word = vec![Lit::FALSE; w];
-    let mut quo: Word = vec![Lit::FALSE; w];
-    for i in (0..w).rev() {
-        // Shift the remainder left, bringing in dividend bit i; `top` is the
-        // bit shifted out into the conceptual (w+1)-th position.
-        let top = rem[w - 1];
-        for j in (1..w).rev() {
-            rem[j] = rem[j - 1];
-        }
-        rem[0] = a[i];
-        // (w+1)-bit remainder >= divisor: the shifted-out bit is set, or the
-        // low w bits alone already reach the divisor.
-        let (diff, low_ge) = sub_with_uge(aig, &rem, b);
-        let ge = aig.or(top, low_ge);
-        quo[i] = ge;
-        // Restoring step: keep the difference only when it did not borrow.
-        for j in 0..w {
-            rem[j] = aig.mux(ge, diff[j], rem[j]);
-        }
-    }
-    // SMT-LIB divide-by-zero: quotient all-ones, remainder = dividend.
-    let b_zero = b
-        .iter()
-        .fold(Lit::FALSE, |acc, &bit| aig.or(acc, bit))
-        .not();
-    let quo = quo.iter().map(|&q| aig.mux(b_zero, Lit::TRUE, q)).collect();
-    let rem = rem
-        .iter()
-        .zip(a)
-        .map(|(&r, &ai)| aig.mux(b_zero, ai, r))
-        .collect();
-    (quo, rem)
+    udivrem(aig, &mut Scratch::default(), a, b)
 }
 
 /// `bvudiv` — the quotient half of [`blast_udivrem`].
 pub fn blast_udiv(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    blast_udivrem(aig, a, b).0
+    word2(aig, &mut Scratch::default(), a, b, k::blast_udiv)
 }
 
-/// `bvurem` — MULTIPLICATIVE: `a - (a udiv b) * b` at the circuit level
-/// (issue #101; the unsigned twin of the #97 fix).
-///
-/// The divider's remainder output computes the same function, but a consumer
-/// equivalence VC pits it against a multiplicative model (`a - (a/b)*b` —
-/// synth's rem_u, loom's WASM form), and a divider-remainder-vs-multiplier
-/// cross-circuit proof is exponential: under 1 s on the 0.9.1 derived form
-/// became over 7 m 48 s (killed) on the divider form, per synth's #101
-/// measurements.
-/// This shape aligns structurally with those models (the shared `udiv`
-/// sub-circuit strashes), restoring propagation-speed VCs.
-///
-/// Exact for ALL inputs including division by zero, with no special case:
-/// SMT-LIB `a udiv 0` is all-ones, and `all-ones * 0 = 0`, so the result is
-/// `a - 0 = a` — precisely SMT-LIB `bvurem` by zero.
-///
-/// The term-level op stays native (`BvTerm::Urem`); only its circuit changed.
-/// Kani harnesses (urem_8/32/64) and the exhaustive width-8 evaluator
-/// differential re-verify the new circuit against the same reference.
+/// `bvurem` — multiplicative: `a - (a udiv b) * b` (issue #101).
 pub fn blast_urem(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    let q = blast_udiv(aig, a, b);
-    let prod = blast_mul(aig, &q, b);
-    crate::blast::arith::blast_sub(aig, a, &prod)
+    word2(aig, &mut Scratch::default(), a, b, k::blast_urem)
 }
-
-// The SIGNED forms (`bvsdiv`/`bvsrem`) are deliberately NOT blasted here: they
-// stay derived ops, lowered onto this core at the term level (see
-// `crate::lowering`). Once `bvurem` is native the derived forms cost no
-// multiplier either — they are sign corrections over `bvudiv`/`bvurem` — so the
-// closed fragment grows by exactly one op rather than three.
 
 #[cfg(test)]
 mod tests {

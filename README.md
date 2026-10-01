@@ -175,10 +175,13 @@ cannot drift from the checker's code.
 your original query. The translation from query to CNF (parsing, rewriting,
 bit-blasting, CNF encoding) is not proven. A bug there can produce a wrong
 answer with a valid certificate; [#182](https://github.com/pulseengine/ordeal/issues/182)
-was such a bug. The bit-blasting rules are proven against Lean's `BitVec`
-semantics, but for a reference copy of the blaster, not the one the solver
-runs. A differential test ties the two together. That translation step is
-defended by tests and by a differential against Z3, not by proof.
+was such a bug. The bit-blasting rules the solver runs are proven against
+Lean's `BitVec` semantics (since #192 phase 2 the solver calls the proven
+rules themselves; there is no second copy). Everything around them — the
+term walk, the constant folding and structural hashing applied as the
+rules' gates are replayed into the AIG, rewriting, the front ends and the
+CNF encoder the solver runs — is defended by tests and by a differential
+against Z3, not by proof.
 Closing that gap is tracked in [#192](https://github.com/pulseengine/ordeal/issues/192).
 Details and exact scope: [docs/formal-verification.md](docs/formal-verification.md).
 

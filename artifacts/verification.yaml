@@ -1406,3 +1406,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-059
+
+  - id: VER-060
+    type: sw-verification
+    title: Shipped walk runs the proven rules; output unchanged (TR-060)
+    status: verified
+    release: v0.25.0
+    description: Bridge tests check that the replay reproduces exactly the reference gates and passes shipped literals through; a byte-for-byte comparison of ordeal check --format json against the previous binary and a production CNF digest over 1211 queries show no shipped change.
+    tags: [blaster, regression]
+    fields:
+      coverage: bridge replay exactness and literal pass-through; 24 fixture queries byte-identical; CNF digest over 1211 queries (44.6M clauses) identical; rule-body grep empty
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- blast::tests"
+    links:
+      - type: verifies
+        target: TR-060

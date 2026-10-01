@@ -1,112 +1,45 @@
-//! Shifts and rotate (DES-007): barrel shifter with SMT-LIB out-of-range
-//! semantics; bvrotr rotates by amount mod width. Correct at EVERY width
-//! 1..=128 — see the soundness note on [`stage_count`].
+//! Shifts and rotate (DES-007) — bridges to the Lean-proven rules in
+//! `crate::blast_kernel` (issue #192 phase 2; the rule bodies that used to
+//! live here are gone, see `blast/mod.rs`).
+//!
+//! Barrel shifter with SMT-LIB out-of-range semantics; `bvrotr` rotates by
+//! amount mod width. Correct at EVERY width 1..=128: `stage_count` is
+//! `ceil(log2 w)` (`blast_kernel::stage_count`, proved exact in Lean's
+//! `stage_count_spec`), the out-of-range test covers the amount bits above
+//! the stages, and `rotr` reduces the amount mod `w` with the proven
+//! `blast_urem` at non-power-of-two widths. Proven in
+//! `lean/BlasterShift.lean` / `lean/BlasterRotr.lean`.
+//!
+//! SOUNDNESS history (fixed 0.22.1): the stage count used to be
+//! `w.trailing_zeros()`, guarded only by a `debug_assert!(w.is_power_of_two())`,
+//! so release builds built too few stages at non-power-of-two widths (zero at
+//! w = 3) and e.g. `(bvshl #b001 #b001)` at width 3 was encoded as 0 — a
+//! satisfiable query came back `unsat` with a VALID certificate, because the
+//! checker certifies the CNF it is given. The exhaustive every-width tests
+//! below (VER-049) pin the fix.
 
-use crate::aig::{Aig, Lit, Word, word_const};
-use crate::blast::muldiv::blast_urem;
-
-/// Number of barrel stages: the amount bits needed to express every
-/// in-range shift `0..w`, i.e. `ceil(log2 w)` (0 for `w = 1`). Stage `k`
-/// shifts by `2^k`, and `2^(stages-1) < w`, so no single stage exceeds the
-/// width; any combined amount `>= w` shifts every bit out (fill), which is
-/// exactly SMT-LIB's out-of-range result. For a power-of-two width this is
-/// `log2 w`, so those circuits are unchanged.
-///
-/// SOUNDNESS (fixed 0.22.1): this used to be `w.trailing_zeros()`, guarded
-/// only by a `debug_assert!(w.is_power_of_two())`. Release builds therefore
-/// built too few stages at non-power-of-two widths (zero at w = 3) and a
-/// wrong out-of-range test, so e.g. `(bvshl #b001 #b001)` at width 3 was
-/// encoded as 0 and a satisfiable query came back `unsat` — with a VALID
-/// certificate, because the checker certifies the CNF it is given.
-fn stage_count(a: &Word, b: &Word) -> usize {
-    let w = a.len();
-    debug_assert_eq!(w, b.len(), "shift operands must share a width");
-    assert!(w > 0, "shift operands must be non-empty");
-    (usize::BITS - (w - 1).leading_zeros()) as usize
-}
-
-/// `amount >= 2^stages`: OR of the amount bits above the barrel stages.
-/// Together with the barrel itself (which shifts everything out for any
-/// combined amount in `w..2^stages`) this realises `amount >= w`.
-fn out_of_range(aig: &mut Aig, b: &Word, stages: usize) -> Lit {
-    b[stages..]
-        .iter()
-        .fold(Lit::FALSE, |acc, &bit| aig.or(acc, bit))
-}
-
-/// Barrel right-shifter: stage `k` muxes a shift by `2^k` on amount bit `k`,
-/// vacated bits fill with `fill`; an out-of-range amount selects all-`fill`.
-fn barrel_right(aig: &mut Aig, a: &Word, b: &Word, fill: Lit) -> Word {
-    let w = a.len();
-    let stages = stage_count(a, b);
-    let mut cur = a.clone();
-    for (k, &sel) in b.iter().enumerate().take(stages) {
-        let s = 1usize << k;
-        cur = (0..w)
-            .map(|i| {
-                let shifted = if i + s < w { cur[i + s] } else { fill };
-                aig.mux(sel, shifted, cur[i])
-            })
-            .collect();
-    }
-    let oor = out_of_range(aig, b, stages);
-    cur.iter().map(|&bit| aig.mux(oor, fill, bit)).collect()
-}
+use crate::aig::{Aig, Word};
+use crate::blast::{Scratch, word2};
+use crate::blast_kernel as k;
 
 /// `bvshl` — zero when the shift amount is ≥ width.
 pub fn blast_shl(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    let w = a.len();
-    let stages = stage_count(a, b);
-    let mut cur = a.clone();
-    for (k, &sel) in b.iter().enumerate().take(stages) {
-        let s = 1usize << k;
-        cur = (0..w)
-            .map(|i| {
-                let shifted = if i >= s { cur[i - s] } else { Lit::FALSE };
-                aig.mux(sel, shifted, cur[i])
-            })
-            .collect();
-    }
-    let oor = out_of_range(aig, b, stages);
-    cur.iter()
-        .map(|&bit| aig.mux(oor, Lit::FALSE, bit))
-        .collect()
+    word2(aig, &mut Scratch::default(), a, b, k::blast_shl)
 }
 
 /// `bvlshr` — zero when the shift amount is ≥ width.
 pub fn blast_lshr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    barrel_right(aig, a, b, Lit::FALSE)
+    word2(aig, &mut Scratch::default(), a, b, k::blast_lshr)
 }
 
 /// `bvashr` — sign-fills; all sign bits when the amount is ≥ width.
 pub fn blast_ashr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    let sign = *a.last().expect("ashr operand must be non-empty");
-    barrel_right(aig, a, b, sign)
+    word2(aig, &mut Scratch::default(), a, b, k::blast_ashr)
 }
 
-/// `bvrotr` — rotate right by amount mod width. For a power-of-two width only
-/// the low `log2 w` amount bits matter (higher bits vanish mod `w`). For any
-/// other width the amount is first reduced `mod w` with the (untrusted,
-/// separately tested) unsigned-remainder blaster; each stage then rotates by
-/// `2^k mod w`, and the selected stages sum to the reduced amount `< w`.
+/// `bvrotr` — rotate right by amount mod width.
 pub fn blast_rotr(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    let w = a.len();
-    let stages = stage_count(a, b);
-    let reduced;
-    let amount: &Word = if w.is_power_of_two() {
-        b
-    } else {
-        reduced = blast_urem(aig, b, &word_const(w as u128, w as u32));
-        &reduced
-    };
-    let mut cur = a.clone();
-    for (k, &sel) in amount.iter().enumerate().take(stages) {
-        let s = 1usize << k;
-        cur = (0..w)
-            .map(|i| aig.mux(sel, cur[(i + s) % w], cur[i]))
-            .collect();
-    }
-    cur
+    word2(aig, &mut Scratch::default(), a, b, k::blast_rotr)
 }
 
 #[cfg(test)]

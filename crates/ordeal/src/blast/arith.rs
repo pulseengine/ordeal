@@ -1,105 +1,69 @@
-//! Add/sub and the eight ordered comparisons (DES-006).
+//! Add/sub and the eight ordered comparisons (DES-006) — bridges to the
+//! Lean-proven rules in `crate::blast_kernel` (issue #192 phase 2; the
+//! rule bodies that used to live here are gone, see `blast/mod.rs`).
 //!
 //! `bvadd`/`bvsub` are a ripple-carry adder (truncated, modular); `bvsub` is
 //! `a + !b + 1`. `bvult` is the borrow of that subtraction — the complement
 //! of the carry-out of `a + !b + 1` — and the remaining unsigned orders are
 //! derived from it. Signed orders reduce to unsigned with both sign bits
-//! flipped (order-embedding of two's complement into unsigned).
+//! flipped (order-embedding of two's complement into unsigned). Proven in
+//! `lean/BlasterArith.lean` / `lean/BlasterCmp.lean` at every width.
 //!
 //! Verified against the concrete evaluator (DES-001) exhaustively at width 8
 //! and randomized at widths 32/64 (UV-006).
 
 use crate::aig::{Aig, Lit, Word};
-
-/// Panic on the malformed inputs a blasting rule must never see.
-fn check_operands(a: &Word, b: &Word) {
-    assert!(!a.is_empty(), "arith blasting: empty word");
-    assert_eq!(a.len(), b.len(), "arith blasting: width mismatch");
-}
-
-/// Ripple-carry chain: returns the truncated sum and the final carry-out.
-///
-/// Per bit: `sum = a ^ b ^ cin`, `cout = (a & b) | (cin & (a ^ b))`.
-fn ripple_carry(aig: &mut Aig, a: &Word, b: &Word, carry_in: Lit) -> (Word, Lit) {
-    let mut carry = carry_in;
-    let mut sum = Word::with_capacity(a.len());
-    for (&x, &y) in a.iter().zip(b) {
-        let p = aig.xor(x, y);
-        sum.push(aig.xor(p, carry));
-        let g = aig.and(x, y);
-        let t = aig.and(p, carry);
-        carry = aig.or(g, t);
-    }
-    (sum, carry)
-}
-
-/// The word with its most significant (sign) bit complemented.
-fn flip_sign(w: &Word) -> Word {
-    let mut v = w.clone();
-    let msb = v.len() - 1;
-    v[msb] = v[msb].not();
-    v
-}
+use crate::blast::{Scratch, pred2, word2};
+use crate::blast_kernel as k;
 
 /// `bvadd` — ripple-carry adder.
 pub fn blast_add(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    check_operands(a, b);
-    ripple_carry(aig, a, b, Lit::FALSE).0
+    word2(aig, &mut Scratch::default(), a, b, k::blast_add)
 }
 
 /// `bvsub` — add of two's complement (invert + carry-in 1).
 pub fn blast_sub(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    check_operands(a, b);
-    let not_b: Word = b.iter().map(|&l| l.not()).collect();
-    ripple_carry(aig, a, &not_b, Lit::TRUE).0
+    word2(aig, &mut Scratch::default(), a, b, k::blast_sub)
 }
 
 /// `bvult` — unsigned less-than via the subtraction borrow chain.
-///
-/// `a < b` iff `a - b` borrows, i.e. the carry-out of `a + !b + 1` is 0.
 pub fn blast_ult(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    check_operands(a, b);
-    let not_b: Word = b.iter().map(|&l| l.not()).collect();
-    ripple_carry(aig, a, &not_b, Lit::TRUE).1.not()
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_ult)
 }
 
 /// `bvule` — `a <= b` iff not `b < a`.
 pub fn blast_ule(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_ult(aig, b, a).not()
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_ule)
 }
 
 /// `bvugt` — `a > b` iff `b < a`.
 pub fn blast_ugt(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_ult(aig, b, a)
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_ugt)
 }
 
 /// `bvuge` — `a >= b` iff not `a < b`.
 pub fn blast_uge(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_ult(aig, a, b).not()
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_uge)
 }
 
 /// `bvslt` — signed: unsigned compare with sign bits flipped.
-///
-/// Adding `2^(w-1)` (= flipping the MSB) maps two's-complement order onto
-/// unsigned order, so `slt(a, b) = ult(a ^ MSB, b ^ MSB)`.
 pub fn blast_slt(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    check_operands(a, b);
-    blast_ult(aig, &flip_sign(a), &flip_sign(b))
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_slt)
 }
 
 /// `bvsle` — `a <=s b` iff not `b <s a`.
 pub fn blast_sle(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_slt(aig, b, a).not()
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_sle)
 }
 
 /// `bvsgt` — `a >s b` iff `b <s a`.
 pub fn blast_sgt(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_slt(aig, b, a)
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_sgt)
 }
 
 /// `bvsge` — `a >=s b` iff not `a <s b`.
 pub fn blast_sge(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_slt(aig, a, b).not()
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_sge)
 }
 
 #[cfg(test)]

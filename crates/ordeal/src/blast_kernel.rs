@@ -1,20 +1,25 @@
-//! Aeneas-friendly model of the bit-blaster (issue #68, v0.15.0 — the
-//! assurance capstone).
+//! THE bit-blasting rules, Aeneas-translatable and Lean-proven (issue #68,
+//! v0.15.0 — the assurance capstone; issue #192 phase 2 — the rules the
+//! solver runs).
 //!
-//! This mirrors what `crates/ordeal-lrat/src/kernel.rs` does for the checker:
-//! a self-contained Rust model, written in the translatable subset Charon +
-//! Aeneas accept (no `HashMap`, no interior mutability, no trait objects), that
-//! captures the **correctness content** of the real bit-blaster. `lean/regen.sh`
-//! Aeneas-translates it into `lean/Blaster.lean`, and `lean/Blaster.lean`'s
-//! proofs establish that each rule equals the formal `BitVec` semantics for
-//! ALL widths — the unbounded evidence that replaces the Kani-bounded harnesses.
+//! This is what `crates/ordeal-lrat/src/kernel.rs` is for the checker: a
+//! self-contained Rust core, written in the translatable subset Charon +
+//! Aeneas accept (no `HashMap`, no interior mutability, no trait objects).
+//! `lean/regen.sh` Aeneas-translates it into `lean/BlastKernel.lean`, and the
+//! `lean/Blaster*.lean` proofs establish that each rule equals the formal
+//! `BitVec` semantics for ALL widths — the unbounded evidence that replaces
+//! the Kani-bounded harnesses.
 //!
-//! Fidelity note: the real `aig.rs` adds structural hashing (a `HashMap`) as a
-//! *performance* optimization — it changes which gates are shared, never what a
-//! gate computes. This model omits it: a functional append-only AIG evaluated
-//! by a forward fold has the same input→output function, which is all the
-//! correctness proof needs. The blast rules themselves (`blast/bitwise.rs`) are
-//! already in the translatable subset and are mirrored here verbatim in spirit.
+//! Since #192 phase 2 the solver's term walk (`solver.rs`) calls these rules
+//! directly — there is no second copy of any rule. The shipped `aig.rs`
+//! applies constant folding and structural hashing (a `HashMap`) in
+//! `Aig::and` as a *performance* optimisation that changes which gates are
+//! shared, never what a gate computes. The proofs count nodes exactly
+//! (`push_and` appends one node), so that simplification cannot live here:
+//! the bridge in `blast/mod.rs` runs a rule on this append-only arena and
+//! replays it node by node through `Aig::and`. The `aig.rs` names in the
+//! docs below (`aig::or`, `aig::xor`, `aig::mux`, `word_const`) are the
+//! shipped one-gate helpers whose shape each gadget reproduces.
 
 /// A literal: an AIG node index plus a negation flag. Mirrors `aig::Lit`.
 #[derive(Clone, Copy)]
@@ -141,8 +146,7 @@ pub fn simulate(aig: &Aig, inputs: &[bool]) -> Vec<bool> {
     vals
 }
 
-/// `bvand` — per-bit AND over two equal-width words. Mirrors
-/// `blast/bitwise.rs::blast_and`.
+/// `bvand` — per-bit AND over two equal-width words.
 pub fn blast_and(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let mut out: Vec<Lit> = Vec::new();
     let w = a.len();
@@ -182,7 +186,7 @@ pub fn blast_xor(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
 }
 
 /// Ripple-carry chain over equal-width words: returns the truncated sum and
-/// the final carry-out. Mirrors `blast/arith.rs::ripple_carry`. Per bit:
+/// the final carry-out. Per bit:
 /// `sum_i = a_i ^ b_i ^ carry`, `carry' = (a_i & b_i) | (carry & (a_i ^ b_i))`.
 pub fn ripple_carry(aig: &mut Aig, a: &[Lit], b: &[Lit], carry_in: Lit) -> (Vec<Lit>, Lit) {
     let mut carry = carry_in;
@@ -201,7 +205,7 @@ pub fn ripple_carry(aig: &mut Aig, a: &[Lit], b: &[Lit], carry_in: Lit) -> (Vec<
     (sum, carry)
 }
 
-/// `bvadd` — ripple-carry adder, carry-in 0. Mirrors `blast/arith.rs::blast_add`.
+/// `bvadd` — ripple-carry adder, carry-in 0.
 pub fn blast_add(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let (sum, _carry) = ripple_carry(aig, a, b, lit_false());
     sum
@@ -219,7 +223,7 @@ pub fn word_not(a: &[Lit]) -> Vec<Lit> {
     out
 }
 
-/// `bvsub` — two's complement: `a + !b + 1`. Mirrors `blast/arith.rs::blast_sub`.
+/// `bvsub` — two's complement: `a + !b + 1`.
 pub fn blast_sub(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let not_b = word_not(b);
     let (sum, _carry) = ripple_carry(aig, a, &not_b, lit_true());
@@ -227,14 +231,14 @@ pub fn blast_sub(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
 }
 
 /// `bvult` — unsigned less-than: the borrow of `a - b`, i.e. the complement
-/// of the carry-out of `a + !b + 1`. Mirrors `blast/arith.rs::blast_ult`.
+/// of the carry-out of `a + !b + 1`.
 pub fn blast_ult(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
     let not_b = word_not(b);
     let (_sum, carry) = ripple_carry(aig, a, &not_b, lit_true());
     lit_not(carry)
 }
 
-/// `bvule` — `a <= b` iff not `b < a`. Mirrors `blast/arith.rs::blast_ule`.
+/// `bvule` — `a <= b` iff not `b < a`.
 pub fn blast_ule(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
     let lt = blast_ult(aig, b, a);
     lit_not(lt)
@@ -251,8 +255,7 @@ pub fn blast_uge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
     lit_not(lt)
 }
 
-/// The word with its most significant (sign) bit complemented. Mirrors
-/// `blast/arith.rs::flip_sign`.
+/// The word with its most significant (sign) bit complemented.
 pub fn flip_sign(a: &[Lit]) -> Vec<Lit> {
     let mut out: Vec<Lit> = Vec::new();
     let w = a.len();
@@ -293,7 +296,7 @@ pub fn blast_sge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
     lit_not(lt)
 }
 
-/// `=` — conjunction of per-bit XNORs. Mirrors `blast/bitwise.rs::blast_eq`.
+/// `=` — conjunction of per-bit XNORs.
 pub fn blast_eq(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Lit {
     let mut acc = lit_true();
     let w = a.len();
@@ -398,16 +401,16 @@ pub fn blast_sign_ext(a: &[Lit], by: usize) -> Vec<Lit> {
     out
 }
 
-/// Barrel stages for a width `w >= 1`, and whether `w` is a power of two.
-/// Mirrors `blast/shift.rs::stage_count` — `ceil(log2 w)`, the bit length
-/// of `w - 1`, which the real blaster spells `usize::BITS - (w - 1)
-/// .leading_zeros()`; `leading_zeros` has no Aeneas model, so the mirror
-/// halves `w - 1` to zero and counts the rounds. `w` is a power of two
-/// exactly when every bit of `w - 1` below that length is set (`w - 1 =
-/// 2^stages - 1`), which the same loop records — the real `blast_rotr`
-/// tests `w.is_power_of_two()`. Stage `k` shifts by `2^k`, `2^(stages-1)
-/// < w <= 2^stages`, so `stages <= w` and no stage exceeds the width
-/// (issue #201; the Lean spec `stage_count_spec` proves all of this).
+/// Barrel stages for a width `w >= 1`, and whether `w` is a power of two:
+/// `ceil(log2 w)`, the bit length of `w - 1` (std would spell it
+/// `usize::BITS - (w - 1).leading_zeros()`; `leading_zeros` has no Aeneas
+/// model, so this halves `w - 1` to zero and counts the rounds — the
+/// `stage_count_matches_real_formula_*` test pins the two spellings against
+/// each other). `w` is a power of two exactly when every bit of `w - 1`
+/// below that length is set (`w - 1 = 2^stages - 1`), which the same loop
+/// records (std: `w.is_power_of_two()`). Stage `k` shifts by `2^k`,
+/// `2^(stages-1) < w <= 2^stages`, so `stages <= w` and no stage exceeds the
+/// width (issue #201; the Lean spec `stage_count_spec` proves all of this).
 pub fn stage_count(w: usize) -> (usize, bool) {
     let mut t = w - 1;
     let mut stages = 0usize;
@@ -444,8 +447,7 @@ pub fn word_const(value: usize, w: usize) -> Vec<Lit> {
 
 /// `amount >= 2^stages`: OR of the amount bits above the barrel stages.
 /// Together with the barrel itself (which shifts everything out for any
-/// combined amount in `w..2^stages`) this realises `amount >= w`. Mirrors
-/// `blast/shift.rs::out_of_range`.
+/// combined amount in `w..2^stages`) this realises `amount >= w`.
 pub fn out_of_range(aig: &mut Aig, b: &[Lit], stages: usize) -> Lit {
     let mut acc = lit_false();
     let w = b.len();
@@ -473,8 +475,8 @@ pub fn barrel_right_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize, fill: 
 }
 
 /// Barrel right-shifter with SMT-LIB out-of-range semantics:
-/// `ceil(log2 w)` mux-stages then an all-`fill` mux on out-of-range.
-/// Mirrors `blast/shift.rs::barrel_right` at every width `w >= 1`.
+/// `ceil(log2 w)` mux-stages then an all-`fill` mux on out-of-range, at
+/// every width `w >= 1`.
 pub fn barrel_right(aig: &mut Aig, a: &[Lit], b: &[Lit], fill: Lit) -> Vec<Lit> {
     let mut cur: Vec<Lit> = Vec::new();
     let w = a.len();
@@ -516,8 +518,8 @@ pub fn barrel_left_stage(aig: &mut Aig, cur: &[Lit], sel: Lit, s: usize) -> Vec<
     next
 }
 
-/// `bvshl` — barrel left-shifter; zero when the amount is >= width.
-/// Mirrors `blast/shift.rs::blast_shl` at every width `w >= 1`.
+/// `bvshl` — barrel left-shifter; zero when the amount is >= width, at
+/// every width `w >= 1`.
 pub fn blast_shl(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let mut cur: Vec<Lit> = Vec::new();
     let w = a.len();
@@ -592,7 +594,7 @@ pub fn rotr_stages(aig: &mut Aig, a: &[Lit], amount: &[Lit], stages: usize) -> V
 }
 
 /// `bvrotr` — rotate right by amount mod width, at every width `w >= 1`.
-/// Mirrors `blast/shift.rs::blast_rotr`: for a power-of-two width only the
+/// For a power-of-two width only the
 /// low `log2 w` amount bits matter (higher bits vanish mod `w`); for any
 /// other width the amount is first reduced mod `w` with `blast_urem`
 /// against the constant word `w`, and the reduced amount `< w <=
@@ -609,8 +611,7 @@ pub fn blast_rotr(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     }
 }
 
-/// Full adder: `(sum, carry_out)` for one bit column. Mirrors
-/// `blast/muldiv.rs::full_adder`.
+/// Full adder: `(sum, carry_out)` for one bit column.
 pub fn full_adder(aig: &mut Aig, a: Lit, b: Lit, cin: Lit) -> (Lit, Lit) {
     let a_xor_b = push_xor(aig, a, b);
     let sum = push_xor(aig, a_xor_b, cin);
@@ -621,8 +622,7 @@ pub fn full_adder(aig: &mut Aig, a: Lit, b: Lit, cin: Lit) -> (Lit, Lit) {
 }
 
 /// Ripple subtraction `a - b` as `a + !b + 1`: returns the w-bit difference
-/// and the final carry, which is 1 iff `a >= b` (no borrow). Mirrors
-/// `blast/muldiv.rs::sub_with_uge`.
+/// and the final carry, which is 1 iff `a >= b` (no borrow).
 pub fn sub_with_uge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> (Vec<Lit>, Lit) {
     let mut carry = lit_true();
     let mut diff: Vec<Lit> = Vec::new();
@@ -640,8 +640,7 @@ pub fn sub_with_uge(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> (Vec<Lit>, Lit) {
 
 /// `bvmul` — truncated shift-add partial-product sum. Row `i` adds
 /// `(a << i) & b[i]` into the accumulator; only bits `i..w` are touched and
-/// the carry out of bit `w-1` is dropped (modular semantics). Mirrors
-/// `blast/muldiv.rs::blast_mul`.
+/// the carry out of bit `w-1` is dropped (modular semantics).
 pub fn blast_mul(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let w = a.len();
     let mut acc: Vec<Lit> = Vec::new();
@@ -668,7 +667,7 @@ pub fn blast_mul(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
 
 /// `bvudiv`/`bvurem` — restoring long division, both results, each with its
 /// SMT-LIB divide-by-zero case (quotient all-ones, remainder = dividend).
-/// Mirrors `blast/muldiv.rs::blast_udivrem`, including the w-bit trick: the
+/// The w-bit trick: the
 /// shifted-out top bit alone decides the (w+1)-bit compare, and the w-bit
 /// modular difference is correct because the loop invariant `rem < divisor`
 /// bounds the true difference below 2^w.
@@ -738,8 +737,9 @@ pub fn blast_udiv(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     quo
 }
 
-/// `bvurem` — MULTIPLICATIVE: `a - (a udiv b) * b` (issue #101), mirroring
-/// the production rule. Exact including /0 (all-ones * 0 = 0, so a - 0 = a).
+/// `bvurem` — MULTIPLICATIVE: `a - (a udiv b) * b` (issue #101; the shape
+/// consumer VCs strash against, see `blast/muldiv.rs`). Exact including /0
+/// (all-ones * 0 = 0, so a - 0 = a).
 pub fn blast_urem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     let q = blast_udiv(aig, a, b);
     let prod = blast_mul(aig, &q, b);
@@ -814,30 +814,33 @@ pub fn tseitin(aig: &Aig, outputs: &[Lit]) -> Vec<Vec<i32>> {
 
 #[cfg(test)]
 mod tests {
-    //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68).
+    //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68;
+    //! re-targeted by #192 phase 2).
     //!
-    //! The Lean proof (`lean/Blaster*.lean`) establishes: MODEL = BitVec
-    //! semantics, unbounded. These tests establish: REAL BLASTER = MODEL, by
-    //! differential simulation — the same operand values through the real
-    //! `blast::*` rules (with structural hashing) and through this model
-    //! (without), asserting equal outputs. Every mirrored rule, exhaustive at
-    //! every width 1..=8, seeded-sampled at every width 9..=16 and at a
-    //! spread of wide widths up to 128 (issue #185(b); this supersedes the
-    //! original width-8-only differential). The chain
-    //!   real blaster =(this differential)= model =(Lean, all widths)= BitVec
-    //! is what replaces "trust the mirroring was faithful". This link is
-    //! test evidence (bounded), stated as such — not smuggled into the
-    //! unbounded claim. Every pair — `rotr` included — is compared on the
-    //! FULL operand domain at every width (issue #201 closed the last
-    //! restriction, `rotr` on amounts `< w` at non-power-of-two widths).
+    //! The Lean proof (`lean/Blaster*.lean`) establishes: these rules =
+    //! BitVec semantics, unbounded, on the append-only reference arena.
+    //! Since #192 phase 2 the solver runs these very rules, so there is no
+    //! second implementation to compare against; what remains unproven is
+    //! the bridge (`blast/mod.rs`) and the folding + hashing the shipped
+    //! `Aig::and` applies as the reference arena is replayed. These tests
+    //! establish, by differential simulation, that BRIDGED (`blast::*`,
+    //! replayed with folding + hashing) = REFERENCE (this arena, raw): the
+    //! same operand values through both, asserting equal outputs. Every
+    //! rule, exhaustive at every width 1..=8, seeded-sampled at every width
+    //! 9..=16 and at a spread of wide widths up to 128 (issue #185(b)). The
+    //! chain
+    //!   shipped (bridge + fold + hash) =(this differential)= rules =(Lean)= BitVec
+    //! is test evidence (bounded) for the unproven link, stated as such —
+    //! not smuggled into the unbounded claim. Every pair — `rotr` included —
+    //! is compared on the FULL operand domain at every width (issue #201).
 
     use super::*;
 
-    /// The mirror's `stage_count` IS the real `blast::shift::stage_count`
-    /// (`ceil(log2 w)` as `usize::BITS - (w - 1).leading_zeros()`) and its
-    /// power-of-two flag IS `usize::is_power_of_two`, at every width the
-    /// solver accepts and well beyond — the two functions the mirror can
-    /// not call (no Aeneas model) pinned against their std spellings.
+    /// `stage_count` IS `ceil(log2 w)` as std spells it (`usize::BITS - (w -
+    /// 1).leading_zeros()`) and its power-of-two flag IS
+    /// `usize::is_power_of_two`, at every width the solver accepts and well
+    /// beyond — the two std functions the kernel cannot call (no Aeneas
+    /// model) pinned against their std spellings.
     #[test]
     fn stage_count_matches_real_formula_and_is_power_of_two() {
         for w in 1usize..=4096 {
@@ -855,7 +858,7 @@ mod tests {
         }
     }
 
-    /// Build two w-bit input words in the model, mirroring `word_input`.
+    /// Build two w-bit input words on the reference arena (`word_input`'s shape).
     fn model_inputs(aig: &mut Aig, w: usize) -> (Vec<Lit>, Vec<Lit>) {
         let mut a: Vec<Lit> = Vec::new();
         let mut b: Vec<Lit> = Vec::new();
@@ -872,15 +875,15 @@ mod tests {
         (a, b)
     }
 
-    /// One mirrored rule instantiated on both sides: the real output word
-    /// (predicates are 1-literal words) and the model output word.
+    /// One rule instantiated on both sides: the bridged output word
+    /// (predicates are 1-literal words) and the reference output word.
     struct DiffPair {
         name: String,
         real: Vec<crate::aig::Lit>,
         model: Vec<Lit>,
     }
 
-    /// Both AIGs with every mirrored rule blasted once over shared inputs:
+    /// Both AIGs with every rule blasted once over shared inputs:
     /// `a` = inputs `0..w`, `b` = inputs `w..2w`, `cond` = input `2w`.
     struct DiffHarness {
         w: usize,
@@ -1084,8 +1087,8 @@ mod tests {
                     .map(|&l| if eval_lit(&mvals, l) { '1' } else { '0' })
                     .collect();
                 panic!(
-                    "mirror/real disagree: op={} w={w} a={a:#x} b={b:#x} cond={cond} \
-                     mirror=#b{mbits} real=#b{rbits}",
+                    "reference/bridged disagree: op={} w={w} a={a:#x} b={b:#x} cond={cond} \
+                     reference=#b{mbits} bridged=#b{rbits}",
                     p.name
                 );
             }
@@ -1144,7 +1147,7 @@ mod tests {
     // rivet: verifies VER-051
     // rivet: verifies VER-056
     /// Issue #185(b): EXHAUSTIVE at every width 1..=8 — every `(a, b)` pair
-    /// through every mirrored rule on both sides (and/or/xor, add, sub,
+    /// through every rule on both sides (and/or/xor, add, sub,
     /// ult/ule/ugt/uge, slt/sle/sgt/sge, eq/ne, ite, extract, concat,
     /// zero_ext, sign_ext, shl/lshr/ashr, mul, udiv/urem/udivrem, rotr —
     /// rotr on its FULL amount domain at every width, #201). `ite`'s
@@ -1184,35 +1187,39 @@ mod tests {
         }
     }
 
-    // ───────────── Gate identity (issue #192 phase 1, F1) ─────────────
+    // ───────────── Gate identity (issue #192 phase 1, F1; phase 2) ─────────────
     //
-    // The simulation differential above shows real and model compute the
-    // same FUNCTION. Phase 1 of #192 needs more: the same CIRCUIT, so that
-    // the model's Tseitin CNF (proven in lean/BlasterTseitin.lean) is the
-    // CNF the solver ships. Two notions, both checked for every mirrored
-    // op at every width 1..=16, each op in its own fresh AIG pair:
+    // The simulation differential above shows bridged and reference compute
+    // the same FUNCTION. Phase 1 of #192 needed more: the same CIRCUIT, so
+    // that the reference Tseitin CNF (proven in lean/BlasterTseitin.lean) is
+    // the CNF the solver ships. In phase 1 the shipped rules were a second
+    // hand-written copy and these tests showed the copy was gate-identical;
+    // since phase 2 the shipped rules ARE a replay of this arena through
+    // `blast/mod.rs`, and the same two notions now pin the bridge against
+    // an independent, test-local replay (`replay` below) — every op, every
+    // width 1..=16, each op in its own fresh AIG pair:
     //
-    //  * RAW identity — the shipped rule on an `AigOptions::RAW` arena (no
+    //  * RAW identity — the bridged rule on an `AigOptions::RAW` arena (no
     //    folding, no hashing: one gate per `and` call, like `push_and`)
-    //    against the model rule: the same number of nodes, the same inputs,
-    //    gate `i` has the same operand PAIR on both sides, and the same
-    //    output literals. The one asymmetry: the shipped `Aig::and` stores
-    //    its two operands order-normalized (`a.raw() <= b.raw()`, the strash
-    //    key, applied in every mode) while the model stores them as given —
-    //    so gate operands are compared as unordered pairs. Everything else is
-    //    exact.
-    //  * REPLAY identity — the model arena replayed node by node through a
-    //    DEFAULT `aig::Aig` (folding + hashing) is node-identical to the
-    //    shipped rule built directly on a default arena: the same
+    //    against the reference rule: the same number of nodes, the same
+    //    inputs, gate `i` has the same operand PAIR on both sides, and the
+    //    same output literals — the bridge adds and drops nothing. The one
+    //    asymmetry: the shipped `Aig::and` stores its two operands
+    //    order-normalized (`a.raw() <= b.raw()`, the strash key, applied in
+    //    every mode) while the reference stores them as given — so gate
+    //    operands are compared as unordered pairs. Everything else is exact.
+    //  * REPLAY identity — the reference arena replayed node by node through
+    //    a DEFAULT `aig::Aig` (folding + hashing) by the test's own `replay`
+    //    is node-identical to the bridged rule on a default arena: the same
     //    `and_gates()` sequence, the same output literals. This is the
-    //    statement "shipped = fold_and_hash(model)" that v0.27.0's proven
-    //    folding/hashing pass will turn into a theorem.
+    //    statement "shipped = fold_and_hash(reference)" that v0.27.0's
+    //    proven folding/hashing pass will turn into a theorem.
     //
-    // Result at the time of writing: every op is identical under both
-    // notions (`push_xor` was the one mismatch — `(x|y)&!(x&y)` vs the
-    // shipped `(x&!y)|(!x&y)` — and now has the shipped shape).
+    // Result: every op is identical under both notions (`push_xor` was the
+    // one phase-1 mismatch — `(x|y)&!(x&y)` vs the shipped `(x&!y)|(!x&y)`
+    // — and has the shipped shape since).
 
-    /// Every mirrored op, by name: the word ops, the predicates, `udivrem`
+    /// Every op, by name: the word ops, the predicates, `udivrem`
     /// (both halves), `ite`, the shifts/rotate, the gate-free plumbing and
     /// the one-bit mux gadget.
     const GATE_IDENTITY_OPS: [&str; 30] = [
@@ -1431,8 +1438,8 @@ mod tests {
 
     // rivet: verifies VER-051
     // rivet: verifies VER-059
-    /// Issue #192 phase 1 (F1), RAW identity: the shipped rule on an
-    /// unsimplified arena IS the model arena — node for node, every op,
+    /// Issue #192 phase 1 (F1), RAW identity: the bridged rule on an
+    /// unsimplified arena IS the reference arena — node for node, every op,
     /// every width 1..=16 (gate operands as unordered pairs, see the
     /// section comment; everything else exact).
     #[test]
@@ -1472,11 +1479,11 @@ mod tests {
 
     // rivet: verifies VER-051
     // rivet: verifies VER-059
-    /// Issue #192 phase 1 (F1), REPLAY identity: the model arena replayed
-    /// through a default `aig::Aig` (constant folding + structural hashing)
-    /// is node-identical to the shipped rule built directly — the same
-    /// `and_gates()` sequence and the same output literals — for every op
-    /// at every width 1..=16.
+    /// Issue #192 phase 1 (F1), REPLAY identity: the reference arena
+    /// replayed through a default `aig::Aig` (constant folding + structural
+    /// hashing) by the test's own `replay` is node-identical to the bridged
+    /// rule — the same `and_gates()` sequence and the same output literals
+    /// — for every op at every width 1..=16.
     #[test]
     fn gate_identity_replay_every_op_widths_1_to_16() {
         for w in 1usize..=16 {
@@ -1604,7 +1611,7 @@ mod tests {
     // rivet: verifies VER-051
     // rivet: verifies VER-059
     /// Issue #192 phase 1: the model Tseitin encoder IS `cnf::tseitin` —
-    /// clause for clause, in order — on the shipped arena of every mirrored
+    /// clause for clause, in order — on the shipped arena of every
     /// op at every width 1..=16, in each simplification mode (raw, fold
     /// only, fold + hash), asserting every output literal; and, on the
     /// model-built arenas, the same up to the shipped operand normalization.
