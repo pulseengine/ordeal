@@ -1669,3 +1669,22 @@ artifacts:
         target: TR-056
       - type: allocated-to
         target: ARC-003
+
+  - id: TR-060
+    type: sw-req
+    title: The solver runs the Lean-proven blast rules; no second implementation of any rule exists (#192 phase 2)
+    status: verified
+    release: v0.25.0
+    description: "Phase 2 of #192: the shipped term walk builds every rule with the blast_kernel rules the Lean proofs cover, via a bridge that replays the reference arena through the shipped Aig::and (folding and hashing). The duplicate rule bodies in blast/{arith,bitwise,shift,muldiv,structural}.rs are deleted. Shipped output must be unchanged. Kani harnesses target the proven rules on the reference arena; the bridge's folding/hashing is covered by tests and a CNF digest until phase 3 proves it."
+    tags: [soundness, blaster, "192"]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: No rule bodies remain in the five blast family files (grep); ordeal check --format json is byte-identical to the previous binary on every fixture; production CNF digests identical over 1211 queries; Lean build and axiom gate pass from regenerated models; bridge tests pass; Z3 differential passes; Kani tier check passes.
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-059
+      - type: allocated-to
+        target: ARC-003

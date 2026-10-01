@@ -158,20 +158,32 @@ Qualifications, in the same spirit as for the UNSAT theorem:
 - **I/O, the WebAssembly component boundary, and the host embedding.**
 - **The SAT search.** The CDCL engine that *emits* certificates is untrusted
   by design. A bug there can only produce a certificate the checker rejects.
-- **The query-to-CNF translation.** The front ends, rewriting, the bit-blaster
-  the solver actually runs, AIG construction and the Tseitin encoder the
-  solver runs (`cnf.rs`) are *not* proven. This path is trusted: an encoding
-  bug gives a **certified wrong answer**, because the checker certifies the
-  CNF it is given (#182). The `BlastKernel.lean` proofs cover
-  `blast_kernel.rs`, a reference copy of the blaster, and — since #192 phase
-  1 — a reference copy of the Tseitin encoder (`blast_kernel::tseitin`,
-  proven satisfiability-preserving in `lean/BlasterTseitin.lean` and
-  composed with `lrat_check_sound` as `tseitin_refutes_outputs`). They reach
-  the real blaster and the real encoder only through differential tests:
-  gate-identity (the reference AIG rebuilt through `aig::Aig::and` is
-  node-identical to the shipped rule's, every op, widths 1..=16) and a
-  clause-for-clause Tseitin comparison. Closing the gap is tracked in #192;
-  the plan is `docs/design/query-cnf-gap.md`.
+- **The query-to-CNF translation, apart from the blast rules.** This path
+  is trusted: an encoding bug gives a **certified wrong answer**, because
+  the checker certifies the CNF it is given (#182). What *is* proven here,
+  since #192 phase 2: the bit-blasting rules the solver runs are the
+  `blast_kernel.rs` rules themselves — the term walk in `solver.rs` calls
+  `blast_kernel::blast_*` at every arm (there is no second copy of any
+  rule any more) — and `lean/Blaster*.lean` proves each of them equal to
+  the `BitVec` semantics at every width. The rules build on the reference
+  arena, whose `push_and` appends exactly one node (the proofs count
+  nodes); the bridge in `blast/mod.rs` replays that arena into the shipped
+  `aig::Aig` through `Aig::and`. What is *not* proven: the term walk and
+  that bridge; the constant folding and structural hashing inside
+  `Aig::and` (the replay is the point where they happen); canon
+  (`canon.rs`, including constant folding via `eval.rs`); lowering of the
+  derived ops; the sliver (`sliver.rs`); the SMT-LIB and Verus front ends;
+  and the Tseitin encoder the solver runs (`cnf.rs`) — its reference copy
+  `blast_kernel::tseitin` is proven satisfiability-preserving in
+  `lean/BlasterTseitin.lean` and composed with `lrat_check_sound` as
+  `tseitin_refutes_outputs` (#192 phase 1), but reaches `cnf.rs` only
+  through a clause-for-clause differential test. Evidence for the unproven
+  pieces is tests and the Z3 differential; closing them is #192 phases
+  3–5, planned in `docs/design/query-cnf-gap.md`. The Kani harnesses
+  (`blast/proofs.rs`, bounded at widths 8/32/64) target the same
+  `blast_kernel` rules on the reference arena, so they are a second,
+  independent witness of the rule theorems — not of the bridge or the
+  shipped fold/hash, which they cannot model (see `proofs.rs`).
 
 ## Model freshness: generated, not checked (TR-034)
 

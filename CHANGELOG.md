@@ -23,6 +23,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folding only, and folding + hashing (`docs/design/query-cnf-gap.md`).
 
 ### Changed
+- **The solver runs the proven blast rules** (#192 phase 2). The term walk
+  in `solver.rs` now calls `blast_kernel::blast_*` — the Aeneas-translated,
+  Lean-proven rules — at every arm, through a bridge (`blast/mod.rs`) that
+  runs a rule on a scratch reference arena and replays it node by node into
+  the shipped `aig::Aig` via `Aig::and` (folding + hashing, unchanged). The
+  duplicate rule bodies in `blast/{arith,bitwise,shift,muldiv,structural}.rs`
+  are deleted; those modules are one-line bridges that keep the per-family
+  evaluator differentials and the Kani harnesses on the code that runs.
+  The shipped CNF and certificate bytes are unchanged (the `cli_baseline`
+  fixtures and a 1211-query digest over the bench and oracle corpora are
+  byte-identical before and after; `docs/design/query-cnf-gap.md` has the
+  blast+Tseitin timing). Still unproven: the walk, the folding and hashing
+  inside `Aig::and`, canon, lowering, the sliver and the front ends.
+- **Kani harnesses target the proven rules directly** (`blast/proofs.rs`):
+  each harness builds the rule on the reference arena and simulates with
+  the kernel's own fold. Harnesses through the replay bridge do not
+  terminate under CBMC (a literal read back out of a reallocated `Vec` is
+  opaque to its constant propagation, so every fold in `Aig::and` becomes
+  a symbolic branch); the bridge and the shipped fold/hash are covered by
+  the gate-identity tests and the byte-identity digests instead. The tier
+  lists are unchanged; `kani.yml` also triggers on `blast_kernel.rs`.
 - **The reference XOR gadget is `aig::xor`'s shape** — `(x & !y) | (!x &
   y)`, three gates in the shipped order. It was `(x | y) & !(x & y)`: the
   same function, a different circuit, so the model's CNF was not the

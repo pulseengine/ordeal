@@ -20,7 +20,11 @@ use std::collections::HashMap;
 /// modeling any real hash/tree map explodes the SAT problem. Skipping dedup
 /// yields a larger but *simulation-identical* AIG (the strash only ever returns
 /// a gate with the same fanins), so a correctness proof over the un-deduped AIG
-/// establishes the deduped production AIG too. See `blast::proofs`.
+/// establishes the deduped production AIG too. Since #192 phase 2 the
+/// `blast::proofs` harnesses target the proven `blast_kernel` rules on the
+/// reference arena and no longer build a shipped `Aig` (the replay path does
+/// not terminate under CBMC — see `blast/proofs.rs`); the no-op stays so any
+/// future harness over this arena keeps the same contract.
 #[cfg(not(kani))]
 type Strash = HashMap<(u32, u32), Lit>;
 

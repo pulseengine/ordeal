@@ -1,53 +1,47 @@
-//! Bitwise ops and (dis)equality (DES-005): bvand, bvor, bvxor, eq, ne.
+//! Bitwise ops, (dis)equality and `ite` (DES-005, DES-017) — bridges to the
+//! Lean-proven rules in `crate::blast_kernel` (issue #192 phase 2; the
+//! rule bodies that used to live here are gone, see `blast/mod.rs`).
 //!
 //! Each rule is a direct per-bit lowering: `bvand`/`bvor`/`bvxor` map bit `i`
 //! of the result to the corresponding gate over bit `i` of the operands;
-//! `eq` is the conjunction of per-bit XNORs and `ne` its negation. All rules
-//! are verified against the concrete evaluator (DES-001) per UV-005.
+//! `eq` is the conjunction of per-bit XNORs and `ne` its negation; `ite` is
+//! a per-bit mux on the condition literal. Proven in
+//! `lean/BlasterProof.lean` / `lean/BlasterCmp.lean` at every width; all
+//! rules are verified against the concrete evaluator (DES-001) per UV-005.
 
 use crate::aig::{Aig, Lit, Word};
+use crate::blast::{Scratch, ite, pred2, word2};
+use crate::blast_kernel as k;
 
 /// `bvand` — per-bit AND.
 pub fn blast_and(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    debug_assert_eq!(a.len(), b.len(), "blast_and: operand width mismatch");
-    a.iter().zip(b).map(|(&x, &y)| aig.and(x, y)).collect()
+    word2(aig, &mut Scratch::default(), a, b, k::blast_and)
 }
 
 /// `bvor` — per-bit OR.
 pub fn blast_or(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    debug_assert_eq!(a.len(), b.len(), "blast_or: operand width mismatch");
-    a.iter().zip(b).map(|(&x, &y)| aig.or(x, y)).collect()
+    word2(aig, &mut Scratch::default(), a, b, k::blast_or)
 }
 
 /// `bvxor` — per-bit XOR.
 pub fn blast_xor(aig: &mut Aig, a: &Word, b: &Word) -> Word {
-    debug_assert_eq!(a.len(), b.len(), "blast_xor: operand width mismatch");
-    a.iter().zip(b).map(|(&x, &y)| aig.xor(x, y)).collect()
+    word2(aig, &mut Scratch::default(), a, b, k::blast_xor)
 }
 
 /// `=` — conjunction of per-bit XNORs.
 pub fn blast_eq(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    debug_assert_eq!(a.len(), b.len(), "blast_eq: operand width mismatch");
-    a.iter().zip(b).fold(Lit::TRUE, |acc, (&x, &y)| {
-        let bit_eq = aig.xnor(x, y);
-        aig.and(acc, bit_eq)
-    })
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_eq)
 }
 
 /// `distinct` — negation of equality.
 pub fn blast_ne(aig: &mut Aig, a: &Word, b: &Word) -> Lit {
-    blast_eq(aig, a, b).not()
+    pred2(aig, &mut Scratch::default(), a, b, k::blast_ne)
 }
 
 /// `ite` (bool→BV bridge, DES-017) — per-bit mux on the condition literal:
 /// `cond ? then_ : else_`. Both words must share the width.
 pub fn blast_ite(aig: &mut Aig, cond: Lit, then_: &Word, else_: &Word) -> Word {
-    debug_assert_eq!(then_.len(), else_.len(), "blast_ite: branch width mismatch");
-    then_
-        .iter()
-        .zip(else_)
-        .map(|(&t, &e)| aig.mux(cond, t, e))
-        .collect()
+    ite(aig, &mut Scratch::default(), cond, then_, else_)
 }
 
 #[cfg(test)]

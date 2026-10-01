@@ -2569,3 +2569,28 @@ artifacts:
         target: VER-059
       - type: part-of-execution
         target: VE-049
+
+  - id: VE-050
+    type: verification-execution
+    title: "#192 phase 2 re-verified independently (VER-060)"
+    status: implemented
+    description: "Implemented by a background agent; re-verified independently in its worktree: rule-body grep over blast/{arith,bitwise,shift,muldiv,structural}.rs empty (each public fn is a one-line bridge call); bridge code read (inputs map to shipped literals, gates replayed in order through Aig::and, negation via lift). Models deleted and regenerated: 0 axioms each; lake build 1716 jobs, 0 sorry; axiom gate passes; kani_tiers.sh check passes; cargo test --workspace after a forced rebuild: 242 passed, 0 failed, debug and release; ordeal check --format json on 24 queries byte-identical to the main binary; Z3 differential (oracle::) 12 passed. Agent-reported: CNF digests over 1211 queries identical to main; blast+Tseitin 11-19% slower on gate-heavy queries; all 82 Kani harnesses retargeted at the proven rules (15 sampled verify in the usual band), because Kani through the bridge did not finish."
+    fields:
+      environment: "note: macOS arm64, local, pinned Charon/Aeneas via nix, Z3 via Homebrew; branch proof/192-phase2 @ e33b34a"
+      executor: local
+      timestamp: 2026-10-01T08:03:17Z
+      version: e33b34a
+
+  - id: VV-107
+    type: verification-verdict
+    title: VER-060 pass — the proven rules run; output unchanged
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-050
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-060
+      - type: part-of-execution
+        target: VE-050

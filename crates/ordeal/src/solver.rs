@@ -41,7 +41,8 @@
 //! the rule is fixed — the solver reverts to conservative, never guesses.
 
 use crate::aig::{Aig, AigOptions, Lit, Word, word_input};
-use crate::blast::{arith, bitwise, muldiv, shift, structural};
+use crate::blast;
+use crate::blast_kernel as k;
 use crate::cnf::{CnfFormula, TseitinMap, tseitin};
 use crate::eval::{self, Env, EvalError};
 use crate::sat::{SatResult, SatSolver};
@@ -266,6 +267,9 @@ fn bool_uses_disabled(term: &BoolTerm) -> bool {
 /// Blasting context: variable words are shared across assertions by name.
 struct Blaster {
     aig: Aig,
+    /// The bridge's working memory (issue #192 phase 2): every rule runs on
+    /// the proven `blast_kernel` and is replayed into `aig` from here.
+    scratch: blast::Scratch,
     vars: HashMap<String, Word>,
     /// Input-creation order, for model decoding.
     var_order: Vec<(String, u32)>,
@@ -279,6 +283,7 @@ impl Blaster {
     fn with_options(options: AigOptions) -> Self {
         Blaster {
             aig: Aig::with_options(options),
+            scratch: blast::Scratch::default(),
             vars: HashMap::new(),
             var_order: Vec::new(),
         }
@@ -303,72 +308,72 @@ impl Blaster {
             BvTerm::Var { name, .. } => self.var_word(name, width),
             BvTerm::Add(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_add(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_add)
             }
             BvTerm::Sub(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_sub(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sub)
             }
             BvTerm::Mul(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                muldiv::blast_mul(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_mul)
             }
             BvTerm::Udiv(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                muldiv::blast_udiv(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_udiv)
             }
             BvTerm::Urem(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                muldiv::blast_urem(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_urem)
             }
             BvTerm::And(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                bitwise::blast_and(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_and)
             }
             BvTerm::Or(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                bitwise::blast_or(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_or)
             }
             BvTerm::Xor(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                bitwise::blast_xor(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_xor)
             }
             BvTerm::Shl(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                shift::blast_shl(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_shl)
             }
             BvTerm::Lshr(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                shift::blast_lshr(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_lshr)
             }
             BvTerm::Ashr(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                shift::blast_ashr(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ashr)
             }
             BvTerm::Rotr(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                shift::blast_rotr(&mut self.aig, &wa, &wb)
+                blast::word2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_rotr)
             }
             BvTerm::Extract { hi, lo, arg } => {
                 let w = self.blast_bv(arg)?;
-                structural::blast_extract(&w, *hi, *lo)
+                blast::extract(&mut self.scratch, &w, *hi, *lo)
             }
             BvTerm::Concat(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                structural::blast_concat(&wa, &wb)
+                blast::concat(&mut self.scratch, &wa, &wb)
             }
             BvTerm::ZeroExt { by, arg } => {
                 let w = self.blast_bv(arg)?;
-                structural::blast_zero_ext(&w, *by)
+                blast::extend(&mut self.scratch, &w, *by, k::blast_zero_ext)
             }
             BvTerm::SignExt { by, arg } => {
                 let w = self.blast_bv(arg)?;
-                structural::blast_sign_ext(&w, *by)
+                blast::extend(&mut self.scratch, &w, *by, k::blast_sign_ext)
             }
             BvTerm::Ite { cond, then_, else_ } => {
                 let c = self.blast_bool(cond)?;
                 let (wt, we) = (self.blast_bv(then_)?, self.blast_bv(else_)?);
-                bitwise::blast_ite(&mut self.aig, c, &wt, &we)
+                blast::ite(&mut self.aig, &mut self.scratch, c, &wt, &we)
             }
         })
     }
@@ -377,43 +382,43 @@ impl Blaster {
         Ok(match term {
             BoolTerm::Eq(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                bitwise::blast_eq(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_eq)
             }
             BoolTerm::Ne(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                bitwise::blast_ne(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ne)
             }
             BoolTerm::Ult(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_ult(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ult)
             }
             BoolTerm::Ule(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_ule(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ule)
             }
             BoolTerm::Ugt(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_ugt(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_ugt)
             }
             BoolTerm::Uge(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_uge(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_uge)
             }
             BoolTerm::Slt(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_slt(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_slt)
             }
             BoolTerm::Sle(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_sle(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sle)
             }
             BoolTerm::Sgt(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_sgt(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sgt)
             }
             BoolTerm::Sge(a, b) => {
                 let (wa, wb) = (self.blast_bv(a)?, self.blast_bv(b)?);
-                arith::blast_sge(&mut self.aig, &wa, &wb)
+                blast::pred2(&mut self.aig, &mut self.scratch, &wa, &wb, k::blast_sge)
             }
             BoolTerm::Not(t) => self.blast_bool(t)?.not(),
             BoolTerm::And(a, b) => {
@@ -1304,6 +1309,70 @@ mod cnf_gap_measurement {
                 median_of(samples.iter().map(|s| s.clauses).collect()),
                 sum_t.as_secs_f64() * 1e3,
                 fmt_us(med_t)
+            );
+        }
+    }
+
+    /// SHA-256 over the production CNF (`num_vars`, then every clause, every
+    /// literal as little-endian `i32`, clause-terminated by a zero) of every
+    /// query in a corpus, in corpus order — one line per corpus.
+    fn digest(title: &str, corpus: &[Vec<BoolTerm>]) {
+        let mut bytes: Vec<u8> = Vec::new();
+        let mut clauses = 0u64;
+        for q in corpus {
+            let mut s = Solver::new();
+            for a in q {
+                s.assert(a.clone());
+            }
+            let (_, cnf, _) = s
+                .lower_with(AigOptions::default())
+                .expect("corpus query must lower");
+            bytes.extend_from_slice(&cnf.num_vars.to_le_bytes());
+            for c in &cnf.clauses {
+                for &l in c {
+                    bytes.extend_from_slice(&l.to_le_bytes());
+                }
+                bytes.extend_from_slice(&0i32.to_le_bytes());
+                clauses += 1;
+            }
+        }
+        println!(
+            "| {title} | {} | {clauses} | {} |",
+            corpus.len(),
+            crate::sha256::sha256_hex(&bytes)
+        );
+    }
+
+    /// Issue #192 phase 2: the production CNF of every corpus query, as one
+    /// digest per corpus. Run on the base commit and on the branch; equal
+    /// digests mean the shipped CNF is byte-identical over the whole corpus
+    /// (the `cli_baseline` fixtures are a handful of queries; this is ~1200).
+    #[test]
+    #[ignore = "measurement, not a check: prints the #192 phase-2 CNF digests"]
+    fn cnf_gap_digest() {
+        println!("\n| corpus | queries | clauses | sha256 of every production CNF |");
+        println!("|---|---:|---:|---|");
+        let latency: Vec<Vec<BoolTerm>> = latency_corpus().into_iter().map(|(_, q)| q).collect();
+        digest("benches/latency.rs corpus", &latency);
+        let bmc: Vec<Vec<BoolTerm>> = [16usize, 32, 64]
+            .iter()
+            .map(|&k| crate::bmc_corpus::queue_overflow(k, k as u8))
+            .chain(
+                [24usize, 48]
+                    .iter()
+                    .map(|&k| crate::bmc_corpus::deadlock(k, false)),
+            )
+            .collect();
+        digest("benches/bmc.rs corpus", &bmc);
+        #[cfg(feature = "oracle")]
+        {
+            digest(
+                "oracle::gen_corpus(0x192, 200)",
+                &crate::oracle::gen_corpus(0x192, 200),
+            );
+            digest(
+                "oracle::gen_corpus(0xC0FFEE, 1000)",
+                &crate::oracle::gen_corpus(0xC0FFEE, 1000),
             );
         }
     }
