@@ -1650,3 +1650,22 @@ artifacts:
         target: TR-030
       - type: allocated-to
         target: ARC-014
+
+  - id: TR-059
+    type: sw-req
+    title: The CNF encoding is proven satisfiability-preserving, and the Lean-proven blaster is gate-identical to the shipped one (#192 phase 1)
+    status: verified
+    release: v0.25.0
+    description: "Phase 1 of #192 (maintainer decision: option (b), a proven re-encoder beside the checker). The proven model's XOR must build the same gates as aig::xor (it built (x|y)&!(x&y), the shipped code builds (a&!b)|(!a&b)); every mirrored rule must produce a gate-identical AIG to the shipped rule; the model Tseitin encoder must mirror cnf.rs and be proven satisfiability-preserving, composed with lrat_check_sound. Shipped solver output must not change."
+    tags: [soundness, lean, tseitin, blaster, "192"]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "Lean: tseitin_sat_preserving, tseitin_satisfiable and tseitin_refutes_outputs elaborate axiom-clean (propext/Classical.choice/Quot.sound only) from freshly regenerated models with 0 sorry; Rust: gate identity raw and replayed for every mirrored op at widths 1..=16, failing under the old XOR shape; model Tseitin equals cnf.rs clause-for-clause on shipped arenas; ordeal --format json output byte-identical to the previous release binary on every fixture."
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-056
+      - type: allocated-to
+        target: ARC-003

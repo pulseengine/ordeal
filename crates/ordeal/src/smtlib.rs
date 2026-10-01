@@ -36,9 +36,12 @@
 //! [`BvTerm::Rotr`], which rotates by a **term** amount. We bridge this by
 //! materializing `k` as a same-width [`BvTerm::Const`]:
 //! `((_ rotate_right k) x)` becomes `Rotr(x, Const{k, width(x)})`, and
-//! `((_ rotate_left k) x)` goes through [`crate::lowering::bvrotl`] (which is
-//! `Rotr(x, 0 - k)` — exact for the power-of-two target widths 8/32/64). No new
-//! operator enters the closed fragment.
+//! `((_ rotate_left k) x)` goes through [`crate::lowering::bvrotl`], which is
+//! `Rotr(x, 0 - k)` at a power-of-two width and `Rotr(x, (w - k mod w) mod
+//! w)` otherwise — exact at EVERY width since #182 (the `0 - k` identity is
+//! false at non-power-of-two widths; `lowering::bvrotl_exact_at_every_width`
+//! checks the lowering exhaustively at widths 1..=10). No new operator
+//! enters the closed fragment.
 
 use crate::eval::bv_sort;
 use crate::lowering;

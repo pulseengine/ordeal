@@ -119,6 +119,8 @@ artifacts:
         target: TR-021
       - type: allocated-from
         target: TR-056
+      - type: allocated-from
+        target: TR-059
   - id: ARC-004
     type: sw-arch-component
     title: ordeal-cnf (Tseitin CNF encoder)

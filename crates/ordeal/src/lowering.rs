@@ -38,8 +38,8 @@
 //!
 //! - `bvnot x   = x xor 1..1`
 //! - `bvneg x   = 0 - x`
-//! - `bvrotl a b = rotr(a, 0 - b)` — exact for power-of-two widths (see
-//!   [`bvrotl`]), which covers the target widths 8/32/64.
+//! - `bvrotl a b = rotr(a, 0 - b)` at a power-of-two width, else
+//!   `rotr(a, (w - b mod w) mod w)` — exact at every width (see [`bvrotl`]).
 //! - `bvurem a b` — the native [`BvTerm::Urem`] (multiplier-free; see above).
 //! - `bvsdiv a b` — the SMT-LIB sign-mask construction over `bvudiv`.
 //! - `bvsrem a b = (|a| urem |b| ^ sa) - sa` — the SMT-LIB sign-mask

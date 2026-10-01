@@ -159,12 +159,19 @@ Qualifications, in the same spirit as for the UNSAT theorem:
 - **The SAT search.** The CDCL engine that *emits* certificates is untrusted
   by design. A bug there can only produce a certificate the checker rejects.
 - **The query-to-CNF translation.** The front ends, rewriting, the bit-blaster
-  the solver actually runs, AIG construction and Tseitin encoding are *not*
-  proven. This path is trusted: an encoding bug gives a **certified wrong
-  answer**, because the checker certifies the CNF it is given (#182). The
-  `BlastKernel.lean` proofs cover `blast_kernel.rs`, a reference copy of the
-  blaster. They reach the real blaster only through a differential test.
-  Closing the gap is tracked in #192.
+  the solver actually runs, AIG construction and the Tseitin encoder the
+  solver runs (`cnf.rs`) are *not* proven. This path is trusted: an encoding
+  bug gives a **certified wrong answer**, because the checker certifies the
+  CNF it is given (#182). The `BlastKernel.lean` proofs cover
+  `blast_kernel.rs`, a reference copy of the blaster, and — since #192 phase
+  1 — a reference copy of the Tseitin encoder (`blast_kernel::tseitin`,
+  proven satisfiability-preserving in `lean/BlasterTseitin.lean` and
+  composed with `lrat_check_sound` as `tseitin_refutes_outputs`). They reach
+  the real blaster and the real encoder only through differential tests:
+  gate-identity (the reference AIG rebuilt through `aig::Aig::and` is
+  node-identical to the shipped rule's, every op, widths 1..=16) and a
+  clause-for-clause Tseitin comparison. Closing the gap is tracked in #192;
+  the plan is `docs/design/query-cnf-gap.md`.
 
 ## Model freshness: generated, not checked (TR-034)
 

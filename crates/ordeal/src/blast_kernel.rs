@@ -98,11 +98,16 @@ pub fn push_or(aig: &mut Aig, x: Lit, y: Lit) -> Lit {
     lit_not(na)
 }
 
-/// XOR: `(x | y) & !(x & y)`. Matches `aig::xor`.
+/// XOR: `(x & !y) | (!x & y)` — three AND gates, in exactly the order
+/// `aig::xor` pushes them (issue #192 phase 1: the model was `(x | y) &
+/// !(x & y)` before, the same function as a different circuit, so the
+/// model's CNF was not the shipped CNF). Gate-identical to `aig::xor`:
+/// `gate_identity_*` in the tests below rebuilds this gadget through
+/// `aig::Aig::and` and demands the same arena.
 pub fn push_xor(aig: &mut Aig, x: Lit, y: Lit) -> Lit {
-    let o = push_or(aig, x, y);
-    let a = push_and(aig, x, y);
-    push_and(aig, o, lit_not(a))
+    let l = push_and(aig, x, lit_not(y));
+    let r = push_and(aig, lit_not(x), y);
+    push_or(aig, l, r)
 }
 
 /// Evaluate a literal under a primary-input assignment, given the values
@@ -741,6 +746,72 @@ pub fn blast_urem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     blast_sub(aig, a, &prod)
 }
 
+/// The DIMACS literal of an AIG literal, mirroring `cnf::TseitinMap::cnf_lit`:
+/// CNF variable `node + 1` (DIMACS has no variable 0), negative when the
+/// literal is complemented. The `as i32` cast is modelled by Aeneas
+/// (`UScalar.hcast`); the Lean spec carries the in-bounds precondition.
+pub fn cnf_lit(l: Lit) -> i32 {
+    let var = (l.node + 1) as i32;
+    if l.neg { -var } else { var }
+}
+
+/// Model Tseitin encoder (issue #192 phase 1), mirroring `cnf::tseitin`
+/// clause for clause and in the same order: the constant node pinned false
+/// (`[-1]`), then for every AND gate `o = a & b`, in node order, the three
+/// clauses `(¬o ∨ a) (¬o ∨ b) (o ∨ ¬a ∨ ¬b)`, then one unit clause per
+/// asserted output literal. `lean/BlasterTseitin.lean` proves
+/// `tseitin_sat_preserving`: when every output literal is true under some
+/// input assignment, the simulation values satisfy this CNF — the direction
+/// an UNSAT verdict needs (a refuted CNF refutes the query). The
+/// `tseitin_matches_cnf_rs_*` tests below pin the model to `cnf::tseitin`
+/// clause for clause.
+///
+/// `Vec::new` + `push` (not `vec![]`): the Aeneas fragment, as in `aig_new`.
+#[allow(clippy::vec_init_then_push)]
+pub fn tseitin(aig: &Aig, outputs: &[Lit]) -> Vec<Vec<i32>> {
+    let mut clauses: Vec<Vec<i32>> = Vec::new();
+    let mut c0: Vec<i32> = Vec::new();
+    c0.push(-1);
+    clauses.push(c0);
+    let n = aig.nodes.len();
+    let mut i = 0usize;
+    while i < n {
+        let node = aig.nodes[i];
+        match node {
+            Node::False => {}
+            Node::Input(_) => {}
+            Node::And(x, y) => {
+                let o = (i + 1) as i32;
+                let la = cnf_lit(x);
+                let lb = cnf_lit(y);
+                let mut c1: Vec<i32> = Vec::new();
+                c1.push(-o);
+                c1.push(la);
+                clauses.push(c1);
+                let mut c2: Vec<i32> = Vec::new();
+                c2.push(-o);
+                c2.push(lb);
+                clauses.push(c2);
+                let mut c3: Vec<i32> = Vec::new();
+                c3.push(o);
+                c3.push(-la);
+                c3.push(-lb);
+                clauses.push(c3);
+            }
+        }
+        i += 1;
+    }
+    let m = outputs.len();
+    let mut j = 0usize;
+    while j < m {
+        let mut c: Vec<i32> = Vec::new();
+        c.push(cnf_lit(outputs[j]));
+        clauses.push(c);
+        j += 1;
+    }
+    clauses
+}
+
 #[cfg(test)]
 mod tests {
     //! Fidelity differential (the blast_kernel <-> aig.rs link, issue #68).
@@ -1110,6 +1181,535 @@ mod tests {
     fn model_matches_real_blaster_every_op_sampled_wide_widths() {
         for w in [17usize, 24, 31, 32, 33, 48, 63, 64, 65, 96, 127, 128] {
             sampled_diff(w, 128, 0x185B_1700 ^ w as u64);
+        }
+    }
+
+    // ───────────── Gate identity (issue #192 phase 1, F1) ─────────────
+    //
+    // The simulation differential above shows real and model compute the
+    // same FUNCTION. Phase 1 of #192 needs more: the same CIRCUIT, so that
+    // the model's Tseitin CNF (proven in lean/BlasterTseitin.lean) is the
+    // CNF the solver ships. Two notions, both checked for every mirrored
+    // op at every width 1..=16, each op in its own fresh AIG pair:
+    //
+    //  * RAW identity — the shipped rule on an `AigOptions::RAW` arena (no
+    //    folding, no hashing: one gate per `and` call, like `push_and`)
+    //    against the model rule: the same number of nodes, the same inputs,
+    //    gate `i` has the same operand PAIR on both sides, and the same
+    //    output literals. The one asymmetry: the shipped `Aig::and` stores
+    //    its two operands order-normalized (`a.raw() <= b.raw()`, the strash
+    //    key, applied in every mode) while the model stores them as given —
+    //    so gate operands are compared as unordered pairs. Everything else is
+    //    exact.
+    //  * REPLAY identity — the model arena replayed node by node through a
+    //    DEFAULT `aig::Aig` (folding + hashing) is node-identical to the
+    //    shipped rule built directly on a default arena: the same
+    //    `and_gates()` sequence, the same output literals. This is the
+    //    statement "shipped = fold_and_hash(model)" that v0.27.0's proven
+    //    folding/hashing pass will turn into a theorem.
+    //
+    // Result at the time of writing: every op is identical under both
+    // notions (`push_xor` was the one mismatch — `(x|y)&!(x&y)` vs the
+    // shipped `(x&!y)|(!x&y)` — and now has the shipped shape).
+
+    /// Every mirrored op, by name: the word ops, the predicates, `udivrem`
+    /// (both halves), `ite`, the shifts/rotate, the gate-free plumbing and
+    /// the one-bit mux gadget.
+    const GATE_IDENTITY_OPS: [&str; 30] = [
+        "and", "or", "xor", "add", "sub", "sub(b,a)", "mul", "udiv", "urem", "udivrem", "ult",
+        "ule", "ugt", "uge", "slt", "sle", "sgt", "sge", "eq", "ne", "ite", "shl", "lshr", "ashr",
+        "rotr", "extract", "concat", "zero_ext", "sign_ext", "mux1",
+    ];
+
+    /// Run one op on BOTH sides over fresh inputs `a = 0..w`, `b = w..2w`,
+    /// `cond = 2w` (created in that order on both arenas, so the input
+    /// variables coincide), returning the output words.
+    fn apply_op(
+        name: &str,
+        w: usize,
+        raig: &mut crate::aig::Aig,
+        maig: &mut Aig,
+    ) -> (Vec<crate::aig::Lit>, Vec<Lit>) {
+        use crate::aig as real;
+        use crate::blast::{arith, bitwise, muldiv, shift, structural};
+        let wu = w as u32;
+        let ra = real::word_input(raig, wu);
+        let rb = real::word_input(raig, wu);
+        let rc = raig.input();
+        let (ma, mb) = model_inputs(maig, w);
+        let mc = push_input(maig, 2 * w);
+        match name {
+            "and" => (
+                bitwise::blast_and(raig, &ra, &rb),
+                blast_and(maig, &ma, &mb),
+            ),
+            "or" => (bitwise::blast_or(raig, &ra, &rb), blast_or(maig, &ma, &mb)),
+            "xor" => (
+                bitwise::blast_xor(raig, &ra, &rb),
+                blast_xor(maig, &ma, &mb),
+            ),
+            "add" => (arith::blast_add(raig, &ra, &rb), blast_add(maig, &ma, &mb)),
+            "sub" => (arith::blast_sub(raig, &ra, &rb), blast_sub(maig, &ma, &mb)),
+            "sub(b,a)" => (arith::blast_sub(raig, &rb, &ra), blast_sub(maig, &mb, &ma)),
+            "mul" => (muldiv::blast_mul(raig, &ra, &rb), blast_mul(maig, &ma, &mb)),
+            "udiv" => (
+                muldiv::blast_udiv(raig, &ra, &rb),
+                blast_udiv(maig, &ma, &mb),
+            ),
+            "urem" => (
+                muldiv::blast_urem(raig, &ra, &rb),
+                blast_urem(maig, &ma, &mb),
+            ),
+            "udivrem" => {
+                let (rq, rr) = muldiv::blast_udivrem(raig, &ra, &rb);
+                let (mq, mr) = blast_udivrem(maig, &ma, &mb);
+                (
+                    rq.into_iter().chain(rr).collect(),
+                    mq.into_iter().chain(mr).collect(),
+                )
+            }
+            "ult" => (
+                vec![arith::blast_ult(raig, &ra, &rb)],
+                vec![blast_ult(maig, &ma, &mb)],
+            ),
+            "ule" => (
+                vec![arith::blast_ule(raig, &ra, &rb)],
+                vec![blast_ule(maig, &ma, &mb)],
+            ),
+            "ugt" => (
+                vec![arith::blast_ugt(raig, &ra, &rb)],
+                vec![blast_ugt(maig, &ma, &mb)],
+            ),
+            "uge" => (
+                vec![arith::blast_uge(raig, &ra, &rb)],
+                vec![blast_uge(maig, &ma, &mb)],
+            ),
+            "slt" => (
+                vec![arith::blast_slt(raig, &ra, &rb)],
+                vec![blast_slt(maig, &ma, &mb)],
+            ),
+            "sle" => (
+                vec![arith::blast_sle(raig, &ra, &rb)],
+                vec![blast_sle(maig, &ma, &mb)],
+            ),
+            "sgt" => (
+                vec![arith::blast_sgt(raig, &ra, &rb)],
+                vec![blast_sgt(maig, &ma, &mb)],
+            ),
+            "sge" => (
+                vec![arith::blast_sge(raig, &ra, &rb)],
+                vec![blast_sge(maig, &ma, &mb)],
+            ),
+            "eq" => (
+                vec![bitwise::blast_eq(raig, &ra, &rb)],
+                vec![blast_eq(maig, &ma, &mb)],
+            ),
+            "ne" => (
+                vec![bitwise::blast_ne(raig, &ra, &rb)],
+                vec![blast_ne(maig, &ma, &mb)],
+            ),
+            "ite" => (
+                bitwise::blast_ite(raig, rc, &ra, &rb),
+                blast_ite(maig, mc, &ma, &mb),
+            ),
+            "shl" => (shift::blast_shl(raig, &ra, &rb), blast_shl(maig, &ma, &mb)),
+            "lshr" => (
+                shift::blast_lshr(raig, &ra, &rb),
+                blast_lshr(maig, &ma, &mb),
+            ),
+            "ashr" => (
+                shift::blast_ashr(raig, &ra, &rb),
+                blast_ashr(maig, &ma, &mb),
+            ),
+            "rotr" => (
+                shift::blast_rotr(raig, &ra, &rb),
+                blast_rotr(maig, &ma, &mb),
+            ),
+            // Gate-free plumbing: every extract range for the width, both
+            // concat orders, the four extension amounts — concatenated into
+            // one output word per side.
+            "extract" => {
+                let mut r = Vec::new();
+                let mut m = Vec::new();
+                for (hi, lo) in extract_ranges(w) {
+                    r.extend(structural::blast_extract(&ra, hi as u32, lo as u32));
+                    m.extend(blast_extract(&ma, hi, lo));
+                }
+                (r, m)
+            }
+            "concat" => (
+                structural::blast_concat(&ra, &rb)
+                    .into_iter()
+                    .chain(structural::blast_concat(&rb, &ra))
+                    .collect(),
+                blast_concat(&ma, &mb)
+                    .into_iter()
+                    .chain(blast_concat(&mb, &ma))
+                    .collect(),
+            ),
+            "zero_ext" => {
+                let mut r = Vec::new();
+                let mut m = Vec::new();
+                for by in [0usize, 1, 4, w] {
+                    r.extend(structural::blast_zero_ext(&ra, by as u32));
+                    m.extend(blast_zero_ext(&ma, by));
+                }
+                (r, m)
+            }
+            "sign_ext" => {
+                let mut r = Vec::new();
+                let mut m = Vec::new();
+                for by in [0usize, 1, 4, w] {
+                    r.extend(structural::blast_sign_ext(&ra, by as u32));
+                    m.extend(blast_sign_ext(&ma, by));
+                }
+                (r, m)
+            }
+            // The one-bit mux gadget itself (`aig::mux` vs `push_mux`).
+            "mux1" => (
+                vec![raig.mux(rc, ra[0], rb[0])],
+                vec![push_mux(maig, mc, ma[0], mb[0])],
+            ),
+            other => panic!("unknown gate-identity op {other}"),
+        }
+    }
+
+    /// AIGER raw encoding of a model literal: `node << 1 | neg`, the
+    /// shipped `aig::Lit::raw`.
+    fn model_raw(l: Lit) -> u32 {
+        (l.node as u32) << 1 | l.neg as u32
+    }
+
+    /// The model arena as `(gate var, operand raw, operand raw)` triples in
+    /// node order, exactly what `aig::Aig::and_gates` yields.
+    fn model_gates(maig: &Aig) -> Vec<(u32, u32, u32)> {
+        maig.nodes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| match n {
+                Node::And(x, y) => Some((i as u32, model_raw(*x), model_raw(*y))),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn real_gates(raig: &crate::aig::Aig) -> Vec<(u32, u32, u32)> {
+        raig.and_gates()
+            .map(|(v, a, b)| (v, a.raw(), b.raw()))
+            .collect()
+    }
+
+    /// The shipped literal of a model literal under a replay map.
+    fn replay_lit(map: &[crate::aig::Lit], l: Lit) -> crate::aig::Lit {
+        if l.neg {
+            map[l.node].not()
+        } else {
+            map[l.node]
+        }
+    }
+
+    /// Replay a model arena through a shipped `aig::Aig` with the given
+    /// options, returning the arena and the shipped literal of every model
+    /// node.
+    fn replay(maig: &Aig, opts: crate::aig::AigOptions) -> (crate::aig::Aig, Vec<crate::aig::Lit>) {
+        use crate::aig as real;
+        let mut raig = real::Aig::with_options(opts);
+        let mut map: Vec<real::Lit> = Vec::with_capacity(maig.nodes.len());
+        for n in &maig.nodes {
+            let r = match n {
+                Node::False => real::Lit::FALSE,
+                Node::Input(_) => raig.input(),
+                Node::And(x, y) => {
+                    let (rx, ry) = (replay_lit(&map, *x), replay_lit(&map, *y));
+                    raig.and(rx, ry)
+                }
+            };
+            map.push(r);
+        }
+        (raig, map)
+    }
+
+    // rivet: verifies VER-051
+    // rivet: verifies VER-059
+    /// Issue #192 phase 1 (F1), RAW identity: the shipped rule on an
+    /// unsimplified arena IS the model arena — node for node, every op,
+    /// every width 1..=16 (gate operands as unordered pairs, see the
+    /// section comment; everything else exact).
+    #[test]
+    fn gate_identity_raw_every_op_widths_1_to_16() {
+        for w in 1usize..=16 {
+            for name in GATE_IDENTITY_OPS {
+                let mut raig = crate::aig::Aig::with_options(crate::aig::AigOptions::RAW);
+                let mut maig = aig_new();
+                let (rout, mout) = apply_op(name, w, &mut raig, &mut maig);
+                assert_eq!(
+                    raig.num_vars() as usize,
+                    maig.nodes.len(),
+                    "{name} w={w}: node count"
+                );
+                assert_eq!(
+                    raig.num_inputs() as usize,
+                    2 * w + 1,
+                    "{name} w={w}: inputs"
+                );
+                let rg = real_gates(&raig);
+                let mg = model_gates(&maig);
+                assert_eq!(rg.len(), mg.len(), "{name} w={w}: gate count");
+                for (k, (r, m)) in rg.iter().zip(&mg).enumerate() {
+                    let rp = if r.1 <= r.2 { (r.1, r.2) } else { (r.2, r.1) };
+                    let mp = if m.1 <= m.2 { (m.1, m.2) } else { (m.2, m.1) };
+                    assert!(
+                        r.0 == m.0 && rp == mp,
+                        "{name} w={w}: gate #{k} differs: real {r:?} model {m:?}"
+                    );
+                }
+                let mraw: Vec<u32> = mout.iter().map(|&l| model_raw(l)).collect();
+                let rraw: Vec<u32> = rout.iter().map(|l| l.raw()).collect();
+                assert_eq!(rraw, mraw, "{name} w={w}: output literals");
+            }
+        }
+    }
+
+    // rivet: verifies VER-051
+    // rivet: verifies VER-059
+    /// Issue #192 phase 1 (F1), REPLAY identity: the model arena replayed
+    /// through a default `aig::Aig` (constant folding + structural hashing)
+    /// is node-identical to the shipped rule built directly — the same
+    /// `and_gates()` sequence and the same output literals — for every op
+    /// at every width 1..=16.
+    #[test]
+    fn gate_identity_replay_every_op_widths_1_to_16() {
+        for w in 1usize..=16 {
+            for name in GATE_IDENTITY_OPS {
+                let mut raig = crate::aig::Aig::new();
+                let mut maig = aig_new();
+                let (rout, mout) = apply_op(name, w, &mut raig, &mut maig);
+                let (replayed, map) = replay(&maig, crate::aig::AigOptions::default());
+                assert_eq!(
+                    replayed.num_inputs(),
+                    raig.num_inputs(),
+                    "{name} w={w}: inputs"
+                );
+                let rg = real_gates(&raig);
+                let pg = real_gates(&replayed);
+                for (k, (r, p)) in rg.iter().zip(&pg).enumerate() {
+                    assert_eq!(
+                        r, p,
+                        "{name} w={w}: gate #{k} differs (real vs replayed model)"
+                    );
+                }
+                assert_eq!(rg.len(), pg.len(), "{name} w={w}: gate count");
+                assert_eq!(
+                    replayed.num_vars(),
+                    raig.num_vars(),
+                    "{name} w={w}: node count"
+                );
+                let mapped: Vec<u32> = mout.iter().map(|&l| replay_lit(&map, l).raw()).collect();
+                let rraw: Vec<u32> = rout.iter().map(|l| l.raw()).collect();
+                assert_eq!(rraw, mapped, "{name} w={w}: output literals");
+            }
+        }
+    }
+
+    // ───────────── Tseitin differential (issue #192 phase 1) ─────────────
+
+    /// A shipped arena as a model arena, node for node. The shipped `Node`
+    /// is private; inputs and gates interleave in creation order, so walk
+    /// the variables and classify each by whether `and_gates` names it.
+    fn to_model(raig: &crate::aig::Aig) -> Aig {
+        let gates: std::collections::BTreeMap<u32, (u32, u32)> = raig
+            .and_gates()
+            .map(|(v, a, b)| (v, (a.raw(), b.raw())))
+            .collect();
+        let lit = |raw: u32| Lit {
+            node: (raw >> 1) as usize,
+            neg: raw & 1 == 1,
+        };
+        let mut m = aig_new();
+        let mut k = 0usize;
+        for v in 1..raig.num_vars() {
+            match gates.get(&v) {
+                Some(&(a, b)) => m.nodes.push(Node::And(lit(a), lit(b))),
+                None => {
+                    m.nodes.push(Node::Input(k));
+                    k += 1;
+                }
+            }
+        }
+        assert_eq!(k as u32, raig.num_inputs());
+        m
+    }
+
+    /// Model `tseitin` vs `cnf::tseitin` on the SAME arena (the shipped one
+    /// converted node for node): clause-for-clause equal, same var count.
+    fn assert_tseitin_identical(raig: &crate::aig::Aig, routs: &[crate::aig::Lit], what: &str) {
+        let maig = to_model(raig);
+        let mouts: Vec<Lit> = routs
+            .iter()
+            .map(|l| Lit {
+                node: l.var() as usize,
+                neg: l.is_complement(),
+            })
+            .collect();
+        let (real, _map) = crate::cnf::tseitin(raig, routs);
+        let model = tseitin(&maig, &mouts);
+        assert_eq!(real.num_vars as usize, maig.nodes.len(), "{what}: num_vars");
+        assert_eq!(real.clauses.len(), model.len(), "{what}: clause count");
+        for (k, (r, m)) in real.clauses.iter().zip(&model).enumerate() {
+            assert_eq!(r, m, "{what}: clause #{k} differs");
+        }
+    }
+
+    /// Model `tseitin` on a MODEL-built arena vs `cnf::tseitin` on its raw
+    /// replay: the same up to the shipped arena's per-gate operand
+    /// normalization (which swaps the two binary clauses of a gate and the
+    /// two negated literals of its ternary clause); clause count and
+    /// `num_vars` exact.
+    fn assert_tseitin_identical_mod_operand_order(maig: &Aig, mouts: &[Lit], what: &str) {
+        let (raw, map) = replay(maig, crate::aig::AigOptions::RAW);
+        let routs: Vec<crate::aig::Lit> = mouts.iter().map(|&l| replay_lit(&map, l)).collect();
+        let (real, _) = crate::cnf::tseitin(&raw, &routs);
+        let model = tseitin(maig, mouts);
+        assert_eq!(real.num_vars as usize, maig.nodes.len(), "{what}: num_vars");
+        assert_eq!(real.clauses.len(), model.len(), "{what}: clause count");
+        let mut k = 0usize;
+        while k < model.len() {
+            let (r, m) = (&real.clauses[k], &model[k]);
+            if r == m {
+                k += 1;
+                continue;
+            }
+            // A gate whose operands the shipped arena swapped: the model's
+            // (¬o∨a)(¬o∨b)(o∨¬a∨¬b) is the shipped (¬o∨b)(¬o∨a)(o∨¬b∨¬a).
+            assert!(
+                k + 2 < model.len(),
+                "{what}: clause #{k} differs: real {r:?} model {m:?}"
+            );
+            let (m1, m2, m3) = (&model[k], &model[k + 1], &model[k + 2]);
+            let (r1, r2, r3) = (&real.clauses[k], &real.clauses[k + 1], &real.clauses[k + 2]);
+            let swapped = m1.len() == 2
+                && m3.len() == 3
+                && r1 == m2
+                && r2 == m1
+                && r3 == &vec![m3[0], m3[2], m3[1]];
+            assert!(
+                swapped,
+                "{what}: clauses #{k}..#{} differ beyond operand order: real {r1:?} {r2:?} {r3:?} model {m1:?} {m2:?} {m3:?}",
+                k + 2
+            );
+            k += 3;
+        }
+    }
+
+    // rivet: verifies VER-051
+    // rivet: verifies VER-059
+    /// Issue #192 phase 1: the model Tseitin encoder IS `cnf::tseitin` —
+    /// clause for clause, in order — on the shipped arena of every mirrored
+    /// op at every width 1..=16, in each simplification mode (raw, fold
+    /// only, fold + hash), asserting every output literal; and, on the
+    /// model-built arenas, the same up to the shipped operand normalization.
+    #[test]
+    fn tseitin_matches_cnf_rs_every_op_widths_1_to_16() {
+        for w in 1usize..=16 {
+            for name in GATE_IDENTITY_OPS {
+                for opts in [
+                    crate::aig::AigOptions::RAW,
+                    crate::aig::AigOptions::FOLD_ONLY,
+                    crate::aig::AigOptions::default(),
+                ] {
+                    let mut raig = crate::aig::Aig::with_options(opts);
+                    let mut maig = aig_new();
+                    let (rout, mout) = apply_op(name, w, &mut raig, &mut maig);
+                    assert_tseitin_identical(&raig, &rout, &format!("{name} w={w} {opts:?}"));
+                    assert_tseitin_identical_mod_operand_order(
+                        &maig,
+                        &mout,
+                        &format!("{name} w={w} (model arena)"),
+                    );
+                }
+            }
+        }
+    }
+
+    /// A seeded random model circuit over `n_in` inputs with `n_gates`
+    /// gates (operands drawn from earlier nodes, random polarity), and a
+    /// random output literal.
+    fn random_model_circuit(rng: &mut DiffRng, n_in: usize, n_gates: usize) -> (Aig, Lit) {
+        let mut maig = aig_new();
+        for k in 0..n_in {
+            push_input(&mut maig, k);
+        }
+        for _ in 0..n_gates {
+            let n = maig.nodes.len();
+            let pick = |rng: &mut DiffRng| Lit {
+                node: (rng.next() % n as u64) as usize,
+                neg: rng.next() & 1 == 1,
+            };
+            let (x, y) = (pick(rng), pick(rng));
+            push_and(&mut maig, x, y);
+        }
+        let out = Lit {
+            node: maig.nodes.len() - 1,
+            neg: rng.next() & 1 == 1,
+        };
+        (maig, out)
+    }
+
+    // rivet: verifies VER-051
+    // rivet: verifies VER-059
+    /// Issue #192 phase 1: `tseitin` vs `cnf::tseitin` on seeded random
+    /// circuits (any operand mix, including constants and repeated
+    /// operands, which the op arenas never produce raw).
+    #[test]
+    fn tseitin_matches_cnf_rs_random_circuits() {
+        let mut rng = DiffRng(0x1920_7531);
+        for round in 0..200 {
+            let (maig, out) = random_model_circuit(&mut rng, 1 + (round % 6), 1 + (round % 40));
+            assert_tseitin_identical_mod_operand_order(&maig, &[out], &format!("round {round}"));
+            // And exactly, on the replayed (default) arena's conversion.
+            let (raig, map) = replay(&maig, crate::aig::AigOptions::default());
+            assert_tseitin_identical(
+                &raig,
+                &[replay_lit(&map, out)],
+                &format!("round {round} (replayed)"),
+            );
+        }
+    }
+
+    /// Evaluate a DIMACS clause list under `vals[v-1]`.
+    fn cnf_holds(clauses: &[Vec<i32>], vals: &[bool]) -> bool {
+        clauses.iter().all(|c| {
+            c.iter().any(|&l| {
+                let v = vals[(l.unsigned_abs() - 1) as usize];
+                if l > 0 { v } else { !v }
+            })
+        })
+    }
+
+    // rivet: verifies VER-051
+    // rivet: verifies VER-059
+    /// Issue #192 phase 1: the runtime shadow of `tseitin_sat_preserving`
+    /// (lean/BlasterTseitin.lean) — for every input assignment under which
+    /// the output literal is TRUE, the simulation values (CNF variable
+    /// `v + 1` := node `v`'s value) satisfy the model CNF; and when it is
+    /// FALSE they do not (the root unit clause fails). Random small
+    /// circuits, exhaustive over the inputs.
+    #[test]
+    fn tseitin_simulation_values_satisfy_cnf_iff_output_true() {
+        let mut rng = DiffRng(0x1920_ACE5);
+        for round in 0..100 {
+            let n_in = 1 + (round % 5);
+            let (maig, out) = random_model_circuit(&mut rng, n_in, 1 + (round % 12));
+            let cnf = tseitin(&maig, &[out]);
+            for bits in 0u32..(1 << n_in) {
+                let inputs: Vec<bool> = (0..n_in).map(|k| bits >> k & 1 == 1).collect();
+                let vals = simulate(&maig, &inputs);
+                assert_eq!(
+                    cnf_holds(&cnf, &vals),
+                    eval_lit(&vals, out),
+                    "round {round} inputs {bits:#b}"
+                );
+            }
         }
     }
 }

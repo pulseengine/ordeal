@@ -1391,3 +1391,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-058
+
+  - id: VER-059
+    type: sw-verification
+    title: Tseitin proven satisfiability-preserving; blaster gate identity at widths 1..=16; shipped output unchanged (TR-059)
+    status: verified
+    release: v0.25.0
+    description: lean/BlasterTseitin.lean proves the model Tseitin encoder satisfiability-preserving and composes it with lrat_check_sound (tseitin_refutes_outputs); AxiomCheck.lean pins the theorems. Rust tests check gate identity of every mirrored rule against the shipped one and clause-for-clause Tseitin equality; a byte-for-byte output comparison against the previous release binary confirms no shipped change.
+    tags: [lean, tseitin, negative-control]
+    fields:
+      coverage: 3 Tseitin theorems axiom-pinned; 30 mirrored rules gate-identical at widths 1..16 (raw and replayed); Tseitin clause-for-clause on shipped arenas and 200 random circuits; 24 fixture queries byte-identical vs main
+      method: automated-test
+      steps: "run: cd lean && lake build && cd .. && bash scripts/axiom_check.sh && cargo test -p ordeal --lib -- blast_kernel"
+    links:
+      - type: verifies
+        target: TR-059
