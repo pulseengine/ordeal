@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The trusted checker fails closed on overflow in release builds** (TR-063,
+  #225). The Lean proofs model overflow as failure, but release builds
+  wrapped silently. `overflow-checks` is now on for `ordeal-lrat` in the
+  release profile. Cost: about 1% on a 30 MB-proof query. Downstream
+  workspaces should add the same override (see `docs/consuming-ordeal.md`).
+
 **The trusted checker re-checks the query, not only the CNF** (#192,
 phase 4). The proven lowering moved into `ordeal-lrat`, which gains
 `check_query`: a proven well-formedness check of the term DAG, the

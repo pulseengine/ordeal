@@ -2644,3 +2644,28 @@ artifacts:
         target: VER-062
       - type: part-of-execution
         target: VE-052
+
+  - id: VE-053
+    type: verification-execution
+    title: Overflow-checks override verified with a negative control (VER-063)
+    status: implemented
+    description: "cargo test -p ordeal-lrat --release overflow_guard: 1 passed; debug: 1 passed. Negative control: with overflow-checks = false in [profile.release.package.ordeal-lrat], the release test fails ('test did not panic as expected'). ordeal check --format json on 24 fixture queries: byte-identical before and after. Checker-heavy query (bvmul distributivity at width 6, unsat, 30 MB LRAT): best of 5, 2.311 s before vs 2.332 s after (1.009x). cargo test --workspace --release: 258 passed, 0 failed."
+    fields:
+      environment: "note: macOS arm64, local; branch fix/lrat-overflow-checks-225 on main @ 0e917f8"
+      executor: local
+      timestamp: 2026-10-01T21:06:39Z
+      version: 0e917f8
+
+  - id: VV-110
+    type: verification-verdict
+    title: VER-063 pass — the trusted crate panics on overflow in release builds
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-053
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-063
+      - type: part-of-execution
+        target: VE-053

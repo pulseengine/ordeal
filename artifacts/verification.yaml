@@ -1455,3 +1455,18 @@ artifacts:
         target: TR-062
       - type: part-of-execution
         target: VE-052
+
+  - id: VER-063
+    type: sw-verification
+    title: Overflow in the trusted crate panics in release builds (TR-063)
+    status: verified
+    release: v0.27.0
+    description: ordeal-lrat test overflow_guard::release_overflow_panics_instead_of_wrapping overflows usize and expects a panic; it runs under cargo test --release, where only the per-package profile override makes it pass.
+    tags: [checker, overflow, negative-control]
+    fields:
+      coverage: release-profile overflow panic in ordeal-lrat, with a negative control; byte identity on 24 queries; checker-heavy timing
+      method: automated-test
+      steps: "run: cargo test -p ordeal-lrat --release -- overflow_guard && cargo test -p ordeal-lrat -- overflow_guard"
+    links:
+      - type: verifies
+        target: TR-063

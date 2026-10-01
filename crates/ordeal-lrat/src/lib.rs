@@ -609,3 +609,18 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod overflow_guard {
+    // rivet: verifies VER-063
+    /// #225: arithmetic overflow in the trusted crate panics in every build
+    /// profile, matching the Aeneas model (which fails on overflow). Run
+    /// under `cargo test --release` too: the workspace release profile turns
+    /// `overflow-checks` on for this package only.
+    #[test]
+    #[should_panic(expected = "overflow")]
+    fn release_overflow_panics_instead_of_wrapping() {
+        let x = std::hint::black_box(usize::MAX);
+        let _ = std::hint::black_box(x + std::hint::black_box(1));
+    }
+}
