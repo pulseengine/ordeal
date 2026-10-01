@@ -275,6 +275,12 @@ struct Blaster {
     vars: HashMap<String, Vec<k::Lit>>,
     /// Input-creation order, for model decoding.
     var_order: Vec<(String, u32)>,
+    /// The lowered query (#192 phase 4): the DAG, its constant table, the
+    /// roots and the compaction hints the CNF was produced from — what an
+    /// `ordeal-cert/v2` certificate carries so the trusted crate can
+    /// re-encode it. `None` for the measurement-only configurations that
+    /// skip compaction (the re-check always compacts).
+    query: Option<crate::query::QueryDag>,
 }
 
 impl Blaster {
@@ -678,7 +684,12 @@ impl Solver {
         let dag = builder.finish();
         let mut raw = k::aig_new();
         let (words, outs) = k::encode(&mut raw, &dag.nodes, &dag.bits, &dag.roots);
-        let (aig, outs, var_words): (k::Aig, Vec<k::Lit>, Vec<Vec<k::Lit>>) = if options.fold {
+        let (aig, outs, var_words, query): (
+            k::Aig,
+            Vec<k::Lit>,
+            Vec<Vec<k::Lit>>,
+            Option<crate::query::QueryDag>,
+        ) = if options.fold {
             let hints = if options.strash {
                 strash_hints(&raw)
             } else {
@@ -691,10 +702,16 @@ impl Solver {
                 .iter()
                 .map(|(_, _, n)| k::map_word(&map, &words[*n]))
                 .collect();
-            (aig, outs, var_words)
+            let query = crate::query::QueryDag {
+                nodes: dag.nodes,
+                bits: dag.bits,
+                roots: dag.roots,
+                hints,
+            };
+            (aig, outs, var_words, Some(query))
         } else {
             let var_words = dag.vars.iter().map(|(_, _, n)| words[*n].clone()).collect();
-            (raw, outs, var_words)
+            (raw, outs, var_words, None)
         };
         let clauses = k::tseitin(&aig, &outs);
         let cnf = CnfFormula {
@@ -712,6 +729,7 @@ impl Solver {
                 aig,
                 vars,
                 var_order,
+                query,
             },
             cnf,
         ))
@@ -758,41 +776,99 @@ impl Solver {
     /// the witness on every `sat`); `check` is untouched and pays nothing —
     /// the witness capture happens only when this entry is called.
     pub fn check_with_witness(&self) -> crate::witness::WitnessCheckResult {
+        self.solve_witness().0
+    }
+
+    /// Decide and, on `Unsat`, return the certificate TOGETHER WITH THE
+    /// QUERY it refutes (issue #192 phase 4, `ordeal-cert/v2`): a
+    /// [`crate::query::QueryCertificate`] carrying the lowered term DAG,
+    /// its constant table, the asserted roots and the compaction hints
+    /// next to the CNF + LRAT pair. Its `recheck()` re-encodes the DAG
+    /// inside the trusted crate (`ordeal_lrat::check_query`) and checks the
+    /// proof against the CNF *it* produced, so a consumer certifies the
+    /// query and not a CNF it has to take on faith
+    /// (`kernel.spec.check_query_sound`). Symmetric with the witness gate:
+    /// the trusted query re-check runs BEFORE `Unsat` is returned, and a
+    /// certificate it would reject degrades to `Unknown`. `Sat` is the
+    /// usual re-checkable witness.
+    ///
+    /// Opt-in: `check` / `check_with_witness` are untouched and pay
+    /// nothing; this entry costs one extra lowering (the re-check).
+    pub fn check_with_query(&self) -> crate::query::QueryCheckResult {
+        use crate::query::{QueryCertificate, QueryCheckResult};
+        use crate::witness::WitnessCheckResult;
+        match self.solve_witness() {
+            (WitnessCheckResult::Unsat(certificate), Some(query)) => {
+                let cert = QueryCertificate { certificate, query };
+                match cert.recheck() {
+                    Ok(()) => QueryCheckResult::Unsat(cert),
+                    Err(_) => {
+                        debug_assert!(false, "trusted crate rejected our query — ordeal bug");
+                        QueryCheckResult::Unknown
+                    }
+                }
+            }
+            // `lower()` always compacts, so an Unsat always has its query;
+            // never reached, but Unknown is the sound answer regardless.
+            (WitnessCheckResult::Unsat(_), None) => QueryCheckResult::Unknown,
+            (WitnessCheckResult::Sat(w), _) => QueryCheckResult::Sat(w),
+            (WitnessCheckResult::Unknown, _) => QueryCheckResult::Unknown,
+        }
+    }
+
+    /// The witness-carrying solve, also returning the lowered query the
+    /// CNF came from (for `check_with_query`). This is the body
+    /// `check_with_witness` always had; the query is threaded out, not
+    /// recomputed.
+    fn solve_witness(
+        &self,
+    ) -> (
+        crate::witness::WitnessCheckResult,
+        Option<crate::query::QueryDag>,
+    ) {
         use crate::witness::{SatCertificate, WitnessCheckResult};
         if self.assertions.is_empty() {
             // Trivially satisfiable: the empty witness re-checks vacuously
             // (no clauses to satisfy, no bindings to verify).
-            return WitnessCheckResult::Sat(SatCertificate {
-                model: Model {
-                    assignments: Vec::new(),
-                },
-                cnf: Vec::new(),
-                assignment: Vec::new(),
-                bit_map: Vec::new(),
-            });
+            return (
+                WitnessCheckResult::Sat(SatCertificate {
+                    model: Model {
+                        assignments: Vec::new(),
+                    },
+                    cnf: Vec::new(),
+                    assignment: Vec::new(),
+                    bit_map: Vec::new(),
+                }),
+                None,
+            );
         }
-        let Some((blaster, cnf)) = self.lower() else {
-            return WitnessCheckResult::Unknown;
+        let Some((mut blaster, cnf)) = self.lower() else {
+            return (WitnessCheckResult::Unknown, None);
         };
+        // Moved out, not cloned: the default path pays no copy for it.
+        let query = blaster.query.take();
         let mut sat_solver = SatSolver::new();
         match sat_solver.solve(&cnf) {
             SatResult::Unsat => {
                 let cert =
                     crate::lrat::emit_lrat_trimmed(cnf.clauses.len(), sat_solver.proof_trace());
                 match ordeal_lrat::check(&cnf.clauses, &cert) {
-                    Ok(()) => WitnessCheckResult::Unsat(Certificate {
-                        lrat: cert.into_bytes(),
-                        cnf: cnf.clauses,
-                    }),
+                    Ok(()) => (
+                        WitnessCheckResult::Unsat(Certificate {
+                            lrat: cert.into_bytes(),
+                            cnf: cnf.clauses,
+                        }),
+                        query,
+                    ),
                     Err(_) => {
                         debug_assert!(false, "checker rejected our certificate — ordeal bug");
-                        WitnessCheckResult::Unknown
+                        (WitnessCheckResult::Unknown, None)
                     }
                 }
             }
             SatResult::Sat(assignment) => {
                 let Pipeline::Sat(env) = self.decode_and_check(&blaster, &assignment) else {
-                    return WitnessCheckResult::Unknown;
+                    return (WitnessCheckResult::Unknown, None);
                 };
                 let mut assignments: Vec<(String, u128)> = env.into_iter().collect();
                 assignments.sort();
@@ -811,10 +887,10 @@ impl Solver {
                 // The trusted crate validates the witness BEFORE Sat is
                 // asserted — the SAT twin of the LRAT gate above.
                 match cert.recheck() {
-                    Ok(()) => WitnessCheckResult::Sat(cert),
+                    Ok(()) => (WitnessCheckResult::Sat(cert), None),
                     Err(_) => {
                         debug_assert!(false, "trusted crate rejected our witness — ordeal bug");
-                        WitnessCheckResult::Unknown
+                        (WitnessCheckResult::Unknown, None)
                     }
                 }
             }

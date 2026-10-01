@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Regenerate the Aeneas-produced Lean models of the trusted Rust kernels.
 #
-#   lean/regen.sh [all|kernel|blaster]     (default: all)
+#   lean/regen.sh [all|kernel]     (default: all; `blaster` is an alias)
 #
-#   kernel  → lean/Kernel.lean       from crates/ordeal-lrat/src/kernel.rs
-#   blaster → lean/BlastKernel.lean  from crates/ordeal/src/blast_kernel.rs
+#   kernel  → lean/Kernel.lean  from crates/ordeal-lrat/src/kernel.rs, which
+#             `#[path]`-includes crates/ordeal-lrat/src/blast_kernel.rs (the
+#             proven lowering) as its submodule `blast_kernel` — ONE
+#             translation unit since #192 phase 4, so `check_query` (checker
+#             + lowering composed) is modelled in the same file. Namespaces:
+#             `kernel.*` (checker) and `kernel.blast_kernel.*` (lowering).
 #
 # TR-034 (issue #48): the generated models are BUILD PRODUCTS, not committed
 # artifacts — they are .gitignored, and the Lean CI job runs this script
@@ -47,14 +51,10 @@ regen() { # $1 = rust source, $2 = llbc name, $3 = generated file (for the log)
 
 what="${1:-all}"
 case "$what" in
-  kernel) regen crates/ordeal-lrat/src/kernel.rs kernel.llbc lean/Kernel.lean ;;
-  blaster) regen crates/ordeal/src/blast_kernel.rs blast_kernel.llbc lean/BlastKernel.lean ;;
-  all)
-    regen crates/ordeal-lrat/src/kernel.rs kernel.llbc lean/Kernel.lean
-    regen crates/ordeal/src/blast_kernel.rs blast_kernel.llbc lean/BlastKernel.lean
-    ;;
+  # One unit: kernel.rs is the crate root and pulls in blast_kernel.rs.
+  kernel|blaster|all) regen crates/ordeal-lrat/src/kernel.rs kernel.llbc lean/Kernel.lean ;;
   *)
-    echo "usage: lean/regen.sh [all|kernel|blaster]" >&2
+    echo "usage: lean/regen.sh [all|kernel]" >&2
     exit 2
     ;;
 esac

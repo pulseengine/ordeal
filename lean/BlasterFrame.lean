@@ -33,7 +33,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════ LEAF SPECS: INPUT NODES ══════════════════ -/
 
@@ -761,4 +761,4 @@ theorem blast_rotr_frame (aig : Aig) (a b : Slice Lit)
     exact ⟨h11, hpre1.trans h12, by omega,
       fun L hL => h14 L (hwf1 L hL), h15⟩
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

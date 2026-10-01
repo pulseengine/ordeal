@@ -377,6 +377,81 @@ pub fn check(cnf: &[Vec<i32>], certificate: &str) -> Result<(), CheckError> {
 /// [`kernel::check_binding`].
 pub use kernel::{SatWitnessError, check_binding, check_sat};
 
+/// The proven lowering (issue #192 phase 4): the blast rules, the term-DAG
+/// encoder, the folding + hashing pass and the Tseitin encoder, in the
+/// trusted crate so that [`check_query`] re-encodes a certificate's query
+/// with the same code the solver lowers through. See
+/// [`kernel::blast_kernel`].
+pub use kernel::blast_kernel;
+/// The string-free query re-check and its error (see [`check_query`] for
+/// the text-facing entry).
+pub use kernel::{QueryError, check_query as check_query_steps, dag_wf};
+
+/// Why a query re-check ([`check_query`]) was rejected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryCheckError {
+    /// The certificate text could not be parsed, or the parsed steps do not
+    /// refute the CNF re-encoded from the DAG (with the certificate line
+    /// mapped back, as [`check`] reports it).
+    Certificate(CheckError),
+    /// The DAG is malformed (`dag_wf`), a root is not boolean, or the
+    /// query exceeds the proven capacity.
+    Query(QueryError),
+}
+
+impl core::fmt::Display for QueryCheckError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            QueryCheckError::Certificate(e) => write!(f, "{e}"),
+            QueryCheckError::Query(QueryError::NodeNotWellFormed { node }) => {
+                write!(f, "query DAG node {node} is not well-formed")
+            }
+            QueryCheckError::Query(QueryError::BadRoot { root }) => {
+                write!(f, "query root {root} is not a boolean node")
+            }
+            QueryCheckError::Query(QueryError::TooLarge) => {
+                write!(f, "query exceeds the proven capacity bounds")
+            }
+            QueryCheckError::Query(QueryError::Check(e)) => {
+                write!(f, "re-encoded CNF not refuted: {e:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for QueryCheckError {}
+
+/// Check a textual LRAT `certificate` against the CNF that the proven
+/// lowering produces from a term DAG — the `ordeal-cert/v2` re-check
+/// (issue #192 phase 4). `ns` is the DAG (operands are earlier nodes),
+/// `bits` the constant table its `Const` nodes slice, `roots` the asserted
+/// boolean nodes, and `hints` the structural-hashing hints the solver
+/// compacted with (untrusted advice: a wrong hint costs a duplicate gate,
+/// never a wrong value).
+///
+/// Returns `Ok(cnf)` — `cnf` being the re-encoded CNF, for readers that
+/// want to confirm it is the one a bundle also carries — iff the DAG is
+/// well-formed and the certificate contains a verified addition of the
+/// empty clause against that CNF, which proves the DAG itself
+/// unsatisfiable: no assignment to its variables makes every root true
+/// (`kernel.spec.check_query_sound`, `lean/QueryCheck.lean`). As with
+/// [`check`], the parser is untrusted and outside the proof: it can only
+/// change WHICH steps are checked.
+pub fn check_query(
+    ns: &[blast_kernel::DagNode],
+    bits: &[bool],
+    roots: &[usize],
+    hints: &[usize],
+    certificate: &str,
+) -> Result<Vec<Vec<i32>>, QueryCheckError> {
+    let (steps, lines) = parse_certificate(certificate).map_err(QueryCheckError::Certificate)?;
+    match kernel::check_query(ns, bits, roots, hints, &steps) {
+        Ok(cnf) => Ok(cnf),
+        Err(QueryError::Check(e)) => Err(QueryCheckError::Certificate(lift(e, &lines))),
+        Err(e) => Err(QueryCheckError::Query(e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

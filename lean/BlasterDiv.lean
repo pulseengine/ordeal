@@ -86,7 +86,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════ THE PURE SUBTRACT-WITH-UGE MODEL ══════════════════ -/
 
@@ -2285,4 +2285,4 @@ theorem blast_urem_bitvec (aig : Aig) (a b : Slice Lit)
   rw [umod_eq_sub_smtUDiv_mul A B]
   exact himp hA hP3
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

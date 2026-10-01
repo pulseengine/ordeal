@@ -28,13 +28,13 @@
    * `blast_and_bitvec` etc. lift this to `BitVec w` for arbitrary `w`
      via `getLsbD_and` / `getLsbD_or` / `getLsbD_xor`.
 -/
-import BlastKernel
+import Kernel
 
 open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════════════ THE PURE MODEL ══════════════════════════ -/
 
@@ -830,4 +830,4 @@ theorem blast_xor_bitvec (aig : Aig) (a b : Slice Lit)
   intro vals hbit hA hB
   exact Denotes.of_bits hA hB (fun j _ => by simp) hlen hbit
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

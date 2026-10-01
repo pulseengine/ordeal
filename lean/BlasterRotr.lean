@@ -26,7 +26,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════ THE REMAINDER'S STRUCTURAL FRAME ══════════════════ -/
 
@@ -299,4 +299,4 @@ theorem blast_rotr_bitvec (aig : Aig) (a b : Slice Lit)
       BitVec.toNat_ofNat, hal, Nat.mod_eq_of_lt Nat.lt_two_pow_self]
     exact Nat.mod_eq_of_lt (by omega)
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

@@ -22,7 +22,7 @@
    / `cnfHolds` / `unsat` over `Std.I32` DIMACS literals): the encoder's
    output is judged by the same meaning the checker's soundness theorem is
    stated in, so nothing is lost at the seam. -/
-import BlastKernel
+import Kernel
 import BlasterProof
 import Sound
 
@@ -30,7 +30,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 open kernel.spec (Asn litVar litHolds clauseHolds cnfHolds unsat)
 
@@ -478,4 +478,4 @@ theorem tseitin_refutes_outputs (aig : Aig) (outputs : Slice Lit) (L : Nat)
   rw [henc, WP.spec_ok] at hsat
   exact hsat (kernel.spec.lrat_check_sound ⟨cnf.val, cnf.property⟩ steps hfit hchk)
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

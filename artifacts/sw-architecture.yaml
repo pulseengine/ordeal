@@ -181,8 +181,8 @@ artifacts:
         target: TR-032
   - id: ARC-006
     type: sw-arch-component
-    title: ordeal-lrat (verified certificate checker)
-    description: "The sole TRUSTED component (crates/ordeal-lrat, zero dependencies): the LRAT checker kernel::check_steps — if it accepts a certificate for a CNF, that CNF is unsatisfiable (lean/Sound.lean lrat_check_sound) — and, since TR-038, the SAT-witness checker kernel::check_sat / check_binding (lean/SatWitness.lean check_sat_sound / check_binding_sound / verdicts_exclusive, TR-044). Both are machine-checked over the Aeneas model regenerated from this crate's source in CI (TR-034). It has no build or link dependency on the solver, so the trust boundary is exactly this crate. Ordeal reports UNSAT only when this checker accepts the certificate, and SAT-with-witness only when check_sat accepts. LRAT trimming is NOT here: it lives in the untrusted solver (crates/ordeal/src/lrat.rs), and an over-trimmed proof is simply rejected. (Description corrected 2026-09-24: it previously claimed the trusted crate includes LRAT trimming.)"
+    title: ordeal-lrat (verified certificate checker and, since TR-062, the proven lowering + query re-check)
+    description: "The sole TRUSTED component (crates/ordeal-lrat, zero dependencies). Since TR-062 (#192 phase 4) it also holds the proven lowering kernel::blast_kernel (blast rules, term-DAG encoder, folding/hashing pass, Tseitin — the code the solver runs, re-exported) and kernel::check_query (dag_wf + re-encode + check_steps; lean/QueryCheck.lean check_query_sound), so an ordeal-cert/v2 re-check certifies the query. The LRAT checker kernel::check_steps — if it accepts a certificate for a CNF, that CNF is unsatisfiable (lean/Sound.lean lrat_check_sound) — and, since TR-038, the SAT-witness checker kernel::check_sat / check_binding (lean/SatWitness.lean check_sat_sound / check_binding_sound / verdicts_exclusive, TR-044). Both are machine-checked over the Aeneas model regenerated from this crate's source in CI (TR-034). It has no build or link dependency on the solver, so the trust boundary is exactly this crate. Ordeal reports UNSAT only when this checker accepts the certificate, and SAT-with-witness only when check_sat accepts. LRAT trimming is NOT here: it lives in the untrusted solver (crates/ordeal/src/lrat.rs), and an over-trimmed proof is simply rejected. (Description corrected 2026-09-24: it previously claimed the trusted crate includes LRAT trimming.)"
     status: verified
     tags: [lrat, checker, verified, trusted-core, aeneas, lean]
     links:
@@ -207,6 +207,8 @@ artifacts:
         target: TR-025
       - type: allocated-from
         target: TR-030
+      - type: allocated-from
+        target: TR-062
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)
@@ -274,9 +276,9 @@ artifacts:
         target: FEAT-009
   - id: ARC-011
     type: sw-arch-component
-    title: ordeal-evidence (portable certificate, ordeal-cert/v1 bundle, SAT witness, in-tree SHA-256)
+    title: ordeal-evidence (portable certificate, ordeal-cert/v1 and v2 bundles, SAT witness, in-tree SHA-256)
     status: verified
-    description: "The evidence formats a consumer re-checks without trusting the solver: the portable UNSAT Certificate carrying its CNF (recheck()), the ordeal-cert/v1 JSON bundle with content hashes (cert_bundle.rs, cert-bundle feature), the always-compiled SAT witness types and canonical texts (witness.rs), and the dependency-free SHA-256 used for integrity hashes (sha256.rs). UNTRUSTED for soundness: every format is re-established by the trusted checker; the hashes are integrity only."
+    description: "The evidence formats a consumer re-checks without trusting the solver: the portable UNSAT Certificate carrying its CNF (recheck()), the ordeal-cert/v1 JSON bundle with content hashes (cert_bundle.rs, cert-bundle feature), the ordeal-cert/v2 bundle and the always-compiled QueryCertificate carrying the lowered query (query.rs, TR-062; re-checked by the trusted check_query), the always-compiled SAT witness types and canonical texts (witness.rs), and the dependency-free SHA-256 used for integrity hashes (sha256.rs). UNTRUSTED for soundness: every format is re-established by the trusted checker; the hashes are integrity only."
     links:
       - type: allocated-from
         target: TR-017
@@ -293,6 +295,8 @@ artifacts:
         target: FEAT-015
       - type: allocated-from
         target: TR-048
+      - type: allocated-from
+        target: TR-062
   - id: ARC-012
     type: sw-arch-component
     title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)

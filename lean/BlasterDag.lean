@@ -36,7 +36,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 2000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════════════ THE DAG SEMANTICS ══════════════════════ -/
 
@@ -2003,4 +2003,4 @@ theorem encode_sound (aig : Aig) (ns : Slice DagNode) (bits : Slice Bool)
     unfold dagBool bval
     exact hd.2 0 hw0
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

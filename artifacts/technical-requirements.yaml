@@ -1707,3 +1707,26 @@ artifacts:
         target: TR-060
       - type: allocated-to
         target: ARC-003
+
+  - id: TR-062
+    type: sw-req
+    title: The trusted checker re-checks the query, not only the CNF — check_query and ordeal-cert/v2 (#192 phase 4)
+    status: verified
+    release: v0.27.0
+    description: "Phase 4 of #192: the proven lowering (blast rules, term-DAG encoder, folding/hashing pass, Tseitin) moves into the trusted ordeal-lrat crate as kernel::blast_kernel, one Aeneas translation unit with the checker, so the solver and the trusted re-check run the SAME code (ordeal re-exports it; no second copy). ordeal-lrat gains check_query(dag, bits, roots, hints, lrat): a proven well-formedness check dag_wf (the DagWF precondition phase 3 assumed), the capacity checks the theorems carry, re-encoding through encode / compact / map_word / tseitin, then check_steps on that CNF. Lean: dag_wf_spec (Ok iff DagWF, widths fitting usize) and the capstone check_query_sound (accepted ⟹ no assignment makes every root true), axiom-clean. The ordeal-cert/v2 bundle carries the query block (DAG nodes, constant bits, roots, hints, sha256) next to the v1 pair; v1 bundles parse and re-check exactly as before; the CLI emits the block only under --with-query. Default output byte-identical to v0.26.0."
+    tags: [soundness, checker, trusted-core, "192", cert-bundle]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: lake build and the axiom gate pass from the regenerated single-unit model with dag_wf_spec and check_query_sound pinned axiom-clean, every earlier capstone still proven; a negative control per capstone (a one-line kernel mutation fails its proof); flipping one constant bit of a v2 bundle's query fails the recheck while the CNF and proof are untouched; tampering any v2 hash fails at parse; the shipped v1 bundles still parse and re-check; ordeal check --format json is byte-identical to the v0.26.0 binary on every fixture; ordeal-lrat declares no dependencies; Z3 differential, Kani tier check, wasm32-wasip2 build pass.
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-061
+      - type: allocated-to
+        target: ARC-006
+      - type: allocated-to
+        target: ARC-011

@@ -40,7 +40,7 @@ open Aeneas Aeneas.Std Result
 
 set_option maxHeartbeats 1000000
 
-namespace blast_kernel.spec
+namespace kernel.blast_kernel.spec
 
 /- ══════════════ DERIVED UNSIGNED COMPARISONS ══════════════ -/
 
@@ -1295,4 +1295,4 @@ theorem blast_sign_ext_bitvec (a : Slice Lit) (by1 : Std.Usize)
       show a.val.length - 1 = w - 1 by omega]
     simp [show j < w + by1.val by omega, show ¬(j < w) by omega]
 
-end blast_kernel.spec
+end kernel.blast_kernel.spec

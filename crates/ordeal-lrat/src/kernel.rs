@@ -21,6 +21,26 @@
 //! slice patterns, and no std methods beyond `Vec::{new, push, len}` and
 //! indexing. Keep it that way — a "cleanup" that reintroduces iterator
 //! sugar breaks the translation.
+//!
+//! # One translation unit (issue #192 phase 4)
+//!
+//! This file is the crate root of the Aeneas translation (`lean/regen.sh`
+//! translates it as a standalone crate named `kernel`). The proven
+//! lowering — the blast rules, the term-DAG encoder, the folding + hashing
+//! pass and the Tseitin encoder — is the submodule [`blast_kernel`],
+//! `#[path]`-included so that the same file is a module of this crate under
+//! `cargo` and a module of the translation unit under Charon. The Lean model
+//! is therefore ONE file, `lean/Kernel.lean`, with the checker in namespace
+//! `kernel` and the lowering in `kernel.blast_kernel`; [`check_query`] below
+//! composes the two, and `lean/QueryCheck.lean` proves `check_query_sound`
+//! about it.
+
+/// The proven lowering (blast rules, DAG encoder, compaction, Tseitin) —
+/// the other half of the translation unit (see the module docs).
+#[path = "blast_kernel.rs"]
+pub mod blast_kernel;
+
+use blast_kernel::{DagNode, aig_new, compact, encode, map_word, tseitin};
 
 /// One already-parsed certificate step.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -566,6 +586,291 @@ pub fn check_binding(
     Ok(())
 }
 
+// ───────────── The query re-check (issue #192 phase 4) ─────────────
+
+/// Why [`check_query`] rejected. Data-only (no strings), like
+/// [`CoreError`], so the Lean model stays simple.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum QueryError {
+    /// DAG node `node` is not well-formed: an operand is not an earlier
+    /// node, operand widths disagree or are zero, an extract range or a
+    /// constant slice does not fit, or the node's width would overflow
+    /// `usize` (`dag_wf`; the Lean `DagWF` predicate).
+    NodeNotWellFormed {
+        /// 0-based index of the offending node.
+        node: usize,
+    },
+    /// Root entry `root` does not name a boolean (width-1) node of the DAG.
+    BadRoot {
+        /// 0-based index into the root list.
+        root: usize,
+    },
+    /// The query is beyond the capacity the soundness theorems are stated
+    /// for: the arena's gate budget, the `i32` variable numbers or the
+    /// clause count would not fit. Rejecting is sound; nothing this size
+    /// is ever produced in practice.
+    TooLarge,
+    /// The LRAT steps do not refute the CNF re-encoded from the DAG.
+    Check(CoreError),
+}
+
+/// Two bitvector operands `a`, `b` of an earlier node each, of the same
+/// positive width (`DagNodeWF`'s binary-word case).
+fn bin_wf(ws: &[usize], a: usize, b: usize) -> bool {
+    let n = ws.len();
+    a < n && b < n && ws[a] > 0 && ws[a] == ws[b]
+}
+
+/// Two boolean operands (width 1) of an earlier node each.
+fn bool_bin_wf(ws: &[usize], a: usize, b: usize) -> bool {
+    let n = ws.len();
+    a < n && b < n && ws[a] == 1 && ws[b] == 1
+}
+
+/// One bitvector operand of positive width whose extension would not
+/// overflow `usize` (`ZeroExt` / `SignExt`).
+fn ext_wf(ws: &[usize], a: usize, by: usize) -> bool {
+    let n = ws.len();
+    a < n && ws[a] > 0 && ws[a] <= usize::MAX - by
+}
+
+/// Well-formedness of ONE node against the widths `ws` of the nodes before
+/// it (`ws.len()` is the node's own index) and the size `nbits` of the
+/// constant table: the Lean `DagNodeWF` predicate (`lean/BlasterDag.lean`)
+/// plus "the node's width fits `usize`" (`Concat` and the extensions add
+/// widths; a sum past `usize::MAX` is rejected rather than wrapped).
+/// `dag_wf_spec` proves exactly that equivalence.
+fn node_wf(ws: &[usize], nbits: usize, node: DagNode) -> bool {
+    let n = ws.len();
+    match node {
+        DagNode::Var(w) => w > 0,
+        DagNode::Const(s, w) => w > 0 && s <= nbits && w <= nbits - s,
+        DagNode::Add(a, b) => bin_wf(ws, a, b),
+        DagNode::Sub(a, b) => bin_wf(ws, a, b),
+        DagNode::Mul(a, b) => bin_wf(ws, a, b),
+        DagNode::Udiv(a, b) => bin_wf(ws, a, b),
+        DagNode::Urem(a, b) => bin_wf(ws, a, b),
+        DagNode::And(a, b) => bin_wf(ws, a, b),
+        DagNode::Or(a, b) => bin_wf(ws, a, b),
+        DagNode::Xor(a, b) => bin_wf(ws, a, b),
+        DagNode::Shl(a, b) => bin_wf(ws, a, b),
+        DagNode::Lshr(a, b) => bin_wf(ws, a, b),
+        DagNode::Ashr(a, b) => bin_wf(ws, a, b),
+        DagNode::Rotr(a, b) => bin_wf(ws, a, b),
+        DagNode::Extract(hi, lo, a) => a < n && lo <= hi && hi < ws[a],
+        DagNode::Concat(a, b) => {
+            a < n && b < n && ws[a] > 0 && ws[b] > 0 && ws[a] <= usize::MAX - ws[b]
+        }
+        DagNode::ZeroExt(a, by) => ext_wf(ws, a, by),
+        DagNode::SignExt(a, by) => ext_wf(ws, a, by),
+        DagNode::Ite(c, t, e) => {
+            c < n && t < n && e < n && ws[c] == 1 && ws[t] > 0 && ws[t] == ws[e]
+        }
+        DagNode::Eq(a, b) => bin_wf(ws, a, b),
+        DagNode::Ne(a, b) => bin_wf(ws, a, b),
+        DagNode::Ult(a, b) => bin_wf(ws, a, b),
+        DagNode::Ule(a, b) => bin_wf(ws, a, b),
+        DagNode::Ugt(a, b) => bin_wf(ws, a, b),
+        DagNode::Uge(a, b) => bin_wf(ws, a, b),
+        DagNode::Slt(a, b) => bin_wf(ws, a, b),
+        DagNode::Sle(a, b) => bin_wf(ws, a, b),
+        DagNode::Sgt(a, b) => bin_wf(ws, a, b),
+        DagNode::Sge(a, b) => bin_wf(ws, a, b),
+        DagNode::Not(a) => a < n && ws[a] == 1,
+        DagNode::BoolAnd(a, b) => bool_bin_wf(ws, a, b),
+        DagNode::BoolOr(a, b) => bool_bin_wf(ws, a, b),
+    }
+}
+
+/// The width of one node from the widths of the earlier nodes (the Lean
+/// `dagNodeWidth`). Only called after [`node_wf`] accepted the node, so
+/// every index is in range and no sum overflows.
+fn node_width(ws: &[usize], node: DagNode) -> usize {
+    match node {
+        DagNode::Var(w) => w,
+        DagNode::Const(_, w) => w,
+        DagNode::Add(a, _) => ws[a],
+        DagNode::Sub(a, _) => ws[a],
+        DagNode::Mul(a, _) => ws[a],
+        DagNode::Udiv(a, _) => ws[a],
+        DagNode::Urem(a, _) => ws[a],
+        DagNode::And(a, _) => ws[a],
+        DagNode::Or(a, _) => ws[a],
+        DagNode::Xor(a, _) => ws[a],
+        DagNode::Shl(a, _) => ws[a],
+        DagNode::Lshr(a, _) => ws[a],
+        DagNode::Ashr(a, _) => ws[a],
+        DagNode::Rotr(a, _) => ws[a],
+        DagNode::Extract(hi, lo, _) => hi - lo + 1,
+        DagNode::Concat(a, b) => ws[a] + ws[b],
+        DagNode::ZeroExt(a, by) => ws[a] + by,
+        DagNode::SignExt(a, by) => ws[a] + by,
+        DagNode::Ite(_, t, _) => ws[t],
+        DagNode::Eq(_, _) => 1,
+        DagNode::Ne(_, _) => 1,
+        DagNode::Ult(_, _) => 1,
+        DagNode::Ule(_, _) => 1,
+        DagNode::Ugt(_, _) => 1,
+        DagNode::Uge(_, _) => 1,
+        DagNode::Slt(_, _) => 1,
+        DagNode::Sle(_, _) => 1,
+        DagNode::Sgt(_, _) => 1,
+        DagNode::Sge(_, _) => 1,
+        DagNode::Not(_) => 1,
+        DagNode::BoolAnd(_, _) => 1,
+        DagNode::BoolOr(_, _) => 1,
+    }
+}
+
+/// The proven well-formedness check of a term DAG (issue #192 phase 4):
+/// every node against the widths of the nodes before it, in order,
+/// returning every node's width. `Ok(ws)` iff the DAG satisfies the Lean
+/// `DagWF` predicate the encoder's soundness theorem assumes (and every
+/// width fits `usize`) — `dag_wf_spec` in `lean/QueryCheck.lean`. `nbits`
+/// is the length of the constant table the `Const` nodes slice.
+pub fn dag_wf(ns: &[DagNode], nbits: usize) -> Result<Vec<usize>, QueryError> {
+    let mut ws: Vec<usize> = Vec::new();
+    let n = ns.len();
+    let mut i = 0usize;
+    while i < n {
+        let node = ns[i];
+        if !node_wf(&ws, nbits, node) {
+            return Err(QueryError::NodeNotWellFormed { node: i });
+        }
+        let w = node_width(&ws, node);
+        ws.push(w);
+        i += 1;
+    }
+    Ok(ws)
+}
+
+/// Every root names a boolean (width-1) node: the encoder's `hroots`
+/// precondition.
+pub fn roots_wf(ws: &[usize], roots: &[usize]) -> Result<(), QueryError> {
+    let n = ws.len();
+    let m = roots.len();
+    let mut r = 0usize;
+    while r < m {
+        let root = roots[r];
+        if root >= n || ws[root] != 1 {
+            return Err(QueryError::BadRoot { root: r });
+        }
+        r += 1;
+    }
+    Ok(())
+}
+
+/// The largest width in `ws` (0 for an empty DAG): the width bound `W` of
+/// `encode_sound`.
+pub fn max_width(ws: &[usize]) -> usize {
+    let mut m = 0usize;
+    let n = ws.len();
+    let mut i = 0usize;
+    while i < n {
+        if ws[i] > m {
+            m = ws[i];
+        }
+        i += 1;
+    }
+    m
+}
+
+/// Is `1 + n * (25·w² + 20·w + 1) <= usize::MAX` — the arena capacity
+/// hypothesis of `encode_sound` (`gateBound`), for a DAG of `n` nodes whose
+/// widths are at most `w`? Computed without overflowing: every product is
+/// bounded by a division first (`x * y <= MAX` iff `x <= MAX / y`).
+pub fn encode_fits(w: usize, n: usize) -> bool {
+    let max = usize::MAX;
+    if w > max / 25 {
+        return false;
+    }
+    let w25 = 25 * w;
+    if w > 0 && w25 > max / w {
+        return false;
+    }
+    let sq = w25 * w;
+    let lin = 20 * w;
+    if sq > max - lin {
+        return false;
+    }
+    let s = sq + lin;
+    if s > max - 1 {
+        return false;
+    }
+    let gb = s + 1;
+    if n > 0 && gb > max / n {
+        return false;
+    }
+    let total = n * gb;
+    total < max
+}
+
+/// Is `1 + 3 * nodes + outs < usize::MAX` — the clause-count capacity of
+/// `tseitin_sat_preserving`? Computed without overflowing.
+pub fn tseitin_fits(nodes: usize, outs: usize) -> bool {
+    let max = usize::MAX;
+    if nodes > max / 3 {
+        return false;
+    }
+    let three = 3 * nodes;
+    if outs > max - 2 {
+        return false;
+    }
+    three <= max - 2 - outs
+}
+
+/// **The query re-check** (issue #192 phase 4, `ordeal-cert/v2`): accept
+/// iff the term DAG `ns` (constants in `bits`, asserted roots `roots`) is
+/// well-formed and `steps` is an LRAT refutation of the CNF that the
+/// proven lowering — `encode`, `compact` with the certificate's `hints`,
+/// `map_word`, `tseitin` — produces from it. The solver lowers through the
+/// very same functions, so the CNF re-encoded here is the CNF it solved;
+/// a consumer who re-checks a v2 bundle certifies the QUERY, not a CNF it
+/// has to take on faith.
+///
+/// > If `check_query(ns, bits, roots, hints, steps)` returns `Ok(cnf)`,
+/// > then no assignment to the DAG's variables makes every root true.
+///
+/// The `Ok` payload is the re-encoded CNF (so a bundle reader can confirm
+/// it is the CNF the bundle also carries for v1 readers); the soundness
+/// statement does not depend on it. Machine-checked as
+/// `kernel.spec.check_query_sound` (`lean/QueryCheck.lean`):
+/// `dag_wf_spec` discharges the `DagWF` precondition that phase 3's
+/// `dag_refuted` assumed, the capacity checks discharge its `usize` /
+/// `i32` hypotheses, and the rest is `dag_refuted` itself. The hints are
+/// untrusted advice (`compact_sound` holds for any hints); the steps are
+/// untrusted (`lrat_check_sound`).
+pub fn check_query(
+    ns: &[DagNode],
+    bits: &[bool],
+    roots: &[usize],
+    hints: &[usize],
+    steps: &[Step],
+) -> Result<Vec<Vec<i32>>, QueryError> {
+    let ws = dag_wf(ns, bits.len())?;
+    roots_wf(&ws, roots)?;
+    let wmax = max_width(&ws);
+    if !encode_fits(wmax, ns.len()) {
+        return Err(QueryError::TooLarge);
+    }
+    let mut raw = aig_new();
+    let (_words, outs) = encode(&mut raw, ns, bits, roots);
+    let (aig, map) = compact(&raw, hints);
+    let outs2 = map_word(&map, &outs);
+    // `i32::MAX` spelled out: the Lean spec compares against `I32.max`.
+    if aig.nodes.len() > 2147483647 || !tseitin_fits(aig.nodes.len(), outs2.len()) {
+        return Err(QueryError::TooLarge);
+    }
+    let cnf = tseitin(&aig, &outs2);
+    if steps.len() > usize::MAX - cnf.len() {
+        return Err(QueryError::TooLarge);
+    }
+    match check_steps(&cnf, steps) {
+        Ok(()) => Ok(cnf),
+        Err(e) => Err(QueryError::Check(e)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -673,6 +978,134 @@ mod tests {
         assert!(matches!(
             check_binding(&assignment, &[0], 0),
             Err(SatWitnessError::InvalidCnfLiteral { .. })
+        ));
+    }
+
+    // ── #192 phase 4: the query re-check ────────────────────────────────
+
+    use super::blast_kernel::DagNode as N;
+
+    /// `x : BV1`, `x = 1`, `¬(x = 1)`: a well-formed two-root DAG.
+    fn tiny_dag() -> (Vec<N>, Vec<bool>, Vec<usize>) {
+        (
+            vec![N::Var(1), N::Const(0, 1), N::Eq(0, 1), N::Not(2)],
+            vec![true],
+            vec![2, 3],
+        )
+    }
+
+    #[test]
+    fn check_query_dag_wf_accepts_well_formed_dags_with_their_widths() {
+        let (ns, bits, _) = tiny_dag();
+        assert_eq!(dag_wf(&ns, bits.len()), Ok(vec![1, 1, 1, 1]));
+        let ns = vec![
+            N::Var(8),
+            N::Const(0, 8),
+            N::Add(0, 1),
+            N::Extract(7, 4, 2),
+            N::Concat(3, 0),
+            N::ZeroExt(3, 3),
+            N::SignExt(4, 1),
+            N::Ult(0, 1),
+            N::Ite(7, 0, 1),
+            N::BoolAnd(7, 7),
+        ];
+        assert_eq!(dag_wf(&ns, 8), Ok(vec![8, 8, 8, 4, 12, 7, 13, 1, 8, 1]));
+        assert_eq!(roots_wf(&[8, 1, 1], &[1, 2]), Ok(()));
+        assert_eq!(max_width(&[3, 9, 2]), 9);
+        assert_eq!(max_width(&[]), 0);
+    }
+
+    #[test]
+    fn check_query_dag_wf_rejects_each_malformation_at_its_node() {
+        let bad = |ns: Vec<N>, nbits: usize, node: usize| {
+            assert_eq!(
+                dag_wf(&ns, nbits),
+                Err(QueryError::NodeNotWellFormed { node }),
+                "{node}"
+            );
+        };
+        bad(vec![N::Var(0)], 0, 0); // zero width
+        bad(vec![N::Const(0, 2)], 1, 0); // constant slice past the table
+        bad(vec![N::Var(8), N::Add(0, 1)], 0, 1); // operand not earlier
+        bad(vec![N::Var(8), N::Var(4), N::Add(0, 1)], 0, 2); // widths disagree
+        bad(vec![N::Var(8), N::Extract(8, 0, 0)], 0, 1); // hi past the width
+        bad(vec![N::Var(8), N::Extract(2, 3, 0)], 0, 1); // lo > hi
+        bad(vec![N::Var(8), N::Ite(0, 0, 0)], 0, 1); // condition not boolean
+        bad(vec![N::Var(8), N::Not(0)], 0, 1); // Not of a word
+        bad(vec![N::Var(8), N::ZeroExt(0, usize::MAX)], 0, 1); // width overflow
+        bad(vec![N::Var(usize::MAX), N::Concat(0, 0)], 0, 1); // width overflow
+        assert_eq!(
+            roots_wf(&[8, 1], &[1, 0]),
+            Err(QueryError::BadRoot { root: 1 })
+        );
+        assert_eq!(
+            roots_wf(&[8, 1], &[2]),
+            Err(QueryError::BadRoot { root: 0 })
+        );
+    }
+
+    #[test]
+    fn check_query_capacity_checks_match_their_formulas() {
+        // gateBound(W) = 25 W² + 20 W + 1; 1 + n · gateBound(W) ≤ usize::MAX.
+        assert!(encode_fits(0, 0));
+        assert!(encode_fits(128, 1 << 20));
+        assert!(encode_fits(0, usize::MAX - 1));
+        assert!(!encode_fits(0, usize::MAX)); // 1 + MAX overflows
+        assert!(!encode_fits(usize::MAX / 1000, 1));
+        assert!(!encode_fits(1 << 16, usize::MAX / 1000));
+        // 1 + 3 · nodes + outs < usize::MAX.
+        assert!(tseitin_fits(0, 0));
+        assert!(tseitin_fits((usize::MAX - 2) / 3, 0));
+        assert!(!tseitin_fits((usize::MAX - 2) / 3 + 1, 0));
+        assert!(!tseitin_fits(0, usize::MAX - 1));
+        assert!(tseitin_fits(0, usize::MAX - 2));
+    }
+
+    #[test]
+    fn check_query_rejects_before_encoding_and_without_a_refutation() {
+        let (ns, bits, roots) = tiny_dag();
+        let hints: Vec<usize> = Vec::new();
+        // No steps: the re-encoded CNF is not refuted.
+        assert_eq!(
+            check_query(&ns, &bits, &roots, &hints, &[]),
+            Err(QueryError::Check(CoreError::NoEmptyClause))
+        );
+        // A malformed DAG never reaches the encoder.
+        let mut bad = ns.clone();
+        bad[2] = N::Eq(0, 9);
+        assert_eq!(
+            check_query(&bad, &bits, &roots, &hints, &[]),
+            Err(QueryError::NodeNotWellFormed { node: 2 })
+        );
+        // A root that is a word, not a boolean (the tiny DAG's `Var(1)`
+        // IS boolean, so an 8-bit variable is used here).
+        assert_eq!(
+            check_query(&[N::Var(8)], &[], &[0], &hints, &[]),
+            Err(QueryError::BadRoot { root: 0 })
+        );
+        // A constant table too short for the Const node.
+        assert_eq!(
+            check_query(&ns, &[], &roots, &hints, &[]),
+            Err(QueryError::NodeNotWellFormed { node: 1 })
+        );
+    }
+
+    /// The tiny DAG's CNF, refuted by hand: `x = 1` is `x` (node 1 is the
+    /// input, node 2 the AND `1 & x` folded to `x` by `compact`), so the
+    /// roots are the literals `x` and `¬x` — two contradictory unit
+    /// clauses after the constant clause `[-1]`.
+    #[test]
+    fn check_query_accepts_a_hand_refuted_query() {
+        let (ns, bits, roots) = tiny_dag();
+        // Hints are advice: an empty list means "share nothing".
+        let cnf = check_query(&ns, &bits, &roots, &[], &[add(4, &[], &[2, 3])])
+            .expect("the hand-written refutation is accepted");
+        assert_eq!(cnf, vec![vec![-1], vec![2], vec![-2]]);
+        // The same steps against a different root polarity: not a refutation.
+        assert!(matches!(
+            check_query(&ns, &bits, &[2, 2], &[], &[add(4, &[], &[2, 3])]),
+            Err(QueryError::Check(_))
         ));
     }
 

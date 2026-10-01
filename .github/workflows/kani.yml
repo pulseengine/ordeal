@@ -43,6 +43,7 @@ on:
       - "crates/ordeal/src/blast/**"
       # #192 phase 2: the harnesses target the proven rules directly.
       - "crates/ordeal/src/blast_kernel.rs"
+      - "crates/ordeal-lrat/src/blast_kernel.rs"
       - "crates/ordeal/src/aig.rs"
       - "crates/ordeal/src/eval.rs"
       - "scripts/kani_tiers.sh"

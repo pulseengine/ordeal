@@ -216,6 +216,78 @@ dependency-free; they are integrity only — the verdict rests on the
 recheck, never on the hash. A `sat` is only printed after the trusted
 recheck passed; text mode notes the witness size on stderr.
 
+## UNSAT verdicts as evidence about the query: `ordeal-cert/v2`
+
+A v1 certificate (`cert.cnf`, `cert.lrat`) proves the **CNF**
+unsatisfiable; that the CNF is the one your assertions lower to was the
+solver's word (its lowering is proven since v0.26.0, but no re-check ran
+it). Since v0.27.0 (#192 phase 4) the trusted `ordeal-lrat` crate holds
+that proven lowering itself and exposes `ordeal_lrat::check_query`: given
+the lowered term DAG, it re-encodes the DAG inside the trusted crate and
+checks the LRAT proof against the CNF *it* produced. An accepted re-check
+therefore proves the **query** unsatisfiable (`kernel.spec.check_query_sound`,
+`lean/QueryCheck.lean`, axiom-clean; `docs/formal-verification.md` states
+exactly what "query" means there). Opt in:
+
+```rust
+use ordeal::{Solver, QueryCheckResult};
+
+match solver.check_with_query() {
+    QueryCheckResult::Unsat(cert) => {
+        // cert.certificate: the v1 pair (cnf + lrat), still recheck()-able.
+        // cert.query:       the lowered DAG (nodes, constant bits, roots, hints).
+        cert.recheck().expect("the trusted crate re-encodes the query and accepts the proof");
+        #[cfg(feature = "cert-bundle")]
+        let json = cert.to_cert_v2(&attests);          // "format": "ordeal-cert/v2"
+    }
+    QueryCheckResult::Sat(witness) => { /* the usual re-checkable witness */ }
+    QueryCheckResult::Unknown => { /* no claim */ }
+}
+```
+
+`check_with_query` runs the trusted re-check *before* returning `Unsat`
+(a certificate it would reject degrades to `Unknown`, like the witness
+gate), at the cost of one extra lowering; `check` and
+`check_with_witness` are untouched. To verify a received bundle:
+`QueryCertificate::from_cert_v2(json)` (every content hash — problem,
+proof, query — verified before it returns) then `bundle.recheck()`. Or,
+without the feature, decode the `query` block yourself
+(`ordeal::query::node_from_op`, `bits_from_string`) and call
+`ordeal_lrat::check_query(nodes, bits, roots, hints, lrat_text)` — it
+returns the re-encoded CNF, which should equal `problem.clauses`.
+
+The v2 bundle is the v1 envelope with one more block after `proof`:
+
+```json
+"query": {
+  "encoding": "ordeal-dag/v1",
+  "num_nodes": 7,
+  "nodes": [["const",0,8],["var",8],["add",0,1],["const",8,8],["eq",2,3],["const",16,8],["ne",1,5]],
+  "bits": "101000001100000001111111",
+  "roots": [4, 6],
+  "hints": [0, 1, 2, "…"],
+  "sha256": "…"
+}
+```
+
+(`nodes` are `[op, args…]` in constructor order; `bits` is the constant
+table; `hints` are the solver's compaction hints — untrusted advice the
+re-check verifies.) Nothing about v1 changed: `to_cert_v1` /
+`from_cert_v1` emit and read what they did, rivet's v1 ingestion keeps
+working, and a v1 reader refuses a v2 bundle by its `format` string
+rather than silently ignoring the query (a rivet issue for v2 ingestion
+follows). At the command line, `ordeal check foo.smt2 --format json
+--with-query` prints the same `query` block inside `certificate` on
+`unsat` (JSON only); without the flag the output is byte-identical to
+v0.26.0.
+
+What a v2 recheck does *not* cover (still the solver's word): the
+untrusted DAG builder's choice of DAG for your assertions (now visible in
+the bundle), canonicalization, the rewriting of derived ops (`bvnot`,
+`bvneg`, `bvrotl`, `bvsdiv`, …) into the closed core before the DAG is
+built, the sliver and the SMT-LIB front end — `docs/formal-verification.md`
+has the list.
+
 ## Supply chain: SBOM and VEX
 
 From v0.20.0 each GitHub Release carries a CycloneDX SBOM

@@ -311,3 +311,125 @@ fn tampered_sat_witness_is_rejected_by_the_trusted_crate() {
         "a flipped witness bit must break the advertised binding"
     );
 }
+
+// ── #192 phase 4: `--with-query` ─────────────────────────────────────────
+
+/// Decode the JSON `query` block the way a v2 consumer does.
+fn query_from_json(q: &serde_json::Value) -> ordeal::QueryDag {
+    let nodes = q["query"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .map(|n| {
+            let items = n.as_array().expect("node array");
+            let op = items[0].as_str().expect("op");
+            let args: Vec<usize> = items[1..]
+                .iter()
+                .map(|a| a.as_u64().expect("arg") as usize)
+                .collect();
+            ordeal::query::node_from_op(op, &args).expect("known op")
+        })
+        .collect();
+    let usizes = |v: &serde_json::Value| -> Vec<usize> {
+        v.as_array()
+            .expect("array")
+            .iter()
+            .map(|x| x.as_u64().expect("usize") as usize)
+            .collect()
+    };
+    ordeal::QueryDag {
+        nodes,
+        bits: ordeal::query::bits_from_string(q["query"]["bits"].as_str().expect("bits"))
+            .expect("bitstring"),
+        roots: usizes(&q["query"]["roots"]),
+        hints: usizes(&q["query"]["hints"]),
+    }
+}
+
+// rivet: verifies VER-062
+/// `--format json --with-query`: the unsat certificate carries the lowered
+/// query (the `ordeal-cert/v2` `query` block), and this test re-establishes
+/// the verdict at the QUERY level with the trusted crate — decoding the DAG
+/// from the JSON and running `ordeal_lrat::check_query` on it — then checks
+/// the hash with an independent SHA-256 and the CNF against the re-encoding.
+#[test]
+fn format_json_with_query_carries_a_recheckable_query() {
+    use sha2::Digest;
+    let out = ordeal_stdin(
+        &["check", "-", "--format", "json", "--with-query"],
+        UNSAT_SCRIPT,
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(v["verdict"], "unsat");
+    let cert = &v["certificate"];
+    assert_eq!(cert["query"]["encoding"], ordeal::query::QUERY_ENCODING);
+    let query = query_from_json(cert);
+    assert_eq!(cert["query"]["num_nodes"], query.nodes.len());
+    let cnf: Vec<Vec<i32>> = cert["clauses"]
+        .as_array()
+        .expect("clauses")
+        .iter()
+        .map(|c| {
+            c.as_array()
+                .expect("clause")
+                .iter()
+                .map(|l| l.as_i64().expect("lit") as i32)
+                .collect()
+        })
+        .collect();
+    let lrat = cert["lrat"].as_str().expect("lrat text");
+    let reencoded =
+        ordeal_lrat::check_query(&query.nodes, &query.bits, &query.roots, &query.hints, lrat)
+            .expect("the trusted crate re-encodes the query and accepts the proof");
+    assert_eq!(reencoded, cnf, "the printed CNF is the trusted re-encoding");
+    let expect = hex_of(&sha2::Sha256::digest(query.canonical_text().as_bytes()));
+    assert_eq!(
+        cert["query"]["sha256"], expect,
+        "query hash (independent SHA-256)"
+    );
+    // A flipped constant bit no longer re-checks (the phase-4 criterion).
+    let mut tampered = query.clone();
+    tampered.bits[0] = !tampered.bits[0];
+    let r = ordeal_lrat::check_query(
+        &tampered.nodes,
+        &tampered.bits,
+        &tampered.roots,
+        &tampered.hints,
+        lrat,
+    );
+    assert!(
+        r.as_ref().map(|c| c != &cnf).unwrap_or(true),
+        "a flipped query bit must not re-check against the same proof and CNF"
+    );
+}
+
+// rivet: verifies VER-062
+/// Without `--with-query` the JSON is the v0.26.0 shape (no `query` key);
+/// `sat` output is identical with and without the flag; the flag needs
+/// `--format json`.
+#[test]
+fn with_query_is_opt_in_and_json_only() {
+    let plain = ordeal_stdin(&["check", "-", "--format", "json"], UNSAT_SCRIPT);
+    let v: serde_json::Value = serde_json::from_slice(&plain.stdout).expect("json");
+    assert!(
+        v["certificate"].get("query").is_none(),
+        "default output carries no query"
+    );
+    let a = ordeal_stdin(&["check", "-", "--format", "json"], SAT_SCRIPT);
+    let b = ordeal_stdin(
+        &["check", "-", "--format", "json", "--with-query"],
+        SAT_SCRIPT,
+    );
+    assert_eq!(
+        a.stdout, b.stdout,
+        "sat output is unchanged by --with-query"
+    );
+    let out = ordeal_stdin(&["check", "-", "--with-query"], UNSAT_SCRIPT);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--format json"));
+}

@@ -2619,3 +2619,28 @@ artifacts:
         target: VER-061
       - type: part-of-execution
         target: VE-051
+
+  - id: VE-052
+    type: verification-execution
+    title: "#192 phase 4 verified (VER-062)"
+    status: implemented
+    description: "Model regenerated from the single translation unit (lean/regen.sh all): Kernel.lean 0 axioms (checker as kernel.*, lowering as kernel.blast_kernel.*; the thirteen Blaster*.lean files changed only import/namespace lines). lake build: Build completed successfully (1724 jobs); 0 'declaration uses sorry' in every hand-written proof file incl. the new QueryCheck.lean; scripts/axiom_check.sh passes with dag_wf_spec, check_query_sound and check_query_refutes_cnf pinned to propext / Classical.choice / Quot.sound next to every earlier capstone. Negative controls (one-line kernel.rs mutations, model regenerated, re-run by the integrator after the proof author): dropping the Ite condition-width check fails node_wf_spec (QueryCheck.lean:273/290); passing the un-mapped root literals to tseitin fails check_query_accepted (QueryCheck.lean:892); source restored byte-for-byte (sha256 99c70b1f…), touched, regenerated (0 axioms) and rebuilt clean (1724 jobs) after each. cargo test --workspace: 257 passed / 0 failed / 3 ignored, debug and release; cert-bundle tests 16 passed; nextest 273 passed / 3 skipped, junit_to_rivet mapped 91 results with no dead marker; check_verification_citations.sh PASS (the new measure's cargo legs resolve to 5 + 6 + 3 tests; its one feature-gated leg is skipped by design); clippy default and --features oracle,cert-bundle clean; fmt clean; Z3 differential (oracle::) 12 passed; kani_tiers.sh check PASS (82 harnesses, each in exactly one tier); wasm32-wasip2 release build succeeds; check_exact_lrat_pin PASS; ordeal-lrat declares no dependencies (manifest guard test; cargo tree shows the crate alone). Bundle negative control: flipping one constant bit of a v2 query (hash recomputed) fails QueryBundle::recheck while the untouched CNF/proof pair still re-checks at the CNF level; a stale query hash, a forged proof or problem fail at parse; the shipped v1 bundles under evidence/certs re-check unchanged; the rivet_ingestion / rivet_witness_ingestion / cert_bundle_smt2 examples pass. ordeal check --format json on 24 queries (differential fixtures, evidence/certs, fuzz seeds): byte-identical (stdout, stderr, exit code) between the v0.26.0 release binary built from 4bf1430 (origin/main) and the branch binary, in JSON and text mode; the query block appears only under --with-query."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2; branch proof/192-phase4 on 4bf1430 (v0.26.0)"
+      executor: local
+      timestamp: 2026-10-01T19:26:38Z
+      version: 4bf1430+phase4
+
+  - id: VV-109
+    type: verification-verdict
+    title: VER-062 pass — the trusted crate re-checks the query; check_query proven; v2 alongside v1; output unchanged
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-052
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-062
+      - type: part-of-execution
+        target: VE-052

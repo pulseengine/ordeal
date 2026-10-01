@@ -1,9 +1,11 @@
 # Formal verification: what is proven, and what is trusted
 
 This document states — precisely and conservatively — what the Lean 4 proofs in
-`lean/Sound.lean` (the UNSAT direction: the LRAT certificate checker) and
-`lean/SatWitness.lean` (the SAT direction: the witness checker, TR-044) do and
-do not establish about ordeal's trusted checker crate. It is written to be
+`lean/Sound.lean` (the UNSAT direction: the LRAT certificate checker),
+`lean/SatWitness.lean` (the SAT direction: the witness checker, TR-044) and
+`lean/QueryCheck.lean` (the query direction: the certificate-carried term DAG
+re-check, #192 phase 4 / TR-062) do and do not establish about ordeal's
+trusted checker crate. It is written to be
 checkable line by line, not to impress. If a claim here cannot be backed by
 the source or a tool run, it does not belong here.
 
@@ -14,7 +16,18 @@ the source or a tool run, it does not belong here.
 > that CNF is unsatisfiable — proved with **zero `sorry`**, over the
 > **Aeneas-generated model** of the Rust source.
 
-Everything below qualifies that sentence. The qualifications are the point.
+Since #192 phase 4 there is a second sentence, about the query rather than
+the CNF:
+
+> The **query re-check** `kernel::check_query` is machine-checked to be
+> **sound**: if it accepts an LRAT certificate against a term DAG, no
+> assignment to the DAG's variables makes every asserted root true — with
+> no side conditions (the DAG's well-formedness and every capacity bound
+> are checked by proven code at run time), **zero `sorry`**, over the
+> Aeneas-generated model of the Rust that both the solver and the re-check
+> run.
+
+Everything below qualifies both sentences. The qualifications are the point.
 
 ## The theorem, exactly
 
@@ -145,6 +158,74 @@ Qualifications, in the same spirit as for the UNSAT theorem:
    unchanged. Direction: **soundness only**, as above — a rejected witness
    says nothing.
 
+## The query direction: the certificate-carried DAG (#192 phase 4 / TR-062)
+
+Since phase 4 the proven lowering — the blast rules, the term-DAG encoder,
+the folding + hashing pass and the Tseitin encoder — lives in the trusted
+crate (`crates/ordeal-lrat/src/blast_kernel.rs`, a `#[path]` submodule of
+`kernel.rs`, so Charon/Aeneas translate checker and lowering as ONE unit
+into `lean/Kernel.lean`: `kernel.*` and `kernel.blast_kernel.*`), and the
+solver re-exports it (`ordeal::blast_kernel`): one source, no second copy.
+On top of it `kernel::check_query` composes everything into one entry
+point an `ordeal-cert/v2` bundle is re-checked with:
+
+```rust
+pub fn check_query(ns: &[DagNode], bits: &[bool], roots: &[usize],
+                   hints: &[usize], steps: &[Step]) -> Result<Vec<Vec<i32>>, QueryError>
+```
+
+It runs `dag_wf` (every node against the widths of the nodes before it),
+`roots_wf`, the capacity checks the theorems carry (`encode_fits`,
+`tseitin_fits`, the `i32` arena bound, `|cnf| + |steps|`), then
+`aig_new` → `encode` → `compact(hints)` → `map_word` → `tseitin` — the
+same calls as `solver.rs::lower_with` — and finally `check_steps` on that
+CNF. `lean/QueryCheck.lean` (namespace `kernel.spec`) proves, `sorry`-free
+and axiom-clean (pinned in `lean/AxiomCheck.lean`):
+
+```lean
+theorem dag_wf_spec (ns : Slice kernel.blast_kernel.DagNode) (nbits : Std.Usize) :
+    kernel.dag_wf ns nbits ⦃ r =>
+      match r with
+      | core.result.Result.Ok ws =>
+          ws.val.map Std.Usize.val = dagWidths ns.val ∧ DagWF ns.val nbits.val
+      | core.result.Result.Err _ =>
+          ¬ (DagWF ns.val nbits.val ∧ ∀ w ∈ dagWidths ns.val, w ≤ Std.Usize.max) ⦄
+
+theorem check_query_sound (ns : Slice kernel.blast_kernel.DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (hints : Slice Std.Usize) (steps : Slice kernel.Step)
+    (cnf : alloc.vec.Vec (alloc.vec.Vec Std.I32))
+    (h : kernel.check_query ns bits roots hints steps = ok (core.result.Result.Ok cnf)) :
+    ∀ inp : List Bool, ¬ (∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp bits.val ns.val (roots.val[k]).val = true)
+
+theorem check_query_refutes_cnf … (h : … = ok (core.result.Result.Ok cnf)) :
+    unsat (cnf.val.map (fun c => c.val))
+```
+
+`dag_wf_spec` is the **iff** form of the check (total: the run never
+fails): `Ok` exactly when the Lean `DagWF` predicate — the side condition
+phase 3's `encode_sound` / `dag_refuted` *assumed* — holds and every
+width fits `usize` (the only `DagWF` DAGs the Rust check rejects are ones
+whose `Concat` / `ZeroExt` / `SignExt` width sum passes `usize::MAX`; it
+rejects instead of wrapping). `check_query_sound` is `dag_refuted`'s
+conclusion with every hypothesis discharged: `dag_wf_spec` gives `DagWF`,
+`roots_wf_spec` the roots condition, `max_width_spec` and
+`encode_fits_spec` the gate budget (`1 + n · gateBound W ≤ usize::MAX`),
+the run-time tests the `i32` / `usize` capacities, and `dag_refuted` does
+the rest. Direction: soundness only, as everywhere in this document —
+`TooLarge` and a rejected DAG say nothing.
+
+What a v2 recheck therefore proves: **the lowered term DAG the bundle
+carries is unsatisfiable** — under the DAG semantics `dagSim`
+(`lean/BlasterDag.lean`, defined directly over Lean `BitVec`: variables
+read their bits off the input assignment in node order, constants off the
+constant table, every operator by its `BitVec` meaning incl. SMT-LIB's
+division by zero). The hints are untrusted by design (`compact_sound`
+holds for any hints) and the CNF the bundle also carries for v1 readers
+is checked equal to the re-encoding on the untrusted side
+(`QueryRecheckError::CnfMismatch`) — not part of the theorem, which does
+not depend on the `Ok` payload.
+
 ## Out of scope (explicitly NOT proven)
 
 - **Certificate text parsing.** The public entry point
@@ -208,32 +289,42 @@ Qualifications, in the same spirit as for the UNSAT theorem:
   `compact_sound`, `dag_refuted`, `dag_refuted_raw`) are pinned
   axiom-clean in `lean/AxiomCheck.lean`.
 
-  What is *not* proven: the DAG builder (`dag.rs`: which `DagNode` is
-  made for which term, variable sharing by name, hash-consing) — a wrong
-  decision there changes the question asked, as the old term walk could;
-  the `DagWF` side condition is assumed, not checked by proven code
-  (phase 4 adds a proven checker so an untrusted certificate can carry the
-  DAG); canon (`canon.rs`, including constant folding via `eval.rs`);
-  lowering of the derived ops; the sliver (`sliver.rs`); the SMT-LIB and
-  Verus front ends. `dag::strash_hints` is untrusted by design: it only
-  reproduces the sharing decisions of the old `Aig::and` strash so the
-  shipped CNF stays byte-identical, and `compact_sound` holds for any
-  hints. The shipped `cnf.rs` and `aig.rs` are no longer on the
-  production path (they serve the per-family differentials and the
-  gate-identity tests). Evidence for the unproven pieces is tests and the
-  Z3 differential; closing them is #192 phases 4–5, planned in
-  `docs/design/query-cnf-gap.md`. The Kani harnesses (`blast/proofs.rs`,
-  bounded at widths 8/32/64) target the same `blast_kernel` rules on the
-  reference arena, so they are a second, independent witness of the rule
-  theorems — not of the encoder or the compaction pass (see `proofs.rs`).
+  Since phase 4 the `DagWF` side condition is no longer assumed: it is
+  decided by the proven `kernel::dag_wf` (`dag_wf_spec`, above), and
+  `check_query_sound` has no hypotheses. What is *still not* proven, and
+  therefore trusted when a verdict is read **as a statement about the
+  assertions a caller made** rather than about the DAG a v2 bundle
+  carries: the DAG builder (`dag.rs`: which `DagNode` is made for which
+  term, variable sharing by name, hash-consing) — a wrong decision there
+  changes the question asked, as the old term walk could, but the DAG it
+  produced is now in the certificate, where a consumer can audit it;
+  canon (`canon.rs`, including constant folding via `eval.rs`); the
+  **lowering of the derived ops** (`lowering.rs`: `bvnot`, `bvneg`,
+  `bvrotl`, `bvsdiv`, `bvsrem`, … are rewritten into the closed core
+  *before* the DAG is built — they are not DAG constructs, so a v2 bundle
+  carries the rewritten query; making them proven `DagNode`s is phase 5);
+  the sliver (`sliver.rs`); the SMT-LIB and Verus front ends.
+  `dag::strash_hints` is untrusted by design: it only reproduces the
+  sharing decisions of the old `Aig::and` strash so the shipped CNF stays
+  byte-identical, and `compact_sound` holds for any hints. The shipped
+  `cnf.rs` and `aig.rs` are no longer on the production path (they serve
+  the per-family differentials and the gate-identity tests). Evidence for
+  the unproven pieces is tests and the Z3 differential; closing them is
+  #192 phase 5, planned in `docs/design/query-cnf-gap.md`. The Kani
+  harnesses (`blast/proofs.rs`, bounded at widths 8/32/64) target the same
+  `blast_kernel` rules on the reference arena, so they are a second,
+  independent witness of the rule theorems — not of the encoder, the
+  compaction pass or `check_query` (see `proofs.rs`).
 
 ## Model freshness: generated, not checked (TR-034)
 
-The models the proofs reason about — `lean/Kernel.lean` (checker) and
-`lean/BlastKernel.lean` (bit-blaster) — are **build products, not committed
-artifacts**. `lean/regen.sh all` produces them from the Rust sources with
-Charon/Aeneas pinned in exactly one place (`lean/toolchain-pins.env`), and
-the *Lean model + soundness proof* CI job regenerates both **before every
+The model the proofs reason about — `lean/Kernel.lean`, since #192 phase 4
+ONE file holding the checker (`kernel.*`) and the proven lowering
+(`kernel.blast_kernel.*`, from `crates/ordeal-lrat/src/blast_kernel.rs`,
+a `#[path]` submodule of `kernel.rs`) — is a **build product, not a
+committed artifact**. `lean/regen.sh` produces it from the Rust sources
+with Charon/Aeneas pinned in exactly one place (`lean/toolchain-pins.env`),
+and the *Lean model + soundness proof* CI job regenerates it **before every
 proof build**. A proof about a stale model is therefore unrepresentable:
 there is no committed model that could go stale, and a `kernel.rs` /
 `blast_kernel.rs` change whose translation breaks a proof fails that
@@ -267,16 +358,19 @@ dual-mechanisation work (issue #47 / TR-035).
 ## How to reproduce the checks
 
 ```
-./lean/regen.sh all                 # produce the models (nix; once per pin-bump)
+./lean/regen.sh all                 # produce the model (nix; once per pin-bump)
 cd lean
 lake env lean Sound.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 lake env lean SatWitness.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
+lake env lean QueryCheck.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 echo 'import Sound
 import SatWitness
+import QueryCheck
 #print axioms kernel.spec.lrat_check_sound
 #print axioms kernel.spec.check_binding_sound
-#print axioms kernel.spec.check_sat_sound' > /tmp/ax.lean
+#print axioms kernel.spec.check_sat_sound
+#print axioms kernel.spec.check_query_sound' > /tmp/ax.lean
 lake env lean /tmp/ax.lean          # inspect the axiom lists (three standard axioms each)
 lake build AxiomCheck               # the pinned lists, as a gate
-grep -c '^axiom' Kernel.lean BlastKernel.lean   # expect 0 and 0 (CI-gated)
+grep -c '^axiom' Kernel.lean        # expect 0 (CI-gated)
 ```
