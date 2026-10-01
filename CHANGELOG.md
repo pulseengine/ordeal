@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-01
+
+**The trusted checker re-checks the query, not just a CNF** (#192 phase 4).
+`ordeal_lrat::check_query` re-encodes a well-formed term DAG with the
+proven encoder. `check_query_sound` states that an accepted bundle refutes
+the query DAG. It ships as an opt-in `ordeal-cert/v2`; v1 bundles and
+default output are unchanged. The trusted crate now fails closed on overflow
+in release builds (#225).
+
 ### Fixed
 - **The trusted checker fails closed on overflow in release builds** (TR-063,
   #225). The Lean proofs model overflow as failure, but release builds
@@ -1427,7 +1436,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.27.0
 [0.26.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.26.0
 [0.25.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.25.0
 [0.24.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.24.0
