@@ -40,7 +40,7 @@
 //! [`DISABLED_OPS`] and every query containing it returns `Unknown` until
 //! the rule is fixed — the solver reverts to conservative, never guesses.
 
-use crate::aig::{Aig, Lit, Word, word_input};
+use crate::aig::{Aig, AigOptions, Lit, Word, word_input};
 use crate::blast::{arith, bitwise, muldiv, shift, structural};
 use crate::cnf::{CnfFormula, TseitinMap, tseitin};
 use crate::eval::{self, Env, EvalError};
@@ -272,9 +272,13 @@ struct Blaster {
 }
 
 impl Blaster {
-    fn new() -> Self {
+    /// A blaster over an arena with the given simplification settings
+    /// (issue #192 phase 1: the CNF-gap measurement runs the production
+    /// rules with folding / hashing switched off; the production path,
+    /// `lower()`, always passes `AigOptions::default()`).
+    fn with_options(options: AigOptions) -> Self {
         Blaster {
-            aig: Aig::new(),
+            aig: Aig::with_options(options),
             vars: HashMap::new(),
             var_order: Vec::new(),
         }
@@ -771,6 +775,14 @@ impl Solver {
     /// Tseitin — shared by every backend. `None` means conservative Unknown
     /// (disabled ops or ill-sorted input; `validate()` diagnoses).
     fn lower(&self) -> Option<(Blaster, CnfFormula, TseitinMap)> {
+        self.lower_with(AigOptions::default())
+    }
+
+    /// `lower` over an arena with explicit simplification settings. The
+    /// production path is `lower()` (= the default options); the other
+    /// settings exist for the #192 CNF-size / time measurement
+    /// (`cnf_gap_measurement` below) and yield a simulation-identical AIG.
+    fn lower_with(&self, options: AigOptions) -> Option<(Blaster, CnfFormula, TseitinMap)> {
         if self.assertions.iter().any(bool_uses_disabled) {
             return None;
         }
@@ -778,7 +790,7 @@ impl Solver {
         if self.validate().is_err() {
             return None;
         }
-        let mut blaster = Blaster::new();
+        let mut blaster = Blaster::with_options(options);
         let mut roots = Vec::with_capacity(self.assertions.len());
         for a in &self.assertions {
             // Untrusted canonicalization above the AIG (issue #35 / TR-009):
@@ -1086,6 +1098,253 @@ fn cnf_sat_verdict(formula: &crate::cnf::CnfFormula, assignment: &[bool]) -> Che
         .map(|(i, &b)| (format!("v{}", i + 1), b as u128))
         .collect();
     CheckResult::Sat(Model { assignments })
+}
+
+/// Issue #192 phase 1 — the CNF-gap measurement: CNF size and blast +
+/// Tseitin time of the SHIPPED pipeline with AIG simplification switched
+/// off, folding only, and folding + hashing (production). A test-only
+/// harness, `#[ignore]`d: it prints markdown tables (recorded in
+/// docs/design/query-cnf-gap.md) rather than asserting anything beyond
+/// the three configurations agreeing on the verdict's inputs.
+///
+///   cargo test -p ordeal --release --lib cnf_gap_measurement -- --ignored --nocapture
+///   LIBRARY_PATH=/opt/homebrew/lib cargo test -p ordeal --release --lib \
+///       --features oracle cnf_gap_measurement -- --ignored --nocapture
+#[cfg(test)]
+mod cnf_gap_measurement {
+    use super::*;
+    use crate::term::Sort;
+    use std::time::{Duration, Instant};
+
+    fn v(n: &str, w: u32) -> BvTerm {
+        BvTerm::Var {
+            name: n.into(),
+            sort: Sort::new(w),
+        }
+    }
+    fn c(val: u128, w: u32) -> BvTerm {
+        BvTerm::Const {
+            value: val,
+            sort: Sort::new(w),
+        }
+    }
+
+    /// The `benches/latency.rs` corpus (copied: a bench's `corpus()` is not
+    /// a library item, and the bench must stay untouched).
+    fn latency_corpus() -> Vec<(String, Vec<BoolTerm>)> {
+        use crate::lowering;
+        let mut out = Vec::new();
+        {
+            let (a, b) = (v("a", 32), v("b", 32));
+            let ours = lowering::bvsrem(a.clone(), b.clone(), 32);
+            let q = lowering::bvsdiv(a.clone(), b.clone(), 32);
+            let theirs = BvTerm::Sub(Box::new(a), Box::new(BvTerm::Mul(Box::new(q), Box::new(b))));
+            out.push((
+                "srem_vc_32".to_string(),
+                vec![BoolTerm::Ne(Box::new(ours), Box::new(theirs))],
+            ));
+        }
+        {
+            let (a, b) = (v("a", 32), v("b", 32));
+            let ours = BvTerm::Urem(Box::new(a.clone()), Box::new(b.clone()));
+            let q = BvTerm::Udiv(Box::new(a.clone()), Box::new(b.clone()));
+            let theirs = BvTerm::Sub(Box::new(a), Box::new(BvTerm::Mul(Box::new(q), Box::new(b))));
+            out.push((
+                "urem_vc_32".to_string(),
+                vec![BoolTerm::Ne(Box::new(ours), Box::new(theirs))],
+            ));
+        }
+        {
+            let x = v("x", 32);
+            let bytes = crate::layout::to_le_bytes(&x, 32);
+            let back = crate::layout::from_le_bytes(&bytes);
+            out.push((
+                "layout_roundtrip_32".to_string(),
+                vec![BoolTerm::Ne(Box::new(back), Box::new(x))],
+            ));
+        }
+        {
+            use crate::trap::{DivOp, trap_div};
+            let (a, b) = (v("a", 32), v("b", 32));
+            let t1 = trap_div(DivOp::DivU, &a, &b, 32);
+            let t2 = trap_div(DivOp::DivU, &a, &b, 32);
+            let iff = BoolTerm::And(
+                Box::new(BoolTerm::Or(
+                    Box::new(BoolTerm::Not(Box::new(t1.clone()))),
+                    Box::new(t2.clone()),
+                )),
+                Box::new(BoolTerm::Or(
+                    Box::new(BoolTerm::Not(Box::new(t2))),
+                    Box::new(t1),
+                )),
+            );
+            out.push(("trap_vc_32".to_string(), vec![BoolTerm::Not(Box::new(iff))]));
+        }
+        {
+            let (a, b, cc) = (v("a", 64), v("b", 64), v("c", 64));
+            out.push((
+                "ult_cycle_64".to_string(),
+                vec![
+                    BoolTerm::Ult(Box::new(a.clone()), Box::new(b.clone())),
+                    BoolTerm::Ult(Box::new(b), Box::new(cc.clone())),
+                    BoolTerm::Ult(Box::new(cc), Box::new(a)),
+                ],
+            ));
+        }
+        {
+            let x = v("x", 64);
+            let shl = BvTerm::Shl(Box::new(x.clone()), Box::new(c(1, 64)));
+            let add = BvTerm::Add(Box::new(x.clone()), Box::new(x));
+            out.push((
+                "shl1_eq_add_64".to_string(),
+                vec![BoolTerm::Ne(Box::new(shl), Box::new(add))],
+            ));
+        }
+        out
+    }
+
+    /// One measurement: AIG ANDs, CNF vars, CNF clauses, and the median
+    /// wall time of `lower_with` (canon + blast + Tseitin) over `runs`.
+    struct Sample {
+        ands: u64,
+        vars: u64,
+        clauses: u64,
+        median: Duration,
+    }
+
+    fn measure(q: &[BoolTerm], opts: AigOptions, runs: usize) -> Sample {
+        let mut s = Solver::new();
+        for a in q {
+            s.assert(a.clone());
+        }
+        let mut times = Vec::with_capacity(runs);
+        let mut sample = None;
+        for _ in 0..runs {
+            let t0 = Instant::now();
+            let lowered = s.lower_with(opts).expect("corpus query must lower");
+            times.push(t0.elapsed());
+            sample = Some(Sample {
+                ands: u64::from(lowered.0.aig.num_ands()),
+                vars: u64::from(lowered.1.num_vars),
+                clauses: lowered.1.clauses.len() as u64,
+                median: Duration::ZERO,
+            });
+        }
+        times.sort();
+        let mut sample = sample.expect("at least one run");
+        sample.median = times[runs / 2];
+        sample
+    }
+
+    const CONFIGS: [(&str, AigOptions); 3] = [
+        ("raw", AigOptions::RAW),
+        ("fold", AigOptions::FOLD_ONLY),
+        (
+            "fold+hash",
+            AigOptions {
+                fold: true,
+                strash: true,
+            },
+        ),
+    ];
+
+    fn fmt_us(d: Duration) -> String {
+        format!("{:.1}", d.as_secs_f64() * 1e6)
+    }
+
+    /// Per-query table over a named corpus.
+    fn table(title: &str, corpus: &[(String, Vec<BoolTerm>)], runs: usize) {
+        println!("\n### {title}\n");
+        println!(
+            "| query | config | AIG ANDs | CNF vars | CNF clauses | blast+Tseitin median (µs) |"
+        );
+        println!("|---|---|---:|---:|---:|---:|");
+        for (name, q) in corpus {
+            for (cname, opts) in CONFIGS {
+                let s = measure(q, opts, runs);
+                println!(
+                    "| {name} | {cname} | {} | {} | {} | {} |",
+                    s.ands,
+                    s.vars,
+                    s.clauses,
+                    fmt_us(s.median)
+                );
+            }
+        }
+    }
+
+    /// Aggregate table over a corpus of unnamed queries: totals and the
+    /// per-query medians.
+    #[cfg(feature = "oracle")]
+    fn aggregate_table(title: &str, corpus: &[Vec<BoolTerm>], runs: usize) {
+        println!("\n### {title} ({} queries)\n", corpus.len());
+        println!(
+            "| config | total AIG ANDs | total CNF vars | total CNF clauses | median ANDs/query | median clauses/query | total blast+Tseitin (ms, sum of medians) | median per query (µs) |"
+        );
+        println!("|---|---:|---:|---:|---:|---:|---:|---:|");
+        for (cname, opts) in CONFIGS {
+            let samples: Vec<Sample> = corpus.iter().map(|q| measure(q, opts, runs)).collect();
+            let total = |f: &dyn Fn(&Sample) -> u64| samples.iter().map(f).sum::<u64>();
+            let median_of = |mut xs: Vec<u64>| {
+                xs.sort();
+                xs[xs.len() / 2]
+            };
+            let sum_t: Duration = samples.iter().map(|s| s.median).sum();
+            let med_t = {
+                let mut ts: Vec<Duration> = samples.iter().map(|s| s.median).collect();
+                ts.sort();
+                ts[ts.len() / 2]
+            };
+            println!(
+                "| {cname} | {} | {} | {} | {} | {} | {:.2} | {} |",
+                total(&|s| s.ands),
+                total(&|s| s.vars),
+                total(&|s| s.clauses),
+                median_of(samples.iter().map(|s| s.ands).collect()),
+                median_of(samples.iter().map(|s| s.clauses).collect()),
+                sum_t.as_secs_f64() * 1e3,
+                fmt_us(med_t)
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "measurement, not a check: prints the #192 CNF-gap tables (release build)"]
+    fn cnf_gap_measurement() {
+        let runs = 7;
+        println!(
+            "\nconfigurations: raw = no folding, no hashing; fold = constant folding only; \
+             fold+hash = production (constant folding + structural hashing)"
+        );
+        table("benches/latency.rs corpus", &latency_corpus(), runs);
+        let bmc: Vec<(String, Vec<BoolTerm>)> = [16usize, 32, 64]
+            .iter()
+            .map(|&k| {
+                (
+                    format!("queue_overflow_k{k}"),
+                    crate::bmc_corpus::queue_overflow(k, k as u8),
+                )
+            })
+            .chain([24usize, 48].iter().map(|&k| {
+                (
+                    format!("deadlock_k{k}"),
+                    crate::bmc_corpus::deadlock(k, false),
+                )
+            }))
+            .collect();
+        table("benches/bmc.rs corpus", &bmc, runs);
+        #[cfg(feature = "oracle")]
+        {
+            let corpus = crate::oracle::gen_corpus(0x192, 200);
+            aggregate_table(
+                "oracle::gen_corpus(0x192, 200) — the Z3 differential corpus",
+                &corpus,
+                runs,
+            );
+        }
+        #[cfg(not(feature = "oracle"))]
+        println!("\n(oracle corpus skipped: build with --features oracle)");
+    }
 }
 
 #[cfg(test)]
@@ -2017,7 +2276,7 @@ mod cadical_parity_tests {
 
             // CaDiCaL: the identical CNF the pipeline solves, rebuilt through
             // the same canonicalize → blast → Tseitin steps.
-            let mut blaster = Blaster::new();
+            let mut blaster = Blaster::with_options(AigOptions::default());
             let mut roots = Vec::new();
             let mut blast_ok = true;
             for a in assertions {

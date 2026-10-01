@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Tseitin satisfiability preservation, proven** (#192 phase 1).
+  `blast_kernel::tseitin` mirrors `cnf::tseitin` clause for clause (a
+  differential test pins it). `lean/BlasterTseitin.lean` proves
+  `tseitin_sat_preserving` — an input assignment that satisfies every
+  asserted AIG output satisfies the emitted CNF — over Sound.lean's own
+  CNF semantics, and `tseitin_refutes_outputs` composes it with
+  `lrat_check_sound`: an accepted certificate against the encoded CNF
+  refutes the circuit. Axiom-clean, pinned in `AxiomCheck.lean`.
+- **Gate identity, tested.** For every mirrored rule at widths 1..=16 the
+  reference AIG, rebuilt node by node through `aig::Aig::and` (folding +
+  hashing), is node-identical to the shipped rule's AIG.
+- **CNF-size benchmark** of the shipped blaster with no simplification,
+  folding only, and folding + hashing (`docs/design/query-cnf-gap.md`).
+
+### Changed
+- **The reference XOR gadget is `aig::xor`'s shape** — `(x & !y) | (!x &
+  y)`, three gates in the shipped order. It was `(x | y) & !(x & y)`: the
+  same function, a different circuit, so the model's CNF was not the
+  shipped CNF. The gadget proof was redone; every downstream theorem is
+  unchanged (the gate count is still three).
+- `smtlib.rs` / `lowering.rs` module docs no longer say `rotate_left` is
+  exact only at widths 8/32/64 — it has been exact at every width since
+  #182.
+
 ## [0.24.0] - 2026-09-30
 
 **Proof and evidence depth.** The shift and rotate proofs now hold at every

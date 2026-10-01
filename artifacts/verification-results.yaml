@@ -2544,3 +2544,28 @@ artifacts:
         target: VER-043
       - type: part-of-execution
         target: VE-048
+
+  - id: VE-049
+    type: verification-execution
+    title: "#192 phase 1 re-verified independently (VER-059)"
+    status: implemented
+    description: "Implemented by a background agent; re-verified independently in its worktree: models deleted and regenerated (lean/regen.sh all rc 0; Kernel.lean and BlastKernel.lean 0 axioms); lake build: Build completed successfully (1716 jobs), 0 'declaration uses sorry'; scripts/axiom_check.sh passes, AxiomCheck prints tseitin_sat_preserving and tseitin_satisfiable depending only on propext, Classical.choice, Quot.sound; cargo test -p ordeal --lib after a forced rebuild: 205 passed debug and release. ordeal check --format json on 24 queries (differential fixtures, evidence/certs, fuzz seeds): byte-identical between the main binary and the branch binary, certificates included. Agent-reported negative control: the old XOR shape fails the gate-identity test at xor w=1 gate #0."
+    fields:
+      environment: "note: macOS arm64, local, pinned Charon/Aeneas via nix; branch proof/192-phase1 @ 90e05be"
+      executor: local
+      timestamp: 2026-10-01T04:36:39Z
+      version: 90e05be
+
+  - id: VV-106
+    type: verification-verdict
+    title: VER-059 pass — Tseitin proven, blaster gate-identical, shipped output unchanged
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-049
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-059
+      - type: part-of-execution
+        target: VE-049

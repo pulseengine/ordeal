@@ -86,22 +86,73 @@ enum Node {
     And(Lit, Lit),
 }
 
+/// Which simplifications [`Aig::and`] applies (issue #192 phase 1: the
+/// CNF-size / time benchmark in `docs/design/query-cnf-gap.md` runs the
+/// shipped blast rules under each combination). The production pipeline
+/// always uses [`AigOptions::default`] (both on); every other setting is a
+/// measurement / test configuration and yields a *simulation-identical*
+/// AIG (folding and hashing only change which gates exist, never what a
+/// literal computes).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AigOptions {
+    /// Constant folding: `x&0=0`, `x&1=x`, `x&x=x`, `x&!x=0`.
+    pub fold: bool,
+    /// Structural hashing: a repeated operand pair returns the existing gate.
+    pub strash: bool,
+}
+
+impl Default for AigOptions {
+    /// The production setting: folding and hashing both on.
+    fn default() -> Self {
+        AigOptions {
+            fold: true,
+            strash: true,
+        }
+    }
+}
+
+impl AigOptions {
+    /// No simplification at all: one gate per `and` call — the shape of the
+    /// Lean-modelled `blast_kernel` arena.
+    pub const RAW: AigOptions = AigOptions {
+        fold: false,
+        strash: false,
+    };
+    /// Constant folding only, no gate sharing.
+    pub const FOLD_ONLY: AigOptions = AigOptions {
+        fold: true,
+        strash: false,
+    };
+}
+
 /// The AIG arena.
 #[derive(Clone, Debug, Default)]
 pub struct Aig {
     nodes: Vec<Node>,
     strash: Strash,
     num_inputs: u32,
+    options: AigOptions,
 }
 
 impl Aig {
-    /// An empty graph (just the constant node).
+    /// An empty graph (just the constant node), with folding and hashing on.
     pub fn new() -> Self {
+        Self::with_options(AigOptions::default())
+    }
+
+    /// An empty graph with the given simplification settings.
+    pub fn with_options(options: AigOptions) -> Self {
         Aig {
             nodes: vec![Node::Const],
             strash: Strash::default(),
             num_inputs: 0,
+            options,
         }
+    }
+
+    /// The simplification settings this arena was created with.
+    pub fn options(&self) -> AigOptions {
+        self.options
     }
 
     /// Number of variables (constant + inputs + AND nodes).
@@ -127,27 +178,35 @@ impl Aig {
         Lit::new(var, false)
     }
 
-    /// AND of two literals, with constant folding and structural hashing.
+    /// AND of two literals, with constant folding and structural hashing
+    /// (each as enabled by the arena's [`AigOptions`]).
     pub fn and(&mut self, a: Lit, b: Lit) -> Lit {
         // Constant folding.
-        if a == Lit::FALSE || b == Lit::FALSE || a == b.not() {
-            return Lit::FALSE;
+        if self.options.fold {
+            if a == Lit::FALSE || b == Lit::FALSE || a == b.not() {
+                return Lit::FALSE;
+            }
+            if a == Lit::TRUE {
+                return b;
+            }
+            if b == Lit::TRUE || a == b {
+                return a;
+            }
         }
-        if a == Lit::TRUE {
-            return b;
-        }
-        if b == Lit::TRUE || a == b {
-            return a;
-        }
-        // Normalize operand order for the strash key.
+        // Normalize operand order (the strash key; applied in every mode so
+        // the stored gate never depends on the hashing setting).
         let (x, y) = if a.raw() <= b.raw() { (a, b) } else { (b, a) };
-        if let Some(&lit) = self.strash.get(&(x.raw(), y.raw())) {
+        if self.options.strash
+            && let Some(&lit) = self.strash.get(&(x.raw(), y.raw()))
+        {
             return lit;
         }
         let var = self.nodes.len() as u32;
         self.nodes.push(Node::And(x, y));
         let lit = Lit::new(var, false);
-        self.strash.insert((x.raw(), y.raw()), lit);
+        if self.options.strash {
+            self.strash.insert((x.raw(), y.raw()), lit);
+        }
         lit
     }
 
@@ -258,6 +317,37 @@ mod tests {
         assert_eq!(g.and(x, x), x);
         assert_eq!(g.and(x, x.not()), Lit::FALSE);
         assert_eq!(g.num_ands(), 0, "all folded, no gate created");
+    }
+
+    #[test]
+    fn options_control_folding_and_hashing() {
+        // RAW: every `and` call is a gate, even a foldable or repeated one.
+        let mut raw = Aig::with_options(AigOptions::RAW);
+        let x = raw.input();
+        let y = raw.input();
+        let g1 = raw.and(x, Lit::TRUE);
+        assert_ne!(g1, x, "no folding: and(x, TRUE) is a fresh gate");
+        let g2 = raw.and(x, y);
+        let g3 = raw.and(y, x);
+        assert_ne!(g2, g3, "no hashing: a repeated pair is a fresh gate");
+        assert_eq!(raw.num_ands(), 3);
+        // FOLD_ONLY: folds, but still no sharing.
+        let mut fold = Aig::with_options(AigOptions::FOLD_ONLY);
+        let x = fold.input();
+        let y = fold.input();
+        assert_eq!(fold.and(x, Lit::TRUE), x);
+        let g2 = fold.and(x, y);
+        let g3 = fold.and(y, x);
+        assert_ne!(g2, g3);
+        assert_eq!(fold.num_ands(), 2);
+        // Default: both, and `new()` is the default.
+        let mut def = Aig::new();
+        assert_eq!(def.options(), AigOptions::default());
+        let x = def.input();
+        let y = def.input();
+        assert_eq!(def.and(x, Lit::TRUE), x);
+        assert_eq!(def.and(x, y), def.and(y, x));
+        assert_eq!(def.num_ands(), 1);
     }
 
     #[test]

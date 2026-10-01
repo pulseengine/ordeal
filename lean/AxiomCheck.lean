@@ -23,6 +23,7 @@ import BlasterShift
 import BlasterMul
 import BlasterDiv
 import BlasterRotr
+import BlasterTseitin
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -76,6 +77,21 @@ import BlasterRotr
 /-- info: 'blast_kernel.spec.blast_urem_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms blast_kernel.spec.blast_urem_bitvec
+
+-- The model Tseitin encoder (BlasterTseitin.lean, issue #192 phase 1): the
+-- satisfiability-preservation capstone, its `unsat`-form restatement, and
+-- its composition with `lrat_check_sound` (the two proven halves meeting).
+/-- info: 'blast_kernel.spec.tseitin_sat_preserving' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.tseitin_sat_preserving
+
+/-- info: 'blast_kernel.spec.tseitin_satisfiable' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.tseitin_satisfiable
+
+/-- info: 'blast_kernel.spec.tseitin_refutes_outputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms blast_kernel.spec.tseitin_refutes_outputs
 
 -- The SAT-witness checker (SatWitness.lean, TR-044 / VER-039). These pins
 -- are what surfaced the TR-038 regression: `clause_satisfied` used

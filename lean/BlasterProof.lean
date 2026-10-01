@@ -278,8 +278,9 @@ theorem push_or_gadget (aig : Aig) (x y : Lit)
     cases pEvalLit (pSim inp aig.nodes.val) x <;>
       cases pEvalLit (pSim inp aig.nodes.val) y <;> rfl
 
-/-- Gadget spec for `push_xor` (three gates:
-    `x ⊕ y = (x ∨ y) ∧ ¬(x ∧ y)`). -/
+/-- Gadget spec for `push_xor` (three gates, the shipped `aig::xor` shape
+    since issue #192 phase 1: `x ⊕ y = (x ∧ ¬y) ∨ (¬x ∧ y)` — two ANDs and
+    the De-Morgan OR gate, in that order). -/
 theorem push_xor_gadget (aig : Aig) (x y : Lit)
     (hcap : aig.nodes.val.length + 3 ≤ Usize.max)
     (hx : x.node.val < aig.nodes.val.length)
@@ -294,22 +295,23 @@ theorem push_xor_gadget (aig : Aig) (x y : Lit)
           = (pEvalLit (pSim inp aig.nodes.val) x
              ^^ pEvalLit (pSim inp aig.nodes.val) y)) ⦄ := by
   unfold push_xor
-  step with (push_or_gadget aig x y (by omega) hx hy) as
-    ⟨o, aig1, ho1, ho2, ho3, ho4, ho5⟩
-  have hx1 : x.node.val < aig1.nodes.val.length := by omega
+  step with (lit_not_spec y) as ⟨ny, hny⟩
+  have hny' : ny.node.val < aig.nodes.val.length := by simp [hny]; exact hy
+  step with (push_and_gadget aig x ny (by omega) hx hny') as
+    ⟨l, aig1, hl1, hl2, hl3, hl4, hl5⟩
+  step with (lit_not_spec x) as ⟨nx, hnx⟩
+  have hnx1 : nx.node.val < aig1.nodes.val.length := by simp [hnx]; omega
   have hy1 : y.node.val < aig1.nodes.val.length := by omega
-  step with (push_and_gadget aig1 x y (by omega) hx1 hy1) as
-    ⟨ga, aig2, ha1, ha2, ha3, ha4, ha5⟩
-  step with (lit_not_spec ga) as ⟨l, hl⟩
-  have ho3' : o.node.val < aig2.nodes.val.length := by omega
-  have hl3 : l.node.val < aig2.nodes.val.length := by
-    simp only [hl]; exact ha3
-  apply WP.spec_mono (push_and_gadget aig2 o l (by omega) ho3' hl3)
+  step with (push_and_gadget aig1 nx y (by omega) hnx1 hy1) as
+    ⟨r, aig2, hr1, hr2, hr3, hr4, hr5⟩
+  have hl3' : l.node.val < aig2.nodes.val.length := by omega
+  apply WP.spec_mono (push_or_gadget aig2 l r (by omega) hl3' hr3)
   rintro ⟨g, aig3⟩ ⟨hg1, hg2, hg3, hg4, hg5⟩
-  refine ⟨by omega, ho2.trans (ha2.trans hg2), hg3,
-    fun L hL => hg4 L (ha4 L (ho4 L hL)), fun inp => ?_⟩
-  rw [hg5 inp, pEvalLit_stable ha2 o ho3 inp, ho5 inp, hl, pEvalLit_not,
-    ha5 inp, pEvalLit_stable ho2 x hx inp, pEvalLit_stable ho2 y hy inp]
+  refine ⟨by omega, hl2.trans (hr2.trans hg2), hg3,
+    fun L hL => hg4 L (hr4 L (hl4 L hL)), fun inp => ?_⟩
+  rw [hg5 inp, pEvalLit_stable hr2 l hl3 inp, hl5 inp, hr5 inp, hny, hnx,
+    pEvalLit_not, pEvalLit_not, pEvalLit_stable hl2 x hx inp,
+    pEvalLit_stable hl2 y hy inp]
   cases pEvalLit (pSim inp aig.nodes.val) x <;>
     cases pEvalLit (pSim inp aig.nodes.val) y <;> rfl
 

@@ -68,6 +68,16 @@ lean_lib «Sound» {}
 -- by blast_urem first — so it lives after both. `sorry`-free, axiom-clean.
 @[default_target] lean_lib «BlasterRotr» {}
 
+-- Satisfiability preservation of the model Tseitin encoder (issue #192,
+-- phase 1 / v0.25.0): `tseitin_sat_preserving` (an input assignment that
+-- satisfies every asserted AIG output satisfies the emitted CNF — the
+-- UNSAT direction), `tseitin_satisfiable` (its statement over Sound.lean's
+-- `unsat`) and `tseitin_refutes_outputs` (composed with `lrat_check_sound`:
+-- an accepted certificate against the encoded CNF refutes the circuit).
+-- Imports BlasterProof (the pure simulator) and Sound (the CNF semantics).
+-- `sorry`-free, axiom-clean.
+@[default_target] lean_lib «BlasterTseitin» {}
+
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —
 -- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),

@@ -73,6 +73,52 @@ proof* CI job is a real gate (no `continue-on-error`): it builds `Kernel` and
 `Sound` and fails if `lake env lean Sound.lean` reports any sorry-bearing
 declaration. A proven leaf cannot silently regress to `sorry`.
 
+## The model Tseitin encoder (issue #192, phase 1)
+
+`BlasterTseitin.lean` proves the direction an UNSAT verdict needs for the
+reference Tseitin encoder `blast_kernel::tseitin` (a clause-for-clause
+mirror of the shipped `cnf::tseitin`, pinned by a differential test). It
+reuses Sound.lean's CNF semantics (`litHolds` / `cnfHolds` / `unsat`) so
+the encoder's output is judged by the meaning `lrat_check_sound` refutes.
+`sorry`-free, axiom-clean (pinned in `AxiomCheck.lean`), a default
+`lake build` target:
+
+```lean
+/-- DIMACS variable v is AIG node v - 1's simulated value (cnf_lit). -/
+def simAsn (vals : List Bool) : Asn := fun v => vals.getD (v - 1) false
+
+theorem tseitin_sat_preserving (aig : Aig) (outputs : Slice Lit)
+    (inp : List Bool) (L : Nat)
+    (hwf : AigWF aig.nodes.val L)
+    (h0 : aig.nodes.val[0]? = some Node.False)
+    (hi32 : (aig.nodes.val.length : Int) ≤ I32.max)
+    (hcap : 1 + 3 * aig.nodes.val.length + outputs.val.length < Usize.max)
+    (houts : ∀ l ∈ outputs.val,
+      l.node.val < aig.nodes.val.length ∧
+      pEvalLit (pSim inp aig.nodes.val) l = true) :
+    tseitin aig outputs ⦃ cnf =>
+      cnfHolds (simAsn (pSim inp aig.nodes.val)) (cnf.val.map (fun c => c.val)) ⦄
+
+theorem tseitin_satisfiable … :
+    tseitin aig outputs ⦃ cnf => ¬ unsat (cnf.val.map (fun c => c.val)) ⦄
+
+/-- The two proven halves meet: an accepted LRAT certificate against the
+    encoded CNF means no input assignment satisfies the asserted outputs. -/
+theorem tseitin_refutes_outputs … (henc : tseitin aig outputs = ok cnf)
+    (hchk : kernel.check_steps ⟨cnf.val, cnf.property⟩ steps
+      = ok (core.result.Result.Ok ())) :
+    ∀ inp : List Bool, ¬ (∀ l ∈ outputs.val,
+      l.node.val < aig.nodes.val.length ∧
+      pEvalLit (pSim inp aig.nodes.val) l = true)
+```
+
+Scope, stated plainly: this is a theorem about the *reference* encoder over
+the *reference* AIG. The shipped `cnf.rs` and `aig.rs` are reached through
+the differential tests in `blast_kernel.rs` (gate identity and clause-for-
+clause equality), not by proof. The reference XOR gadget is gate-identical
+to `aig::xor` since this phase (it was the same function as a different
+three-gate circuit before — the same CNF only up to equisatisfiability).
+
 ## The SAT-witness checker (TR-038 → TR-044 / VER-039)
 
 `SatWitness.lean` extends the same semantics — nothing in `Sound.lean`
