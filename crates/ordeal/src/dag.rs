@@ -83,6 +83,12 @@ mod tag {
     pub const NOT: u8 = 28;
     pub const BAND: u8 = 29;
     pub const BOR: u8 = 30;
+    // The formerly derived ops (#192 phase 5).
+    pub const BVNOT: u8 = 31;
+    pub const NEG: u8 = 32;
+    pub const ROTL: u8 = 33;
+    pub const SDIV: u8 = 34;
+    pub const SREM: u8 = 35;
 }
 
 /// Builds a [`Dag`] from (canonicalized) assertions.
@@ -167,6 +173,20 @@ impl DagBuilder {
             BvTerm::Lshr(a, b) => self.bin(tag::LSHR, a, b, k::DagNode::Lshr)?,
             BvTerm::Ashr(a, b) => self.bin(tag::ASHR, a, b, k::DagNode::Ashr)?,
             BvTerm::Rotr(a, b) => self.bin(tag::ROTR, a, b, k::DagNode::Rotr)?,
+            // The formerly derived ops (#192 phase 5) become nodes of their
+            // own; `Solver::check`'s default path never shows them to the
+            // builder (it rewrites them first), `check_with_query` does.
+            BvTerm::Not(a) => {
+                let x = self.bv(a)?;
+                self.intern((tag::BVNOT, x, 0, 0), k::DagNode::BvNot(x))
+            }
+            BvTerm::Neg(a) => {
+                let x = self.bv(a)?;
+                self.intern((tag::NEG, x, 0, 0), k::DagNode::Neg(x))
+            }
+            BvTerm::Rotl(a, b) => self.bin(tag::ROTL, a, b, k::DagNode::Rotl)?,
+            BvTerm::Sdiv(a, b) => self.bin(tag::SDIV, a, b, k::DagNode::Sdiv)?,
+            BvTerm::Srem(a, b) => self.bin(tag::SREM, a, b, k::DagNode::Srem)?,
             BvTerm::Extract { hi, lo, arg } => {
                 let x = self.bv(arg)?;
                 let (hi, lo) = (*hi as usize, *lo as usize);

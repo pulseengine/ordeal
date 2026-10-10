@@ -1470,3 +1470,20 @@ artifacts:
     links:
       - type: verifies
         target: TR-063
+
+  - id: VER-064
+    type: sw-verification
+    title: The derived ops as proven DAG constructs — five _bitvec theorems, the rules match the evaluator and the rewrite, the v2 block carries the operation, output unchanged (TR-064)
+    status: verified
+    release: v0.28.0
+    description: "lean/BlasterDerived.lean proves blast_bvnot_bitvec, blast_neg_bitvec, blast_rotl_bitvec, blast_sdiv_bitvec and blast_srem_bitvec against the Lean BitVec operations (~~~, -, rotateLeft mod width, smtSDiv, srem) for every width, composed from the earlier rule capstones; BlasterDag.lean's encode_node_spec gains the five arms and QueryCheck.lean the un_wf_spec / node_wf_spec / encode_fits_spec updates, so encode_sound, dag_refuted, dag_wf_spec and check_query_sound hold over the larger DAG language; AxiomCheck.lean pins the five. Rust tests: derived_rules_match_the_evaluator (exhaustive at widths 1..=6, sampled at 7..=16, 24, 32, 64, 128 with the edge values), derived_rules_are_the_rewrite (gate identity on the reference arena), rewrite_equals_the_proven_rule_with_a_trusted_recheck (op ≠ rewrite refuted through check_with_query, trusted-rechecked), derived_nodes_lower_to_the_rewrite_cnf_when_operands_come_first and derived_nodes_can_renumber_the_cnf (the two lowering paths, identical and the documented difference), derived_op_is_carried_as_its_own_node_and_rechecks and sdiv_node_swapped_to_udiv_fails_the_recheck (API-level negative control, both directions), v2_sdiv_node_swapped_to_udiv_fails_recheck_with_cnf_and_proof_untouched (bundle-level control plus the ordeal-dag/v1-vs-v2 tag discipline), format_json_with_query_carries_the_derived_op_as_a_node (CLI), the kernel's dag_wf tests for the new nodes, and under the oracle feature derived_ops_differential_through_check_with_query (Z3, every corpus width, SMT-LIB edge cases)."
+    tags: [lean, checker, cert-bundle, negative-control, regression, closed-fragment]
+    fields:
+      coverage: 5 new capstones axiom-pinned plus every earlier one; 4 Lean negative controls (sdiv sign handling, rotl direction, neg operand order, node_wf arm — each fails its proof); bundle and API negative controls (sdiv → udiv fails the recheck with CNF and proof untouched; a v1-tagged block with a derived node is refused); rules vs evaluator exhaustive at widths 1..=6 and sampled to 128; rules gate-identical to the rewrite; rules vs Z3 at widths 3, 5, 8, 12, 24, 32, 64 through check_with_query; 24 fixture queries byte-identical vs v0.27.0 (JSON and text); four corpus digests unchanged
+      method: automated-test
+      steps: "run: cd lean && lake build && cd .. && bash scripts/axiom_check.sh && cargo test -p ordeal-lrat --lib -- kernel::tests::check_query_dag_wf && cargo test -p ordeal --lib -- derived_ rewrite_equals_the_proven_rule && cargo test -p ordeal --lib -- query::tests::sdiv_node_swapped_to_udiv query::tests::derived_op_is_carried && cargo test -p ordeal --features cert-bundle cert_bundle::tests::v2_sdiv_node_swapped_to_udiv && cargo test -p ordeal --test cli_baseline -- derived_op && LIBRARY_PATH=/opt/homebrew/lib cargo test -p ordeal --features oracle --release --lib -- oracle::tests::derived_ops_differential_through_check_with_query"
+    links:
+      - type: verifies
+        target: TR-064
+      - type: part-of-execution
+        target: VE-054

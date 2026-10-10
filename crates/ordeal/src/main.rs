@@ -179,7 +179,7 @@ fn query_json(q: &QueryDag) -> String {
     };
     format!(
         "{{\"encoding\":\"{}\",\"num_nodes\":{},\"nodes\":[{}],\"bits\":\"{}\",\"roots\":[{}],\"hints\":[{}],\"sha256\":\"{}\"}}",
-        ordeal::query::QUERY_ENCODING,
+        q.encoding(),
         q.nodes.len(),
         nodes.join(","),
         ordeal::query::bits_string(&q.bits),

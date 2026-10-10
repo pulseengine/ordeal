@@ -14,7 +14,9 @@
      node takes the next `w` inputs). `dagWidths` is the width-only
      projection; `DagWF` is the syntactic well-formedness the encoder
      assumes (operands are earlier nodes, widths agree).
-   * `encode_node_spec` is the case split over the 32 node kinds. Each
+   * `encode_node_spec` is the case split over the 37 node kinds (32 of
+     phase 3 plus the five derived operations of phase 5, whose rules are
+     proven in BlasterDerived.lean). Each
      arm glues the rule's STRUCTURAL frame (BlasterFrame.lean: prefix,
      capacity, `AigWF`, output range) to its SEMANTIC capstone
      (`blast_X_bitvec`, stated through the monadic `simulate`) with
@@ -31,6 +33,7 @@
 import BlasterTseitin
 import BlasterRotr
 import BlasterFrame
+import BlasterDerived
 
 open Aeneas Aeneas.Std Result
 
@@ -163,6 +166,19 @@ def dagNodeVal (inp bits : List Bool) (vals : List DVal) (nin : Nat) :
   | .Not a => bvBool (!bval (vals.getD a.val dDflt))
   | .BoolAnd a b => bvBool (bval (vals.getD a.val dDflt) && bval (vals.getD b.val dDflt))
   | .BoolOr a b => bvBool (bval (vals.getD a.val dDflt) || bval (vals.getD b.val dDflt))
+  | .BvNot a => ⟨(vals.getD a.val dDflt).1, ~~~(vals.getD a.val dDflt).2⟩
+  | .Neg a => ⟨(vals.getD a.val dDflt).1, -(vals.getD a.val dDflt).2⟩
+  | .Rotl a b =>
+    ⟨(vals.getD a.val dDflt).1,
+      (vals.getD a.val dDflt).2.rotateLeft
+        ((toW (vals.getD a.val dDflt).1 (vals.getD b.val dDflt)).toNat
+          % (vals.getD a.val dDflt).1)⟩
+  | .Sdiv a b =>
+    ⟨(vals.getD a.val dDflt).1,
+      (vals.getD a.val dDflt).2.smtSDiv (toW _ (vals.getD b.val dDflt))⟩
+  | .Srem a b =>
+    ⟨(vals.getD a.val dDflt).1,
+      (vals.getD a.val dDflt).2.srem (toW _ (vals.getD b.val dDflt))⟩
 
 /-- The primary-input counter after a node: a `Var w` takes `w` inputs. -/
 def dagNodeNin (nin : Nat) : DagNode → Nat
@@ -183,6 +199,7 @@ def dagNodeWidth (ws : List Nat) : DagNode → Nat
   | .Eq _ _ | .Ne _ _ | .Ult _ _ | .Ule _ _ | .Ugt _ _ | .Uge _ _
   | .Slt _ _ | .Sle _ _ | .Sgt _ _ | .Sge _ _
   | .Not _ | .BoolAnd _ _ | .BoolOr _ _ => 1
+  | .BvNot a | .Neg a | .Rotl a _ | .Sdiv a _ | .Srem a _ => ws.getD a.val 0
 
 /-- The DAG simulation, generalized over the accumulated values and the
     input counter. -/
@@ -367,6 +384,9 @@ def DagNodeWF (ws : List Nat) (nbits i : Nat) : DagNode → Prop
     0 < ws.getD t.val 0 ∧ ws.getD t.val 0 = ws.getD e.val 0
   | .Not a => a.val < i ∧ ws.getD a.val 0 = 1
   | .BoolAnd a b | .BoolOr a b => a.val < i ∧ b.val < i ∧ ws.getD a.val 0 = 1 ∧ ws.getD b.val 0 = 1
+  | .BvNot a | .Neg a => a.val < i ∧ 0 < ws.getD a.val 0
+  | .Rotl a b | .Sdiv a b | .Srem a b =>
+    a.val < i ∧ b.val < i ∧ 0 < ws.getD a.val 0 ∧ ws.getD a.val 0 = ws.getD b.val 0
 
 /-- Well-formedness of a DAG: every node against the widths of the nodes
     before it (the widths of a prefix are a prefix of the widths). -/
@@ -405,96 +425,17 @@ theorem dagWidths_take_getD (ns : List DagNode) (i j : Nat) (hj : j < i) :
   · rw [List.take_of_length_le (by omega)]
 
 /-- The gate budget of one node whose operand widths are at most `W`:
-    a bound every rule's capacity hypothesis fits under (the worst case is
-    `rotr` at a non-power-of-two width: `22·w² + 17·w` for the modular
-    reduction plus `3·w·stages` for the barrel). -/
-def gateBound (W : Nat) : Nat := 25 * W * W + 20 * W + 1
+    a bound every rule's capacity hypothesis fits under. Until phase 5 it
+    was `25·W² + 20·W + 1` (the worst case being `rotr` at a
+    non-power-of-two width); the derived `rotl` at such a width runs three
+    remainders and the barrel (`66·w² + 60·w + 3·w·stages`,
+    `rotl_le_gateBound`), so it is now `70·W² + 70·W + 1`. The Rust
+    `encode_fits` spells the same polynomial (`encode_fits_spec`). -/
+def gateBound (W : Nat) : Nat := 70 * W * W + 70 * W + 1
 
-/- ══════════════ HARVESTING SIMULATE-WRAPPED FACTS ══════════════ -/
-
-/-- `pSim` only reads the inputs an `AigWF`-bounded aig names, so two
-    input lists agreeing below `L` simulate identically. -/
-theorem pSimAux_congr_inputs {inp inp' : List Bool} {L : Nat}
-    (h : ∀ k, k < L → inp.getD k false = inp'.getD k false)
-    (vals : List Bool) (ns : List Node)
-    (hns : ∀ nd ∈ ns, ∀ k, nd = Node.Input k → k.val < L) :
-    pSimAux inp vals ns = pSimAux inp' vals ns := by
-  induction ns generalizing vals with
-  | nil => rfl
-  | cons nd ns ih =>
-    simp only [pSimAux]
-    have hnd : pNodeVal inp vals nd = pNodeVal inp' vals nd := by
-      cases nd with
-      | False => rfl
-      | Input k =>
-        simp only [pNodeVal]
-        exact h k.val (hns _ (List.mem_cons_self) k rfl)
-      | And x y => rfl
-    rw [hnd]
-    exact ih _ (fun nd' hnd' => hns nd' (List.mem_cons_of_mem _ hnd'))
-
-theorem pSim_congr_inputs {inp inp' : List Bool} {L : Nat} {ns : List Node}
-    (hwf : AigWF ns L)
-    (h : ∀ k, k < L → inp.getD k false = inp'.getD k false) :
-    pSim inp ns = pSim inp' ns := by
-  unfold pSim
-  apply pSimAux_congr_inputs h
-  intro nd hnd k hk
-  obtain ⟨i, hi, rfl⟩ := List.getElem_of_mem hnd
-  have := hwf i hi
-  rw [hk] at this
-  exact this
-
-/-- `inp` padded or truncated to exactly `L` entries, agreeing with `inp`
-    on every index below `L`. -/
-def padTo (inp : List Bool) (L : Nat) : List Bool :=
-  (inp ++ List.replicate L false).take L
-
-@[simp] theorem padTo_length (inp : List Bool) (L : Nat) : (padTo inp L).length = L := by
-  simp only [padTo, List.length_take, List.length_append, List.length_replicate]
-  omega
-
-theorem padTo_getD (inp : List Bool) (L k : Nat) (hk : k < L) :
-    (padTo inp L).getD k false = inp.getD k false := by
-  unfold padTo
-  rw [List.getD_eq_getElem?_getD, List.getElem?_take_of_lt hk, List.getD_eq_getElem?_getD]
-  by_cases hin : k < inp.length
-  · rw [List.getElem?_append_left hin]
-  · rw [List.getElem?_append_right (by omega), List.getElem?_replicate]
-    have hnone : inp[k]? = none := List.getElem?_eq_none (by omega)
-    have hlt : k - inp.length < L := by omega
-    rw [hnone]
-    simp [hlt]
-
-/-- Harvest a `simulate`-wrapped postcondition (the shape of every
-    `blast_X_bitvec` capstone) at the pure level, for an ARBITRARY input
-    list: the aig only names inputs below `L`, so `inp` padded to `L` is
-    a valid `Slice` that simulates like `inp`. -/
-theorem harvest {aig0 aig1 : Aig} {L : Nat}
-    (hwf0 : AigWF aig0.nodes.val L) (hwf1 : AigWF aig1.nodes.val L)
-    (hL : L ≤ Usize.max) {P : List Bool → Prop}
-    (h : ∀ inputs : Slice Bool, AigWF aig0.nodes.val inputs.val.length →
-      simulate aig1 inputs ⦃ vals => P vals.val ⦄)
-    (inp : List Bool) : P (pSim inp aig1.nodes.val) := by
-  let inputs : Slice Bool := ⟨padTo inp L, by simp [hL]⟩
-  have hlen : inputs.val.length = L := by simp [inputs]
-  obtain ⟨vals, hvals, hP⟩ := simulate_spec_pSim aig1 inputs (by rw [hlen]; exact hwf1)
-    (h inputs (by rw [hlen]; exact hwf0))
-  rw [hvals] at hP
-  have hcongr : pSim inputs.val aig1.nodes.val = pSim inp aig1.nodes.val :=
-    pSim_congr_inputs hwf1 (fun k hk => padTo_getD inp L k hk)
-  rw [hcongr] at hP
-  exact hP
-
-/-- A universally quantified family of specs on one computation. -/
-theorem spec_forall {α β : Type} [Nonempty β] {m : Result α} {P : β → α → Prop}
-    (h : ∀ x, WP.spec m (P x)) : WP.spec m (fun r => ∀ x, P x r) := by
-  cases m with
-  | ok x =>
-    simp only [WP.spec_ok] at h ⊢
-    exact h
-  | fail e => exact (WP.spec_fail _).mp (h (Classical.arbitrary β)) |>.elim
-  | div => exact (WP.spec_div).mp (h (Classical.arbitrary β)) |>.elim
+/- The harvesting infrastructure (`pSim_congr_inputs`, `padTo`, `harvest`,
+   `spec_forall`) moved to BlasterDerived.lean in phase 5, where the
+   derived-op compositions need it; it is imported from there. -/
 
 /-- `Denotes` at an equal width, through `toW`. -/
 theorem Denotes.toW {vals : List Bool} {word : List Lit} {v : DVal} {w : Nat}
@@ -553,24 +494,36 @@ theorem le_gateBound {w W : Nat} (hw : w ≤ W) : w ≤ gateBound W := by
   unfold gateBound
   nlinarith
 
+/-- `bvrotl`'s budget: two remainders, a subtraction and the rotate. -/
+theorem rotl_le_gateBound {w W : Nat} (hw0 : 0 < w) (hw : w ≤ W) :
+    rotlBound w ≤ gateBound W := by
+  unfold rotlBound rotrBound uremBound gateBound
+  have hs := pStages_le hw0
+  have h1 : 3 * w * pStages w ≤ 3 * w * w := Nat.mul_le_mul_left _ hs
+  nlinarith [sq_le hw]
+
+/-- `bvsdiv`'s budget: two sign masks, two magnitudes, the divider and the
+    result sign. -/
+theorem sdiv_le_gateBound {w W : Nat} (hw0 : 0 < w) (hw : w ≤ W) :
+    sdivBound w ≤ gateBound W := by
+  unfold sdivBound ashrBound absBound udivBound xorBound subBound gateBound
+  have hs := pStages_le hw0
+  have h1 : 3 * w * pStages w ≤ 3 * w * w := Nat.mul_le_mul_left _ hs
+  have h2 : w - pStages w ≤ w := Nat.sub_le _ _
+  nlinarith [sq_le hw]
+
+/-- `bvsrem`'s budget: the signed quotient, a multiplier and a subtraction. -/
+theorem srem_le_gateBound {w W : Nat} (hw0 : 0 < w) (hw : w ≤ W) :
+    sremBound w ≤ gateBound W := by
+  unfold sremBound sdivBound ashrBound absBound udivBound xorBound subBound mulBound gateBound
+  have hs := pStages_le hw0
+  have h1 : 3 * w * pStages w ≤ 3 * w * w := Nat.mul_le_mul_left _ hs
+  have h2 : w - pStages w ≤ w := Nat.sub_le _ _
+  nlinarith [sq_le hw]
+
 /- ══════════════ GLUING A RULE'S FRAME TO ITS SEMANTICS ══════════════ -/
 
-/-- The structural post of a word rule: output width, prefix, gate budget,
-    well-formedness preservation, output range. -/
-def WordFrame (aig : Aig) (a : Slice Lit) (bound : Nat)
-    (p : alloc.vec.Vec Lit × Aig) : Prop :=
-  p.1.val.length = a.val.length ∧
-  aig.nodes.val <+: p.2.nodes.val ∧
-  p.2.nodes.val.length ≤ aig.nodes.val.length + bound ∧
-  (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
-  (∀ l ∈ p.1.val, l.node.val < p.2.nodes.val.length)
-
-/-- The structural post of a predicate rule. -/
-def PredFrame (aig : Aig) (bound : Nat) (p : Lit × Aig) : Prop :=
-  aig.nodes.val <+: p.2.nodes.val ∧
-  p.2.nodes.val.length ≤ aig.nodes.val.length + bound ∧
-  (∀ L, AigWF aig.nodes.val L → AigWF p.2.nodes.val L) ∧
-  p.1.node.val < p.2.nodes.val.length
+/- `WordFrame` / `PredFrame` live in BlasterDerived.lean since phase 5. -/
 
 /-- A binary WORD rule, frame and semantics in pure form: if the operand
     words denote `VA inp` and `VB inp` (of equal width) under the aig
@@ -641,6 +594,42 @@ theorem bin_pred_rule {aig : Aig} {a b : Slice Lit} {L bound : Nat}
     hwf (hwfp L hwf) hL (hs inp) inp
   exact h (Denotes.up hpre ha inp (hdenA inp))
     (Denotes.up hpre hb inp (Denotes.toW (hdenB inp) (hwab inp)))
+
+/-- A binary WORD rule given in the pure conditional form (the shape of
+    BlasterDerived.lean's composite rules): the same conclusion as
+    `bin_word_rule`. -/
+theorem bin_word_rule_pure {aig : Aig} {a b : Slice Lit} {bound : Nat}
+    {rule : Result (alloc.vec.Vec Lit × Aig)}
+    {f : ∀ {w : Nat}, BitVec w → BitVec w → BitVec w}
+    (hfull : ∀ {w : Nat} (A B : BitVec w), rule ⦃ p => WordFrame aig a bound p ∧
+      ∀ inp, Denotes (pSim inp aig.nodes.val) a.val w A →
+        Denotes (pSim inp aig.nodes.val) b.val w B →
+        Denotes (pSim inp p.2.nodes.val) p.1.val w (f A B) ⦄)
+    (VA VB : List Bool → DVal)
+    (hdenA : ∀ inp, Denotes (pSim inp aig.nodes.val) a.val (VA inp).1 (VA inp).2)
+    (hdenB : ∀ inp, Denotes (pSim inp aig.nodes.val) b.val (VB inp).1 (VB inp).2)
+    (hwab : ∀ inp, (VB inp).1 = (VA inp).1) :
+    rule ⦃ p => WordFrame aig a bound p ∧
+      ∀ inp, Denotes (pSim inp p.2.nodes.val) p.1.val (VA inp).1
+        (f (VA inp).2 (toW (VA inp).1 (VB inp))) ⦄ :=
+  spec_and (WP.spec_mono (hfull (w := 0) 0#0 0#0) (fun _ h => h.1))
+    (spec_forall (fun inp => WP.spec_mono (hfull (VA inp).2 (toW (VA inp).1 (VB inp)))
+      (fun _ h => h.2 inp (hdenA inp) (Denotes.toW (hdenB inp) (hwab inp)))))
+
+/-- A unary WORD rule in the pure conditional form. -/
+theorem un_word_rule_pure {aig : Aig} {a : Slice Lit} {bound : Nat}
+    {rule : Result (alloc.vec.Vec Lit × Aig)}
+    {f : ∀ {w : Nat}, BitVec w → BitVec w}
+    (hfull : ∀ {w : Nat} (A : BitVec w), rule ⦃ p => WordFrame aig a bound p ∧
+      ∀ inp, Denotes (pSim inp aig.nodes.val) a.val w A →
+        Denotes (pSim inp p.2.nodes.val) p.1.val w (f A) ⦄)
+    (VA : List Bool → DVal)
+    (hdenA : ∀ inp, Denotes (pSim inp aig.nodes.val) a.val (VA inp).1 (VA inp).2) :
+    rule ⦃ p => WordFrame aig a bound p ∧
+      ∀ inp, Denotes (pSim inp p.2.nodes.val) p.1.val (VA inp).1 (f (VA inp).2) ⦄ :=
+  spec_and (WP.spec_mono (hfull (w := 0) 0#0) (fun _ h => h.1))
+    (spec_forall (fun inp => WP.spec_mono (hfull (VA inp).2)
+      (fun _ h => h.2 inp (hdenA inp))))
 
 /-- A one-literal word denotes the boolean its literal evaluates to. -/
 theorem Denotes_single {vals : List Bool} {l : Lit} {b : Bool}
@@ -1686,6 +1675,119 @@ theorem encode_node_spec (aig : Aig) (words : Slice (alloc.vec.Vec Lit))
       apply Denotes_single
       rw [h5 inp, hl, hl1, hA, hB]
       rfl
+  | BvNot a =>
+    simp only [DagNodeWF] at hnode
+    obtain ⟨ha, hpos⟩ := hnode
+    obtain ⟨hlA, hrA, hwA, hdA⟩ := operand_facts hVw hrng hden a ha
+    dsimp only
+    step as ⟨v, hv⟩
+    have hvA : (alloc.vec.Vec.deref v).val = (words.val[a.val]).val := by rw [hderef, hv]
+    rw [← hvA] at hlA hrA hdA
+    step with (spec_and (blast_bvnot_rng _ hrA)
+      (spec_forall (fun inp => blast_bvnot_bitvec _ ((V inp).getD a.val dDflt).2))) as
+      ⟨out, hrng', hsem⟩
+    unfold NodePost
+    dsimp only
+    refine ⟨List.prefix_refl _, by have := one_le_gateBound W; omega, rfl,
+      fun h => h, fun h => h, hrng', ?_⟩
+    intro inp
+    exact hsem inp _ (hdA inp)
+  | Neg a =>
+    simp only [DagNodeWF] at hnode
+    obtain ⟨ha, hpos⟩ := hnode
+    obtain ⟨hlA, hrA, hwA, hdA⟩ := operand_facts hVw hrng hden a ha
+    dsimp only
+    step as ⟨v, hv⟩
+    have hvA : (alloc.vec.Vec.deref v).val = (words.val[a.val]).val := by rw [hderef, hv]
+    rw [← hvA] at hlA hrA hdA
+    have hcapA : aig.nodes.val.length + 9 * (alloc.vec.Vec.deref v).val.length ≤ Usize.max := by
+      have hb' : 9 * (alloc.vec.Vec.deref v).val.length ≤ gateBound W := by
+        rw [hlA]
+        exact lin_le_gateBound (by omega) (hWs a.val)
+      omega
+    step with (un_word_rule_pure (f := fun {w} (A : BitVec w) => -A)
+      (fun {w} A => blast_neg_pure aig _ nin.val hcapA hrA hne h0 hwf hL A)
+      (fun inp => (V inp).getD a.val dDflt) hdA) as ⟨out, aig1, hfr, hs⟩
+    exact NodePost.of_word hfr (by rw [hlA]; exact lin_le_gateBound (by omega) (hWs a.val)) rfl hs
+  | Rotl a b =>
+    simp only [DagNodeWF] at hnode
+    obtain ⟨ha, hb, hpos, heq⟩ := hnode
+    obtain ⟨hlA, hrA, hwA, hdA⟩ := operand_facts hVw hrng hden a ha
+    obtain ⟨hlB, hrB, hwB, hdB⟩ := operand_facts hVw hrng hden b hb
+    dsimp only
+    step as ⟨v, hv⟩
+    step as ⟨v1, hv1⟩
+    have hvA : (alloc.vec.Vec.deref v).val = (words.val[a.val]).val := by rw [hderef, hv]
+    have hvB : (alloc.vec.Vec.deref v1).val = (words.val[b.val]).val := by rw [hderef, hv1]
+    rw [← hvA] at hlA hrA hdA
+    rw [← hvB] at hlB hrB hdB
+    have hab : (alloc.vec.Vec.deref v1).val.length = (alloc.vec.Vec.deref v).val.length := by
+      rw [hlA, hlB, heq]
+    have hw : 0 < (alloc.vec.Vec.deref v).val.length := by rw [hlA]; exact hpos
+    have hcapA : aig.nodes.val.length + rotlBound (alloc.vec.Vec.deref v).val.length
+        ≤ Usize.max := by
+      have hb' : rotlBound (alloc.vec.Vec.deref v).val.length ≤ gateBound W := by
+        rw [hlA]
+        exact rotl_le_gateBound hpos (hWs a.val)
+      omega
+    step with (bin_word_rule_pure (f := fun {w} (A B : BitVec w) => A.rotateLeft (B.toNat % w))
+      (fun {w} A B => spec_and (blast_rotl_frame aig _ _ hw hab hcapA hrA hrB hne h0)
+        (blast_rotl_pure aig _ _ nin.val hw hab hcapA hrA hrB hne h0 hwf hL A B))
+      (fun inp => (V inp).getD a.val dDflt) (fun inp => (V inp).getD b.val dDflt)
+      hdA hdB (fun inp => by rw [hwA, hwB, heq])) as ⟨out, aig1, hfr, hs⟩
+    exact NodePost.of_word hfr (by rw [hlA]; exact rotl_le_gateBound hpos (hWs a.val)) rfl hs
+  | Sdiv a b =>
+    simp only [DagNodeWF] at hnode
+    obtain ⟨ha, hb, hpos, heq⟩ := hnode
+    obtain ⟨hlA, hrA, hwA, hdA⟩ := operand_facts hVw hrng hden a ha
+    obtain ⟨hlB, hrB, hwB, hdB⟩ := operand_facts hVw hrng hden b hb
+    dsimp only
+    step as ⟨v, hv⟩
+    step as ⟨v1, hv1⟩
+    have hvA : (alloc.vec.Vec.deref v).val = (words.val[a.val]).val := by rw [hderef, hv]
+    have hvB : (alloc.vec.Vec.deref v1).val = (words.val[b.val]).val := by rw [hderef, hv1]
+    rw [← hvA] at hlA hrA hdA
+    rw [← hvB] at hlB hrB hdB
+    have hab : (alloc.vec.Vec.deref v1).val.length = (alloc.vec.Vec.deref v).val.length := by
+      rw [hlA, hlB, heq]
+    have hw : 0 < (alloc.vec.Vec.deref v).val.length := by rw [hlA]; exact hpos
+    have hcapA : aig.nodes.val.length + sdivBound (alloc.vec.Vec.deref v).val.length
+        ≤ Usize.max := by
+      have hb' : sdivBound (alloc.vec.Vec.deref v).val.length ≤ gateBound W := by
+        rw [hlA]
+        exact sdiv_le_gateBound hpos (hWs a.val)
+      omega
+    step with (bin_word_rule_pure (f := fun {w} (A B : BitVec w) => A.smtSDiv B)
+      (fun {w} A B => blast_sdiv_pure aig _ _ nin.val hw hab hcapA hrA hrB hne h0 hwf hL A B)
+      (fun inp => (V inp).getD a.val dDflt) (fun inp => (V inp).getD b.val dDflt)
+      hdA hdB (fun inp => by rw [hwA, hwB, heq])) as ⟨out, aig1, hfr, hs⟩
+    exact NodePost.of_word hfr (by rw [hlA]; exact sdiv_le_gateBound hpos (hWs a.val)) rfl hs
+  | Srem a b =>
+    simp only [DagNodeWF] at hnode
+    obtain ⟨ha, hb, hpos, heq⟩ := hnode
+    obtain ⟨hlA, hrA, hwA, hdA⟩ := operand_facts hVw hrng hden a ha
+    obtain ⟨hlB, hrB, hwB, hdB⟩ := operand_facts hVw hrng hden b hb
+    dsimp only
+    step as ⟨v, hv⟩
+    step as ⟨v1, hv1⟩
+    have hvA : (alloc.vec.Vec.deref v).val = (words.val[a.val]).val := by rw [hderef, hv]
+    have hvB : (alloc.vec.Vec.deref v1).val = (words.val[b.val]).val := by rw [hderef, hv1]
+    rw [← hvA] at hlA hrA hdA
+    rw [← hvB] at hlB hrB hdB
+    have hab : (alloc.vec.Vec.deref v1).val.length = (alloc.vec.Vec.deref v).val.length := by
+      rw [hlA, hlB, heq]
+    have hw : 0 < (alloc.vec.Vec.deref v).val.length := by rw [hlA]; exact hpos
+    have hcapA : aig.nodes.val.length + sremBound (alloc.vec.Vec.deref v).val.length
+        ≤ Usize.max := by
+      have hb' : sremBound (alloc.vec.Vec.deref v).val.length ≤ gateBound W := by
+        rw [hlA]
+        exact srem_le_gateBound hpos (hWs a.val)
+      omega
+    step with (bin_word_rule_pure (f := fun {w} (A B : BitVec w) => A.srem B)
+      (fun {w} A B => blast_srem_pure aig _ _ nin.val hw hab hcapA hrA hrB hne h0 hwf hL A B)
+      (fun inp => (V inp).getD a.val dDflt) (fun inp => (V inp).getD b.val dDflt)
+      hdA hdB (fun inp => by rw [hwA, hwB, heq])) as ⟨out, aig1, hfr, hs⟩
+    exact NodePost.of_word hfr (by rw [hlA]; exact srem_le_gateBound hpos (hWs a.val)) rfl hs
 
 /- ══════════════ THE ENCODER LOOP ══════════════ -/
 

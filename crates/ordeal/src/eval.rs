@@ -67,7 +67,11 @@ pub fn bv_sort(term: &BvTerm) -> Result<Sort, EvalError> {
         | BvTerm::Shl(a, b)
         | BvTerm::Lshr(a, b)
         | BvTerm::Ashr(a, b)
-        | BvTerm::Rotr(a, b) => same_width(bv_sort(a)?.width, bv_sort(b)?.width)?,
+        | BvTerm::Rotr(a, b)
+        | BvTerm::Rotl(a, b)
+        | BvTerm::Sdiv(a, b)
+        | BvTerm::Srem(a, b) => same_width(bv_sort(a)?.width, bv_sort(b)?.width)?,
+        BvTerm::Not(a) | BvTerm::Neg(a) => bv_sort(a)?.width,
         BvTerm::Extract { hi, lo, arg } => {
             let w = bv_sort(arg)?.width;
             if hi < lo || *hi >= w {
@@ -146,6 +150,28 @@ pub fn eval_bv(term: &BvTerm, env: &Env) -> Result<u128, EvalError> {
                 ((x >> r) | (x << (w - r))) & m
             }
         }
+        // The formerly derived ops (#192 phase 5): the SMT-LIB definitions,
+        // spelled directly (not via the rewrite), so the evaluator is an
+        // oracle independent of both the rewrite and the proven rules.
+        BvTerm::Not(a) => !eval_bv(a, env)? & m,
+        BvTerm::Neg(a) => eval_bv(a, env)?.wrapping_neg() & m,
+        BvTerm::Rotl(a, b) => {
+            let (x, sh) = (eval_bv(a, env)?, eval_bv(b, env)?);
+            let r = (sh % w as u128) as u32;
+            if r == 0 {
+                x
+            } else {
+                ((x << r) | (x >> (w - r))) & m
+            }
+        }
+        BvTerm::Sdiv(a, b) => {
+            let (x, y) = (eval_bv(a, env)?, eval_bv(b, env)?);
+            sdiv(x, y, w)
+        }
+        BvTerm::Srem(a, b) => {
+            let (x, y) = (eval_bv(a, env)?, eval_bv(b, env)?);
+            srem(x, y, w)
+        }
         BvTerm::Extract { lo, arg, .. } => (eval_bv(arg, env)? >> lo) & m,
         BvTerm::Concat(a, b) => {
             let wb = bv_sort(b)?.width;
@@ -170,6 +196,39 @@ pub fn eval_bv(term: &BvTerm, env: &Env) -> Result<u128, EvalError> {
         }
     };
     Ok(v)
+}
+
+/// SMT-LIB `bvsdiv` on `w`-bit values: the sign-case definition over
+/// `bvudiv` (`msb` picks the case, magnitudes are two's-complement
+/// negations). Division by zero is `bvudiv`'s all-ones, so `a sdiv 0` is
+/// `-1` for `a >= 0` and `1` for `a < 0`; `INT_MIN sdiv -1` is `INT_MIN`.
+fn sdiv(x: u128, y: u128, w: u32) -> u128 {
+    let m = mask(w);
+    let neg = |v: u128| v.wrapping_neg() & m;
+    let msb = |v: u128| (v >> (w - 1)) & 1 == 1;
+    let udiv = |p: u128, q: u128| p.checked_div(q).unwrap_or(m);
+    match (msb(x), msb(y)) {
+        (false, false) => udiv(x, y),
+        (true, false) => neg(udiv(neg(x), y)),
+        (false, true) => neg(udiv(x, neg(y))),
+        (true, true) => udiv(neg(x), neg(y)),
+    }
+}
+
+/// SMT-LIB `bvsrem` on `w`-bit values: the sign-case definition over
+/// `bvurem` (the sign of the dividend). `a srem 0` is `a`;
+/// `INT_MIN srem -1` is `0`.
+fn srem(x: u128, y: u128, w: u32) -> u128 {
+    let m = mask(w);
+    let neg = |v: u128| v.wrapping_neg() & m;
+    let msb = |v: u128| (v >> (w - 1)) & 1 == 1;
+    let urem = |p: u128, q: u128| if q == 0 { p } else { p % q };
+    match (msb(x), msb(y)) {
+        (false, false) => urem(x, y),
+        (true, false) => neg(urem(neg(x), y)),
+        (false, true) => urem(x, neg(y)),
+        (true, true) => neg(urem(neg(x), neg(y))),
+    }
 }
 
 /// Interpret a value of the given width as a signed integer.
@@ -232,6 +291,53 @@ mod tests {
         }
         // and 0/0 too
         assert_eq!(ev(&BvTerm::Udiv(b(c(0, 8)), b(c(0, 8)))), 0xFF);
+    }
+
+    /// #192 phase 5: the formerly derived ops' SMT-LIB edge cases, as the
+    /// evaluator defines them (the oracle the proven rules are tested
+    /// against), at width 8 and at the `u128` edge width 128.
+    #[test]
+    fn derived_ops_follow_smtlib_at_the_edges() {
+        // bvsdiv: /0 is -1 for a >= 0 and 1 for a < 0; INT_MIN / -1 wraps.
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(7, 8)), b(c(0, 8)))), 0xFF);
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(0, 8)), b(c(0, 8)))), 0xFF);
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(0xF9, 8)), b(c(0, 8)))), 0x01);
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(0x80, 8)), b(c(0xFF, 8)))), 0x80);
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(0xF9, 8)), b(c(2, 8)))), 0xFD); // -7 / 2 = -3
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(7, 8)), b(c(0xFE, 8)))), 0xFD); // 7 / -2 = -3
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(0xF9, 8)), b(c(0xFE, 8)))), 0x03); // -7 / -2 = 3
+        // bvsrem: sign of the dividend; a % 0 = a; INT_MIN % -1 = 0.
+        assert_eq!(ev(&BvTerm::Srem(b(c(0xF9, 8)), b(c(0, 8)))), 0xF9);
+        assert_eq!(ev(&BvTerm::Srem(b(c(0x80, 8)), b(c(0xFF, 8)))), 0x00);
+        assert_eq!(ev(&BvTerm::Srem(b(c(0xF9, 8)), b(c(2, 8)))), 0xFF); // -7 % 2 = -1
+        assert_eq!(ev(&BvTerm::Srem(b(c(7, 8)), b(c(0xFE, 8)))), 0x01); // 7 % -2 = 1
+        assert_eq!(ev(&BvTerm::Srem(b(c(0xF9, 8)), b(c(0xFE, 8)))), 0xFF); // -7 % -2 = -1
+        // bvneg / bvnot.
+        assert_eq!(ev(&BvTerm::Neg(b(c(0x80, 8)))), 0x80);
+        assert_eq!(ev(&BvTerm::Neg(b(c(1, 8)))), 0xFF);
+        assert_eq!(ev(&BvTerm::Not(b(c(0x0F, 8)))), 0xF0);
+        // bvrotl: amount mod the width, at a non-power-of-two width too.
+        assert_eq!(
+            ev(&BvTerm::Rotl(b(c(0b1000_0001, 8)), b(c(1, 8)))),
+            0b0000_0011
+        );
+        assert_eq!(ev(&BvTerm::Rotl(b(c(0xAB, 8)), b(c(8, 8)))), 0xAB);
+        assert_eq!(ev(&BvTerm::Rotl(b(c(0b10000, 5)), b(c(6, 5)))), 0b00001);
+        assert_eq!(
+            ev(&BvTerm::Rotl(b(c(0xAB, 8)), b(c(9, 8)))),
+            ev(&BvTerm::Rotl(b(c(0xAB, 8)), b(c(1, 8))))
+        );
+        // Width 128: no shift overflow in the u128 arithmetic.
+        let m = u128::MAX;
+        assert_eq!(ev(&BvTerm::Not(b(c(0, 128)))), m);
+        assert_eq!(ev(&BvTerm::Neg(b(c(1, 128)))), m);
+        assert_eq!(ev(&BvTerm::Sdiv(b(c(m, 128)), b(c(0, 128)))), 1); // -1 / 0 = 1
+        assert_eq!(ev(&BvTerm::Srem(b(c(1u128 << 127, 128)), b(c(m, 128)))), 0);
+        assert_eq!(ev(&BvTerm::Rotl(b(c(1u128 << 127, 128)), b(c(1, 128)))), 1);
+        assert_eq!(
+            ev(&BvTerm::Rotl(b(c(1, 128)), b(c(127, 128)))),
+            1u128 << 127
+        );
     }
 
     #[test]

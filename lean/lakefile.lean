@@ -96,6 +96,14 @@ lean_lib «Sound» {}
 --                     unsatisfiable (composed with `lrat_check_sound`).
 -- All `sorry`-free, axiom-clean (pinned in AxiomCheck.lean).
 @[default_target] lean_lib «BlasterFrame» {}
+-- Issue #192 phase 5 (v0.28.0): the derived operations as proven rules.
+--   BlasterDerived  — `blast_bvnot_bitvec`, `blast_neg_bitvec`,
+--                     `blast_rotl_bitvec`, `blast_sdiv_bitvec`,
+--                     `blast_srem_bitvec` (each composite rule against the
+--                     Lean `BitVec` operation SMT-LIB names) and their
+--                     frames; also home of the harvesting infrastructure
+--                     BlasterDag builds on.
+@[default_target] lean_lib «BlasterDerived» {}
 @[default_target] lean_lib «BlasterCompact» {}
 @[default_target] lean_lib «BlasterDag» {}
 @[default_target] lean_lib «BlasterCapstone» {}

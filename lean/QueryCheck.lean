@@ -150,6 +150,26 @@ theorem ext_wf_spec (ws : Slice Std.Usize) (a by1 : Std.Usize) :
     exact ha (by scalar_tac)
 
 
+theorem un_wf_spec (ws : Slice Std.Usize) (a : Std.Usize) :
+    kernel.un_wf ws a ⦃ r => r = true ↔
+      (a.val < ws.val.length ∧ 0 < (ws.val.map UScalar.val).getD a.val 0) ⦄ := by
+  unfold kernel.un_wf
+  dsimp only
+  split
+  · rename_i ha
+    have ha' : a.val < ws.val.length := by scalar_tac
+    step as ⟨i, hi⟩
+    simp only [decide_eq_true_eq, getD_map_val _ _ ha', ← hi]
+    constructor
+    · intro h
+      exact ⟨ha', by scalar_tac⟩
+    · rintro ⟨_, h⟩
+      scalar_tac
+  · rename_i ha
+    simp only [WP.spec_ok, Bool.false_eq_true, false_iff]
+    rintro ⟨h, _⟩
+    exact ha (by scalar_tac)
+
 /-- `node_wf` accepts node `nd` against the widths `ws` of the nodes before
     it iff the node is `DagNodeWF` at index `ws.len()` and its own width
     fits `usize`. -/
@@ -160,13 +180,16 @@ theorem node_wf_spec (ws : Slice Std.Usize) (nbits : Std.Usize)
         dagNodeWidth (ws.val.map UScalar.val) nd ≤ Usize.max) ⦄ := by
   have h1max : 1 ≤ Usize.max := by scalar_tac
   -- `cases nd` cannot generalize `nd` under the `⦃ ⦄` notation; `induction` can.
-  -- The 22 binary-word / predicate arms and the two extensions are the
-  -- helper specs; the six remaining arms follow.
+  -- The 25 binary-word / predicate arms, the two unary word arms (phase 5)
+  -- and the two extensions are the helper specs; the six remaining arms
+  -- follow.
   induction nd <;> simp only [kernel.node_wf, DagNodeWF, dagNodeWidth] <;> first
     | exact WP.spec_mono (bin_wf_spec ws _ _)
         (fun _ hr => and_fits_iff (getD_map_val_le _ _) hr)
     | exact WP.spec_mono (bin_wf_spec ws _ _) (fun _ hr => and_fits_iff h1max hr)
     | exact WP.spec_mono (bool_bin_wf_spec ws _ _) (fun _ hr => and_fits_iff h1max hr)
+    | exact WP.spec_mono (un_wf_spec ws _)
+        (fun _ hr => and_fits_iff (getD_map_val_le _ _) hr)
     | exact ext_wf_spec ws _ _
     | skip
   · -- Var
@@ -644,17 +667,16 @@ theorem max_width_spec (ws : Slice Std.Usize) :
   intro k hk _
   simp at hk
 
-theorem encode_fits_tail (w n w25 : Std.Usize)
-    (hw25 : w25.val = 25 * w.val) (hsq : 25 * w.val * w.val ≤ Usize.max)
-    (h25 : 25 * w.val ≤ Usize.max) :
+theorem encode_fits_tail (w n w70 : Std.Usize)
+    (hw70 : w70.val = 70 * w.val) (hsq : 70 * w.val * w.val ≤ Usize.max)
+    (h70 : 70 * w.val ≤ Usize.max) :
     ((do
-      let sq ← w25 * w
-      let lin ← 20#usize * w
-      let i2 ← core.num.Usize.MAX - lin
+      let sq ← w70 * w
+      let i2 ← core.num.Usize.MAX - w70
       if sq > i2
       then ok false
       else
-        let s ← sq + lin
+        let s ← sq + w70
         let i3 ← core.num.Usize.MAX - 1#usize
         if s > i3
         then ok false
@@ -672,15 +694,13 @@ theorem encode_fits_tail (w n w25 : Std.Usize)
       b = true → 1 + n.val * gateBound w.val ≤ Usize.max ⦄ := by
   have hMAX : core.num.Usize.MAX.val = Usize.max := by simp
   have h1max : 1 ≤ Usize.max := by scalar_tac
-  have hsq' : w25.val * w.val ≤ Usize.max := by rw [hw25]; exact hsq
+  have hsq' : w70.val * w.val ≤ Usize.max := by rw [hw70]; exact hsq
   step as ⟨sq, hsqv⟩
-  have hlin' : 20 * w.val ≤ Usize.max := by omega
-  step as ⟨lin, hlinv⟩
   step as ⟨i2, hi2⟩
   split
   · simp
   · rename_i hle
-    have hs' : sq.val + lin.val ≤ Usize.max := by scalar_tac
+    have hs' : sq.val + w70.val ≤ Usize.max := by scalar_tac
     step as ⟨s, hs⟩
     step as ⟨i3, hi3⟩
     split
@@ -688,8 +708,8 @@ theorem encode_fits_tail (w n w25 : Std.Usize)
     · rename_i hle3
       have hgb' : s.val + 1 ≤ Usize.max := by scalar_tac
       step as ⟨gb, hgb⟩
-      have hgbv : gb.val = 25 * w.val * w.val + 20 * w.val + 1 := by
-        rw [hgb, hs, hsqv, hlinv, hw25]
+      have hgbv : gb.val = 70 * w.val * w.val + 70 * w.val + 1 := by
+        rw [hgb, hs, hsqv, hw70]
       split
       · rename_i hnpos
         step as ⟨i4, hi4⟩
@@ -727,27 +747,27 @@ theorem encode_fits_spec (w n : Std.Usize) :
   split
   · simp
   · rename_i hle
-    have h25 : 25 * w.val ≤ Usize.max := by
-      have : w.val ≤ Usize.max / 25 := by scalar_tac
+    have h70 : 70 * w.val ≤ Usize.max := by
+      have : w.val ≤ Usize.max / 70 := by scalar_tac
       have := (Nat.le_div_iff_mul_le (by omega)).mp this
       omega
-    have h25' : (25#usize).val * w.val ≤ Usize.max := by simpa using h25
-    step as ⟨w25, hw25⟩
+    have h70' : (70#usize).val * w.val ≤ Usize.max := by simpa using h70
+    step as ⟨w70, hw70⟩
     split
     · rename_i hwpos
       step as ⟨i1, hi1⟩
       split
       · simp
       · rename_i hle2
-        have hsq : 25 * w.val * w.val ≤ Usize.max := by
-          have : w25.val ≤ Usize.max / w.val := by scalar_tac
+        have hsq : 70 * w.val * w.val ≤ Usize.max := by
+          have : w70.val ≤ Usize.max / w.val := by scalar_tac
           have := (Nat.le_div_iff_mul_le (by scalar_tac)).mp this
-          rw [hw25] at this
+          rw [hw70] at this
           simpa using this
-        exact encode_fits_tail w n w25 (by simpa using hw25) hsq h25
+        exact encode_fits_tail w n w70 (by simpa using hw70) hsq h70
     · rename_i hwz
       have hw0 : w.val = 0 := by scalar_tac
-      exact encode_fits_tail w n w25 (by simpa using hw25) (by rw [hw0]; simp) h25
+      exact encode_fits_tail w n w70 (by simpa using hw70) (by rw [hw0]; simp) h70
 
 /-- `tseitin_fits nodes outs = true` means the clause-count capacity
     hypothesis of `tseitin_sat_preserving` holds; it never fails. -/

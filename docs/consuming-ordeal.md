@@ -281,12 +281,24 @@ follows). At the command line, `ordeal check foo.smt2 --format json
 `unsat` (JSON only); without the flag the output is byte-identical to
 v0.26.0.
 
+Since v0.28.0 (#192 phase 5) the five formerly derived ops — `bvnot`,
+`bvneg`, `bvrotl`, `bvsdiv`, `bvsrem` — are nodes of their own in the
+query block (`"bvnot"`, `"neg"`, `"rotl"`, `"sdiv"`, `"srem"`), each with a
+proven rule the trusted crate runs, so the block carries the operation you
+asked about rather than its rewrite. A block that uses one of them is
+tagged `"encoding": "ordeal-dag/v2"` with `recheck.min_version` `0.28.0`
+(a v0.27.0 reader refuses it as unsupported rather than misreading it); a
+block without them stays `ordeal-dag/v1`, and readers from v0.28.0 accept
+both. Only `check_with_query` / `--with-query` lower them as nodes: the
+default `check` still rewrites them first, so its certificates are
+byte-identical to v0.27.0's (for a few queries the two paths' CNFs differ
+in variable numbering — both certified; `docs/design/query-cnf-gap.md`,
+phase 5).
+
 What a v2 recheck does *not* cover (still the solver's word): the
 untrusted DAG builder's choice of DAG for your assertions (now visible in
-the bundle), canonicalization, the rewriting of derived ops (`bvnot`,
-`bvneg`, `bvrotl`, `bvsdiv`, …) into the closed core before the DAG is
-built, the sliver and the SMT-LIB front end — `docs/formal-verification.md`
-has the list.
+the bundle), canonicalization, the sliver and the SMT-LIB front end —
+`docs/formal-verification.md` has the list.
 
 ## Supply chain: SBOM and VEX
 

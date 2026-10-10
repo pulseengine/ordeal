@@ -76,6 +76,14 @@ pub fn canonicalize_bv(t: &BvTerm) -> BvTerm {
         Lshr(a, b) => Lshr(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Ashr(a, b) => Ashr(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Rotr(a, b) => Rotr(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
+        // The formerly derived ops (#192 phase 5): unary / non-commutative,
+        // so only the operands are canonicalized (and the node folds below
+        // when they are constant, through the evaluator's own definitions).
+        Not(a) => Not(bx(canonicalize_bv(a))),
+        Neg(a) => Neg(bx(canonicalize_bv(a))),
+        Rotl(a, b) => Rotl(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
+        Sdiv(a, b) => Sdiv(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
+        Srem(a, b) => Srem(bx(canonicalize_bv(a)), bx(canonicalize_bv(b))),
         Extract { hi, lo, arg } => Extract {
             hi: *hi,
             lo: *lo,

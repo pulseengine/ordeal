@@ -1749,3 +1749,26 @@ artifacts:
         target: TR-062
       - type: allocated-to
         target: ARC-006
+
+  - id: TR-064
+    type: sw-req
+    title: The derived ops stop being trusted rewrites — proven DagNode constructs for bvnot, bvneg, bvrotl, bvsdiv, bvsrem (#192 phase 5)
+    status: verified
+    release: v0.28.0
+    description: "Phase 5 of #192: until v0.27.0 the five derived operations synth emits (bvnot, bvneg, bvrotl, bvsdiv, bvsrem) were rewritten into the closed core by lowering.rs BEFORE the term DAG was built, so the rewrite was trusted and an ordeal-cert/v2 bundle carried the rewritten query. Each is now a DagNode constructor (BvNot, Neg, Rotl, Sdiv, Srem) and a BvTerm variant (Not, Neg, Rotl, Sdiv, Srem) whose encode_node arm in the trusted crate is the rewrite spelled as a composition of the already-proven rules in the rewrite's operand order, with a Lean _bitvec theorem against the matching Lean BitVec operation (lean/BlasterDerived.lean: ~~~A, -A, A.rotateLeft (B.toNat % w) at every width, A.smtSDiv B incl. division by zero and INT_MIN / -1, A.srem B incl. b = 0 and INT_MIN % -1). dagSim / DagWF / node_wf / node_width cover the new constructors; encode_sound, dag_refuted, dag_wf_spec and check_query_sound are re-established with their statements unchanged over the larger DAG language (the gate budget gateBound / encode_fits is 70·w² + 70·w + 1). Solver::check_with_query lowers them as nodes so the v2 query block carries the operation (tagged ordeal-dag/v2 when a derived node is present, min_version 0.28.0; ordeal-dag/v1 otherwise; readers accept both and hash under the declared tag). The default Solver::check path keeps applying the rewrite first (lowering::expand_*) so its certificates are byte-identical to v0.27.0; switching it is the maintainer's call, measured in docs/design/query-cnf-gap.md phase 5."
+    tags: [soundness, checker, trusted-core, "192", cert-bundle, closed-fragment]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "lake build and the axiom gate pass from the regenerated single-unit model with blast_bvnot_bitvec, blast_neg_bitvec, blast_rotl_bitvec, blast_sdiv_bitvec, blast_srem_bitvec pinned axiom-clean next to every earlier capstone, 0 sorry, Kernel.lean 0 axioms; a negative control per new rule (a one-line blast_kernel.rs mutation of the sign handling / rotate direction / subtraction order fails its proof) and one in node_wf; the five rules match the evaluator's SMT-LIB definitions exhaustively at widths 1..=6 and sampled to 128; each rule is gate-identical to the rewrite on the reference arena; op(a,b) ≠ rewrite(op(a,b)) is refuted through check_with_query; a v2 bundle whose sdiv node is changed to udiv (hash recomputed, CNF and proof untouched) fails the recheck; v1 bundles and ordeal-dag/v1 blocks keep re-checking; ordeal check output byte-identical to the v0.27.0 binary on every fixture (JSON and text) and the four corpus digests unchanged; Z3 differential of the rules through check_with_query at every corpus width incl. the SMT-LIB edge cases; Kani tier check, wasm32-wasip2 build, exact-pin check pass; ordeal-lrat declares no dependencies."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-062
+      - type: allocated-to
+        target: ARC-006
+      - type: allocated-to
+        target: ARC-011

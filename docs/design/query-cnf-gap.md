@@ -1,10 +1,11 @@
 # Design: close the query→CNF gap — a proven re-encoder beside the checker
 
 **Issue:** #192 · **Milestones:** v0.25.0 (phases 1 and 2), v0.26.0
-(phase 3), v0.27.0 (phase 4) · **Decision:** option (b), maintainer,
-2026-10-01; phase 4 ships `ordeal-cert/v2` *alongside* v1 (maintainer,
-2026-10-01) · **Status:** phases 1–4 delivered (this document records all
-four); phase 5 planned.
+(phase 3), v0.27.0 (phase 4), v0.28.0 (phase 5) · **Decision:** option
+(b), maintainer, 2026-10-01; phase 4 ships `ordeal-cert/v2` *alongside* v1
+(maintainer, 2026-10-01) · **Status:** phases 1–5 delivered (this
+document records all five); the default path's switch to the phase-5
+nodes is an open maintainer decision (see phase 5, "byte identity").
 
 ## The claim being protected
 
@@ -24,7 +25,7 @@ The trusted base grows, but only by proven code.
 | Stage | Assurance before #192 | After phase 1 | After phase 2 | After phase 3 | After phase 4 |
 |---|---|---|---|---|---|
 | SMT-LIB / Verus front ends | tests and the Z3 differential | unchanged | unchanged | unchanged | unchanged |
-| lowering of derived ops | tests (exhaustive at width 8) and Z3 | unchanged | unchanged | unchanged | unchanged (still lowered to the closed core *before* the DAG; the v2 bundle carries the lowered DAG) |
+| lowering of derived ops | tests (exhaustive at width 8) and Z3 | unchanged | unchanged | unchanged | unchanged (still lowered to the closed core *before* the DAG; the v2 bundle carries the lowered DAG) — **phase 5 (v0.28.0):** `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem` are `DagNode`s with **proven** composite rules (`lean/BlasterDerived.lean`); the v2 bundle carries the operation; the default `check` path keeps the rewrite so its bytes are unchanged (the rewrite stays untrusted there) |
 | sliver (array/UF) | tests only | unchanged | unchanged | unchanged | unchanged |
 | canon (including constant folding via `eval.rs`) | tests only | unchanged | unchanged | unchanged | unchanged |
 | term walk | tests only | unchanged | unchanged (it now *calls* the proven rules, but is itself unproven) | split in two: the **DAG builder** (`dag.rs`, term → `DagNode` list; untrusted glue, tests only) and the **encoder** (`blast_kernel::encode`, **proven**: `encode_sound`) | the DAG builder stays untrusted, but its output is now **in the certificate** (`ordeal-cert/v2` `query`), so a consumer sees the question that was lowered; the encoder runs **inside the trusted crate** |
@@ -59,9 +60,19 @@ The UNSAT path has no such check, and that is the gap.
   flipping one constant bit in `query` fails the recheck even though the
   CNF and proof are untouched; default output byte-identical. Derived ops
   are **not** DAG constructs yet (see "what phase 4 does not claim").
-- **v0.28.0+.** A query-level SAT check, so `eval.rs` leaves the trust
-  path; the sliver; derived ops as proven DAG constructs; the SMT-LIB
-  parser stays trusted, mitigated by a round trip and Z3.
+- **v0.28.0 — phase 5 (delivered, below).** The derived ops stop being
+  trusted rewrites: `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem` become
+  `DagNode` constructors whose `encode_node` arms are compositions of the
+  already-proven rules, each with a `_bitvec` theorem against the matching
+  Lean `BitVec` operation; `check_with_query` lowers them as nodes and the
+  v2 query block carries the operation. Acceptance: default output
+  byte-identical to v0.27.0 (the default path keeps the rewrite); a v2
+  bundle whose `sdiv` node is changed to `udiv` fails the recheck.
+- **v0.29.0+.** A query-level SAT check, so `eval.rs` leaves the trust
+  path; the sliver; the SMT-LIB parser stays trusted, mitigated by a round
+  trip and Z3; switching the default path to the phase-5 nodes (changes
+  emitted certificates for some `bvsdiv`/`bvsrem`/`bvnot` queries —
+  maintainer's call, measured below).
 
 (The milestones moved up by one against the first plan: phases 1 and 2
 both shipped in v0.25.0.)
@@ -848,6 +859,246 @@ stay untrusted *by design* (`compact_sound` holds for any hints); a wrong
 hint set changes gate sharing, so the re-encoded CNF differs from the
 carried one and the bundle is rejected as inconsistent rather than
 accepted on a different formula (`hints_are_advice_not_trust`).
+
+## Phase 5: what was delivered
+
+### Design: each derived op is its rewrite, spelled over the proven rules
+
+Until phase 5 the five derived operations synth emits — `bvnot`, `bvneg`,
+`bvrotl`, `bvsdiv`, `bvsrem` — were rewritten into the closed core by
+`lowering.rs` *before* the term DAG was built (`bvneg x = 0 - x`, the
+SMT-LIB sign-mask construction for `bvsdiv`, …). The rewrite was backed
+by tests and Z3 only, and a v2 bundle carried the rewritten query, so a
+consumer certified `(q ^ (sa ^ sb)) - (sa ^ sb)` rather than `bvsdiv`.
+
+Phase 5 makes each of them a construct of the closed fragment with a
+proven rule — the admission criterion of CLAUDE.md:
+
+1. **`DagNode` gains five constructors** — `BvNot(a)`, `Neg(a)`,
+   `Rotl(a, b)`, `Sdiv(a, b)`, `Srem(a, b)` — and `BvTerm` the matching
+   variants (`Not`, `Neg`, `Rotl`, `Sdiv`, `Srem`; the SMT-LIB front end
+   builds them directly, `lowering::bvsdiv` and friends now construct
+   them, so API consumers keep working). The `encode_node` arm of each
+   is a **composition of the already-proven rules in the rewrite's own
+   operand order** (`crates/ordeal-lrat/src/blast_kernel.rs`):
+   `blast_bvnot = word_not` (gate-free: the XOR with all-ones folds to
+   exactly these literals in `compact`), `blast_neg = blast_sub(0, a)`,
+   `blast_rotl = blast_rotr(a, 0 - b)` at a power-of-two width and
+   `blast_rotr(a, (w - b urem w) urem w)` otherwise, `blast_sdiv` = the
+   sign-mask construction (`sign_mask = ashr(x, w-1)`, `abs_word =
+   (s ^ x) - s`, `udiv`, two XORs and a subtraction), `blast_srem =
+   a - blast_sdiv(a, b) * b` (multiplicative, #97, unchanged).
+2. **`node_wf` / `node_width`** (`kernel.rs`) treat them as the word
+   operators they are (`un_wf` for the unary two, `bin_wf` for the
+   rest); `dag_wf_spec`'s iff is re-proved (`un_wf_spec`).
+3. **The gate budget grew:** `gateBound W` is now `70·W² + 70·W + 1`
+   (was `25·W² + 20·W + 1`): `bvrotl` at a non-power-of-two width runs
+   three remainders plus the barrel (`66·w² + 60·w + 3·w·stages`). The
+   Rust `encode_fits` spells the same polynomial, `encode_fits_spec` is
+   re-proved against it. At `w ≤ 128` this is `1.2·10⁶` gates per node
+   against `usize::MAX`: nothing a solver produces comes near it.
+4. **Two lowering paths, one proven encoder.** `Solver::check` /
+   `check_with_witness` (and `ordeal check` without `--with-query`) apply
+   the rewrite first — `lowering::expand_bool`, the v0.27.0 lowering as
+   one pass over the term — then canon, then the DAG, so their
+   certificates are byte-identical to v0.27.0's (`DerivedOps::Rewrite`).
+   `Solver::check_with_query` (and `--with-query`) does not rewrite: the
+   derived ops reach the DAG as their own nodes, the proven composite
+   rules encode them, and the v2 query block carries the operation
+   (`DerivedOps::Nodes`). Why two paths, below.
+
+### The theorems
+
+`lean/BlasterDerived.lean` (new; namespace `kernel.blast_kernel.spec`),
+each stated in the standard simulate-wrapped capstone shape of every
+other rule, for every width `w ≥ 1`:
+
+```lean
+theorem blast_bvnot_bitvec (a : Slice Lit) {w : Nat} (A : BitVec w) :
+    blast_bvnot a ⦃ out => ∀ vals, Denotes vals a.val w A → Denotes vals out.val w (~~~A) ⦄
+
+theorem blast_neg_bitvec … (A : BitVec w) :
+    blast_neg aig a ⦃ p => ∀ inputs, AigWF … → simulate p.2 inputs ⦃ vals =>
+      Denotes vals.val a.val w A → Denotes vals.val p.1.val w (-A) ⦄ ⦄
+
+theorem blast_rotl_bitvec … (A B : BitVec w) :
+    blast_rotl aig a b ⦃ p => … Denotes vals.val p.1.val w (A.rotateLeft (B.toNat % w)) ⦄ ⦄
+
+theorem blast_sdiv_bitvec … (A B : BitVec w) :
+    blast_sdiv aig a b ⦃ p => … Denotes vals.val p.1.val w (A.smtSDiv B) ⦄ ⦄
+
+theorem blast_srem_bitvec … (A B : BitVec w) :
+    blast_srem aig a b ⦃ p => … Denotes vals.val p.1.val w (A.srem B) ⦄ ⦄
+```
+
+`BitVec.smtSDiv` is Lean core's SMT-LIB signed division (all-ones
+quotient on division by zero, so `a sdiv 0 = -1` for `a ≥ 0` and `1`
+otherwise; `INT_MIN sdiv -1 = INT_MIN`), `BitVec.srem` is core's
+sign-of-the-dividend remainder (`a srem 0 = a`, `INT_MIN srem -1 = 0`),
+`BitVec.rotateLeft` reduces its amount mod the width. The mathematics
+is four `BitVec` lemmas: `rotateRight_sub_eq_rotateLeft` (rotating right
+by `(w - r) % w` is rotating left by `r`) with
+`rotateRight_neg_eq_rotateLeft` for the power-of-two branch (`2^w` is a
+multiple of `w = 2^s`, the identity that is *false* at other widths —
+0.22.1 — which is why the other branch reduces explicitly);
+`sshiftRight_last` (`ashr(x, w-1)` is the sign mask), `xor_sub_signMask`
+(`(s ^ x) - s` is `-x` under the all-ones mask and `x` under the zero
+mask) and `sdiv_construction` (the whole construction equals `smtSDiv`,
+four sign cases); and `srem_eq_sub_smtSDiv_mul` (`A.srem B = A -
+A.smtSDiv B * B` for all `B`, zero included, from phase 2's
+`umod_eq_sub_smtUDiv_mul` in each sign case).
+
+The compositions are proved in a *pure conditional* form (`bin_pure_of_sim`
+harvests a rule's capstone at the pure level, `Denotes.up` transports the
+operand facts along the aig prefixes; `sim_of_pure` turns the result
+back into the simulate-wrapped statement); `BlasterDag.lean` gains the
+five arms of `encode_node_spec` (37 node kinds now; `bin_word_rule_pure`
+/ `un_word_rule_pure` glue a pure-form rule to `NodePost`) and the three
+budget lemmas `rotl_le_gateBound`, `sdiv_le_gateBound`,
+`srem_le_gateBound`. `dagSim` / `DagWF` / `dagNodeWidth` cover the new
+constructors; `encode_sound`, `compact_sound`, `dag_refuted`,
+`dag_wf_spec`, `check_query_sound` and `check_query_refutes_cnf` are
+re-established with their statements unchanged (the DAG language is
+larger; `gateBound` is a `def` whose value changed). The five new
+capstones are pinned axiom-clean in `lean/AxiomCheck.lean` next to every
+earlier one. `lake build`: 1726 jobs, no `sorry`; `Kernel.lean`: 0 axioms.
+
+### Negative controls
+
+One-line mutations, each followed by `lean/regen.sh all` and a build of
+the named library (the proof must fail), then a byte-for-byte restore,
+`touch`, regen and a clean full build:
+
+| mutation | proof that fails |
+|---|---|
+| `blast_sdiv`: the result sign uses `sign_mask(a)` twice (`rs = sa ^ sa`) — wrong sign handling | `BlasterDerived` (`blast_sdiv_pure`, line 1260: the final `sdiv_construction` rewrite no longer unifies — the output denotes `(Q ^ 0) - 0`, not `smtSDiv`) |
+| `blast_rotl`: the power-of-two branch computes `b - 0` instead of `0 - b` (rotates by `b`) | `BlasterDerived` (`blast_rotl_frame` line 562 and `blast_rotl_pure` line 706: the subtraction step no longer has the zero word as its first operand, and `rotateRight_neg_eq_rotateLeft` would not apply) |
+| `blast_neg`: `blast_sub(a, zero)` instead of `blast_sub(zero, a)` | `BlasterDerived` (`blast_neg_frame` line 403 and `blast_neg_bitvec` line 432: the proof steps through `blast_sub(zero, a)`; the mutated rule denotes `A - 0`, not `-A`) |
+| `node_wf`: the `Sdiv` arm uses `bool_bin_wf` | `QueryCheck` (`node_wf_spec` line 180: unsolved goals, hence `dag_wf_spec`) |
+
+(The `lake build` exit codes and the first error lines of each run are
+in the execution record VE-054; the sources were restored byte-for-byte
+— SHA-256 `c5fef1ad…` for `blast_kernel.rs`, `7b281b69…` for
+`kernel.rs` — touched, regenerated (0 axioms) and the full tree rebuilt
+clean, 1726 jobs, with the axiom gate, before the final test runs.)
+
+And the bundle-level control the phase was specified by: a v2 bundle of
+the refutation `(a sdiv b) ≠ rewrite(a sdiv b)` whose `sdiv` node is
+changed to `udiv` (hash recomputed, so integrity passes; CNF and proof
+untouched) fails `QueryBundle::recheck`, while the v1 recheck of the same
+pair still passes
+(`v2_sdiv_node_swapped_to_udiv_fails_recheck_with_cnf_and_proof_untouched`;
+`sdiv_node_swapped_to_udiv_fails_the_recheck` at the API, in both
+directions). The semantics differ for a negative dividend, so the control
+is not a formatting accident.
+
+### The v2 query block: `ordeal-dag/v2`
+
+A DAG that uses one of the five new node kinds is emitted under the
+encoding tag `ordeal-dag/v2` (`bvnot`, `neg`, `rotl`, `sdiv`, `srem`
+spellings) with `recheck.min_version` `0.28.0`; a DAG without them keeps
+`ordeal-dag/v1` and `0.27.0`, so v0.27.0 readers keep reading what they
+could read and refuse (`Unsupported`) what they could not. The reader
+accepts both tags, hashes the block under the tag it *declares*
+(`QueryDag::sha256_tagged`), and refuses a v1-tagged block that carries
+a derived node (`Malformed`). The shipped v1 bundles under
+`evidence/certs/` parse and re-check unchanged.
+
+### Acceptance: the shipped bytes are unchanged — and why the default path keeps the rewrite
+
+1. For every `.smt2` under `crates/ordeal/tests/fixtures/differential/`,
+   `evidence/certs/` and `fuzz/seeds/smtlib/` (24 files) the SHA-256 of
+   `ordeal check <f> --format json` (stdout + stderr + exit code) from
+   the v0.27.0 release binary built from `97d314f` (origin/main) equals
+   the one from this branch: 24 same, 0 differ; the same in text mode
+   (48/48).
+2. The `cnf_gap_digest` test over the bench and oracle corpora prints the
+   four digests unchanged (1211 queries, 44.6 M clauses):
+
+| corpus | queries | clauses | sha256 of every production CNF (v0.27.0 = phase 5) |
+|---|---:|---:|---|
+| benches/latency.rs corpus | 6 | 112352 | `78aaa670cd461529af79ccf2c8ec780d88671f23f8a51aa75abd7bc311b620bb` |
+| benches/bmc.rs corpus | 5 | 86344 | `5c14a69e452c4fbfb736c98dade24c06547968e06ec853194e8262a9e26826b5` |
+| oracle::gen_corpus(0x192, 200) | 200 | 10272352 | `a1d80de907c207a589d7fd1bb7b4a2d7751764776d85d75e6184d43e64e52597` |
+| oracle::gen_corpus(0xC0FFEE, 1000) | 1000 | 34117473 | `42d44115dec319b317cf34e64494b33f29404653a5cbabd4c8334c2b27570f7c` |
+
+3. **Would the bytes change if the default path lowered the derived ops
+   as nodes?** Yes, for some queries. The composite rule *is* the
+   rewrite's gate sequence (`derived_rules_are_the_rewrite`: the raw
+   arena of a DAG holding the node is, gate for gate, the raw arena of the
+   DAG the rewritten term builds, at widths 1, 5, 8, 12, 32, operands
+   created first; `bvnot` compacts to the same literals as its XOR), and
+   on the three fixtures that use a derived op (`rotate_left` at widths 5
+   and 12) `--with-query` emits the same CNF and LRAT as the default. But
+   two things outside the rule can differ between the two paths:
+   - **canonicalization orders commutative operands by the operands'
+     `Debug` names**, and a node's name sorts differently from its
+     rewrite's (`Not(` before `Var`, `Xor(` after it; inside the rewritten
+     `bvsdiv` tree `Xor(a, sa)` becomes `Xor(sa, a)` only for some operand
+     shapes) — so an `Eq`/`Ne`/`Xor`/`Mul` parent or inner node can swap
+     its operands on one path and not the other, which changes the XOR
+     gadget's gate order;
+   - **a variable whose first occurrence is inside a derived op's second
+     operand** gets its primary inputs created in the middle of the
+     rewritten tree on the default path and before the node's gates on the
+     other, so the arena — and the CNF's variable numbering — differ.
+
+   Measured: `benches/latency.rs corpus (derived ops as nodes)` digests to
+   `7b35d569f722f36db0200c2ab541b6e82fb156ff4ccbb4fefc208d52118e1e84` —
+   the same 112352 clauses, different bytes, all of it `srem_vc_32` (the
+   second mechanism: `b` first occurs inside `bvsrem(a, b)`); the other
+   corpora contain no derived op. `derived_nodes_can_renumber_the_cnf`
+   pins that case, `derived_nodes_lower_to_the_rewrite_cnf_when_operands_come_first`
+   pins the identity when neither mechanism applies. Both paths are
+   certified (every `--with-query` UNSAT is re-encoded and re-checked by
+   the trusted crate before it is returned), so this is a question of
+   *which bytes ship*, not of soundness — and therefore the maintainer's
+   call: the switch is one line (`Solver::lower`, `DerivedOps::Rewrite`
+   → `Nodes`). Until it is made, `lowering.rs`'s rewrite stays on the
+   default path exactly as before (untrusted, backed by the same width-8
+   exhaustive reference test, the Z3 differential — now stated about
+   `expand_bv` — and, new, `rewrite_equals_the_proven_rule_with_a_trusted_recheck`:
+   `op(a, b) ≠ rewrite(op(a, b))` is refuted through `check_with_query`
+   for every derived op at widths 8/32(/64), i.e. the trusted crate
+   re-encodes the DAG holding both and certifies the refutation).
+
+### Evidence for the rules beyond the proofs
+
+- `derived_rules_match_the_evaluator`: the five rules on the reference
+  arena against the evaluator's own SMT-LIB definitions (now spelled in
+  `eval.rs`, not via the rewrite), exhaustively at every width 1..=6
+  (every operand pair: every sign combination, `/0`, `INT_MIN / -1`,
+  rotate amounts at and beyond the width, power-of-two and other widths)
+  and sampled at widths 7..=16, 24, 32, 64, 128.
+- `oracle::derived_ops_differential_through_check_with_query` (the
+  `oracle` feature): the five rules against Z3's native `bvnot`, `bvneg`,
+  `ext_rotate_left`, `bvsdiv`, `bvsrem` at every corpus width (3, 5, 8,
+  12, 24, 32, 64), through `check_with_query` — symbolic `op(a, b) = r`
+  (SAT, models re-evaluated on both sides), and for the edge constants
+  (`0`, `1`, all-ones, `INT_MIN`, `INT_MAX`, `2`, `w`, `w + 1`) both
+  `op(x, y) ≠ eval(op(x, y))` (UNSAT, trusted-rechecked) and
+  `op(a, y) = eval(op(x, y))` (SAT). 21 oracle tests pass; no `Unknown`.
+- `exhaustive_width8_div_rem_family_matches_smtlib_reference` now checks
+  both the evaluator's `Sdiv`/`Srem` and the rewrite against the
+  independent reference over all 65536 width-8 pairs.
+
+### What phase 5 does not claim
+
+The trusted re-check certifies the DAG a v2 bundle carries — now
+including the derived operations themselves. Still unproven, in the
+order the remaining phases take them: the DAG builder (`dag.rs`); canon
+(`canon.rs`, including constant folding via `eval.rs` — whose `Sdiv` /
+`Srem` / `Rotl` / `Neg` / `Not` definitions are tested, not proven); the
+rewrite `lowering::expand_*` on the **default** path (a v1 certificate
+from `check` still carries the rewritten query; the v2 certificate from
+`check_with_query` does not); the sliver; the SMT-LIB and Verus front
+ends. No Kani harness was added for the five composite rules (the Lean
+theorems hold at every width; `kani_tiers.sh check` requires every
+harness to be tiered with a measured time, and none was measured) — an
+open item, not a gap in the proof. `blast_rotl` at a non-power-of-two
+width reproduces the rewrite's three remainders rather than the two it
+needs, deliberately (gate identity with the rewrite); a cheaper rule
+changes the bytes of such queries and is a separate decision.
 
 ## Open risks
 

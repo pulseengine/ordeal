@@ -21,9 +21,12 @@
 //! - **Literals:** `(_ bvN W)`, `#xHEX`, `#bBIN` → [`BvTerm::Const`]; a
 //!   declared name → [`BvTerm::Var`].
 //! - **Bitvector ops:** `bvadd bvsub bvmul bvand bvor bvxor` (n-ary,
-//!   left-folded) and `concat` (n-ary); `bvudiv bvshl bvlshr bvashr` (binary);
-//!   `bvnot bvneg` (unary) and `bvurem bvsdiv bvsrem` (binary) via
-//!   [`crate::lowering`]; `((_ extract hi lo) x)`, `((_ zero_extend k) x)`,
+//!   left-folded) and `concat` (n-ary); `bvudiv bvurem bvshl bvlshr bvashr`
+//!   (binary); `bvnot bvneg` (unary) and `bvsdiv bvsrem` (binary) — their
+//!   own [`BvTerm`] constructs with proven rules since #192 phase 5 (the
+//!   default `check` path rewrites them into the core first,
+//!   [`crate::lowering::expand_bv`], so its certificates are unchanged);
+//!   `((_ extract hi lo) x)`, `((_ zero_extend k) x)`,
 //!   `((_ sign_extend k) x)`, `((_ rotate_left k) x)`,
 //!   `((_ rotate_right k) x)`, and `(ite c a b)` → [`BvTerm::Ite`].
 //! - **Predicates:** `= distinct bvult bvule bvugt bvuge bvslt bvsle bvsgt
@@ -32,19 +35,20 @@
 //! # The rotate-amount mismatch
 //!
 //! SMT-LIB's `rotate_left` / `rotate_right` take a **constant** rotate amount
-//! `k` baked into the operator symbol, but the closed core only has
-//! [`BvTerm::Rotr`], which rotates by a **term** amount. We bridge this by
-//! materializing `k` as a same-width [`BvTerm::Const`]:
-//! `((_ rotate_right k) x)` becomes `Rotr(x, Const{k, width(x)})`, and
-//! `((_ rotate_left k) x)` goes through [`crate::lowering::bvrotl`], which is
-//! `Rotr(x, 0 - k)` at a power-of-two width and `Rotr(x, (w - k mod w) mod
-//! w)` otherwise — exact at EVERY width since #182 (the `0 - k` identity is
-//! false at non-power-of-two widths; `lowering::bvrotl_exact_at_every_width`
-//! checks the lowering exhaustively at widths 1..=10). No new operator
-//! enters the closed fragment.
+//! `k` baked into the operator symbol, but the closed core's [`BvTerm::Rotr`]
+//! / [`BvTerm::Rotl`] rotate by a **term** amount. We bridge this by
+//! materializing `k` (reduced mod the width) as a same-width
+//! [`BvTerm::Const`]: `((_ rotate_right k) x)` becomes `Rotr(x, Const{k,
+//! width(x)})` and `((_ rotate_left k) x)` becomes `Rotl(x, Const{k,
+//! width(x)})`. `Rotl` has its own proven rule since #192 phase 5
+//! (`blast_rotl_bitvec`, every width); the default `check` path rewrites it
+//! as [`crate::lowering::rewrite_rotl`] — `Rotr(x, 0 - k)` at a power-of-two
+//! width and `Rotr(x, (w - k mod w) mod w)` otherwise — exact at EVERY width
+//! since #182 (the `0 - k` identity is false at non-power-of-two widths;
+//! `lowering::bvrotl_exact_at_every_width` checks both exhaustively at
+//! widths 1..=10).
 
 use crate::eval::bv_sort;
-use crate::lowering;
 use crate::{BoolTerm, BvTerm, CheckResult, Solver, Sort};
 use std::collections::{HashMap, HashSet};
 
@@ -332,31 +336,30 @@ impl Ctx {
                 Ok(BvTerm::Ashr(Box::new(a), Box::new(b)))
             }
 
-            // Derived ops, lowered onto the closed core (crate::lowering).
+            // The formerly derived ops (#192 phase 5): constructs of the
+            // closed fragment with proven rules since v0.28.0. The default
+            // `check` path rewrites them into the core before the DAG
+            // (`lowering::expand_*`, byte-identical certificates);
+            // `--with-query` lowers them as nodes.
             "bvnot" => {
                 let x = self.one_bv(op, args)?;
-                let w = Self::width_of(&x)?;
-                Ok(lowering::bvnot(x, w))
+                Ok(BvTerm::Not(Box::new(x)))
             }
             "bvneg" => {
                 let x = self.one_bv(op, args)?;
-                let w = Self::width_of(&x)?;
-                Ok(lowering::bvneg(x, w))
+                Ok(BvTerm::Neg(Box::new(x)))
             }
             "bvurem" => {
                 let (a, b) = self.two_bv(op, args)?;
-                let w = Self::width_of(&a)?;
-                Ok(lowering::bvurem(a, b, w))
+                Ok(BvTerm::Urem(Box::new(a), Box::new(b)))
             }
             "bvsdiv" => {
                 let (a, b) = self.two_bv(op, args)?;
-                let w = Self::width_of(&a)?;
-                Ok(lowering::bvsdiv(a, b, w))
+                Ok(BvTerm::Sdiv(Box::new(a), Box::new(b)))
             }
             "bvsrem" => {
                 let (a, b) = self.two_bv(op, args)?;
-                let w = Self::width_of(&a)?;
-                Ok(lowering::bvsrem(a, b, w))
+                Ok(BvTerm::Srem(Box::new(a), Box::new(b)))
             }
 
             // The bool→BV bridge.
@@ -438,13 +441,16 @@ impl Ctx {
                 Ok(BvTerm::Rotr(Box::new(x), Box::new(const_bv(k, w))))
             }
             "rotate_left" => {
-                // rotate_left k: reduce k mod w (see rotate_right), then
-                // lowering::bvrotl, which is exact at every width.
+                // rotate_left k: reduce k mod w (see rotate_right), then the
+                // `Rotl` construct (#192 phase 5; proven rule `blast_rotl`,
+                // exact at every width — the default path rewrites it as
+                // `lowering::rewrite_rotl`, which is exact at every width
+                // too).
                 let k = idx(2)?;
                 let x = arg(self)?;
                 let w = Self::width_of(&x)?;
                 let k = (k as u128) % w as u128;
-                Ok(lowering::bvrotl(x, const_bv(k, w), w))
+                Ok(BvTerm::Rotl(Box::new(x), Box::new(const_bv(k, w))))
             }
             other => Err(SmtError::Unsupported(format!("indexed operator '{other}'"))),
         }

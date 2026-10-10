@@ -30,8 +30,8 @@
 //!   internally-inconsistent bundle never yields a usable [`Certificate`].
 
 use crate::query::{
-    QUERY_ENCODING, QueryCertificate, QueryDag, QueryRecheckError, bits_from_string, bits_string,
-    node_from_op, node_op,
+    QUERY_ENCODING, QUERY_ENCODING_V2, QueryCertificate, QueryDag, QueryRecheckError,
+    bits_from_string, bits_string, encoding_supported, node_from_op, node_op,
 };
 use crate::sha256::sha256_hex;
 use crate::solver::{Certificate, Model};
@@ -363,7 +363,9 @@ impl QueryCertificate {
                 body: proof_text.clone(),
             },
             query: QueryBlock {
-                encoding: QUERY_ENCODING.into(),
+                // The lowest tag that expresses the DAG (#192 phase 5):
+                // `ordeal-dag/v1` unless a derived-op node is present.
+                encoding: q.encoding().into(),
                 num_nodes: q.nodes.len(),
                 nodes: q.nodes.iter().map(node_to_json).collect(),
                 bits: bits_string(&q.bits),
@@ -373,7 +375,8 @@ impl QueryCertificate {
             },
             recheck: RecheckBlockV2 {
                 tool: "ordeal-lrat".into(),
-                min_version: "0.27.0".into(),
+                // A derived-op node needs the phase-5 `check_query`.
+                min_version: if q.has_derived() { "0.28.0" } else { "0.27.0" }.into(),
                 cmd: "ordeal_lrat::check_query(query.nodes, query.bits, query.roots, \
                       query.hints, proof.body) == Ok(problem.clauses)"
                     .into(),
@@ -417,7 +420,7 @@ impl QueryCertificate {
                 env.proof.encoding
             )));
         }
-        if env.query.encoding != QUERY_ENCODING {
+        if !encoding_supported(&env.query.encoding) {
             return Err(BundleError::Unsupported(format!(
                 "query encoding {}",
                 env.query.encoding
@@ -451,7 +454,17 @@ impl QueryCertificate {
             roots: env.query.roots,
             hints: env.query.hints,
         };
-        if query.sha256() != env.query.sha256 {
+        // A block tagged `ordeal-dag/v1` must not carry a node kind that
+        // tag cannot express (a v0.27.0 reader would have refused the node;
+        // this reader refuses the lie about the tag).
+        if env.query.encoding == QUERY_ENCODING && query.has_derived() {
+            return Err(BundleError::Malformed(format!(
+                "query encoding {} carries a derived-op node ({} is required)",
+                QUERY_ENCODING, QUERY_ENCODING_V2
+            )));
+        }
+        // The hash covers the DECLARED tag.
+        if query.sha256_tagged(&env.query.encoding) != env.query.sha256 {
             return Err(BundleError::HashMismatch("query"));
         }
         Ok(QueryBundle {
@@ -1103,6 +1116,111 @@ mod tests {
         assert!(matches!(
             QueryCertificate::from_cert_v2(&v1),
             Err(BundleError::WrongFormat(f)) if f == "ordeal-cert/v1"
+        ));
+    }
+
+    /// `(a sdiv b) ≠ rewrite(a sdiv b)` at width 8 through
+    /// `check_with_query`: the DAG carries an `Sdiv` node (#192 phase 5).
+    fn an_sdiv_query_certificate() -> QueryCertificate {
+        use crate::{BoolTerm, BvTerm, QueryCheckResult, Sort};
+        let var = |name: &str| BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(8),
+        };
+        let sdiv = BvTerm::Sdiv(Box::new(var("a")), Box::new(var("b")));
+        let twin = crate::lowering::expand_bv(&sdiv).expect("sorted");
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(Box::new(sdiv), Box::new(twin)));
+        match s.check_with_query() {
+            QueryCheckResult::Unsat(c) => c,
+            other => panic!("expected Unsat with query, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-064
+    /// #192 phase 5 at the bundle level: a v2 bundle whose `query` block
+    /// carries an `sdiv` node is tagged `ordeal-dag/v2` with
+    /// `recheck.min_version` 0.28.0, round-trips, and re-checks; the SAME
+    /// bundle with that node changed to `udiv` (hash recomputed, so
+    /// integrity passes; CNF and proof untouched) FAILS the recheck while
+    /// its v1 pair still re-checks at the CNF level. A block that declares
+    /// `ordeal-dag/v1` but carries a derived node is refused at parse, and
+    /// a block tagged `ordeal-dag/v2` without one is accepted when its hash
+    /// is computed under the declared tag.
+    #[test]
+    fn v2_sdiv_node_swapped_to_udiv_fails_recheck_with_cnf_and_proof_untouched() {
+        let cert = an_sdiv_query_certificate();
+        assert!(cert.query.has_derived());
+        let json = cert.to_cert_v2(&attests());
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["query"]["encoding"], QUERY_ENCODING_V2);
+        assert_eq!(v["recheck"]["min_version"], "0.28.0");
+        let round =
+            QueryCertificate::from_cert_v2(&json).expect("v2 bundle with an sdiv node parses");
+        round
+            .recheck()
+            .expect("round-tripped sdiv bundle re-checks");
+        assert_eq!(round.certificate.query, cert.query);
+
+        // The control: sdiv → udiv in the JSON, hash recomputed.
+        let mut t = v.clone();
+        let nodes = t["query"]["nodes"].as_array_mut().unwrap();
+        let i = nodes
+            .iter()
+            .position(|n| n[0] == "sdiv")
+            .expect("an sdiv node in the block");
+        nodes[i][0] = serde_json::Value::String("udiv".into());
+        let mut tampered_query = cert.query.clone();
+        let crate::blast_kernel::DagNode::Sdiv(a, b) = tampered_query.nodes[i] else {
+            panic!("node {i} is the sdiv node");
+        };
+        tampered_query.nodes[i] = crate::blast_kernel::DagNode::Udiv(a, b);
+        // Stale hash first: rejected at parse.
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::HashMismatch("query"))
+        ));
+        // Recomputed hash under the declared (v2) tag: parses, recheck fails.
+        t["query"]["sha256"] =
+            serde_json::Value::String(tampered_query.sha256_tagged(QUERY_ENCODING_V2));
+        let bundle = QueryCertificate::from_cert_v2(&t.to_string())
+            .expect("consistent tamper passes the integrity check");
+        assert_eq!(bundle.certificate.certificate.cnf, cert.certificate.cnf);
+        assert_eq!(bundle.certificate.certificate.lrat, cert.certificate.lrat);
+        let r = bundle.recheck();
+        assert!(r.is_err(), "sdiv → udiv must fail the recheck: {r:?}");
+        bundle
+            .certificate
+            .certificate
+            .recheck()
+            .expect("the untouched CNF/proof pair still re-checks at the CNF level");
+
+        // A v1-tagged block carrying a derived node is a lie about the tag.
+        let mut t = v.clone();
+        t["query"]["encoding"] = serde_json::Value::String(QUERY_ENCODING.into());
+        t["query"]["sha256"] = serde_json::Value::String(cert.query.sha256_tagged(QUERY_ENCODING));
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::Malformed(m)) if m.contains("derived-op node")
+        ));
+        // A v2-tagged block WITHOUT a derived node is fine when hashed under
+        // the declared tag (the writer would have chosen v1; a reader does
+        // not insist).
+        let plain = a_query_certificate();
+        let mut t: serde_json::Value = serde_json::from_str(&plain.to_cert_v2(&attests())).unwrap();
+        assert_eq!(t["query"]["encoding"], QUERY_ENCODING);
+        t["query"]["encoding"] = serde_json::Value::String(QUERY_ENCODING_V2.into());
+        t["query"]["sha256"] =
+            serde_json::Value::String(plain.query.sha256_tagged(QUERY_ENCODING_V2));
+        QueryCertificate::from_cert_v2(&t.to_string())
+            .expect("v2-tagged block without derived nodes parses under its declared tag")
+            .recheck()
+            .expect("and re-checks");
+        // An unknown tag is unsupported.
+        t["query"]["encoding"] = serde_json::Value::String("ordeal-dag/v3".into());
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&t.to_string()),
+            Err(BundleError::Unsupported(_))
         ));
     }
 

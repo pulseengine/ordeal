@@ -1,56 +1,74 @@
-//! Derived-op lowering helpers (DES-018 / TR-015).
+//! The formerly derived ops: constructors and the core-fragment REWRITE
+//! (DES-018 / TR-015; proven DAG constructs since #192 phase 5, TR-064).
 //!
-//! synth-verify emits a handful of bitvector operations that the closed core
-//! fragment ([`crate::term`], loom #246) deliberately omits: `bvnot`, `bvneg`,
-//! `bvrotl`, `bvsdiv`, and `bvsrem`. Rather than widen the closed set (each new
-//! [`BvTerm`] variant would need its own proven bit-blasting rule), this module
-//! provides them as **derived-term constructors**: pure functions that build a
-//! [`BvTerm`] out of the operations the core already decides.
+//! synth-verify emits a handful of bitvector operations the closed core
+//! fragment ([`crate::term`], loom #246) did not have as constructs of their
+//! own until v0.28.0: `bvnot`, `bvneg`, `bvrotl`, `bvsdiv` and `bvsrem`.
+//! Until then this module rewrote them into the core (`bvneg x = 0 - x`,
+//! the SMT-LIB sign-mask construction for `bvsdiv`, …) *before* the term DAG
+//! was built, so a certificate carried the rewrite and the rewrite itself
+//! was trusted. Since phase 5 each is a [`BvTerm`] variant ([`BvTerm::Not`],
+//! [`BvTerm::Neg`], [`BvTerm::Rotl`], [`BvTerm::Sdiv`], [`BvTerm::Srem`]) with
+//! a proven bit-blasting rule (`blast_kernel::blast_bvnot` … `blast_srem`,
+//! `lean/BlasterDerived.lean`: `blast_bvnot_bitvec`, `blast_neg_bitvec`,
+//! `blast_rotl_bitvec`, `blast_sdiv_bitvec`, `blast_srem_bitvec` — each
+//! against the Lean `BitVec` operation SMT-LIB names), and the constructors
+//! below ([`bvnot`], [`bvneg`], [`bvrotl`], [`bvsdiv`], [`bvsrem`]) simply
+//! build those variants. Callers that used the constructors keep working.
 //!
-//! `bvurem` is the one exception: as of v0.10.0 it is a NATIVE op
-//! ([`BvTerm::Urem`]) because the remainder falls straight out of the
-//! restoring-division circuit, whereas the term-level `a - (a/b)*b` identity
-//! cannot avoid a multiplier. Promoting that single op made the whole div/rem
-//! family multiplier-free (`bvsrem` is now a sign correction over it), for +1
-//! trusted op instead of +3. [`bvurem`] remains here as a thin constructor so
-//! the SMT-LIB front-end and existing callers keep working.
+//! The rewrite is kept, as [`expand_bv`] / [`expand_bool`], for one caller:
+//! the default path of `Solver::check` / `check_with_witness` (and so
+//! `ordeal check` without `--with-query`), which rewrites the derived ops
+//! into the core before canonicalization exactly as v0.27.0 did, so that the
+//! certificates it emits are byte-identical. `Solver::check_with_query` (and
+//! `ordeal check --with-query`) does NOT rewrite: the derived ops reach the
+//! DAG as their own nodes, the proven composite rules encode them, and the
+//! `ordeal-cert/v2` query block carries the operation. The composite rules
+//! are the rewrite spelled gate for gate (the rewrite's term shape over the
+//! proven rules, in the rewrite's operand order — `bvnot` compacts to the
+//! same literals as its XOR with all-ones), so the two paths produce the
+//! same CNF except where canonicalization reorders commutative operands
+//! *inside* the rewritten tree (`bvsdiv` / `bvsrem` operands whose `Debug`
+//! order differs from the rule's): `docs/design/query-cnf-gap.md`, phase 5,
+//! records the exact cases and the digests. Switching the default path to
+//! the nodes is the maintainer's call, one line in `Solver::lower`.
+//!
+//! `bvurem` is a NATIVE op since v0.10.0 ([`BvTerm::Urem`]) because the
+//! remainder falls straight out of the restoring-division circuit; [`bvurem`]
+//! remains a thin constructor.
 //!
 //! # Trust
 //!
-//! These are ordinary term builders — they are **not** new blast rules and add
-//! nothing to the trusted base (the one native op, `bvurem`, carries its own
-//! proven blast rule + Kani harness like every other fragment op). Every `Unsat`
-//! a consumer derives from a lowered term is still gated by the verified LRAT
-//! checker; the derived forms themselves remain untrusted.
+//! The rewrite is on the UNTRUSTED side: every `Unsat` a consumer derives
+//! from a rewritten term is still gated by the verified LRAT checker. What
+//! backs it: `exhaustive_width8_div_rem_family_matches_smtlib_reference`
+//! checks the rewrite AND the evaluator's own definitions of `bvsdiv` /
+//! `bvsrem` against an independent SMT-LIB reference over **all 65536
+//! width-8 input pairs** — every sign combination, `INT_MIN / -1`, and every
+//! divide-/remainder-by-zero case — with no Z3 required; `UV-017` re-checks
+//! the rewrite against Z3's native operators (widths 8/32/64) under the
+//! `oracle` feature; and, since phase 5, the proven rules:
+//! `rewrite_equals_the_proven_rule_with_a_trusted_recheck` asks
+//! `check_with_query` to refute `op(a, b) ≠ rewrite(op(a, b))` for every
+//! derived op, so the trusted crate re-encodes the DAG that holds BOTH and
+//! certifies the refutation.
 //!
-//! What makes them *blessed* is a mechanical oracle, not assertion:
-//! `exhaustive_width8_div_rem_family_matches_smtlib_reference` checks `bvurem`,
-//! `bvsdiv` and `bvsrem` against an independent SMT-LIB reference over **all
-//! 65536 width-8 input pairs** — every sign combination, the `INT_MIN / -1`
-//! overflow, and every divide-/remainder-by-zero case — with **no Z3 required**,
-//! so it runs in the default build. `UV-017` additionally re-checks each against
-//! Z3's native operator (widths 8/32/64) under the `oracle` feature. NOTE: the
-//! `bvurem`/`bvsrem` forms CHANGED in v0.10.0 (see above), so the Z3-free
-//! exhaustive test — not the older issue-#29 validation of the previous forms —
-//! is what backs them now.
-//!
-//! # The chosen forms (all match SMT-LIB QF_BV / Z3 semantics)
+//! # The rewrite's forms (all match SMT-LIB QF_BV / Z3 semantics)
 //!
 //! - `bvnot x   = x xor 1..1`
 //! - `bvneg x   = 0 - x`
 //! - `bvrotl a b = rotr(a, 0 - b)` at a power-of-two width, else
-//!   `rotr(a, (w - b mod w) mod w)` — exact at every width (see [`bvrotl`]).
+//!   `rotr(a, (w - b mod w) mod w)` — exact at every width (see [`rewrite_rotl`]).
 //! - `bvurem a b` — the native [`BvTerm::Urem`] (multiplier-free; see above).
 //! - `bvsdiv a b` — the SMT-LIB sign-mask construction over `bvudiv`.
-//! - `bvsrem a b = (|a| urem |b| ^ sa) - sa` — the SMT-LIB sign-mask
-//!   construction over the native `bvurem`, exact including `b = 0` and the
-//!   `INT_MIN / -1` overflow edge, and multiplier-free.
+//! - `bvsrem a b = a - (a sdiv b) * b` — MULTIPLICATIVE on purpose (#97).
 //!
 //! Widths are accepted in `1..=128`; the operands of each binary helper must
 //! already share the given width (this module does not sort-check — build
 //! well-sorted terms and validate with [`crate::eval::bv_sort`]).
 
-use crate::term::{BvTerm, Sort};
+use crate::eval::{self, EvalError};
+use crate::term::{BoolTerm, BvTerm, Sort};
 
 /// The all-ones mask for a `width`-bit value (`2^width - 1`).
 ///
@@ -72,60 +90,33 @@ fn const_bv(value: u128, width: u32) -> BvTerm {
     }
 }
 
-/// The arithmetic sign mask of `x`: all-ones when `x` is negative (as a
-/// two's-complement `width`-bit value), all-zeros otherwise.
-///
-/// Built as `ashr(x, width - 1)`, which broadcasts the sign bit across the
-/// whole word. Used by the signed-division helpers.
-fn sign_mask(x: BvTerm, width: u32) -> BvTerm {
-    BvTerm::Ashr(Box::new(x), Box::new(const_bv((width - 1) as u128, width)))
+fn bx(t: BvTerm) -> Box<BvTerm> {
+    Box::new(t)
 }
 
-/// Two's-complement absolute value of `x` at `width` bits: `(x ^ s) - s`,
-/// where `s = sign_mask(x)`.
-///
-/// When `x >= 0` the mask is zero and this is `x`; when `x < 0` it is
-/// `~x - (-1) = ~x + 1 = -x`. Note `abs(INT_MIN)` overflows back to `INT_MIN`,
-/// exactly as SMT-LIB's `bvsdiv` construction requires.
-fn abs_bv(x: BvTerm, width: u32) -> BvTerm {
-    let s = sign_mask(x.clone(), width);
-    BvTerm::Sub(
-        Box::new(BvTerm::Xor(Box::new(x), Box::new(s.clone()))),
-        Box::new(s),
-    )
-}
+// ─── The constructors: the variants of the closed fragment ───────────────────
 
-/// Bitwise NOT (`bvnot`): `x xor 1..1`.
-///
-/// XOR with the all-ones constant flips every bit — the standard derivation of
-/// one's complement from XOR.
+/// Bitwise NOT (`bvnot`): the [`BvTerm::Not`] node (proven rule
+/// `blast_bvnot`). `width` is unused — the node carries its operand's sort —
+/// and kept for signature compatibility with v0.27.0.
 pub fn bvnot(x: BvTerm, width: u32) -> BvTerm {
-    BvTerm::Xor(Box::new(x), Box::new(const_bv(mask(width), width)))
+    let _ = width;
+    BvTerm::Not(bx(x))
 }
 
-/// Two's-complement negation (`bvneg`): `0 - x`.
+/// Two's-complement negation (`bvneg`): the [`BvTerm::Neg`] node (proven
+/// rule `blast_neg`). `width` as in [`bvnot`].
 pub fn bvneg(x: BvTerm, width: u32) -> BvTerm {
-    BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(x))
+    let _ = width;
+    BvTerm::Neg(bx(x))
 }
 
-/// Rotate-left (`bvrotl`) by a variable amount, exact at every width.
-///
-/// For a power-of-two `width`, rotating left by `b` equals rotating right by
-/// `0 - b`: the core [`BvTerm::Rotr`] reduces its amount mod `width`, and
-/// `2^width ≡ 0 (mod width)`, so `(0 - b) mod width = (width - b mod width)
-/// mod width`. That identity FAILS for any other width (fixed 0.22.1: the
-/// SMT-LIB front end applied it at every width), so there the amount is
-/// computed explicitly as `(width - b mod width) mod width` — both operands
-/// of the subtraction are `<= width`, so it never wraps.
+/// Rotate-left (`bvrotl`) by a term amount, mod the width, exact at every
+/// width: the [`BvTerm::Rotl`] node (proven rule `blast_rotl`). `width` as
+/// in [`bvnot`].
 pub fn bvrotl(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
-    let amount = if width.is_power_of_two() {
-        BvTerm::Sub(Box::new(const_bv(0, width)), Box::new(b))
-    } else {
-        let w = || Box::new(const_bv(width as u128, width));
-        let b_mod_w = BvTerm::Urem(Box::new(b), w());
-        BvTerm::Urem(Box::new(BvTerm::Sub(w(), Box::new(b_mod_w))), w())
-    };
-    BvTerm::Rotr(Box::new(a), Box::new(amount))
+    let _ = width;
+    BvTerm::Rotl(bx(a), bx(b))
 }
 
 /// Unsigned remainder (`bvurem`) — the native fragment op.
@@ -141,10 +132,79 @@ pub fn bvurem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
     // `width` is unused: the op carries its operands' sort. Kept for signature
     // symmetry with the other binary helpers.
     let _ = width;
-    BvTerm::Urem(Box::new(a), Box::new(b))
+    BvTerm::Urem(bx(a), bx(b))
 }
 
-/// Signed division (`bvsdiv`) via the SMT-LIB sign-mask construction over
+/// Signed division (`bvsdiv`), SMT-LIB semantics: the [`BvTerm::Sdiv`] node
+/// (proven rule `blast_sdiv`). `width` as in [`bvnot`].
+pub fn bvsdiv(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+    let _ = width;
+    BvTerm::Sdiv(bx(a), bx(b))
+}
+
+/// Signed remainder (`bvsrem`, sign of the dividend), SMT-LIB semantics: the
+/// [`BvTerm::Srem`] node (proven rule `blast_srem`). `width` as in [`bvnot`].
+pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+    let _ = width;
+    BvTerm::Srem(bx(a), bx(b))
+}
+
+// ─── The rewrite into the core (the v0.27.0 lowering) ────────────────────────
+
+/// The arithmetic sign mask of `x`: all-ones when `x` is negative (as a
+/// two's-complement `width`-bit value), all-zeros otherwise.
+///
+/// Built as `ashr(x, width - 1)`, which broadcasts the sign bit across the
+/// whole word. Used by the signed-division rewrite.
+fn sign_mask(x: BvTerm, width: u32) -> BvTerm {
+    BvTerm::Ashr(bx(x), bx(const_bv((width - 1) as u128, width)))
+}
+
+/// Two's-complement absolute value of `x` at `width` bits: `(x ^ s) - s`,
+/// where `s = sign_mask(x)`.
+///
+/// When `x >= 0` the mask is zero and this is `x`; when `x < 0` it is
+/// `~x - (-1) = ~x + 1 = -x`. Note `abs(INT_MIN)` overflows back to `INT_MIN`,
+/// exactly as SMT-LIB's `bvsdiv` construction requires.
+fn abs_bv(x: BvTerm, width: u32) -> BvTerm {
+    let s = sign_mask(x.clone(), width);
+    BvTerm::Sub(bx(BvTerm::Xor(bx(x), bx(s.clone()))), bx(s))
+}
+
+/// The rewrite of `bvnot`: `x xor 1..1`.
+///
+/// XOR with the all-ones constant flips every bit — the standard derivation of
+/// one's complement from XOR.
+pub fn rewrite_not(x: BvTerm, width: u32) -> BvTerm {
+    BvTerm::Xor(bx(x), bx(const_bv(mask(width), width)))
+}
+
+/// The rewrite of `bvneg`: `0 - x`.
+pub fn rewrite_neg(x: BvTerm, width: u32) -> BvTerm {
+    BvTerm::Sub(bx(const_bv(0, width)), bx(x))
+}
+
+/// The rewrite of `bvrotl` by a variable amount, exact at every width.
+///
+/// For a power-of-two `width`, rotating left by `b` equals rotating right by
+/// `0 - b`: the core [`BvTerm::Rotr`] reduces its amount mod `width`, and
+/// `2^width ≡ 0 (mod width)`, so `(0 - b) mod width = (width - b mod width)
+/// mod width`. That identity FAILS for any other width (fixed 0.22.1: the
+/// SMT-LIB front end applied it at every width), so there the amount is
+/// computed explicitly as `(width - b mod width) mod width` — both operands
+/// of the subtraction are `<= width`, so it never wraps.
+pub fn rewrite_rotl(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+    let amount = if width.is_power_of_two() {
+        BvTerm::Sub(bx(const_bv(0, width)), bx(b))
+    } else {
+        let w = || bx(const_bv(width as u128, width));
+        let b_mod_w = BvTerm::Urem(bx(b), w());
+        BvTerm::Urem(bx(BvTerm::Sub(w(), bx(b_mod_w))), w())
+    };
+    BvTerm::Rotr(bx(a), bx(amount))
+}
+
+/// The rewrite of `bvsdiv`: the SMT-LIB sign-mask construction over
 /// `bvudiv`.
 ///
 /// Let `sa`/`sb` be the sign masks of `a`/`b`. Divide the magnitudes
@@ -161,50 +221,157 @@ pub fn bvurem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
 /// - `INT_MIN / -1`: `|INT_MIN|` overflows back to `INT_MIN`, `|−1| = 1`, so
 ///   `q = INT_MIN`, the result sign is `+`, and the result is `INT_MIN` —
 ///   matching SMT-LIB's overflow-wraps behaviour.
-pub fn bvsdiv(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+pub fn rewrite_sdiv(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
     let sa = sign_mask(a.clone(), width);
     let sb = sign_mask(b.clone(), width);
-    let result_sign = BvTerm::Xor(Box::new(sa), Box::new(sb));
-    let q = BvTerm::Udiv(Box::new(abs_bv(a, width)), Box::new(abs_bv(b, width)));
+    let result_sign = BvTerm::Xor(bx(sa), bx(sb));
+    let q = BvTerm::Udiv(bx(abs_bv(a, width)), bx(abs_bv(b, width)));
     // (q ^ result_sign) - result_sign  — negate the quotient iff signs differ.
     BvTerm::Sub(
-        Box::new(BvTerm::Xor(Box::new(q), Box::new(result_sign.clone()))),
-        Box::new(result_sign),
+        bx(BvTerm::Xor(bx(q), bx(result_sign.clone()))),
+        bx(result_sign),
     )
 }
 
-/// Signed remainder (`bvsrem`, sign follows the dividend) via the SMT-LIB
-/// sign-mask construction over the native `bvurem`.
+/// The rewrite of `bvsrem` (sign follows the dividend): `a - (a sdiv b) * b`.
 ///
-/// Previously derived as `a - bvsdiv(a,b)*b`, which costs a **multiplier**. Now
-/// that [`BvTerm::Urem`] is native (and multiplier-free), the remainder of the
-/// magnitudes can be taken directly and the dividend's sign re-applied — so this
-/// derivation is multiplier-free too:
-///
-/// ```text
-/// r = |a| urem |b|
-/// bvsrem = (r ^ sa) - sa        // negate r iff a < 0
-/// ```
-///
-/// This reproduces SMT-LIB `bvsrem` on every input, including:
-/// - `b = 0`: `|a| urem 0` is `|a|`, and the sign fix maps it back to `a` —
-///   matching SMT-LIB's `bvsrem` by zero.
-/// - `INT_MIN % -1`: `|INT_MIN|` overflows back to `INT_MIN`, `|-1| = 1`, so
-///   `r = 0` and the result is `0`, matching SMT-LIB.
-pub fn bvsrem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
-    // MULTIPLICATIVE on purpose — reverted from the v0.10.0 urem-based form
-    // (issue #97). Consumers' rem_s value models are multiplicative
-    // (`a - (a sdiv b) * b`: synth's Sdiv+Mls, loom's WASM-spec form), and an
-    // equivalence VC between THIS lowering and such a model must be
-    // structurally similar to solve fast. The urem-based form routed through
-    // the restoring divider's remainder, turning every such VC into a
-    // divider-vs-multiplier cross-circuit proof: <1 s queries became >240 s
-    // hangs in synth's CI (0.9.1 -> 0.12.0). The extra multiplier costs
-    // gates; the cross-circuit equivalence costs consumers HOURS. Native
-    // `BvTerm::Urem` remains for direct remainder queries.
-    let q = bvsdiv(a.clone(), b.clone(), width);
-    let prod = BvTerm::Mul(Box::new(q), Box::new(b));
-    BvTerm::Sub(Box::new(a), Box::new(prod))
+/// MULTIPLICATIVE on purpose — reverted from the v0.10.0 urem-based form
+/// (issue #97). Consumers' rem_s value models are multiplicative
+/// (`a - (a sdiv b) * b`: synth's Sdiv+Mls, loom's WASM-spec form), and an
+/// equivalence VC between THIS form and such a model must be structurally
+/// similar to solve fast. The urem-based form routed through the restoring
+/// divider's remainder, turning every such VC into a divider-vs-multiplier
+/// cross-circuit proof: <1 s queries became >240 s hangs in synth's CI
+/// (0.9.1 -> 0.12.0). The extra multiplier costs gates; the cross-circuit
+/// equivalence costs consumers HOURS. Native `BvTerm::Urem` remains for
+/// direct remainder queries. Exact including `b = 0` (`(a sdiv 0) * 0 = 0`)
+/// and `INT_MIN % -1` (`INT_MIN * -1 = INT_MIN`, so the result is `0`).
+pub fn rewrite_srem(a: BvTerm, b: BvTerm, width: u32) -> BvTerm {
+    let q = rewrite_sdiv(a.clone(), b.clone(), width);
+    let prod = BvTerm::Mul(bx(q), bx(b));
+    BvTerm::Sub(bx(a), bx(prod))
+}
+
+/// Rewrite every derived op under `t` into the closed core, bottom-up —
+/// the v0.27.0 lowering as one pass over the term. `Solver::check`'s
+/// default path applies it before canonicalization (see the module docs);
+/// `check_with_query` does not. Fails only on an ill-sorted term (the width
+/// of a derived op is its operand's width, which [`eval::bv_sort`] supplies).
+pub fn expand_bv(t: &BvTerm) -> Result<BvTerm, EvalError> {
+    use BvTerm::*;
+    let width = |x: &BvTerm| eval::bv_sort(x).map(|s| s.width);
+    Ok(match t {
+        Const { .. } | Var { .. } => t.clone(),
+        Add(a, b) => Add(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Sub(a, b) => Sub(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Mul(a, b) => Mul(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Udiv(a, b) => Udiv(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Urem(a, b) => Urem(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        And(a, b) => And(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Or(a, b) => Or(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Xor(a, b) => Xor(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Shl(a, b) => Shl(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Lshr(a, b) => Lshr(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Ashr(a, b) => Ashr(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Rotr(a, b) => Rotr(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        Extract { hi, lo, arg } => Extract {
+            hi: *hi,
+            lo: *lo,
+            arg: bx(expand_bv(arg)?),
+        },
+        Concat(a, b) => Concat(bx(expand_bv(a)?), bx(expand_bv(b)?)),
+        ZeroExt { by, arg } => ZeroExt {
+            by: *by,
+            arg: bx(expand_bv(arg)?),
+        },
+        SignExt { by, arg } => SignExt {
+            by: *by,
+            arg: bx(expand_bv(arg)?),
+        },
+        Ite { cond, then_, else_ } => Ite {
+            cond: Box::new(expand_bool(cond)?),
+            then_: bx(expand_bv(then_)?),
+            else_: bx(expand_bv(else_)?),
+        },
+        Not(a) => {
+            let a = expand_bv(a)?;
+            let w = width(&a)?;
+            rewrite_not(a, w)
+        }
+        Neg(a) => {
+            let a = expand_bv(a)?;
+            let w = width(&a)?;
+            rewrite_neg(a, w)
+        }
+        Rotl(a, b) => {
+            let (a, b) = (expand_bv(a)?, expand_bv(b)?);
+            let w = width(&a)?;
+            rewrite_rotl(a, b, w)
+        }
+        Sdiv(a, b) => {
+            let (a, b) = (expand_bv(a)?, expand_bv(b)?);
+            let w = width(&a)?;
+            rewrite_sdiv(a, b, w)
+        }
+        Srem(a, b) => {
+            let (a, b) = (expand_bv(a)?, expand_bv(b)?);
+            let w = width(&a)?;
+            rewrite_srem(a, b, w)
+        }
+    })
+}
+
+/// [`expand_bv`] under a boolean term.
+pub fn expand_bool(t: &BoolTerm) -> Result<BoolTerm, EvalError> {
+    use BoolTerm::*;
+    let eb = |a: &BvTerm, b: &BvTerm| -> Result<(Box<BvTerm>, Box<BvTerm>), EvalError> {
+        Ok((bx(expand_bv(a)?), bx(expand_bv(b)?)))
+    };
+    Ok(match t {
+        Eq(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Eq(a, b)
+        }
+        Ne(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Ne(a, b)
+        }
+        Ult(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Ult(a, b)
+        }
+        Ule(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Ule(a, b)
+        }
+        Ugt(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Ugt(a, b)
+        }
+        Uge(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Uge(a, b)
+        }
+        Slt(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Slt(a, b)
+        }
+        Sle(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Sle(a, b)
+        }
+        Sgt(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Sgt(a, b)
+        }
+        Sge(a, b) => {
+            let (a, b) = eb(a, b)?;
+            Sge(a, b)
+        }
+        Not(x) => Not(Box::new(expand_bool(x)?)),
+        And(a, b) => And(Box::new(expand_bool(a)?), Box::new(expand_bool(b)?)),
+        Or(a, b) => Or(Box::new(expand_bool(a)?), Box::new(expand_bool(b)?)),
+    })
 }
 
 // rivet: verifies VER-045
@@ -214,8 +381,10 @@ mod tests {
 
     /// Soundness regression (0.22.1): `bvrotl` equals the SMT-LIB
     /// rotate-left (evaluated directly as a left rotation by `b mod w`) at
-    /// EVERY width 1..=10, exhaustively; before the fix the `rotr(a, 0 - b)`
-    /// identity was applied at non-power-of-two widths where it is false.
+    /// EVERY width 1..=10, exhaustively — the evaluator's own `Rotl` AND the
+    /// core rewrite `expand_bv` applies on the default path; before the fix
+    /// the `rotr(a, 0 - b)` identity was applied at non-power-of-two widths
+    /// where it is false.
     #[test]
     fn bvrotl_exact_at_every_width() {
         use crate::eval::{Env, eval_bv};
@@ -223,8 +392,10 @@ mod tests {
             let m = (1u128 << w) - 1;
             for a in 0u128..(1 << w) {
                 for b in 0u128..(1 << w) {
-                    let got = eval_bv(&bvrotl(const_bv(a, w), const_bv(b, w), w), &Env::new())
-                        .expect("eval");
+                    let t = bvrotl(const_bv(a, w), const_bv(b, w), w);
+                    let got = eval_bv(&t, &Env::new()).expect("eval");
+                    let got_rewrite =
+                        eval_bv(&expand_bv(&t).expect("sorted"), &Env::new()).expect("eval");
                     let r = (b % w as u128) as u32;
                     let want = if r == 0 {
                         a
@@ -232,6 +403,7 @@ mod tests {
                         ((a << r) | (a >> (w - r))) & m
                     };
                     assert_eq!(got, want, "rotl w={w} a={a:#x} b={b:#x}");
+                    assert_eq!(got_rewrite, want, "rewritten rotl w={w} a={a:#x} b={b:#x}");
                 }
             }
         }
@@ -272,9 +444,11 @@ mod tests {
     fn exhaustive_width8_div_rem_family_matches_smtlib_reference() {
         // Every one of the 65536 width-8 input pairs — so every sign
         // combination, the INT_MIN/-1 overflow, and every divide-/
-        // remainder-by-zero case is covered. Guards the multiplier-free
-        // derivations (bvurem is now the native op; bvsrem is a sign correction
-        // over it) against the SMT-LIB definitions, with no Z3 needed.
+        // remainder-by-zero case is covered — through BOTH the evaluator's
+        // own `Sdiv` / `Srem` definitions (the SAT model self-check and
+        // canon's constant folding) and the core rewrite `expand_bv` (the
+        // default path), against an independent SMT-LIB reference, with no
+        // Z3 needed.
         let w = 8u32;
         let env = Env::new();
         for x in 0..=0xFFu128 {
@@ -282,17 +456,16 @@ mod tests {
                 let (a, b) = (const_bv(x, w), const_bv(y, w));
                 let (r_urem, r_sdiv, r_srem) = smtlib_ref(x, y, w);
                 let got = |t: BvTerm| eval_bv(&t, &env).unwrap();
-                assert_eq!(
-                    got(bvurem(a.clone(), b.clone(), w)),
-                    r_urem,
-                    "bvurem {x} {y}"
-                );
-                assert_eq!(
-                    got(bvsdiv(a.clone(), b.clone(), w)),
-                    r_sdiv,
-                    "bvsdiv {x} {y}"
-                );
-                assert_eq!(got(bvsrem(a, b, w)), r_srem, "bvsrem {x} {y}");
+                let got_rw = |t: BvTerm| eval_bv(&expand_bv(&t).unwrap(), &env).unwrap();
+                let urem = bvurem(a.clone(), b.clone(), w);
+                let sdiv = bvsdiv(a.clone(), b.clone(), w);
+                let srem = bvsrem(a, b, w);
+                assert_eq!(got(urem.clone()), r_urem, "bvurem {x} {y}");
+                assert_eq!(got(sdiv.clone()), r_sdiv, "bvsdiv {x} {y}");
+                assert_eq!(got(srem.clone()), r_srem, "bvsrem {x} {y}");
+                assert_eq!(got_rw(urem), r_urem, "rewritten bvurem {x} {y}");
+                assert_eq!(got_rw(sdiv), r_sdiv, "rewritten bvsdiv {x} {y}");
+                assert_eq!(got_rw(srem), r_srem, "rewritten bvsrem {x} {y}");
             }
         }
     }
@@ -309,9 +482,17 @@ mod tests {
         //     cross-circuit proof — <1 s queries became >240 s hangs (#97).
         //     This test pins the shape so a future "cleanup" cannot silently
         //     reintroduce the regression in either direction.
+        // Since #192 phase 5 the shape lives in the REWRITE (`expand_bv`,
+        // the default path) and, gate for gate, in the proven composite
+        // rules `blast_sdiv` / `blast_srem` (`derived_rules_are_the_rewrite`
+        // in blast_kernel's tests pins the latter).
         let w = 32u32;
         let (a, b) = (var("a", w), var("b", w));
-        let muls = |t: &BvTerm| format!("{t:?}").matches("Mul(").count();
+        let muls = |t: &BvTerm| {
+            format!("{:?}", expand_bv(t).unwrap())
+                .matches("Mul(")
+                .count()
+        };
         assert_eq!(
             muls(&bvurem(a.clone(), b.clone(), w)),
             0,
@@ -327,6 +508,44 @@ mod tests {
             1,
             "bvsrem must stay MULTIPLICATIVE (one Mul) — see #97"
         );
+    }
+
+    /// #192 phase 5: every derived op's proven rule agrees with the core
+    /// rewrite — `op(a, b) ≠ rewrite(op(a, b))` is refuted through
+    /// `check_with_query`, i.e. the DAG holding both the node and its
+    /// rewritten twin is re-encoded by the trusted crate and the refutation
+    /// re-checked before `Unsat` is returned. At widths 8 and 32 (and 64 for
+    /// the rules without a divider).
+    #[test]
+    fn rewrite_equals_the_proven_rule_with_a_trusted_recheck() {
+        use crate::{BoolTerm, QueryCheckResult, Solver};
+        for &w in &[8u32, 32, 64] {
+            let (a, b) = (var("a", w), var("b", w));
+            let mut ops: Vec<(&str, BvTerm)> = vec![
+                ("bvnot", bvnot(a.clone(), w)),
+                ("bvneg", bvneg(a.clone(), w)),
+                ("bvrotl", bvrotl(a.clone(), b.clone(), w)),
+            ];
+            if w <= 32 {
+                ops.push(("bvsdiv", bvsdiv(a.clone(), b.clone(), w)));
+                ops.push(("bvsrem", bvsrem(a.clone(), b.clone(), w)));
+            }
+            for (name, t) in ops {
+                let twin = expand_bv(&t).expect("sorted");
+                let mut s = Solver::new();
+                s.assert(BoolTerm::Ne(Box::new(t), Box::new(twin)));
+                match s.check_with_query() {
+                    QueryCheckResult::Unsat(cert) => {
+                        cert.recheck().expect("trusted query recheck");
+                        assert!(
+                            cert.query.has_derived(),
+                            "{name} w{w}: the query block must carry the derived node"
+                        );
+                    }
+                    other => panic!("{name} w{w}: rule ≠ rewrite must be Unsat, got {other:?}"),
+                }
+            }
+        }
     }
 
     /// #101 regression guard: the UNSIGNED twin of #97 — native `Urem`
@@ -469,17 +688,23 @@ mod lowering_diff {
     use z3::ast::BV;
     use z3::{Params, SatResult, Solver};
 
-    /// Z3's verdict on the disequality `derived != native`: `Unsat` means the
-    /// derived form is provably equal to Z3's native operator, `Sat` is a real
-    /// disagreement (a counterexample exists), and `Unknown` means Z3 gave up
-    /// (the symbolic multiply/divide circuits at wide widths are hard for
-    /// bit-blasting — this never counts as a disagreement).
+    /// Z3's verdict on the disequality `rewrite(derived) != native`:
+    /// `Unsat` means the core REWRITE of the derived form is provably equal
+    /// to Z3's native operator, `Sat` is a real disagreement (a
+    /// counterexample exists), and `Unknown` means Z3 gave up (the symbolic
+    /// multiply/divide circuits at wide widths are hard for bit-blasting —
+    /// this never counts as a disagreement). The variant itself translates
+    /// to Z3's native operator (`bv_to_z3`), so it is the rewrite — the
+    /// default path's lowering — that this compares; the proven rules are
+    /// compared with the rewrite by `rewrite_equals_the_proven_rule_*` and
+    /// with Z3 by `oracle::derived_ops_differential_through_check_with_query`.
     fn equiv_verdict(derived: &BvTerm, native: BV) -> SatResult {
         let solver = Solver::new();
         let mut params = Params::new();
         params.set_u32("timeout", 20_000);
         solver.set_params(&params);
-        solver.assert(bv_to_z3(derived).eq(native).not());
+        let rewritten = expand_bv(derived).expect("sorted");
+        solver.assert(bv_to_z3(&rewritten).eq(native).not());
         solver.check()
     }
 

@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The derived ops stop being trusted rewrites** (#192 phase 5, TR-064).
+`bvnot`, `bvneg`, `bvrotl`, `bvsdiv` and `bvsrem` are constructs of the
+closed fragment with proven bit-blasting rules; `check_with_query` lowers
+them as their own DAG nodes and the `ordeal-cert/v2` query block carries
+the operation. Default output is byte-identical to v0.27.0.
+
+### Added
+- **New `BvTerm` variants** (`#[non_exhaustive]` policy, #104 — consumers
+  with a `_ =>` arm are unaffected; one without must add arms):
+  `BvTerm::Not`, `BvTerm::Neg`, `BvTerm::Rotl`, `BvTerm::Sdiv`,
+  `BvTerm::Srem` — the five formerly derived ops, now in the closed
+  fragment because each has a proven rule. The SMT-LIB front end builds
+  them directly; `lowering::bvnot` / `bvneg` / `bvrotl` / `bvsdiv` /
+  `bvsrem` now construct them (same signatures). The evaluator defines
+  their SMT-LIB semantics directly (`a sdiv 0` is `-1` for `a >= 0` and
+  `1` otherwise, `INT_MIN sdiv -1 = INT_MIN`; `a srem 0 = a`,
+  `INT_MIN srem -1 = 0`; `rotl` by the amount mod the width).
+- **Five proven composite rules** in the trusted crate
+  (`blast_kernel::blast_bvnot`, `blast_neg`, `blast_rotl`, `blast_sdiv`,
+  `blast_srem`) with `DagNode::{BvNot, Neg, Rotl, Sdiv, Srem}` and
+  `encode_node` arms; `lean/BlasterDerived.lean` proves
+  `blast_bvnot_bitvec` (`~~~A`), `blast_neg_bitvec` (`-A`),
+  `blast_rotl_bitvec` (`A.rotateLeft (B.toNat % w)`, every width),
+  `blast_sdiv_bitvec` (`A.smtSDiv B`, division by zero and
+  `INT_MIN / -1` included) and `blast_srem_bitvec` (`A.srem B`), pinned
+  axiom-clean in `AxiomCheck.lean`; `encode_sound`, `dag_refuted`,
+  `dag_wf_spec` and `check_query_sound` are re-established over the larger
+  DAG language. `node_wf` / `node_width` cover the new nodes; the gate
+  budget `gateBound` / `encode_fits` is `70·w² + 70·w + 1`.
+- **`ordeal-dag/v2`**: a query block that uses a derived-op node is tagged
+  `ordeal-dag/v2` (`bvnot`, `neg`, `rotl`, `sdiv`, `srem`) with
+  `recheck.min_version` `0.28.0`; one without them keeps `ordeal-dag/v1`.
+  Readers accept both (`query::encoding_supported`), hash under the
+  declared tag (`QueryDag::sha256_tagged`), and refuse a v1-tagged block
+  carrying a derived node. `QueryDag::encoding` / `has_derived`.
+- `lowering::expand_bv` / `expand_bool` (the v0.27.0 rewrite as one pass)
+  and `lowering::rewrite_*` (the per-op rewrites, formerly the
+  constructors' bodies).
+- Tests: the five rules against the evaluator, exhaustively at widths
+  1..=6 and sampled to 128 (`derived_rules_match_the_evaluator`); the
+  rules are the rewrite gate for gate (`derived_rules_are_the_rewrite`);
+  `op(a,b) ≠ rewrite(op(a,b))` refuted through `check_with_query`
+  (`rewrite_equals_the_proven_rule_with_a_trusted_recheck`); the Z3
+  differential of the rules through `check_with_query` at every corpus
+  width (`derived_ops_differential_through_check_with_query`, `oracle`
+  feature); the bundle-level negative control (`sdiv` → `udiv` fails the
+  recheck); the CLI `--with-query` block with the derived nodes.
+
+### Changed
+- `Solver::check_with_query` / `ordeal check --with-query` lower the
+  derived ops as nodes (`DerivedOps::Nodes`); `Solver::check` /
+  `check_with_witness` / `ordeal check` keep applying the rewrite first
+  (`DerivedOps::Rewrite`), so their certificates are byte-identical to
+  v0.27.0 (24 fixtures, JSON and text; the four corpus digests). For a
+  query where canonicalization reorders a commutative parent of the op or
+  a variable first occurs inside the op's second operand, the two paths'
+  CNFs differ in variable numbering (same verdict, both certified);
+  switching the default is one line in `Solver::lower` and the
+  maintainer's call (`docs/design/query-cnf-gap.md`, phase 5).
+- `lowering.rs`'s Z3 differential (`UV-017`) now compares the rewrite
+  (`expand_bv`) with Z3's native operators (the variants themselves map
+  to those operators).
+
 ## [0.27.0] - 2026-10-01
 
 **The trusted checker re-checks the query, not just a CNF** (#192 phase 4).

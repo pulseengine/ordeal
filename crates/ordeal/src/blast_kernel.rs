@@ -62,6 +62,225 @@ mod tests {
         }
     }
 
+    /// The value a word of literals carries under a simulation (LSB first).
+    fn word_value(vals: &[bool], word: &[Lit]) -> u128 {
+        word.iter().enumerate().fold(0u128, |acc, (i, &l)| {
+            acc | ((eval_lit(vals, l) as u128) << i)
+        })
+    }
+
+    /// Run one derived rule on fresh input words at width `w` with the
+    /// operand values `a`, `b`, and read the output word's value.
+    fn run_derived(name: &str, w: usize, a: u128, b: u128) -> u128 {
+        let mut aig = aig_new();
+        let (wa, wb) = model_inputs(&mut aig, w);
+        let out = match name {
+            "bvnot" => blast_bvnot(&wa),
+            "bvneg" => blast_neg(&mut aig, &wa),
+            "bvrotl" => blast_rotl(&mut aig, &wa, &wb),
+            "bvsdiv" => blast_sdiv(&mut aig, &wa, &wb),
+            "bvsrem" => blast_srem(&mut aig, &wa, &wb),
+            _ => unreachable!(),
+        };
+        let mut inputs = Vec::with_capacity(2 * w);
+        for i in 0..w {
+            inputs.push((a >> i) & 1 == 1);
+        }
+        for i in 0..w {
+            inputs.push((b >> i) & 1 == 1);
+        }
+        word_value(&simulate(&aig, &inputs), &out)
+    }
+
+    /// The evaluator's value of the derived op on constants (the oracle
+    /// the Lean theorems are also stated against, through `BitVec`).
+    fn eval_derived(name: &str, w: usize, a: u128, b: u128) -> u128 {
+        use crate::eval::{Env, eval_bv};
+        use crate::term::{BvTerm, Sort};
+        let c = |v: u128| {
+            Box::new(BvTerm::Const {
+                value: v,
+                sort: Sort::new(w as u32),
+            })
+        };
+        let t = match name {
+            "bvnot" => BvTerm::Not(c(a)),
+            "bvneg" => BvTerm::Neg(c(a)),
+            "bvrotl" => BvTerm::Rotl(c(a), c(b)),
+            "bvsdiv" => BvTerm::Sdiv(c(a), c(b)),
+            "bvsrem" => BvTerm::Srem(c(a), c(b)),
+            _ => unreachable!(),
+        };
+        eval_bv(&t, &Env::new()).expect("constant term")
+    }
+
+    const DERIVED: [&str; 5] = ["bvnot", "bvneg", "bvrotl", "bvsdiv", "bvsrem"];
+
+    // rivet: verifies VER-064
+    /// #192 phase 5: the five derived rules (`blast_bvnot`, `blast_neg`,
+    /// `blast_rotl`, `blast_sdiv`, `blast_srem`) against the evaluator's
+    /// SMT-LIB definitions, exhaustively at every width 1..=6 (every
+    /// operand pair, so every sign combination, `/0`, `INT_MIN / -1`,
+    /// rotate amounts at and beyond the width, power-of-two and other
+    /// widths), and sampled at widths 7..=16, 24, 32, 64 and 128 with the
+    /// edge values plus a seeded sweep. A bounded, independent witness of
+    /// the Lean `_bitvec` theorems in `lean/BlasterDerived.lean`.
+    #[test]
+    fn derived_rules_match_the_evaluator() {
+        for w in 1usize..=6 {
+            let m = (1u128 << w) - 1;
+            for a in 0..=m {
+                for b in 0..=m {
+                    for name in DERIVED {
+                        assert_eq!(
+                            run_derived(name, w, a, b),
+                            eval_derived(name, w, a, b),
+                            "{name} w={w} a={a:#x} b={b:#x}"
+                        );
+                    }
+                }
+            }
+        }
+        let widths: Vec<usize> = (7..=16).chain([24, 32, 64, 128]).collect();
+        let mut state: u64 = 0x1920_0005_D00D_5EED;
+        for w in widths {
+            let m = if w == 128 {
+                u128::MAX
+            } else {
+                (1u128 << w) - 1
+            };
+            let mut vals: Vec<u128> = vec![
+                0,
+                1,
+                2,
+                m,
+                m - 1,
+                1u128 << (w - 1),
+                (1u128 << (w - 1)) - 1,
+                w as u128,
+                w as u128 + 1,
+            ];
+            for _ in 0..24 {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                let hi = state;
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                vals.push(((u128::from(hi) << 64) | u128::from(state)) & m);
+            }
+            for &a in &vals {
+                for &b in &vals {
+                    for name in DERIVED {
+                        assert_eq!(
+                            run_derived(name, w, a, b),
+                            eval_derived(name, w, a, b),
+                            "{name} w={w} a={a:#x} b={b:#x}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // rivet: verifies VER-064
+    /// #192 phase 5: each composite rule emits EXACTLY the gates of the
+    /// rewrite it replaces — the raw arena of a DAG holding the derived node
+    /// is, gate for gate, the raw arena of the DAG the rewritten term
+    /// builds (operands being variables created first, so the two
+    /// post-orders coincide). `bvnot` is the one gate-free rule: its node
+    /// compacts to the literals its XOR-with-all-ones rewrite compacts to.
+    #[test]
+    fn derived_rules_are_the_rewrite() {
+        use crate::dag::{DagBuilder, no_hints};
+        use crate::term::{BoolTerm, BvTerm, Sort};
+        let var = |name: &str, w: u32| BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(w),
+        };
+        for &w in &[1u32, 5, 8, 12, 32] {
+            let (a, b, r) = (var("a", w), var("b", w), var("r", w));
+            let ops: Vec<(&str, BvTerm)> = vec![
+                ("bvnot", BvTerm::Not(Box::new(a.clone()))),
+                ("bvneg", BvTerm::Neg(Box::new(a.clone()))),
+                (
+                    "bvrotl",
+                    BvTerm::Rotl(Box::new(a.clone()), Box::new(b.clone())),
+                ),
+                (
+                    "bvsdiv",
+                    BvTerm::Sdiv(Box::new(a.clone()), Box::new(b.clone())),
+                ),
+                (
+                    "bvsrem",
+                    BvTerm::Srem(Box::new(a.clone()), Box::new(b.clone())),
+                ),
+            ];
+            for (name, t) in ops {
+                // The operands exist before the op in both DAGs.
+                let pre = BoolTerm::Ult(Box::new(a.clone()), Box::new(b.clone()));
+                // `Ult`, not `Eq`: canon reorders a commutative parent by the
+                // operands' `Debug` names, which differ between the node
+                // (`Not(`) and its rewrite (`Xor(`) — that ordering effect is
+                // the parent's, not the rule's, and is pinned in
+                // `solver::tests::derived_nodes_can_renumber_the_cnf`.
+                let node_q = BoolTerm::Ult(Box::new(t.clone()), Box::new(r.clone()));
+                let rewrite_q = BoolTerm::Ult(
+                    Box::new(crate::lowering::expand_bv(&t).expect("sorted")),
+                    Box::new(r.clone()),
+                );
+                let build = |q: &BoolTerm| {
+                    let mut bld = DagBuilder::new(true);
+                    bld.assert_root(&crate::canon::canonicalize_bool(&pre))
+                        .unwrap();
+                    bld.assert_root(&crate::canon::canonicalize_bool(q))
+                        .unwrap();
+                    let dag = bld.finish();
+                    let mut raw = aig_new();
+                    let (_, outs) = encode(&mut raw, &dag.nodes, &dag.bits, &dag.roots);
+                    (raw, outs)
+                };
+                let (raw_n, outs_n) = build(&node_q);
+                let (raw_r, outs_r) = build(&rewrite_q);
+                let gates = |g: &Aig| -> Vec<(usize, usize, bool, usize, bool)> {
+                    g.nodes
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, n)| match n {
+                            Node::And(x, y) => Some((i, x.node, x.neg, y.node, y.neg)),
+                            _ => None,
+                        })
+                        .collect()
+                };
+                if name == "bvnot" {
+                    // Gate-free node vs. a folding XOR: compare after
+                    // compaction (no hints: the fold alone).
+                    let (c_n, map_n) = compact(&raw_n, &no_hints(&raw_n));
+                    let (c_r, map_r) = compact(&raw_r, &no_hints(&raw_r));
+                    assert_eq!(gates(&c_n), gates(&c_r), "{name} w{w}: compacted gates");
+                    let on = map_word(&map_n, &outs_n);
+                    let or = map_word(&map_r, &outs_r);
+                    assert!(
+                        on.iter().zip(&or).all(|(x, y)| lit_eq(*x, *y)),
+                        "{name} w{w}: compacted roots"
+                    );
+                } else {
+                    assert_eq!(
+                        raw_n.nodes.len(),
+                        raw_r.nodes.len(),
+                        "{name} w{w}: raw arena size"
+                    );
+                    assert_eq!(gates(&raw_n), gates(&raw_r), "{name} w{w}: raw gates");
+                    assert!(
+                        outs_n.iter().zip(&outs_r).all(|(x, y)| lit_eq(*x, *y)),
+                        "{name} w{w}: raw roots"
+                    );
+                }
+            }
+        }
+    }
+
     /// Build two w-bit input words on the reference arena (`word_input`'s shape).
     fn model_inputs(aig: &mut Aig, w: usize) -> (Vec<Lit>, Vec<Lit>) {
         let mut a: Vec<Lit> = Vec::new();
