@@ -627,6 +627,13 @@ fn bool_bin_wf(ws: &[usize], a: usize, b: usize) -> bool {
     a < n && b < n && ws[a] == 1 && ws[b] == 1
 }
 
+/// One bitvector operand `a` of an earlier node, of positive width
+/// (`DagNodeWF`'s unary-word case: `BvNot`, `Neg`).
+fn un_wf(ws: &[usize], a: usize) -> bool {
+    let n = ws.len();
+    a < n && ws[a] > 0
+}
+
 /// One bitvector operand of positive width whose extension would not
 /// overflow `usize` (`ZeroExt` / `SignExt`).
 fn ext_wf(ws: &[usize], a: usize, by: usize) -> bool {
@@ -639,7 +646,9 @@ fn ext_wf(ws: &[usize], a: usize, by: usize) -> bool {
 /// constant table: the Lean `DagNodeWF` predicate (`lean/BlasterDag.lean`)
 /// plus "the node's width fits `usize`" (`Concat` and the extensions add
 /// widths; a sum past `usize::MAX` is rejected rather than wrapped).
-/// `dag_wf_spec` proves exactly that equivalence.
+/// `dag_wf_spec` proves exactly that equivalence. The five derived
+/// operators (phase 5) are word operators like the ones they used to be
+/// rewritten into.
 fn node_wf(ws: &[usize], nbits: usize, node: DagNode) -> bool {
     let n = ws.len();
     match node {
@@ -679,6 +688,11 @@ fn node_wf(ws: &[usize], nbits: usize, node: DagNode) -> bool {
         DagNode::Not(a) => a < n && ws[a] == 1,
         DagNode::BoolAnd(a, b) => bool_bin_wf(ws, a, b),
         DagNode::BoolOr(a, b) => bool_bin_wf(ws, a, b),
+        DagNode::BvNot(a) => un_wf(ws, a),
+        DagNode::Neg(a) => un_wf(ws, a),
+        DagNode::Rotl(a, b) => bin_wf(ws, a, b),
+        DagNode::Sdiv(a, b) => bin_wf(ws, a, b),
+        DagNode::Srem(a, b) => bin_wf(ws, a, b),
     }
 }
 
@@ -719,6 +733,11 @@ fn node_width(ws: &[usize], node: DagNode) -> usize {
         DagNode::Not(_) => 1,
         DagNode::BoolAnd(_, _) => 1,
         DagNode::BoolOr(_, _) => 1,
+        DagNode::BvNot(a) => ws[a],
+        DagNode::Neg(a) => ws[a],
+        DagNode::Rotl(a, _) => ws[a],
+        DagNode::Sdiv(a, _) => ws[a],
+        DagNode::Srem(a, _) => ws[a],
     }
 }
 
@@ -775,21 +794,26 @@ pub fn max_width(ws: &[usize]) -> usize {
     m
 }
 
-/// Is `1 + n * (25·w² + 20·w + 1) <= usize::MAX` — the arena capacity
+/// Is `1 + n * (70·w² + 70·w + 1) <= usize::MAX` — the arena capacity
 /// hypothesis of `encode_sound` (`gateBound`), for a DAG of `n` nodes whose
 /// widths are at most `w`? Computed without overflowing: every product is
-/// bounded by a division first (`x * y <= MAX` iff `x <= MAX / y`).
+/// bounded by a division first (`x * y <= MAX` iff `x <= MAX / y`). The
+/// budget was `25·w² + 20·w + 1` until phase 5; `bvrotl` at a
+/// non-power-of-two width (three remainders plus the barrel) needs
+/// `66·w² + 69·w + 3·w·stages`, so one node's budget is now `70·w² + 70·w +
+/// 1`. Nothing a solver produces comes near it (`w ≤ 128`, so `1.2·10^6`
+/// gates per node against `usize::MAX`).
 pub fn encode_fits(w: usize, n: usize) -> bool {
     let max = usize::MAX;
-    if w > max / 25 {
+    if w > max / 70 {
         return false;
     }
-    let w25 = 25 * w;
-    if w > 0 && w25 > max / w {
+    let w70 = 70 * w;
+    if w > 0 && w70 > max / w {
         return false;
     }
-    let sq = w25 * w;
-    let lin = 20 * w;
+    let sq = w70 * w;
+    let lin = 70 * w;
     if sq > max - lin {
         return false;
     }
@@ -1011,6 +1035,19 @@ mod tests {
             N::BoolAnd(7, 7),
         ];
         assert_eq!(dag_wf(&ns, 8), Ok(vec![8, 8, 8, 4, 12, 7, 13, 1, 8, 1]));
+        // #192 phase 5: the derived-op nodes are word operators like the
+        // ones they used to be rewritten into.
+        let ns = vec![
+            N::Var(12),
+            N::Var(12),
+            N::BvNot(0),
+            N::Neg(1),
+            N::Rotl(0, 1),
+            N::Sdiv(2, 3),
+            N::Srem(4, 5),
+            N::Eq(5, 6),
+        ];
+        assert_eq!(dag_wf(&ns, 0), Ok(vec![12, 12, 12, 12, 12, 12, 12, 1]));
         assert_eq!(roots_wf(&[8, 1, 1], &[1, 2]), Ok(()));
         assert_eq!(max_width(&[3, 9, 2]), 9);
         assert_eq!(max_width(&[]), 0);
@@ -1035,6 +1072,12 @@ mod tests {
         bad(vec![N::Var(8), N::Not(0)], 0, 1); // Not of a word
         bad(vec![N::Var(8), N::ZeroExt(0, usize::MAX)], 0, 1); // width overflow
         bad(vec![N::Var(usize::MAX), N::Concat(0, 0)], 0, 1); // width overflow
+        // #192 phase 5: the derived-op nodes under the same discipline.
+        bad(vec![N::Var(8), N::Neg(1)], 0, 1); // operand not earlier
+        bad(vec![N::Var(8), N::BvNot(2)], 0, 1); // operand not earlier
+        bad(vec![N::Var(8), N::Var(4), N::Sdiv(0, 1)], 0, 2); // widths disagree
+        bad(vec![N::Var(8), N::Var(4), N::Srem(1, 0)], 0, 2); // widths disagree
+        bad(vec![N::Var(8), N::Rotl(0, 1)], 0, 1); // amount not earlier
         assert_eq!(
             roots_wf(&[8, 1], &[1, 0]),
             Err(QueryError::BadRoot { root: 1 })
@@ -1047,13 +1090,16 @@ mod tests {
 
     #[test]
     fn check_query_capacity_checks_match_their_formulas() {
-        // gateBound(W) = 25 W² + 20 W + 1; 1 + n · gateBound(W) ≤ usize::MAX.
+        // gateBound(W) = 70 W² + 70 W + 1; 1 + n · gateBound(W) ≤ usize::MAX.
         assert!(encode_fits(0, 0));
         assert!(encode_fits(128, 1 << 20));
         assert!(encode_fits(0, usize::MAX - 1));
         assert!(!encode_fits(0, usize::MAX)); // 1 + MAX overflows
         assert!(!encode_fits(usize::MAX / 1000, 1));
         assert!(!encode_fits(1 << 16, usize::MAX / 1000));
+        // The exact edge: 1 + n · (70·w² + 70·w + 1) ≤ MAX at w = 1 (budget 141).
+        assert!(encode_fits(1, (usize::MAX - 1) / 141));
+        assert!(!encode_fits(1, (usize::MAX - 1) / 141 + 1));
         // 1 + 3 · nodes + outs < usize::MAX.
         assert!(tseitin_fits(0, 0));
         assert!(tseitin_fits((usize::MAX - 2) / 3, 0));

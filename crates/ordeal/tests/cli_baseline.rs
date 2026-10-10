@@ -408,6 +408,76 @@ fn format_json_with_query_carries_a_recheckable_query() {
     );
 }
 
+// rivet: verifies VER-064
+/// #192 phase 5: a `bvsdiv` query under `--with-query` carries the
+/// operation as its own `sdiv` node in an `ordeal-dag/v2` block that the
+/// trusted crate re-checks; without the flag the same query prints the
+/// v0.27.0 shape (no `query` key) — the default path still rewrites the
+/// op, so its certificate is the v0.27.0 one.
+#[test]
+fn format_json_with_query_carries_the_derived_op_as_a_node() {
+    use sha2::Digest;
+    // `(a sdiv 1) ≠ a` is UNSAT for every `a`, `INT_MIN` included
+    // (`INT_MIN sdiv 1 = INT_MIN`); `bvneg` and `bvnot` ride along.
+    let script = "(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n\
+         (assert (distinct (bvsdiv a #x01) (bvneg (bvnot (bvsub a #x01)))))\n(check-sat)\n";
+    let out = ordeal_stdin(&["check", "-", "--format", "json", "--with-query"], script);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(v["verdict"], "unsat");
+    let cert = &v["certificate"];
+    assert_eq!(cert["query"]["encoding"], ordeal::query::QUERY_ENCODING_V2);
+    let kinds: Vec<String> = cert["query"]["nodes"]
+        .as_array()
+        .expect("nodes")
+        .iter()
+        .map(|n| n[0].as_str().expect("op").to_string())
+        .collect();
+    for op in ["sdiv", "neg", "bvnot"] {
+        assert!(
+            kinds.iter().any(|k| k == op),
+            "node kind {op} missing from {kinds:?}"
+        );
+    }
+    assert!(
+        !kinds.iter().any(|k| k == "udiv" || k == "ashr"),
+        "the block carries the operation, not its rewrite: {kinds:?}"
+    );
+    let query = query_from_json(cert);
+    assert!(query.has_derived());
+    let cnf: Vec<Vec<i32>> = cert["clauses"]
+        .as_array()
+        .expect("clauses")
+        .iter()
+        .map(|c| {
+            c.as_array()
+                .expect("clause")
+                .iter()
+                .map(|l| l.as_i64().expect("lit") as i32)
+                .collect()
+        })
+        .collect();
+    let lrat = cert["lrat"].as_str().expect("lrat text");
+    let reencoded =
+        ordeal_lrat::check_query(&query.nodes, &query.bits, &query.roots, &query.hints, lrat)
+            .expect("the trusted crate re-encodes the derived nodes and accepts the proof");
+    assert_eq!(reencoded, cnf, "the printed CNF is the trusted re-encoding");
+    let expect = hex_of(&sha2::Sha256::digest(query.canonical_text().as_bytes()));
+    assert_eq!(
+        cert["query"]["sha256"], expect,
+        "query hash (v2 tag, independent SHA-256)"
+    );
+    // Without the flag: the default shape, no query block, same verdict.
+    let plain = ordeal_stdin(&["check", "-", "--format", "json"], script);
+    let p: serde_json::Value = serde_json::from_slice(&plain.stdout).expect("json");
+    assert_eq!(p["verdict"], "unsat");
+    assert!(p["certificate"].get("query").is_none());
+}
+
 // rivet: verifies VER-062
 /// Without `--with-query` the JSON is the v0.26.0 shape (no `query` key);
 /// `sat` output is identical with and without the flag; the flag needs

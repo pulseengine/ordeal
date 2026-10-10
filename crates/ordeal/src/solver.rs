@@ -186,6 +186,31 @@ pub enum OpKind {
     BoolNot,
     BoolAnd,
     BoolOr,
+    // The formerly derived ops (#192 phase 5).
+    Not,
+    Neg,
+    Rotl,
+    Sdiv,
+    Srem,
+}
+
+/// How the formerly derived ops (`bvnot`, `bvneg`, `bvrotl`, `bvsdiv`,
+/// `bvsrem`) reach the term DAG (#192 phase 5). Both settings lower through
+/// the same proven `encode` / `compact` / `tseitin`; they differ in whether
+/// the derived op is a node of its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DerivedOps {
+    /// Rewrite them into the closed core BEFORE canonicalization
+    /// (`lowering::expand_*`): the v0.27.0 lowering, so `check` /
+    /// `check_with_witness` emit byte-identical certificates. The rewrite
+    /// is an untrusted term rewrite; the DAG (and so a v1 certificate's
+    /// CNF) carries the rewritten query.
+    Rewrite,
+    /// Keep them as their own `DagNode`s, encoded by the proven composite
+    /// rules (`blast_kernel::blast_bvnot` … `blast_srem`), so the
+    /// `ordeal-cert/v2` query block carries the operation itself and the
+    /// trusted re-check covers it. `check_with_query`.
+    Nodes,
 }
 
 fn bv_op(term: &BvTerm) -> Option<OpKind> {
@@ -203,6 +228,11 @@ fn bv_op(term: &BvTerm) -> Option<OpKind> {
         BvTerm::Lshr(..) => OpKind::Lshr,
         BvTerm::Ashr(..) => OpKind::Ashr,
         BvTerm::Rotr(..) => OpKind::Rotr,
+        BvTerm::Not(..) => OpKind::Not,
+        BvTerm::Neg(..) => OpKind::Neg,
+        BvTerm::Rotl(..) => OpKind::Rotl,
+        BvTerm::Sdiv(..) => OpKind::Sdiv,
+        BvTerm::Srem(..) => OpKind::Srem,
         BvTerm::Extract { .. } => OpKind::Extract,
         BvTerm::Concat(..) => OpKind::Concat,
         BvTerm::ZeroExt { .. } => OpKind::ZeroExt,
@@ -229,10 +259,15 @@ fn bv_uses_disabled(term: &BvTerm) -> bool {
         | BvTerm::Lshr(a, b)
         | BvTerm::Ashr(a, b)
         | BvTerm::Rotr(a, b)
+        | BvTerm::Rotl(a, b)
+        | BvTerm::Sdiv(a, b)
+        | BvTerm::Srem(a, b)
         | BvTerm::Concat(a, b) => bv_uses_disabled(a) || bv_uses_disabled(b),
-        BvTerm::Extract { arg, .. } | BvTerm::ZeroExt { arg, .. } | BvTerm::SignExt { arg, .. } => {
-            bv_uses_disabled(arg)
-        }
+        BvTerm::Extract { arg, .. }
+        | BvTerm::ZeroExt { arg, .. }
+        | BvTerm::SignExt { arg, .. }
+        | BvTerm::Not(arg)
+        | BvTerm::Neg(arg) => bv_uses_disabled(arg),
         BvTerm::Ite { cond, then_, else_ } => {
             bool_uses_disabled(cond) || bv_uses_disabled(then_) || bv_uses_disabled(else_)
         }
@@ -642,7 +677,12 @@ impl Solver {
     /// Tseitin — shared by every backend. `None` means conservative Unknown
     /// (disabled ops or ill-sorted input; `validate()` diagnoses).
     fn lower(&self) -> Option<(Blaster, CnfFormula)> {
-        self.lower_with(AigOptions::default())
+        // The default path REWRITES the derived ops (#192 phase 5): switching
+        // this to `DerivedOps::Nodes` changes the emitted certificates of
+        // queries with `bvsdiv` / `bvsrem` operands that canonicalization
+        // reorders (docs/design/query-cnf-gap.md, phase 5) — the
+        // maintainer's call, deliberately not made here.
+        self.lower_with(AigOptions::default(), DerivedOps::Rewrite)
     }
 
     /// `lower` with explicit simplification settings. The production path
@@ -661,7 +701,11 @@ impl Solver {
     /// `lean/BlasterCapstone.lean` composes the three with
     /// `lrat_check_sound`: a certificate the checker accepts refutes the
     /// DAG, not only the CNF.
-    fn lower_with(&self, options: AigOptions) -> Option<(Blaster, CnfFormula)> {
+    fn lower_with(
+        &self,
+        options: AigOptions,
+        derived: DerivedOps,
+    ) -> Option<(Blaster, CnfFormula)> {
         if self.assertions.iter().any(bool_uses_disabled) {
             return None;
         }
@@ -671,12 +715,23 @@ impl Solver {
         }
         let mut builder = DagBuilder::new(options.strash);
         for a in &self.assertions {
+            // #192 phase 5: on the default path the formerly derived ops are
+            // rewritten into the core first (the v0.27.0 lowering, so the
+            // shipped bytes are unchanged); on the query-carrying path they
+            // stay nodes with proven rules. Untrusted either way.
+            let a = match derived {
+                DerivedOps::Rewrite => match crate::lowering::expand_bool(a) {
+                    Ok(t) => t,
+                    Err(_) => return None,
+                },
+                DerivedOps::Nodes => a.clone(),
+            };
             // Untrusted canonicalization above the AIG (issue #35 / TR-009):
             // commutative-operand ordering + const-folding so equal-but-
             // structurally-different terms share a node. Soundness is unaffected
             // — Unsat stays LRAT-checked, and the SAT model self-check
             // re-evaluates against the ORIGINAL assertions.
-            let a = crate::canon::canonicalize_bool(a);
+            let a = crate::canon::canonicalize_bool(&a);
             if builder.assert_root(&a).is_err() {
                 return None;
             }
@@ -776,7 +831,7 @@ impl Solver {
     /// the witness on every `sat`); `check` is untouched and pays nothing —
     /// the witness capture happens only when this entry is called.
     pub fn check_with_witness(&self) -> crate::witness::WitnessCheckResult {
-        self.solve_witness().0
+        self.solve_witness(DerivedOps::Rewrite).0
     }
 
     /// Decide and, on `Unsat`, return the certificate TOGETHER WITH THE
@@ -794,10 +849,19 @@ impl Solver {
     ///
     /// Opt-in: `check` / `check_with_witness` are untouched and pay
     /// nothing; this entry costs one extra lowering (the re-check).
+    ///
+    /// Since #192 phase 5 this is also the path on which the formerly
+    /// derived ops (`bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem`) are
+    /// lowered as their own DAG nodes through the proven composite rules
+    /// ([`DerivedOps::Nodes`]), so the query block carries the operation and
+    /// the trusted re-check covers it; `check` keeps the v0.27.0 rewrite so
+    /// its certificates are unchanged. For a query with `bvsdiv` / `bvsrem`
+    /// operands that canonicalization reorders inside the rewrite, the CNF
+    /// here therefore differs from `check`'s (same verdict, both certified).
     pub fn check_with_query(&self) -> crate::query::QueryCheckResult {
         use crate::query::{QueryCertificate, QueryCheckResult};
         use crate::witness::WitnessCheckResult;
-        match self.solve_witness() {
+        match self.solve_witness(DerivedOps::Nodes) {
             (WitnessCheckResult::Unsat(certificate), Some(query)) => {
                 let cert = QueryCertificate { certificate, query };
                 match cert.recheck() {
@@ -822,6 +886,7 @@ impl Solver {
     /// recomputed.
     fn solve_witness(
         &self,
+        derived: DerivedOps,
     ) -> (
         crate::witness::WitnessCheckResult,
         Option<crate::query::QueryDag>,
@@ -842,7 +907,7 @@ impl Solver {
                 None,
             );
         }
-        let Some((mut blaster, cnf)) = self.lower() else {
+        let Some((mut blaster, cnf)) = self.lower_with(AigOptions::default(), derived) else {
             return (WitnessCheckResult::Unknown, None);
         };
         // Moved out, not cloned: the default path pays no copy for it.
@@ -1048,13 +1113,18 @@ fn check_var_widths_bv<'t>(
         | BvTerm::Lshr(a, b)
         | BvTerm::Ashr(a, b)
         | BvTerm::Rotr(a, b)
+        | BvTerm::Rotl(a, b)
+        | BvTerm::Sdiv(a, b)
+        | BvTerm::Srem(a, b)
         | BvTerm::Concat(a, b) => {
             check_var_widths_bv(a, widths)?;
             check_var_widths_bv(b, widths)
         }
-        BvTerm::Extract { arg, .. } | BvTerm::ZeroExt { arg, .. } | BvTerm::SignExt { arg, .. } => {
-            check_var_widths_bv(arg, widths)
-        }
+        BvTerm::Extract { arg, .. }
+        | BvTerm::ZeroExt { arg, .. }
+        | BvTerm::SignExt { arg, .. }
+        | BvTerm::Not(arg)
+        | BvTerm::Neg(arg) => check_var_widths_bv(arg, widths),
         BvTerm::Ite { cond, then_, else_ } => {
             check_var_widths_bool(cond, widths)?;
             check_var_widths_bv(then_, widths)?;
@@ -1199,7 +1269,9 @@ mod cnf_gap_measurement {
         let mut sample = None;
         for _ in 0..runs {
             let t0 = Instant::now();
-            let lowered = s.lower_with(opts).expect("corpus query must lower");
+            let lowered = s
+                .lower_with(opts, DerivedOps::Rewrite)
+                .expect("corpus query must lower");
             times.push(t0.elapsed());
             sample = Some(Sample {
                 ands: lowered.0.num_ands() as u64,
@@ -1290,6 +1362,13 @@ mod cnf_gap_measurement {
     /// literal as little-endian `i32`, clause-terminated by a zero) of every
     /// query in a corpus, in corpus order — one line per corpus.
     fn digest(title: &str, corpus: &[Vec<BoolTerm>]) {
+        digest_with(title, corpus, DerivedOps::Rewrite);
+    }
+
+    /// `digest` under an explicit derived-op setting (#192 phase 5): the
+    /// `Nodes` line quantifies how the query-carrying path's CNF differs
+    /// from the default path's over a corpus.
+    fn digest_with(title: &str, corpus: &[Vec<BoolTerm>], derived: DerivedOps) {
         let mut bytes: Vec<u8> = Vec::new();
         let mut clauses = 0u64;
         for q in corpus {
@@ -1298,7 +1377,7 @@ mod cnf_gap_measurement {
                 s.assert(a.clone());
             }
             let (_, cnf) = s
-                .lower_with(AigOptions::default())
+                .lower_with(AigOptions::default(), derived)
                 .expect("corpus query must lower");
             bytes.extend_from_slice(&cnf.num_vars.to_le_bytes());
             for c in &cnf.clauses {
@@ -1327,6 +1406,14 @@ mod cnf_gap_measurement {
         println!("|---|---:|---:|---|");
         let latency: Vec<Vec<BoolTerm>> = latency_corpus().into_iter().map(|(_, q)| q).collect();
         digest("benches/latency.rs corpus", &latency);
+        // #192 phase 5: the same corpus with the derived ops as nodes (the
+        // `check_with_query` path) — `srem_vc_32` is the one query here
+        // with `bvsdiv` / `bvsrem`.
+        digest_with(
+            "benches/latency.rs corpus (derived ops as nodes)",
+            &latency,
+            DerivedOps::Nodes,
+        );
         let bmc: Vec<Vec<BoolTerm>> = [16usize, 32, 64]
             .iter()
             .map(|&k| crate::bmc_corpus::queue_overflow(k, k as u8))
@@ -1408,6 +1495,86 @@ mod tests {
     }
     fn b(t: BvTerm) -> Box<BvTerm> {
         Box::new(t)
+    }
+
+    /// The production CNF of `assertions` under a derived-op setting.
+    fn cnf_under(assertions: &[BoolTerm], derived: DerivedOps) -> CnfFormula {
+        let mut s = Solver::new();
+        for a in assertions {
+            s.assert(a.clone());
+        }
+        s.lower_with(AigOptions::default(), derived)
+            .expect("lowers")
+            .1
+    }
+
+    // rivet: verifies VER-064
+    /// #192 phase 5: with the operand variables created before the derived
+    /// op and a non-commutative parent, the query-carrying path (derived
+    /// ops as nodes, proven composite rules) produces the SAME production
+    /// CNF as the default path (the v0.27.0 rewrite) — for every derived
+    /// op, a constant and a variable rotate amount, at power-of-two and
+    /// other widths. This is the gate-identity claim of the design (the
+    /// composite rule IS the rewrite's gates); the two ways the paths CAN
+    /// differ — canon reordering a commutative parent or operand by the
+    /// nodes' `Debug` names (`Not(` sorts before `Var`, its rewrite `Xor(`
+    /// after), and a variable first created inside the second operand —
+    /// are the parent's and the builder's, not the rule's;
+    /// `derived_nodes_can_renumber_the_cnf` pins one of them.
+    #[test]
+    fn derived_nodes_lower_to_the_rewrite_cnf_when_operands_come_first() {
+        for &w in &[5u32, 8, 12, 32] {
+            let (a, bb, r) = (var("a", w), var("b", w), var("r", w));
+            let ops: Vec<(&str, BvTerm)> = vec![
+                ("bvnot", BvTerm::Not(b(a.clone()))),
+                ("bvneg", BvTerm::Neg(b(a.clone()))),
+                ("bvrotl const", BvTerm::Rotl(b(a.clone()), b(c(3, w)))),
+                ("bvrotl var", BvTerm::Rotl(b(a.clone()), b(bb.clone()))),
+                ("bvsdiv", BvTerm::Sdiv(b(a.clone()), b(bb.clone()))),
+                ("bvsrem", BvTerm::Srem(b(a.clone()), b(bb.clone()))),
+            ];
+            for (name, t) in ops {
+                let q = vec![
+                    BoolTerm::Ult(b(a.clone()), b(bb.clone())),
+                    BoolTerm::Ult(b(t), b(r.clone())),
+                ];
+                let rewrite = cnf_under(&q, DerivedOps::Rewrite);
+                let nodes = cnf_under(&q, DerivedOps::Nodes);
+                assert_eq!(rewrite.num_vars, nodes.num_vars, "{name} w{w}: num_vars");
+                assert_eq!(rewrite.clauses, nodes.clauses, "{name} w{w}: clauses");
+            }
+        }
+    }
+
+    // rivet: verifies VER-064
+    /// The documented difference (#192 phase 5, the reason the default path
+    /// keeps the rewrite): when a variable's FIRST occurrence is inside a
+    /// derived op's second operand, the rewrite creates its primary inputs
+    /// in the middle of the rewritten tree while the node creates them
+    /// before its gates, so the arena — and the CNF's variable numbering —
+    /// differ (same clause count, same verdict, both certified; this is the
+    /// `srem_vc_32` digest difference in docs/design/query-cnf-gap.md).
+    #[test]
+    fn derived_nodes_can_renumber_the_cnf() {
+        let (a, bb) = (var("a", 32), var("b", 32));
+        let ours = BvTerm::Srem(b(a.clone()), b(bb.clone()));
+        let q = BvTerm::Sdiv(b(a.clone()), b(bb.clone()));
+        let theirs = BvTerm::Sub(b(a), b(BvTerm::Mul(b(q), b(bb))));
+        let query = vec![BoolTerm::Ne(b(ours), b(theirs))];
+        let rewrite = cnf_under(&query, DerivedOps::Rewrite);
+        let nodes = cnf_under(&query, DerivedOps::Nodes);
+        assert_eq!(rewrite.num_vars, nodes.num_vars, "same arena size");
+        assert_eq!(
+            rewrite.clauses.len(),
+            nodes.clauses.len(),
+            "same clause count"
+        );
+        assert_ne!(
+            rewrite.clauses, nodes.clauses,
+            "the two paths number the variables differently here; if this \
+             stops holding, the default path can switch to DerivedOps::Nodes \
+             without changing emitted certificates — update the design doc"
+        );
     }
 
     /// fuzz-found (#139): two `Var`s sharing a name at different widths are

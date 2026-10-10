@@ -139,8 +139,10 @@ The same program, runnable:
 
 A deliberately closed fragment of QF_BV, bit-widths 1 to 128 (SMT-LIB names):
 
-- arithmetic: `bvadd bvsub bvmul bvudiv bvurem`, plus `bvneg bvsdiv bvsrem`
-  (lowered into the core ops)
+- arithmetic: `bvadd bvsub bvmul bvudiv bvurem bvneg bvsdiv bvsrem`
+  (`bvneg bvsdiv bvsrem` with proven composite rules since v0.28.0;
+  `ordeal check` still lowers them through the older core rewrite by
+  default, `--with-query` through the proven rules)
 - bitwise: `bvand bvor bvxor bvnot`
 - shifts and rotation: `bvshl bvlshr bvashr rotate_right rotate_left`
 - structure: `extract concat zero_extend sign_extend ite`
@@ -185,10 +187,12 @@ can carry the term DAG (`ordeal-cert/v2`, `Solver::check_with_query`,
 `ordeal check --with-query`): `ordeal_lrat::check_query` re-encodes the
 DAG itself and checks the proof against the CNF it produced
 (`check_query_sound`, no side conditions), so a consumer re-checking a v2
-bundle certifies the query, not a CNF it has to take on faith. Everything
-above the DAG — building the DAG from the terms, rewriting, the derived
-ops, the front ends — is defended by tests and by a differential against
-Z3, not by proof.
+bundle certifies the query, not a CNF it has to take on faith. Since
+phase 5 (v0.28.0) the five formerly derived ops (`bvnot bvneg bvrotl
+bvsdiv bvsrem`) are DAG nodes with proven rules, so a v2 bundle carries
+the operation rather than its rewrite. Everything above the DAG —
+building the DAG from the terms, rewriting, the front ends — is defended
+by tests and by a differential against Z3, not by proof.
 Closing that gap is tracked in [#192](https://github.com/pulseengine/ordeal/issues/192).
 Details and exact scope: [docs/formal-verification.md](docs/formal-verification.md).
 

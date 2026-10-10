@@ -220,7 +220,11 @@ carries is unsatisfiable** — under the DAG semantics `dagSim`
 (`lean/BlasterDag.lean`, defined directly over Lean `BitVec`: variables
 read their bits off the input assignment in node order, constants off the
 constant table, every operator by its `BitVec` meaning incl. SMT-LIB's
-division by zero). The hints are untrusted by design (`compact_sound`
+division by zero; since #192 phase 5 the five formerly derived operators
+`BvNot`, `Neg`, `Rotl`, `Sdiv`, `Srem` are node kinds of their own, with
+the meanings `~~~`, `-`, `rotateLeft (· % w)`, `smtSDiv`, `srem` and the
+proven composite rules of `lean/BlasterDerived.lean`; `gateBound W` is
+`70·W² + 70·W + 1` since then). The hints are untrusted by design (`compact_sound`
 holds for any hints) and the CNF the bundle also carries for v1 readers
 is checked equal to the re-encoding on the untrusted side
 (`QueryRecheckError::CnfMismatch`) — not part of the theorem, which does
@@ -299,10 +303,18 @@ not depend on the `Ok` payload.
   changes the question asked, as the old term walk could, but the DAG it
   produced is now in the certificate, where a consumer can audit it;
   canon (`canon.rs`, including constant folding via `eval.rs`); the
-  **lowering of the derived ops** (`lowering.rs`: `bvnot`, `bvneg`,
-  `bvrotl`, `bvsdiv`, `bvsrem`, … are rewritten into the closed core
-  *before* the DAG is built — they are not DAG constructs, so a v2 bundle
-  carries the rewritten query; making them proven `DagNode`s is phase 5);
+  **rewrite of the derived ops on the default path** (`lowering.rs`:
+  `Solver::check` still rewrites `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`,
+  `bvsrem` into the closed core *before* the DAG is built, so a v1
+  certificate from `check` carries the rewritten query — since #192
+  phase 5 / TR-064 the five are `DagNode` constructs with **proven**
+  composite rules, `lean/BlasterDerived.lean`'s `blast_bvnot_bitvec`,
+  `blast_neg_bitvec`, `blast_rotl_bitvec`, `blast_sdiv_bitvec`,
+  `blast_srem_bitvec` against `~~~A`, `-A`, `A.rotateLeft (B.toNat % w)`,
+  `A.smtSDiv B`, `A.srem B`, and `Solver::check_with_query` lowers them as
+  such, so the v2 certificate carries the operation and the re-check
+  covers it; the default path keeps the rewrite so its bytes are
+  unchanged, a decision recorded in `docs/design/query-cnf-gap.md`);
   the sliver (`sliver.rs`); the SMT-LIB and Verus front ends.
   `dag::strash_hints` is untrusted by design: it only reproduces the
   sharing decisions of the old `Aig::and` strash so the shipped CNF stays

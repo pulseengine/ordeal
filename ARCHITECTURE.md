@@ -255,7 +255,7 @@ solver.
 | `crates/ordeal/src/sliver.rs` | The array/UF sliver (symbolic-index read-over-write + Ackermannization). |
 | `crates/ordeal/src/trap.rs` | WASM trap conditions as QF_BV predicates; trap-preservation VCs. |
 | `crates/ordeal/src/layout.rs` | Little-endian byte split/reassembly for layout-equivalence queries. |
-| `crates/ordeal/src/lowering.rs` | Derived-op lowering helpers. |
+| `crates/ordeal/src/lowering.rs` | The formerly derived ops (`bvnot bvneg bvrotl bvsdiv bvsrem`): constructors of the `BvTerm` variants (proven DAG constructs since #192 phase 5) and the core-fragment rewrite `expand_*` the default `check` path still applies first (byte-identical certificates); `check_with_query` lowers them as nodes. |
 | `crates/ordeal/src/smtlib.rs` | Minimal SMT-LIB2 QF_BV front end (the `check` subcommand). |
 | `crates/ordeal/src/verus.rs` | Verus `by (bit_vector)` obligation extraction (the `verus` subcommand). |
 | `crates/ordeal/src/cert_bundle.rs` | `ordeal-cert/v1` bundle serialization (`cert-bundle` feature). |

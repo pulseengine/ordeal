@@ -186,8 +186,19 @@ theorem compact_sound (aig : Aig) (hints : Slice Std.Usize) (L : Nat)
   accepted `check_steps` run ⟹ `∀ inp, ¬ (∀ k, dagBool inp bits ns roots[k]
   = true)`. The full statement is in `docs/formal-verification.md`. The
   solver runs exactly this composition (`solver.rs::lower_with`); what
-  stays unproven above it is the DAG builder (`dag.rs`), canon, lowering,
-  the sliver and the front ends.
+  stays unproven above it is the DAG builder (`dag.rs`), canon, the
+  default path's rewrite of the derived ops, the sliver and the front ends.
+- `BlasterDerived.lean` (issue #192 phase 5 / v0.28.0) — the five
+  formerly derived operations as proven composite rules, each against the
+  Lean `BitVec` operation SMT-LIB names: `blast_bvnot_bitvec` (`~~~A`),
+  `blast_neg_bitvec` (`-A`), `blast_rotl_bitvec` (`A.rotateLeft (B.toNat
+  % w)`, every width — `rotateRight_neg_eq_rotateLeft` is the power-of-two
+  identity, false elsewhere), `blast_sdiv_bitvec` (`A.smtSDiv B`:
+  `sshiftRight_last`, `xor_sub_signMask`, `sdiv_construction`) and
+  `blast_srem_bitvec` (`A.srem B`: `srem_eq_sub_smtSDiv_mul`), with
+  frames; also the home of the harvesting infrastructure (`harvest`,
+  `bin_pure_of_sim`, `sim_of_pure`, `WordFrame`) BlasterDag builds on.
+  `encode_node_spec` has 37 arms since; `gateBound` is `70·W² + 70·W + 1`.
 
 ## The SAT-witness checker (TR-038 → TR-044 / VER-039)
 

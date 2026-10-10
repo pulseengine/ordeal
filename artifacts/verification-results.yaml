@@ -2669,3 +2669,28 @@ artifacts:
         target: VER-063
       - type: part-of-execution
         target: VE-053
+
+  - id: VE-054
+    type: verification-execution
+    title: "#192 phase 5 verified (VER-064)"
+    status: implemented
+    description: "Model regenerated (lean/regen.sh all): Kernel.lean 0 axioms with the five new rules (blast_bvnot, blast_neg, blast_rotl, sign_mask, abs_word, blast_sdiv, blast_srem), the five DagNode constructors and the kernel's un_wf / node_wf / node_width / encode_fits (70·w² + 70·w + 1). lake build: Build completed successfully (1726 jobs); 0 'declaration uses sorry' outside the Aeneas library; scripts/axiom_check.sh passes with blast_bvnot_bitvec, blast_neg_bitvec, blast_rotl_bitvec, blast_sdiv_bitvec, blast_srem_bitvec pinned to propext / Classical.choice / Quot.sound next to every earlier capstone (encode_sound, compact_sound, dag_refuted, dag_wf_spec, check_query_sound, check_query_refutes_cnf re-established over the larger DAG language, statements unchanged). Negative controls (one-line mutations, model regenerated, proof must fail, source restored byte-for-byte and rebuilt clean): see the phase-5 table in docs/design/query-cnf-gap.md (blast_sdiv result sign from sign_mask(a) twice; blast_rotl power-of-two branch rotating by b; blast_neg subtracting the zero word from a; node_wf's Sdiv arm through bool_bin_wf). cargo test --workspace: 224 + 13 + 2 + 28 passed / 0 failed / 3 ignored in debug and release; --features cert-bundle: 241 passed; nextest (ci profile, cert-bundle): 284 passed / 3 skipped, junit_to_rivet mapped 103 results; clippy default and --features oracle,cert-bundle clean; fmt clean; Z3 differential (oracle:: + lowering_diff::, release, LIBRARY_PATH=/opt/homebrew/lib): 21 passed incl. derived_ops_differential_through_check_with_query at widths 3, 5, 8, 12, 24, 32, 64 (symbolic op(a,b) = r, and the edge constants 0, 1, all-ones, INT_MIN, INT_MAX, 2, w, w+1 both negated-UNSAT and SAT, no Unknown); derived_rules_match_the_evaluator exhaustive at widths 1..=6 and sampled to 128; derived_rules_are_the_rewrite at widths 1, 5, 8, 12, 32; rewrite_equals_the_proven_rule_with_a_trusted_recheck at widths 8/32 (64 for not/neg/rotl); bundle negative control: sdiv → udiv (hash recomputed, CNF and proof untouched) fails QueryBundle::recheck while the v1 pair still re-checks; a v1-tagged block carrying a derived node is refused; the shipped v1 bundles under evidence/certs re-check unchanged; kani_tiers.sh check PASS (82 harnesses); wasm32-wasip2 release build succeeds; check_exact_lrat_pin PASS; ordeal-lrat declares no dependencies (cargo tree shows the crate alone). ordeal check --format json on 24 queries (differential fixtures, evidence/certs, fuzz seeds): byte-identical (stdout, stderr, exit code) between the v0.27.0 release binary built from 97d314f (origin/main) and the branch binary, in JSON and text mode (48/48); cnf_gap_digest: the four corpus digests unchanged (78aaa670…, 5c14a69e…, a1d80de9…, 42d44115…); with derived ops as nodes the latency corpus digests to 7b35d569… (same 112352 clauses; srem_vc_32 renumbered — the documented difference that keeps the default path on the rewrite)."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2; branch proof/192-phase5 on 97d314f (v0.27.0)"
+      executor: local
+      timestamp: 2026-10-10T06:13:33Z
+      version: 97d314f+phase5
+
+  - id: VV-111
+    type: verification-verdict
+    title: VER-064 pass — the derived ops are proven DAG constructs; the v2 block carries the operation; default output unchanged
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-054
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-064
+      - type: part-of-execution
+        target: VE-054

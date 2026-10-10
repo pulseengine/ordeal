@@ -8,9 +8,11 @@
 //!
 //! # The fragment (QF_BV, widths 8 / 32 / 64)
 //!
-//! - **Bitvector ops:** `bvadd`, `bvsub`, `bvmul`, `bvudiv`, `bvand`, `bvor`,
-//!   `bvxor`, `bvshl`, `bvlshr`, `bvashr`, `bvrotr`, `extract{hi,lo}`,
-//!   `concat`, `zero_ext{by}`, `sign_ext{by}`.
+//! - **Bitvector ops:** `bvadd`, `bvsub`, `bvmul`, `bvudiv`, `bvurem`, `bvand`,
+//!   `bvor`, `bvxor`, `bvshl`, `bvlshr`, `bvashr`, `bvrotr`, `extract{hi,lo}`,
+//!   `concat`, `zero_ext{by}`, `sign_ext{by}`, `ite`; and, since #192 phase 5,
+//!   the five formerly derived ops as constructs of their own, each with a
+//!   proven rule: `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem`.
 //! - **Boolean predicates** (what you assert / check): `eq`, `ne`, `ult`,
 //!   `ule`, `ugt`, `uge`, `slt`, `sle`, `sgt`, `sge`, plus `not` / `and` /
 //!   `or` over booleans.
@@ -130,6 +132,36 @@ pub enum BvTerm {
         /// Value when `cond` does not hold.
         else_: Box<BvTerm>,
     },
+
+    // --- The formerly derived ops (issue #192 phase 5) ---
+    //
+    // Until v0.27.0 these five were REWRITTEN into the core above by
+    // `crate::lowering` before the term DAG was built, so a certificate
+    // carried the rewrite and the rewrite itself was trusted. Each is now a
+    // `blast_kernel::DagNode` of its own whose rule — the rewrite spelled
+    // as a composition of the proven rules — is proven against the Lean
+    // `BitVec` operation SMT-LIB names (`lean/BlasterDerived.lean`:
+    // `blast_bvnot_bitvec`, `blast_neg_bitvec`, `blast_rotl_bitvec`,
+    // `blast_sdiv_bitvec`, `blast_srem_bitvec`), which is what admits them
+    // to the closed fragment. `Solver::check_with_query` lowers them as
+    // nodes (the `ordeal-cert/v2` query block then carries the operation);
+    // the default `Solver::check` still applies the rewrite first
+    // (`lowering::expand_*`), so its certificates are byte-identical to
+    // v0.27.0's — see `docs/design/query-cnf-gap.md`, phase 5.
+    /// Bitwise NOT (`bvnot`).
+    Not(Box<BvTerm>),
+    /// Two's-complement negation (`bvneg`).
+    Neg(Box<BvTerm>),
+    /// Rotate left by a term amount, reduced mod the width (`bvrotl`;
+    /// SMT-LIB's indexed `rotate_left k` is this with a constant amount).
+    Rotl(Box<BvTerm>, Box<BvTerm>),
+    /// Signed division (`bvsdiv`), SMT-LIB semantics: `a sdiv 0` is `-1`
+    /// for `a >= 0` and `1` for `a < 0`; `INT_MIN sdiv -1` wraps to
+    /// `INT_MIN`.
+    Sdiv(Box<BvTerm>, Box<BvTerm>),
+    /// Signed remainder, sign of the dividend (`bvsrem`), SMT-LIB
+    /// semantics: `a srem 0` is `a`; `INT_MIN srem -1` is `0`.
+    Srem(Box<BvTerm>, Box<BvTerm>),
     // --- loom's sliver (implemented in `sliver.rs`, NOT here) ---
     //
     // Non-extensional Array(BV32 -> BV8) select/store (concrete and symbolic

@@ -902,10 +902,15 @@ pub fn eval_const(t: &ExtBvTerm) -> Option<u128> {
             | B::Lshr(a, b)
             | B::Ashr(a, b)
             | B::Rotr(a, b)
+            | B::Rotl(a, b)
+            | B::Sdiv(a, b)
+            | B::Srem(a, b)
             | B::Concat(a, b) => ground_core(a) && ground_core(b),
-            B::Extract { arg, .. } | B::ZeroExt { arg, .. } | B::SignExt { arg, .. } => {
-                ground_core(arg)
-            }
+            B::Extract { arg, .. }
+            | B::ZeroExt { arg, .. }
+            | B::SignExt { arg, .. }
+            | B::Not(arg)
+            | B::Neg(arg) => ground_core(arg),
             B::Ite { cond, then_, else_ } => {
                 ground_bool_core(cond) && ground_core(then_) && ground_core(else_)
             }

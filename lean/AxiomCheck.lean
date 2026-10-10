@@ -26,6 +26,7 @@ import BlasterRotr
 import BlasterTseitin
 import BlasterFrame
 import BlasterCompact
+import BlasterDerived
 import BlasterDag
 import BlasterCapstone
 import QueryCheck
@@ -97,6 +98,31 @@ import QueryCheck
 /-- info: 'kernel.blast_kernel.spec.tseitin_refutes_outputs' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms kernel.blast_kernel.spec.tseitin_refutes_outputs
+
+-- The derived operations as proven rules (BlasterDerived.lean, issue #192
+-- phase 5 / v0.28.0): `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem` were
+-- untrusted term rewrites until phase 5; each is now a `DagNode` whose
+-- composite rule is proven against the Lean `BitVec` operation SMT-LIB
+-- names (`~~~`, `-`, `rotateLeft`, `smtSDiv`, `srem`), at every width.
+/-- info: 'kernel.blast_kernel.spec.blast_bvnot_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.blast_kernel.spec.blast_bvnot_bitvec
+
+/-- info: 'kernel.blast_kernel.spec.blast_neg_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.blast_kernel.spec.blast_neg_bitvec
+
+/-- info: 'kernel.blast_kernel.spec.blast_rotl_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.blast_kernel.spec.blast_rotl_bitvec
+
+/-- info: 'kernel.blast_kernel.spec.blast_sdiv_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.blast_kernel.spec.blast_sdiv_bitvec
+
+/-- info: 'kernel.blast_kernel.spec.blast_srem_bitvec' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.blast_kernel.spec.blast_srem_bitvec
 
 -- The term-DAG encoder, the folding + hashing pass and their composition
 -- with the checker (issue #192 phase 3 / v0.26.0): `encode_sound`

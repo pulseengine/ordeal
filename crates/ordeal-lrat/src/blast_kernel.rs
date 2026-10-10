@@ -767,6 +767,101 @@ pub fn blast_urem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
     blast_sub(aig, a, &prod)
 }
 
+// ─────────── The derived ops as proven rules (issue #192 phase 5) ───────────
+//
+// Until phase 5 `bvnot`, `bvneg`, `bvrotl`, `bvsdiv` and `bvsrem` were
+// rewritten into the closed core by the solver's `lowering.rs` BEFORE the
+// DAG was built, so a certificate carried the rewrite, not the operation.
+// Each is now a `DagNode` whose rule below is that rewrite spelled as a
+// composition of the proven rules above — the same gates, in the order the
+// rewrite's DAG post-order emitted them — and each rule has its own
+// `_bitvec` theorem against the Lean `BitVec` operation the SMT-LIB
+// standard names (`lean/BlasterDerived.lean`): `~~~A`, `-A`,
+// `A.rotateLeft (B.toNat % w)`, `A.smtSDiv B` (division by zero and
+// `INT_MIN / -1` included) and `A.srem B`.
+
+/// `bvnot` — every literal complemented. No gates: the former rewrite
+/// `bvxor x 1..1` has an XOR with a constant literal per bit, and every one
+/// of those folds in `compact`, so a `BvNot` node compacts to this very
+/// word. `blast_bvnot_bitvec`: the output denotes `~~~A`.
+pub fn blast_bvnot(a: &[Lit]) -> Vec<Lit> {
+    word_not(a)
+}
+
+/// `bvneg` — two's-complement negation as the former rewrite `0 - x`:
+/// `blast_sub` of the zero word and `a`, gate for gate. `blast_neg_bitvec`:
+/// the output denotes `-A`.
+pub fn blast_neg(aig: &mut Aig, a: &[Lit]) -> Vec<Lit> {
+    let zero = word_const(0, a.len());
+    blast_sub(aig, &zero, a)
+}
+
+/// `bvrotl` — rotate left by amount mod width, at every width `w >= 1`,
+/// as the former rewrite spelled it: at a power-of-two width rotating left
+/// by `b` is rotating right by `0 - b` (`2^w ≡ 0 (mod w)`); at any other
+/// width that identity fails (0.22.1), so the amount is `(w - b urem w)
+/// urem w`, computed explicitly. `blast_rotl_bitvec`: the output denotes
+/// `A.rotateLeft (B.toNat % w)`.
+pub fn blast_rotl(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let w = a.len();
+    let (_stages, pow2) = stage_count(w);
+    let amount = if pow2 {
+        let zero = word_const(0, w);
+        blast_sub(aig, &zero, b)
+    } else {
+        let modulus = word_const(w, w);
+        let reduced = blast_urem(aig, b, &modulus);
+        let diff = blast_sub(aig, &modulus, &reduced);
+        blast_urem(aig, &diff, &modulus)
+    };
+    blast_rotr(aig, a, &amount)
+}
+
+/// The arithmetic sign mask of a word: `ashr(a, w - 1)`, all-ones when the
+/// sign bit is set and all-zeros otherwise (`sign_mask_bitvec`).
+pub fn sign_mask(aig: &mut Aig, a: &[Lit]) -> Vec<Lit> {
+    let shift = word_const(a.len() - 1, a.len());
+    blast_ashr(aig, a, &shift)
+}
+
+/// Two's-complement magnitude of `a` given its sign mask `s`: `(s ^ a) - s`
+/// — `a` when the mask is zero, `~a + 1 = -a` when it is all-ones
+/// (`abs_word_bitvec`). `|INT_MIN|` wraps back to `INT_MIN`, exactly as
+/// SMT-LIB's `bvsdiv` construction needs.
+pub fn abs_word(aig: &mut Aig, a: &[Lit], s: &[Lit]) -> Vec<Lit> {
+    let x = blast_xor(aig, s, a);
+    blast_sub(aig, &x, s)
+}
+
+/// `bvsdiv` — the SMT-LIB sign-mask construction over `bvudiv`, as the
+/// former rewrite spelled it: `q = |a| udiv |b|`, then
+/// `(q ^ (sa ^ sb)) - (sa ^ sb)` negates the quotient iff the signs differ.
+/// Division by zero (`|a| udiv 0` is all-ones: `-1` for `a >= 0`, `1` for
+/// `a < 0`) and `INT_MIN / -1` (`|INT_MIN| = INT_MIN`, result sign `+`)
+/// follow SMT-LIB. `blast_sdiv_bitvec`: the output denotes `A.smtSDiv B`.
+pub fn blast_sdiv(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let sa = sign_mask(aig, a);
+    let abs_a = abs_word(aig, a, &sa);
+    let sb = sign_mask(aig, b);
+    let abs_b = abs_word(aig, b, &sb);
+    let q = blast_udiv(aig, &abs_a, &abs_b);
+    let rs = blast_xor(aig, &sa, &sb);
+    let xq = blast_xor(aig, &q, &rs);
+    blast_sub(aig, &xq, &rs)
+}
+
+/// `bvsrem` — MULTIPLICATIVE on purpose, as the former rewrite (issue #97:
+/// consumers' `rem_s` value models are `a - (a sdiv b) * b`, and an
+/// equivalence VC against this rule must strash against them): `a -
+/// (a sdiv b) * b`. Exact including `b = 0` (`(a sdiv 0) * 0 = 0`) and
+/// `INT_MIN % -1` (`INT_MIN * -1 = INT_MIN`, so the result is `0`).
+/// `blast_srem_bitvec`: the output denotes `A.srem B`.
+pub fn blast_srem(aig: &mut Aig, a: &[Lit], b: &[Lit]) -> Vec<Lit> {
+    let q = blast_sdiv(aig, a, b);
+    let prod = blast_mul(aig, &q, b);
+    blast_sub(aig, a, &prod)
+}
+
 /// The DIMACS literal of an AIG literal, mirroring `cnf::TseitinMap::cnf_lit`:
 /// CNF variable `node + 1` (DIMACS has no variable 0), negative when the
 /// literal is complemented. The `as i32` cast is modelled by Aeneas
@@ -844,9 +939,12 @@ pub fn tseitin(aig: &Aig, outputs: &[Lit]) -> Vec<Vec<i32>> {
 /// constant table `encode` is given (a table, not a payload, so the node
 /// stays `Copy` — the Aeneas fragment, as `Node`). `Extract(hi, lo, a)`,
 /// `ZeroExt(a, by)` / `SignExt(a, by)` carry their parameters; `Ite(c, t,
-/// e)` takes a boolean node `c`. `lean/BlasterDag.lean` defines the
-/// semantics directly over Lean `BitVec` (`dagSim`) and proves
-/// `encode_sound`: every node's word denotes its value.
+/// e)` takes a boolean node `c`. Since phase 5 the five derived operations
+/// (`BvNot`, `Neg`, `Rotl`, `Sdiv`, `Srem`) are nodes of their own, each
+/// with a proven rule, so a certificate carries the operation and not its
+/// rewrite. `lean/BlasterDag.lean` defines the semantics directly over
+/// Lean `BitVec` (`dagSim`) and proves `encode_sound`: every node's word
+/// denotes its value.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum DagNode {
     /// A fresh `w`-bit variable (the next `w` primary inputs).
@@ -913,6 +1011,16 @@ pub enum DagNode {
     BoolAnd(usize, usize),
     /// Boolean `or`.
     BoolOr(usize, usize),
+    /// `bvnot` (issue #192 phase 5; the boolean `not` is [`DagNode::Not`]).
+    BvNot(usize),
+    /// `bvneg` (phase 5).
+    Neg(usize),
+    /// `bvrotl` — rotate left by a word amount, mod width (phase 5).
+    Rotl(usize, usize),
+    /// `bvsdiv` — SMT-LIB signed division (phase 5).
+    Sdiv(usize, usize),
+    /// `bvsrem` — SMT-LIB signed remainder, sign of the dividend (phase 5).
+    Srem(usize, usize),
 }
 
 /// `w` fresh primary inputs numbered `first .. first + w`, as a word.
@@ -955,7 +1063,8 @@ pub fn lit_word(l: Lit) -> Vec<Lit> {
 /// is node `i`'s) and the next free primary-input number `nin`; returns
 /// the node's word and the updated input counter. Every arm is a call to
 /// the proven rule for that operator — this function adds no gate of its
-/// own beyond `push_and` / `push_or` for the boolean connectives.
+/// own beyond `push_and` / `push_or` for the boolean connectives. The five
+/// derived operators (phase 5) call their composite rules above.
 pub fn encode_node(
     aig: &mut Aig,
     words: &[Vec<Lit>],
@@ -999,6 +1108,11 @@ pub fn encode_node(
         DagNode::Not(a) => (lit_word(lit_not(words[a][0])), nin),
         DagNode::BoolAnd(a, b) => (lit_word(push_and(aig, words[a][0], words[b][0])), nin),
         DagNode::BoolOr(a, b) => (lit_word(push_or(aig, words[a][0], words[b][0])), nin),
+        DagNode::BvNot(a) => (blast_bvnot(&words[a]), nin),
+        DagNode::Neg(a) => (blast_neg(aig, &words[a]), nin),
+        DagNode::Rotl(a, b) => (blast_rotl(aig, &words[a], &words[b]), nin),
+        DagNode::Sdiv(a, b) => (blast_sdiv(aig, &words[a], &words[b]), nin),
+        DagNode::Srem(a, b) => (blast_srem(aig, &words[a], &words[b]), nin),
     }
 }
 

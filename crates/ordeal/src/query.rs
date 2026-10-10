@@ -31,10 +31,26 @@ use crate::sha256::sha256_hex;
 use crate::solver::Certificate;
 use crate::witness::SatCertificate;
 
-/// The `query.encoding` value: a `DagNode` list (`[op, args…]` per node,
-/// operands as indices of earlier nodes), a `0`/`1` constant table, root
-/// indices and compaction hints. Readers reject any other encoding.
+/// The `query.encoding` value of a DAG over the phase-3 node kinds: a
+/// `DagNode` list (`[op, args…]` per node, operands as indices of earlier
+/// nodes), a `0`/`1` constant table, root indices and compaction hints.
+/// Since #192 phase 5 a DAG that uses one of the five derived-op node kinds
+/// (`bvnot`, `neg`, `rotl`, `sdiv`, `srem`) is tagged [`QUERY_ENCODING_V2`]
+/// instead, so a v0.27.0 reader refuses it rather than misreading it; a DAG
+/// without them keeps this tag, and v0.27.0 readers keep reading it.
+/// [`QueryDag::encoding`] picks the tag; readers accept both and reject any
+/// other.
 pub const QUERY_ENCODING: &str = "ordeal-dag/v1";
+
+/// The `query.encoding` value of a DAG that uses a derived-op node kind
+/// (`ordeal-dag/v1` plus `bvnot`, `neg`, `rotl`, `sdiv`, `srem`; #192
+/// phase 5). Readers from v0.28.0 on.
+pub const QUERY_ENCODING_V2: &str = "ordeal-dag/v2";
+
+/// Is `encoding` one this reader decodes?
+pub fn encoding_supported(encoding: &str) -> bool {
+    encoding == QUERY_ENCODING || encoding == QUERY_ENCODING_V2
+}
 
 /// The lowered query: exactly the inputs the proven lowering (and the
 /// trusted re-check) consumes.
@@ -107,7 +123,22 @@ pub fn node_op(node: &k::DagNode) -> (&'static str, Vec<usize>) {
         N::Not(a) => ("not", vec![a]),
         N::BoolAnd(a, b) => ("bool_and", vec![a, b]),
         N::BoolOr(a, b) => ("bool_or", vec![a, b]),
+        N::BvNot(a) => ("bvnot", vec![a]),
+        N::Neg(a) => ("neg", vec![a]),
+        N::Rotl(a, b) => ("rotl", vec![a, b]),
+        N::Sdiv(a, b) => ("sdiv", vec![a, b]),
+        N::Srem(a, b) => ("srem", vec![a, b]),
     }
+}
+
+/// Is this one of the five derived-op node kinds of #192 phase 5 (the ones
+/// `ordeal-dag/v1` cannot express)?
+pub fn node_is_derived(node: &k::DagNode) -> bool {
+    use k::DagNode as N;
+    matches!(
+        node,
+        N::BvNot(_) | N::Neg(_) | N::Rotl(_, _) | N::Sdiv(_, _) | N::Srem(_, _)
+    )
 }
 
 /// The inverse of [`node_op`]: `None` for an unknown mnemonic or a wrong
@@ -253,6 +284,20 @@ pub fn node_from_op(op: &str, args: &[usize]) -> Option<k::DagNode> {
             let (a, b) = two()?;
             N::BoolOr(a, b)
         }
+        "bvnot" => N::BvNot(one()?),
+        "neg" => N::Neg(one()?),
+        "rotl" => {
+            let (a, b) = two()?;
+            N::Rotl(a, b)
+        }
+        "sdiv" => {
+            let (a, b) = two()?;
+            N::Sdiv(a, b)
+        }
+        "srem" => {
+            let (a, b) = two()?;
+            N::Srem(a, b)
+        }
         _ => return None,
     })
 }
@@ -288,12 +333,39 @@ fn push_usizes(s: &mut String, xs: &[usize]) {
 }
 
 impl QueryDag {
+    /// Does the DAG use one of the derived-op node kinds of #192 phase 5?
+    #[must_use]
+    pub fn has_derived(&self) -> bool {
+        self.nodes.iter().any(node_is_derived)
+    }
+
+    /// The encoding tag this DAG is emitted under: the lowest one that can
+    /// express it — [`QUERY_ENCODING`] (`ordeal-dag/v1`, readable by
+    /// v0.27.0) unless a derived-op node is present, then
+    /// [`QUERY_ENCODING_V2`].
+    #[must_use]
+    pub fn encoding(&self) -> &'static str {
+        if self.has_derived() {
+            QUERY_ENCODING_V2
+        } else {
+            QUERY_ENCODING
+        }
+    }
+
     /// The canonical text the content hash covers (stable, diff-friendly):
-    /// the encoding tag, `nodes <n>`, one `<op> <args…>` line per node,
-    /// then `bits <bitstring>`, `roots <r…>` and `hints <h…>`.
+    /// the encoding tag ([`QueryDag::encoding`]), `nodes <n>`, one `<op>
+    /// <args…>` line per node, then `bits <bitstring>`, `roots <r…>` and
+    /// `hints <h…>`.
     pub fn canonical_text(&self) -> String {
+        self.canonical_text_tagged(self.encoding())
+    }
+
+    /// [`QueryDag::canonical_text`] under an explicit encoding tag — what a
+    /// reader hashes to verify a block that DECLARES its tag (a v1-tagged
+    /// block hashes with the v1 tag even on a reader that would emit v2).
+    pub fn canonical_text_tagged(&self, encoding: &str) -> String {
         let mut s = String::new();
-        s.push_str(QUERY_ENCODING);
+        s.push_str(encoding);
         s.push('\n');
         s.push_str("nodes ");
         s.push_str(&self.nodes.len().to_string());
@@ -321,6 +393,13 @@ impl QueryDag {
     #[must_use]
     pub fn sha256(&self) -> String {
         sha256_hex(self.canonical_text().as_bytes())
+    }
+
+    /// [`QueryDag::sha256`] under an explicit encoding tag (see
+    /// [`QueryDag::canonical_text_tagged`]).
+    #[must_use]
+    pub fn sha256_tagged(&self, encoding: &str) -> String {
+        sha256_hex(self.canonical_text_tagged(encoding).as_bytes())
     }
 }
 
@@ -583,6 +662,11 @@ mod tests {
             N::Not(2),
             N::BoolAnd(2, 3),
             N::BoolOr(2, 3),
+            N::BvNot(0),
+            N::Neg(0),
+            N::Rotl(0, 1),
+            N::Sdiv(0, 1),
+            N::Srem(0, 1),
         ];
         for n in all {
             let (op, args) = node_op(&n);
@@ -596,12 +680,129 @@ mod tests {
             roots: vec![2],
             hints: vec![0, 1, 2],
         };
+        assert_eq!(q.encoding(), QUERY_ENCODING);
+        assert!(!q.has_derived());
         assert_eq!(
             q.canonical_text(),
             "ordeal-dag/v1\nnodes 3\nvar 2\nconst 0 2\neq 0 1\nbits 10\nroots 2\nhints 0 1 2\n"
         );
         assert_eq!(bits_from_string("10"), Some(vec![true, false]));
         assert_eq!(bits_from_string("1x"), None);
+        // #192 phase 5: a derived-op node lifts the tag to ordeal-dag/v2,
+        // and the hash follows the tag it is computed under.
+        let q2 = QueryDag {
+            nodes: vec![N::Var(2), N::Var(2), N::Sdiv(0, 1), N::Neg(2), N::Eq(2, 3)],
+            bits: vec![],
+            roots: vec![4],
+            hints: vec![],
+        };
+        assert!(q2.has_derived());
+        assert_eq!(q2.encoding(), QUERY_ENCODING_V2);
+        assert_eq!(
+            q2.canonical_text(),
+            "ordeal-dag/v2\nnodes 5\nvar 2\nvar 2\nsdiv 0 1\nneg 2\neq 2 3\nbits \nroots 4\nhints\n"
+        );
+        assert_eq!(q2.sha256(), q2.sha256_tagged(QUERY_ENCODING_V2));
+        assert_ne!(q2.sha256(), q2.sha256_tagged(QUERY_ENCODING));
+        assert!(encoding_supported(QUERY_ENCODING) && encoding_supported(QUERY_ENCODING_V2));
+        assert!(!encoding_supported("ordeal-dag/v3"));
+    }
+
+    /// #192 phase 5: a query whose refutation rests on `bvsdiv`'s semantics,
+    /// as `check_with_query` lowers it — the DAG carries an `Sdiv` node
+    /// (not its rewrite), the trusted crate re-checks it, and the block is
+    /// tagged `ordeal-dag/v2`.
+    fn sdiv_query_certificate() -> QueryCertificate {
+        // `(a sdiv b) ≠ rewrite(a sdiv b)` at width 8: UNSAT only because
+        // the node IS signed division (the rewrite's sign-mask construction
+        // over `bvudiv`).
+        let a = var("a", 8);
+        let b = var("b", 8);
+        let sdiv = BvTerm::Sdiv(Box::new(a.clone()), Box::new(b.clone()));
+        let twin = crate::lowering::expand_bv(&sdiv).expect("sorted");
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(Box::new(sdiv), Box::new(twin)));
+        match s.check_with_query() {
+            QueryCheckResult::Unsat(c) => c,
+            other => panic!("expected Unsat, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-064
+    /// The derived op reaches the certificate as ITS OWN node: the query
+    /// block of an `(a sdiv b) ≠ rewrite(a sdiv b)` refutation holds an
+    /// `Sdiv` node next to the rewrite's `Udiv`, is tagged `ordeal-dag/v2`,
+    /// and re-checks through the trusted crate.
+    #[test]
+    fn derived_op_is_carried_as_its_own_node_and_rechecks() {
+        let cert = sdiv_query_certificate();
+        cert.recheck()
+            .expect("the trusted crate re-encodes the Sdiv node");
+        assert!(cert.query.has_derived());
+        assert_eq!(cert.query.encoding(), QUERY_ENCODING_V2);
+        let kinds: Vec<&str> = cert.query.nodes.iter().map(|n| node_op(n).0).collect();
+        assert!(
+            kinds.contains(&"sdiv"),
+            "the query block carries the operation: {kinds:?}"
+        );
+        assert!(
+            kinds.contains(&"udiv"),
+            "the rewritten twin is next to it: {kinds:?}"
+        );
+        assert!(
+            cert.query.canonical_text().starts_with("ordeal-dag/v2\n"),
+            "the hash covers the v2 tag"
+        );
+    }
+
+    // rivet: verifies VER-064
+    /// The phase-5 negative control: change the `Sdiv` node of that
+    /// certificate to `Udiv` (same operands, hash recomputed so integrity
+    /// passes) with the CNF and the proof untouched — the recheck FAILS,
+    /// because the trusted crate re-encodes `udiv` and the carried proof
+    /// no longer refutes (nor matches) that CNF. The semantics differ (a
+    /// negative dividend), so this is not a formatting accident.
+    #[test]
+    fn sdiv_node_swapped_to_udiv_fails_the_recheck() {
+        let mut cert = sdiv_query_certificate();
+        let (cnf, lrat) = (cert.certificate.cnf.clone(), cert.certificate.lrat.clone());
+        let i = cert
+            .query
+            .nodes
+            .iter()
+            .position(|n| matches!(n, k::DagNode::Sdiv(_, _)))
+            .expect("an Sdiv node");
+        let k::DagNode::Sdiv(a, b) = cert.query.nodes[i] else {
+            unreachable!()
+        };
+        cert.query.nodes[i] = k::DagNode::Udiv(a, b);
+        assert!(!cert.query.has_derived(), "no derived node is left");
+        assert_eq!(
+            cert.query.encoding(),
+            QUERY_ENCODING,
+            "tag follows the content"
+        );
+        let r = cert.recheck();
+        assert_eq!(cert.certificate.cnf, cnf, "CNF must be untouched");
+        assert_eq!(cert.certificate.lrat, lrat, "proof must be untouched");
+        assert!(r.is_err(), "Sdiv → Udiv must fail the recheck: {r:?}");
+        // …and the CNF-level (v1) recheck of the untouched pair still passes:
+        // exactly the gap the query re-check closes.
+        cert.certificate.recheck().expect("v1 pair re-checks");
+        // The other direction too: a derived node forged INTO the twin's
+        // `udiv` (hash recomputed) does not re-check either.
+        let mut cert = sdiv_query_certificate();
+        let j = cert
+            .query
+            .nodes
+            .iter()
+            .position(|n| matches!(n, k::DagNode::Udiv(_, _)))
+            .expect("the rewrite's Udiv node");
+        let k::DagNode::Udiv(a, b) = cert.query.nodes[j] else {
+            unreachable!()
+        };
+        cert.query.nodes[j] = k::DagNode::Srem(a, b);
+        assert!(cert.recheck().is_err(), "Udiv → Srem must fail the recheck");
     }
 
     // rivet: verifies VER-062
