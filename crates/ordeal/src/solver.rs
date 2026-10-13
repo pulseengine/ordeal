@@ -201,15 +201,16 @@ pub enum OpKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DerivedOps {
     /// Rewrite them into the closed core BEFORE canonicalization
-    /// (`lowering::expand_*`): the v0.27.0 lowering, so `check` /
-    /// `check_with_witness` emit byte-identical certificates. The rewrite
-    /// is an untrusted term rewrite; the DAG (and so a v1 certificate's
-    /// CNF) carries the rewritten query.
+    /// (`lowering::expand_*`): the v0.27.0 lowering. Since v0.28.0 no
+    /// production path uses it (maintainer decision, #192 phase 5); it is
+    /// kept only so the differential tests can compare the old rewrite
+    /// against the proven nodes.
+    #[cfg_attr(not(test), allow(dead_code))]
     Rewrite,
     /// Keep them as their own `DagNode`s, encoded by the proven composite
     /// rules (`blast_kernel::blast_bvnot` … `blast_srem`), so the
     /// `ordeal-cert/v2` query block carries the operation itself and the
-    /// trusted re-check covers it. `check_with_query`.
+    /// trusted re-check covers it. Every production path since v0.28.0.
     Nodes,
 }
 
@@ -677,12 +678,13 @@ impl Solver {
     /// Tseitin — shared by every backend. `None` means conservative Unknown
     /// (disabled ops or ill-sorted input; `validate()` diagnoses).
     fn lower(&self) -> Option<(Blaster, CnfFormula)> {
-        // The default path REWRITES the derived ops (#192 phase 5): switching
-        // this to `DerivedOps::Nodes` changes the emitted certificates of
-        // queries with `bvsdiv` / `bvsrem` operands that canonicalization
-        // reorders (docs/design/query-cnf-gap.md, phase 5) — the
-        // maintainer's call, deliberately not made here.
-        self.lower_with(AigOptions::default(), DerivedOps::Rewrite)
+        // The derived ops are lowered as PROVEN DAG nodes on the default
+        // path (#192 phase 5; maintainer decision 2026-10-13, v0.28.0), so
+        // the lowering.rs rewrite is no longer on any unsat answer's trust
+        // path. This changes the emitted certificates of some queries with
+        // `bvsdiv` / `bvsrem` operands (CNF variables renumbered, verdicts
+        // unchanged; docs/design/query-cnf-gap.md, phase 5).
+        self.lower_with(AigOptions::default(), DerivedOps::Nodes)
     }
 
     /// `lower` with explicit simplification settings. The production path
@@ -831,7 +833,7 @@ impl Solver {
     /// the witness on every `sat`); `check` is untouched and pays nothing —
     /// the witness capture happens only when this entry is called.
     pub fn check_with_witness(&self) -> crate::witness::WitnessCheckResult {
-        self.solve_witness(DerivedOps::Rewrite).0
+        self.solve_witness(DerivedOps::Nodes).0
     }
 
     /// Decide and, on `Unsat`, return the certificate TOGETHER WITH THE
@@ -1270,7 +1272,7 @@ mod cnf_gap_measurement {
         for _ in 0..runs {
             let t0 = Instant::now();
             let lowered = s
-                .lower_with(opts, DerivedOps::Rewrite)
+                .lower_with(opts, DerivedOps::Nodes)
                 .expect("corpus query must lower");
             times.push(t0.elapsed());
             sample = Some(Sample {
@@ -1362,7 +1364,7 @@ mod cnf_gap_measurement {
     /// literal as little-endian `i32`, clause-terminated by a zero) of every
     /// query in a corpus, in corpus order — one line per corpus.
     fn digest(title: &str, corpus: &[Vec<BoolTerm>]) {
-        digest_with(title, corpus, DerivedOps::Rewrite);
+        digest_with(title, corpus, DerivedOps::Nodes);
     }
 
     /// `digest` under an explicit derived-op setting (#192 phase 5): the

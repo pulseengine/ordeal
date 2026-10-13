@@ -1118,3 +1118,20 @@ changes the bytes of such queries and is a separate decision.
   comparison or a division first) — the earlier kernels' `usize` sums are
   bounded by the slices' sizes, as `docs/formal-verification.md`'s `hfit`
   note explains.
+
+
+### Phase 5 default switch (2026-10-13, maintainer decision)
+
+`Solver::lower` and `check_with_witness` now use `DerivedOps::Nodes`.
+`DerivedOps::Rewrite` survives only for the differential tests comparing the
+old rewrite with the proven nodes. Measured on the switch:
+
+- all 24 fixture queries are byte-identical to v0.27.0;
+- the `cnf_gap_digest` corpora are unchanged: latency `7b35d569…`, bmc
+  `5c14a69e…`, oracle 0x192 `a1d80de9…`, oracle 0xC0FFEE `42d44115…`;
+- the Z3 differential passes (13).
+
+The stored `evidence/certs` bundles record producer version 0.23.0.
+Regenerated with a later ordeal, their CNF and proof payloads are
+byte-identical and only the two version fields differ (see OC-001 and
+OC-002).
