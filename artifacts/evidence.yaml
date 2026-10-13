@@ -4,7 +4,7 @@ artifacts:
     type: ordeal-certificate
     title: "Certified: width-12 rotate/shift identity (non-power-of-two, #182 class)"
     status: verified
-    description: "Bundle evidence/certs/rotl_decompose_w12.json, emitted by crates/ordeal/examples/cert_bundle_smt2.rs from evidence/certs/rotl_decompose_w12.smt2 with ordeal 0.23.0. The example re-parsed it (content hashes verified) and re-ran the trusted ordeal-lrat checker (verification-result pass). Z3 independently reports the query unsat. The width is not a power of two, the class #182 mis-encoded."
+    description: "Bundle evidence/certs/rotl_decompose_w12.json, emitted by crates/ordeal/examples/cert_bundle_smt2.rs from evidence/certs/rotl_decompose_w12.smt2 with ordeal 0.23.0. The example re-parsed it (content hashes verified) and re-ran the trusted ordeal-lrat checker (verification-result pass). Z3 independently reports the query unsat. The width is not a power of two, the class #182 mis-encoded. Reproducibility, stated precisely (#192 phase 5 review, 2026-10-13): the bundle records produced_by/checked_by version 0.23.0, so the recorded recheck command reproduces it byte-for-byte only with ordeal 0.23.0. Regenerated with ordeal 0.27.0 (and with the v0.28.0 default switch to proven derived-op nodes), the CNF and LRAT payloads are byte-identical (same problem_sha256 and proof_sha256) and only the two version fields differ. The v0.24.0 tag's falsification wording ('regenerates byte-identically') holds for the payload, not for the envelope across versions."
     fields:
       attests-claim: rotate_left 1 equals its shift decomposition for every 12-bit x >> b, b < 12
       attests-kind: qf_bv_validity
@@ -32,7 +32,7 @@ artifacts:
     type: ordeal-certificate
     title: "Certified: width-24 shift round-trip mask identity (non-power-of-two, #182 class)"
     status: verified
-    description: "Bundle evidence/certs/shl_lshr_mask_w24.json, emitted by crates/ordeal/examples/cert_bundle_smt2.rs from evidence/certs/shl_lshr_mask_w24.smt2 with ordeal 0.23.0. The example re-parsed it (content hashes verified) and re-ran the trusted ordeal-lrat checker (verification-result pass). Z3 independently reports the query unsat. The width is not a power of two, the class #182 mis-encoded."
+    description: "Bundle evidence/certs/shl_lshr_mask_w24.json, emitted by crates/ordeal/examples/cert_bundle_smt2.rs from evidence/certs/shl_lshr_mask_w24.smt2 with ordeal 0.23.0. The example re-parsed it (content hashes verified) and re-ran the trusted ordeal-lrat checker (verification-result pass). Z3 independently reports the query unsat. The width is not a power of two, the class #182 mis-encoded. Reproducibility, stated precisely (#192 phase 5 review, 2026-10-13): the bundle records produced_by/checked_by version 0.23.0, so the recorded recheck command reproduces it byte-for-byte only with ordeal 0.23.0. Regenerated with ordeal 0.27.0 (and with the v0.28.0 default switch to proven derived-op nodes), the CNF and LRAT payloads are byte-identical (same problem_sha256 and proof_sha256) and only the two version fields differ. The v0.24.0 tag's falsification wording ('regenerates byte-identically') holds for the payload, not for the envelope across versions."
     fields:
       attests-claim: (x << s) >> s equals x & (ones >> s) for every 24-bit x, s < 24
       attests-kind: qf_bv_validity

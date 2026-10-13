@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The default path lowers derived ops as proven nodes** (#192 phase 5,
+  maintainer decision). `check` and `check_with_witness` now encode
+  `bvnot`, `bvneg`, `bvrotl`, `bvsdiv` and `bvsrem` with the proven
+  composite rules, so the `lowering.rs` rewrite is no longer on any answer's
+  trust path. Verdicts are unchanged and every stored fixture and benchmark
+  digest is identical. Queries whose `bvsdiv`/`bvsrem` operands
+  canonicalization reorders can get a CNF with renumbered variables, and so
+  a different certificate.
+
 **The derived ops stop being trusted rewrites** (#192 phase 5, TR-064).
 `bvnot`, `bvneg`, `bvrotl`, `bvsdiv` and `bvsrem` are constructs of the
 closed fragment with proven bit-blasting rules; `check_with_query` lowers
