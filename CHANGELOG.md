@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-13
+
+**The derived ops are proven, not rewritten** (#192 phase 5). `bvnot`,
+`bvneg`, `bvrotl`, `bvsdiv` and `bvsrem` are DAG nodes encoded by
+Lean-proven rules on every path. The `lowering.rs` rewrite has left the
+trust path. Verdicts are unchanged. Some `bvsdiv`/`bvsrem` queries get a
+CNF with renumbered variables.
+
 ### Changed
 - **The default path lowers derived ops as proven nodes** (#192 phase 5,
   maintainer decision). `check` and `check_with_witness` now encode
@@ -1509,7 +1517,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.28.0
 [0.27.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.27.0
 [0.26.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.26.0
 [0.25.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.25.0
