@@ -479,9 +479,11 @@ fn format_json_with_query_carries_the_derived_op_as_a_node() {
 }
 
 // rivet: verifies VER-062
-/// Without `--with-query` the JSON is the v0.26.0 shape (no `query` key);
-/// `sat` output is identical with and without the flag; the flag needs
-/// `--format json`.
+// rivet: verifies VER-065
+/// Without `--with-query` the JSON is the v0.26.0 shape (no `query` key,
+/// no `inputs` key, for either verdict); with the flag the `sat` object
+/// is the same object plus exactly those two keys inside `certificate`
+/// (#192 phase 6); the flag needs `--format json`.
 #[test]
 fn with_query_is_opt_in_and_json_only() {
     let plain = ordeal_stdin(&["check", "-", "--format", "json"], UNSAT_SCRIPT);
@@ -495,11 +497,107 @@ fn with_query_is_opt_in_and_json_only() {
         &["check", "-", "--format", "json", "--with-query"],
         SAT_SCRIPT,
     );
+    let va: serde_json::Value = serde_json::from_slice(&a.stdout).expect("json");
+    let mut vb: serde_json::Value = serde_json::from_slice(&b.stdout).expect("json");
+    assert!(
+        va["certificate"].get("query").is_none() && va["certificate"].get("inputs").is_none(),
+        "default sat output carries neither query nor inputs"
+    );
+    let cert = vb["certificate"]
+        .as_object_mut()
+        .expect("certificate object");
+    assert!(
+        cert.remove("query").is_some(),
+        "--with-query adds the query"
+    );
+    assert!(
+        cert.remove("inputs").is_some(),
+        "--with-query adds the inputs"
+    );
     assert_eq!(
-        a.stdout, b.stdout,
-        "sat output is unchanged by --with-query"
+        va, vb,
+        "sat output under --with-query is the default output plus the two blocks"
     );
     let out = ordeal_stdin(&["check", "-", "--with-query"], UNSAT_SCRIPT);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("--format json"));
+}
+
+// rivet: verifies VER-065
+/// `--format json --with-query` on a `sat` query (#192 phase 6): the
+/// certificate carries the lowered query and the DAG's input assignment,
+/// and this test re-establishes the verdict at the QUERY level with the
+/// trusted crate — decoding both blocks from the JSON and running
+/// `ordeal_lrat::check_query_model` — then checks the `inputs` hash with
+/// an independent SHA-256, confirms the printed model IS the assignment,
+/// and shows one flipped input bit no longer re-checks.
+#[test]
+fn format_json_with_query_carries_a_recheckable_model() {
+    use sha2::Digest;
+    let out = ordeal_stdin(
+        &["check", "-", "--format", "json", "--with-query"],
+        SAT_SCRIPT,
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    assert_eq!(v["verdict"], "sat");
+    let cert = &v["certificate"];
+    let query = query_from_json(cert);
+    assert_eq!(cert["inputs"]["encoding"], ordeal::query::INPUTS_ENCODING);
+    let bits = ordeal::query::bits_from_string(cert["inputs"]["bits"].as_str().expect("bits"))
+        .expect("bitstring");
+    let vars: Vec<(String, u32, usize)> = cert["inputs"]["vars"]
+        .as_array()
+        .expect("vars")
+        .iter()
+        .map(|e| {
+            (
+                e["name"].as_str().expect("name").to_string(),
+                e["width"].as_u64().expect("width") as u32,
+                e["node"].as_u64().expect("node") as usize,
+            )
+        })
+        .collect();
+    ordeal_lrat::check_query_model(&query.nodes, &query.bits, &query.roots, &bits)
+        .expect("the trusted crate evaluates the query to true under the printed inputs");
+    let inputs = ordeal::QueryInputs {
+        bits: bits.clone(),
+        vars: vars.clone(),
+    };
+    let expect = hex_of(&sha2::Sha256::digest(inputs.canonical_text().as_bytes()));
+    assert_eq!(
+        cert["inputs"]["sha256"], expect,
+        "inputs hash (independent SHA-256)"
+    );
+    // The printed model is the assignment: `a` is one 8-bit Var node whose
+    // bits are the inputs at its offset, and `a urem 5 = 3` holds of them.
+    let (name, width, node) = &vars[0];
+    assert_eq!((name.as_str(), *width), ("a", 8));
+    assert!(matches!(
+        query.nodes[*node],
+        ordeal_lrat::blast_kernel::DagNode::Var(8)
+    ));
+    let a: u128 = bits
+        .iter()
+        .enumerate()
+        .map(|(j, b)| u128::from(*b) << j)
+        .sum();
+    assert_eq!(a % 5, 3, "the inputs encode a model of the query");
+    let printed = v["model"][0]["value"].as_str().expect("model value");
+    assert_eq!(
+        printed,
+        format!("#x{a:02x}"),
+        "the printed model is the inputs"
+    );
+    // The negative control: one flipped input bit is no longer a model.
+    let mut tampered = bits.clone();
+    tampered[0] = !tampered[0];
+    assert!(
+        ordeal_lrat::check_query_model(&query.nodes, &query.bits, &query.roots, &tampered).is_err(),
+        "a flipped input bit must not re-check"
+    );
 }

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The sat answer is checked against the query, too** (#192 phase 6,
+TR-065). The trusted crate gains `check_query_model`, the SAT twin of
+`check_query`: it evaluates the lowered term DAG under the model's input
+bits with the proven encoder and simulator, and `Solver::check_with_query`
+returns `Sat` only after it accepted. Proven: `check_query_model_sound`
+(every root is true under the inputs, in the SAME `dagBool` semantics
+`check_query_sound` negates) and `query_verdicts_exclusive` (no query has
+both an accepted refutation and an accepted model). Default output and
+every v1 format are byte-identical.
+
 ### Added
 - **Every core operator lifts over sliver children** (#231, TR-066). The
   sliver's `ExtOp` gains `Ite`, `Urem`, `Sdiv`, `Srem`, `Rotl`, `Not` and
@@ -18,6 +28,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the untaken branch of an `ite` stays constrained: the congruence
   constraints are emitted unconditionally. `ExtOp` is `#[non_exhaustive]`,
   so the change is additive.
+- **`ordeal_lrat::check_query_model(ns, bits, roots, inp)`** and
+  `ordeal_lrat::dag_nin` (trusted crate, `kernel.rs`; `ModelError`):
+  `dag_wf` / `roots_wf` / `encode_fits` as `check_query`, then the DAG's
+  input count (an assignment shorter than it is rejected, never padded),
+  then `encode` + `simulate` and every asserted output literal must be
+  true. Fails closed on malformed input and on overflow (TR-063). Lean:
+  `dag_nin_spec`, `check_query_model_loop_spec`,
+  `check_query_model_sound`, `check_query_model_satisfiable`,
+  `query_verdicts_exclusive` (`lean/QueryCheck.lean`), the two capstones
+  pinned axiom-clean in `lean/AxiomCheck.lean`; `Kernel.lean` keeps 0
+  axioms.
+- **`QuerySatCertificate`** / **`QueryInputs`** (`ordeal::query`): the v1
+  `SatCertificate` (`.witness`) plus the lowered `QueryDag` and the DAG's
+  input assignment (`bits`, input 0 first; the `(name, width, Var node)`
+  map; sha256 over a canonical text tagged `ordeal-inputs/v1`).
+  `recheck()` runs the v1 witness re-check, the untrusted
+  model-vs-inputs consistency check, then the trusted `check_query_model`.
+- **`ordeal-cert/v2` SAT bundle** (`cert-bundle` feature):
+  `QuerySatCertificate::to_cert_v2` / `from_cert_v2` / `QuerySatBundle` —
+  the v1 witness envelope plus `query` and `inputs` blocks,
+  `recheck.min_version` `0.29.0`, five content hashes verified before
+  `recheck()`. The UNSAT v2 reader now reports a SAT v2 bundle as
+  `WrongVerdict` (was `Malformed`).
+- **`ordeal check --format json --with-query` on `sat`** prints the
+  `query` and `inputs` blocks inside `certificate`; without the flag the
+  output is unchanged.
+
+### Changed
+- **`QueryCheckResult::Sat` carries a `QuerySatCertificate`** instead of
+  a bare `SatCertificate` (the opt-in `check_with_query` entry, one
+  release old): `.witness` is the previous payload. `check` /
+  `check_with_witness` / `WitnessCheckResult` are untouched. The
+  `eval.rs` self-check and the CNF-level witness re-check still run on
+  the query path (defence in depth); the `Sat` answer now rests on the
+  trusted evaluation, and a model it rejects degrades to `Unknown`.
+- Docs: `docs/design/query-cnf-gap.md` phase 6 and
+  `docs/formal-verification.md` state the remaining trust for `sat`
+  plainly — the DAG builder (`dag.rs`), including which `Var` node a
+  model value is written into, and canonicalization; the default `check`
+  path still returns `Sat` on the CNF witness plus the evaluator.
 
 ## [0.28.0] - 2026-10-13
 

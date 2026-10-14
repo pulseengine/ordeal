@@ -935,4 +935,281 @@ theorem check_query_refutes_cnf (ns : Slice kernel.blast_kernel.DagNode) (bits :
   let hf := (check_query_accepted ns bits roots hints steps cnf h).1
   lrat_check_sound ⟨cnf.val, cnf.property⟩ steps hf.1 hf.2
 
+/- ══════════════════ THE MODEL RE-CHECK (issue #192 phase 6) ══════════════════
+
+   `kernel::check_query_model` is the SAT twin of `check_query`: the same
+   well-formedness and capacity checks, then the proven `encode` and the
+   proven `simulate` over a concrete primary-input assignment, and every
+   asserted output literal must come out true. `encode_sound` already says
+   each output literal simulates to its root's `dagBool` value under EVERY
+   input list, so no new evaluator is proven here — the theorem is the
+   composition. `dag_nin` is the one new kernel function: it computes the
+   DAG's input count (`dagNin`) so that a short assignment is rejected
+   before `simulate` would read past it. -/
+
+/-- The loop invariant of `dag_nin_loop`: `nin` is the input count of the
+    first `i` nodes. -/
+def NinInv (ns : List kernel.blast_kernel.DagNode) (s : Std.Usize × Std.Usize) : Prop :=
+  s.2.val ≤ ns.length ∧ s.1.val = dagNin (ns.take s.2.val)
+
+theorem dag_nin_loop_spec (ns : Slice kernel.blast_kernel.DagNode) (nin n i : Std.Usize)
+    (hn : n.val = ns.val.length) (hinv : NinInv ns.val (nin, i)) :
+    kernel.dag_nin_loop ns nin n i ⦃ r => match r with
+      | core.result.Result.Ok m => m.val = dagNin ns.val
+      | core.result.Result.Err _ => True ⦄ := by
+  unfold kernel.dag_nin_loop
+  apply loop.spec_decr_nat
+    (measure := fun (s : Std.Usize × Std.Usize) => ns.val.length - s.2.val)
+    (inv := NinInv ns.val)
+  · rintro ⟨nin1, i1⟩ ⟨hle, hnin⟩
+    dsimp only at hle hnin
+    unfold kernel.dag_nin_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      have hilt : i1.val < ns.val.length := by scalar_tac
+      have hcap : i1.val < Usize.max := by
+        have := ns.length_ineq
+        omega
+      have htake : ns.val.take (i1.val + 1) = ns.val.take i1.val ++ [ns.val[i1.val]] := by
+        rw [List.take_add_one, List.getElem?_eq_getElem hilt]
+        simp
+      step as ⟨node, hnode⟩
+      -- `hnode : node = ns.val[i1.val]`; the 36 non-`Var` arms are the same
+      -- step (`dagNodeNin` is the identity on them), the `Var` arm adds the
+      -- width after its overflow guard.
+      cases node <;> dsimp only
+      · -- Var
+        rename_i w
+        step as ⟨i2, hi2⟩
+        split
+        · simp only [WP.spec_ok]
+        · rename_i hwle
+          have hadd : nin1.val + w.val ≤ Usize.max := by scalar_tac
+          step as ⟨nin2, hnin2⟩
+          step as ⟨i3, hi3⟩
+          refine ⟨?_, by scalar_tac⟩
+          unfold NinInv
+          dsimp only
+          refine ⟨by scalar_tac, ?_⟩
+          rw [hi3, htake, dagNin_snoc, ← hnode, hnin2, hnin]
+          rfl
+      all_goals
+        step as ⟨i3, hi3⟩
+        refine ⟨?_, by scalar_tac⟩
+        unfold NinInv
+        dsimp only
+        refine ⟨by scalar_tac, ?_⟩
+        rw [hi3, htake, dagNin_snoc, ← hnode, hnin]
+        rfl
+    · rename_i hge
+      have hieq : i1.val = ns.val.length := by scalar_tac
+      simp only [WP.spec_ok]
+      rw [hnin, hieq, List.take_length]
+  · exact hinv
+
+/-- `dag_nin` computes the DAG's primary-input count `dagNin` (and never
+    fails; `Err` only on a `usize` overflow of the sum). -/
+theorem dag_nin_spec (ns : Slice kernel.blast_kernel.DagNode) :
+    kernel.dag_nin ns ⦃ r => match r with
+      | core.result.Result.Ok m => m.val = dagNin ns.val
+      | core.result.Result.Err _ => True ⦄ := by
+  unfold kernel.dag_nin
+  dsimp only
+  apply dag_nin_loop_spec ns _ _ _ (by simp)
+  unfold NinInv
+  dsimp only
+  exact ⟨by simp, by simp [dagNin]⟩
+
+/-- The loop invariant of `check_query_model_loop`: the first `k` output
+    literals are true under the simulation. -/
+def OutsTrueInv (vals : List Bool) (outs : List kernel.blast_kernel.Lit) (k : Nat) : Prop :=
+  k ≤ outs.length ∧
+  ∀ (j : Nat) (hj : j < k) (hj' : j < outs.length), pEvalLit vals outs[j] = true
+
+theorem check_query_model_loop_spec (outs : alloc.vec.Vec kernel.blast_kernel.Lit)
+    (vals : alloc.vec.Vec Bool) (m k : Std.Usize)
+    (hm : m.val = outs.val.length)
+    (hrng : ∀ l ∈ outs.val, l.node.val < vals.val.length)
+    (hinv : OutsTrueInv vals.val outs.val k.val) :
+    kernel.check_query_model_loop outs vals m k ⦃ r => match r with
+      | core.result.Result.Ok _ =>
+        ∀ (j : Nat) (hj : j < outs.val.length), pEvalLit vals.val outs.val[j] = true
+      | core.result.Result.Err _ => True ⦄ := by
+  unfold kernel.check_query_model_loop
+  apply loop.spec_decr_nat
+    (measure := fun (k : Std.Usize) => outs.val.length - k.val)
+    (inv := fun (k : Std.Usize) => OutsTrueInv vals.val outs.val k.val)
+  · rintro k1 ⟨hle, hk⟩
+    unfold kernel.check_query_model_loop.body
+    dsimp only
+    split
+    · rename_i hlt
+      have hklt : k1.val < outs.val.length := by scalar_tac
+      have hderef : (alloc.vec.Vec.deref vals).val = vals.val := rfl
+      step as ⟨l, hl⟩
+      have hlrng : l.node.val < (alloc.vec.Vec.deref vals).val.length := by
+        rw [hderef, hl]
+        exact hrng _ (List.getElem_mem _)
+      step with (eval_lit_spec (alloc.vec.Vec.deref vals) l hlrng) as ⟨b, hb⟩
+      rw [hderef] at hb
+      split
+      · rename_i hbt
+        step as ⟨k2, hk2⟩
+        refine ⟨?_, by scalar_tac⟩
+        unfold OutsTrueInv
+        refine ⟨by scalar_tac, ?_⟩
+        intro j hj hj'
+        rw [hk2] at hj
+        rcases Nat.lt_or_ge j k1.val with h | h
+        · exact hk j h hj'
+        · have hjeq : j = k1.val := by omega
+          subst hjeq
+          rw [← hl, ← hb]
+          exact hbt
+      · simp only [WP.spec_ok]
+    · rename_i hge
+      simp only [WP.spec_ok]
+      intro j hj
+      exact hk j (by scalar_tac) hj
+  · exact hinv
+
+/-- **The model re-check is sound** (issue #192 phase 6, TR-065): if
+    `check_query_model` accepts the input assignment `inp`, every asserted
+    root of the DAG is true under it — in the SAME semantics (`dagBool`)
+    that `check_query_sound` negates, so a SAT and an UNSAT claim about one
+    query speak about one meaning. No hypothesis beyond the acceptance:
+    the checks inside discharge every precondition of `encode_sound`, and
+    `simulate_spec` turns the kernel's simulation into `pSim`. -/
+theorem check_query_model_sound (ns : Slice kernel.blast_kernel.DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (inp : Slice Bool)
+    (h : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) :
+    ∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp.val bits.val ns.val (roots.val[k]).val = true := by
+  unfold kernel.check_query_model at h
+  dsimp only at h
+  -- dag_wf
+  obtain ⟨r, hr, h⟩ := bind_ok_inv h
+  have hP := dag_wf_spec ns (Slice.len bits)
+  rw [hr, WP.spec_ok] at hP
+  cases r with
+  | Err e => simp at h
+  | Ok ws =>
+  obtain ⟨hws, hdag⟩ := hP
+  have hdag' : DagWF ns.val bits.val.length := by simpa using hdag
+  have hlen : ws.val.length = ns.val.length := by
+    have := congrArg List.length hws
+    simpa using this
+  -- roots_wf
+  obtain ⟨r1, hr1, h⟩ := bind_ok_inv h
+  have hP1 := roots_wf_spec (alloc.vec.Vec.deref ws) roots
+  rw [hr1, WP.spec_ok] at hP1
+  cases r1 with
+  | Err e => simp at h
+  | Ok u =>
+  have hroots : ∀ r ∈ roots.val, r.val < ns.val.length ∧ (dagWidths ns.val).getD r.val 0 = 1 := by
+    intro r hr
+    obtain ⟨h1, h2⟩ := hP1 r hr
+    exact ⟨by rw [← hlen]; exact h1, by rw [← hws]; exact h2⟩
+  -- max_width
+  obtain ⟨wmax, hwmax, h⟩ := bind_ok_inv h
+  have hPw := max_width_spec (alloc.vec.Vec.deref ws)
+  rw [hwmax, WP.spec_ok] at hPw
+  have hW : ∀ w ∈ dagWidths ns.val, w ≤ wmax.val := by
+    intro w hw
+    rw [← hws, List.mem_map] at hw
+    obtain ⟨u, hu, rfl⟩ := hw
+    exact hPw u hu
+  -- encode_fits
+  obtain ⟨b, hb, h⟩ := bind_ok_inv h
+  have hPb := encode_fits_spec wmax (Slice.len ns)
+  rw [hb, WP.spec_ok] at hPb
+  split at h
+  · rename_i hbt
+    have hcap : 1 + ns.val.length * gateBound wmax.val ≤ Usize.max := by
+      simpa using hPb hbt
+    -- dag_nin
+    obtain ⟨r2, hr2, h⟩ := bind_ok_inv h
+    have hPn := dag_nin_spec ns
+    rw [hr2, WP.spec_ok] at hPn
+    cases r2 with
+    | Err e =>
+      simp [core.result.Result.Insts.CoreOpsTry.branch,
+        core.result.Result.Insts.CoreOpsTryTraitFromResidualResultInfallible.from_residual] at h
+    | Ok nin =>
+    have hnin : nin.val = dagNin ns.val := hPn
+    simp only [core.result.Result.Insts.CoreOpsTry.branch, bind_tc_ok] at h
+    split at h
+    · simp at h
+    · rename_i hle
+      have hinp : dagNin ns.val ≤ inp.val.length := by
+        rw [← hnin]
+        scalar_tac
+      -- aig_new, encode, simulate
+      obtain ⟨aig0, hnew, h⟩ := bind_ok_inv h
+      obtain ⟨p, henc, h⟩ := bind_ok_inv h
+      obtain ⟨⟨words, outs⟩, aig1⟩ := p
+      obtain ⟨vals, hsim, h⟩ := bind_ok_inv h
+      -- encode_sound
+      have h0list := aig_new_fresh aig0 hnew
+      have hne0 : 0 < aig0.nodes.val.length := by rw [h0list]; simp
+      have h00 : aig0.nodes.val[0]'hne0 = kernel.blast_kernel.Node.False := by simp [h0list]
+      have hwf0 : AigWF aig0.nodes.val 0 := by
+        intro i hi
+        have hi0 : i = 0 := by
+          rw [h0list] at hi
+          simp only [List.length_singleton] at hi
+          omega
+        subst hi0
+        rw [h00]
+        trivial
+      have hcap0 : aig0.nodes.val.length + ns.val.length * gateBound wmax.val ≤ Usize.max := by
+        rw [h0list]
+        simpa using hcap
+      obtain ⟨y, hy, hP⟩ := WP.spec_imp_exists
+        (encode_sound aig0 ns bits roots wmax.val hne0 h00 hwf0 hdag' hW hcap0 hroots)
+      rw [henc] at hy
+      have hy' := Result.ok.inj hy
+      subst hy'
+      obtain ⟨_, hwf1, _, _, holen, horng, hosem⟩ := hP
+      dsimp only at hwf1 holen horng hosem
+      -- simulate_spec: the kernel's simulation is `pSim`
+      have hwf1' : AigWF aig1.nodes.val inp.val.length := AigWF_mono hinp hwf1
+      have hS := simulate_spec aig1 inp hwf1'
+      rw [hsim, WP.spec_ok] at hS
+      -- the output loop
+      have hrng : ∀ l ∈ outs.val, l.node.val < vals.val.length := by
+        intro l hl
+        rw [hS, pSim_length]
+        exact horng l hl
+      have hL := check_query_model_loop_spec outs vals (alloc.vec.Vec.len outs) 0#usize
+        (by simp) hrng ⟨by simp, fun j hj _ => by simp at hj⟩
+      rw [h, WP.spec_ok] at hL
+      intro k hk
+      have hk' : k < outs.val.length := by rw [holen]; exact hk
+      have hkt := hL k hk'
+      rw [hS, hosem inp.val k hk', getD_eq_getElem_of_lt hk] at hkt
+      exact hkt
+  · simp at h
+
+/-- An accepted model re-check exhibits a satisfying assignment: the DAG
+    is NOT unsatisfiable in `check_query_sound`'s sense. -/
+theorem check_query_model_satisfiable (ns : Slice kernel.blast_kernel.DagNode)
+    (bits : Slice Bool) (roots : Slice Std.Usize) (inp : Slice Bool)
+    (h : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) :
+    ¬ ∀ inp' : List Bool, ¬ (∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp' bits.val ns.val (roots.val[k]).val = true) :=
+  fun hall => hall inp.val (check_query_model_sound ns bits roots inp h)
+
+/-- **No query has both an accepted refutation and an accepted model**: the
+    SAT and the UNSAT re-check are stated over one semantics (`dagBool`),
+    and they contradict — the query-level twin of `verdicts_exclusive`. -/
+theorem query_verdicts_exclusive (ns : Slice kernel.blast_kernel.DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (hints : Slice Std.Usize) (steps : Slice kernel.Step)
+    (cnf : alloc.vec.Vec (alloc.vec.Vec Std.I32)) (inp : Slice Bool)
+    (hu : kernel.check_query ns bits roots hints steps = ok (core.result.Result.Ok cnf))
+    (hs : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) : False :=
+  check_query_sound ns bits roots hints steps cnf hu inp.val
+    (check_query_model_sound ns bits roots inp hs)
+
 end kernel.spec

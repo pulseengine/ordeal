@@ -30,8 +30,9 @@
 //!   internally-inconsistent bundle never yields a usable [`Certificate`].
 
 use crate::query::{
-    QUERY_ENCODING, QUERY_ENCODING_V2, QueryCertificate, QueryDag, QueryRecheckError,
-    bits_from_string, bits_string, encoding_supported, node_from_op, node_op,
+    QUERY_ENCODING, QUERY_ENCODING_V2, QueryCertificate, QueryDag, QueryInputs,
+    QueryModelRecheckError, QueryRecheckError, QuerySatCertificate, bits_from_string, bits_string,
+    encoding_supported, node_from_op, node_op,
 };
 use crate::sha256::sha256_hex;
 use crate::solver::{Certificate, Model};
@@ -328,6 +329,66 @@ fn node_from_json(
     node_from_op(op, &args).ok_or_else(malformed)
 }
 
+/// Decode a `query` block into the DAG, verifying its node count, its
+/// encoding-tag discipline and its content hash (under the DECLARED tag).
+/// Shared by the UNSAT and the SAT v2 readers.
+fn query_from_block(block: QueryBlock) -> Result<QueryDag, BundleError> {
+    if !encoding_supported(&block.encoding) {
+        return Err(BundleError::Unsupported(format!(
+            "query encoding {}",
+            block.encoding
+        )));
+    }
+    let mut nodes = Vec::with_capacity(block.nodes.len());
+    for n in &block.nodes {
+        nodes.push(node_from_json(n)?);
+    }
+    if nodes.len() != block.num_nodes {
+        return Err(BundleError::Malformed(format!(
+            "query.num_nodes {} but {} nodes",
+            block.num_nodes,
+            nodes.len()
+        )));
+    }
+    let bits = bits_from_string(&block.bits).ok_or_else(|| {
+        BundleError::Malformed("query bits contain a character other than '0'/'1'".into())
+    })?;
+    let query = QueryDag {
+        nodes,
+        bits,
+        roots: block.roots,
+        hints: block.hints,
+    };
+    // A block tagged `ordeal-dag/v1` must not carry a node kind that
+    // tag cannot express (a v0.27.0 reader would have refused the node;
+    // this reader refuses the lie about the tag).
+    if block.encoding == QUERY_ENCODING && query.has_derived() {
+        return Err(BundleError::Malformed(format!(
+            "query encoding {} carries a derived-op node ({} is required)",
+            QUERY_ENCODING, QUERY_ENCODING_V2
+        )));
+    }
+    // The hash covers the DECLARED tag.
+    if query.sha256_tagged(&block.encoding) != block.sha256 {
+        return Err(BundleError::HashMismatch("query"));
+    }
+    Ok(query)
+}
+
+/// The `query` block as emitted (the lowest tag that expresses the DAG,
+/// #192 phase 5: `ordeal-dag/v1` unless a derived-op node is present).
+fn query_to_block(q: &QueryDag) -> QueryBlock {
+    QueryBlock {
+        encoding: q.encoding().into(),
+        num_nodes: q.nodes.len(),
+        nodes: q.nodes.iter().map(node_to_json).collect(),
+        bits: bits_string(&q.bits),
+        roots: q.roots.clone(),
+        hints: q.hints.clone(),
+        sha256: q.sha256(),
+    }
+}
+
 impl QueryCertificate {
     /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v2`
     /// UNSAT bundle: the v1 envelope (same `problem` and `proof` blocks,
@@ -362,17 +423,7 @@ impl QueryCertificate {
                 encoding: "lrat".into(),
                 body: proof_text.clone(),
             },
-            query: QueryBlock {
-                // The lowest tag that expresses the DAG (#192 phase 5):
-                // `ordeal-dag/v1` unless a derived-op node is present.
-                encoding: q.encoding().into(),
-                num_nodes: q.nodes.len(),
-                nodes: q.nodes.iter().map(node_to_json).collect(),
-                bits: bits_string(&q.bits),
-                roots: q.roots.clone(),
-                hints: q.hints.clone(),
-                sha256: q.sha256(),
-            },
+            query: query_to_block(q),
             recheck: RecheckBlockV2 {
                 tool: "ordeal-lrat".into(),
                 // A derived-op node needs the phase-5 `check_query`.
@@ -402,6 +453,14 @@ impl QueryCertificate {
             Some("ordeal-cert/v2") => {}
             Some(other) => return Err(BundleError::WrongFormat(other.into())),
             None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        // Verdict next, before the envelope: a v2 SAT bundle (#192 phase
+        // 6, different blocks) is reported as the wrong verdict rather
+        // than as "missing field proof".
+        match head.get("verdict").and_then(|f| f.as_str()) {
+            Some("unsat") => {}
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
         }
         let env: UnsatEnvelopeV2 =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
@@ -434,39 +493,7 @@ impl QueryCertificate {
         if sha256_hex(env.proof.body.as_bytes()) != env.recheck.proof_sha256 {
             return Err(BundleError::HashMismatch("proof"));
         }
-        let mut nodes = Vec::with_capacity(env.query.nodes.len());
-        for n in &env.query.nodes {
-            nodes.push(node_from_json(n)?);
-        }
-        if nodes.len() != env.query.num_nodes {
-            return Err(BundleError::Malformed(format!(
-                "query.num_nodes {} but {} nodes",
-                env.query.num_nodes,
-                nodes.len()
-            )));
-        }
-        let bits = bits_from_string(&env.query.bits).ok_or_else(|| {
-            BundleError::Malformed("query bits contain a character other than '0'/'1'".into())
-        })?;
-        let query = QueryDag {
-            nodes,
-            bits,
-            roots: env.query.roots,
-            hints: env.query.hints,
-        };
-        // A block tagged `ordeal-dag/v1` must not carry a node kind that
-        // tag cannot express (a v0.27.0 reader would have refused the node;
-        // this reader refuses the lie about the tag).
-        if env.query.encoding == QUERY_ENCODING && query.has_derived() {
-            return Err(BundleError::Malformed(format!(
-                "query encoding {} carries a derived-op node ({} is required)",
-                QUERY_ENCODING, QUERY_ENCODING_V2
-            )));
-        }
-        // The hash covers the DECLARED tag.
-        if query.sha256_tagged(&env.query.encoding) != env.query.sha256 {
-            return Err(BundleError::HashMismatch("query"));
-        }
+        let query = query_from_block(env.query)?;
         Ok(QueryBundle {
             certificate: QueryCertificate {
                 certificate: Certificate {
@@ -596,58 +623,295 @@ impl SatCertificate {
         if env.verdict != "sat" {
             return Err(BundleError::WrongVerdict(env.verdict));
         }
-        if env.problem.encoding != "dimacs-cnf" {
-            return Err(BundleError::Unsupported(format!(
-                "problem encoding {}",
-                env.problem.encoding
-            )));
-        }
         let Some(witness) = env.witness else {
             return Err(BundleError::Unsupported(
                 "sat bundle without a witness block (legacy self-checked shape)".into(),
             ));
         };
-        if witness.encoding != "bitstring-lsb-var1" {
-            return Err(BundleError::Unsupported(format!(
-                "witness encoding {}",
-                witness.encoding
-            )));
+        sat_witness_from_blocks(env.problem, env.model, witness, &env.recheck)
+    }
+
+    /// The `witness` block as emitted (and the texts its hashes cover).
+    fn witness_block(&self) -> WitnessBlock {
+        let assignment_text = assignment_bitstring(&self.assignment);
+        let bit_map_text = bit_map_canonical_text(&self.bit_map);
+        WitnessBlock {
+            encoding: "bitstring-lsb-var1".into(),
+            assignment: assignment_text.clone(),
+            bit_map: self
+                .bit_map
+                .iter()
+                .map(|(name, width, bits)| BitMapEntry {
+                    name: name.clone(),
+                    width: *width,
+                    bits: bits.clone(),
+                })
+                .collect(),
+            assignment_sha256: sha256_hex(assignment_text.as_bytes()),
+            bit_map_sha256: sha256_hex(bit_map_text.as_bytes()),
         }
-        // Integrity first: all three hashes must match their payloads.
-        let problem_text = cnf_text(&env.problem.clauses);
-        if sha256_hex(problem_text.as_bytes()) != env.recheck.problem_sha256 {
-            return Err(BundleError::HashMismatch("problem"));
-        }
-        if sha256_hex(witness.assignment.as_bytes()) != witness.assignment_sha256 {
-            return Err(BundleError::HashMismatch("witness-assignment"));
-        }
-        let bit_map: Vec<(String, u32, Vec<i32>)> = witness
-            .bit_map
-            .iter()
-            .map(|e| (e.name.clone(), e.width, e.bits.clone()))
-            .collect();
-        if sha256_hex(bit_map_canonical_text(&bit_map).as_bytes()) != witness.bit_map_sha256 {
-            return Err(BundleError::HashMismatch("witness-bit-map"));
-        }
-        let mut assignment = Vec::with_capacity(witness.assignment.len());
-        for c in witness.assignment.chars() {
-            match c {
-                '0' => assignment.push(false),
-                '1' => assignment.push(true),
-                other => {
-                    return Err(BundleError::Malformed(format!(
-                        "witness assignment contains '{other}' (expected '0'/'1')"
-                    )));
-                }
+    }
+}
+
+/// Decode the `problem` / `model` / `witness` blocks of a SAT bundle into
+/// the v1 witness, verifying the three content hashes BEFORE returning.
+/// Shared by the v1 and the v2 (#192 phase 6) SAT readers.
+fn sat_witness_from_blocks(
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    recheck: &SatWitnessRecheck,
+) -> Result<SatCertificate, BundleError> {
+    if problem.encoding != "dimacs-cnf" {
+        return Err(BundleError::Unsupported(format!(
+            "problem encoding {}",
+            problem.encoding
+        )));
+    }
+    if witness.encoding != "bitstring-lsb-var1" {
+        return Err(BundleError::Unsupported(format!(
+            "witness encoding {}",
+            witness.encoding
+        )));
+    }
+    // Integrity first: all three hashes must match their payloads.
+    let problem_text = cnf_text(&problem.clauses);
+    if sha256_hex(problem_text.as_bytes()) != recheck.problem_sha256 {
+        return Err(BundleError::HashMismatch("problem"));
+    }
+    if sha256_hex(witness.assignment.as_bytes()) != witness.assignment_sha256 {
+        return Err(BundleError::HashMismatch("witness-assignment"));
+    }
+    let bit_map: Vec<(String, u32, Vec<i32>)> = witness
+        .bit_map
+        .iter()
+        .map(|e| (e.name.clone(), e.width, e.bits.clone()))
+        .collect();
+    if sha256_hex(bit_map_canonical_text(&bit_map).as_bytes()) != witness.bit_map_sha256 {
+        return Err(BundleError::HashMismatch("witness-bit-map"));
+    }
+    let mut assignment = Vec::with_capacity(witness.assignment.len());
+    for c in witness.assignment.chars() {
+        match c {
+            '0' => assignment.push(false),
+            '1' => assignment.push(true),
+            other => {
+                return Err(BundleError::Malformed(format!(
+                    "witness assignment contains '{other}' (expected '0'/'1')"
+                )));
             }
         }
-        Ok(SatCertificate {
-            model: Model {
-                assignments: env.model.assignments,
+    }
+    Ok(SatCertificate {
+        model: Model {
+            assignments: model.assignments,
+        },
+        cnf: problem.clauses,
+        assignment,
+        bit_map,
+    })
+}
+
+// ── ordeal-cert/v2: the query-carrying SAT bundle (#192 phase 6) ────────
+
+/// The `inputs` block of an `ordeal-cert/v2` SAT bundle: the DAG's
+/// primary-input assignment the trusted `ordeal_lrat::check_query_model`
+/// consumes, the model-to-node map a reader confirms the model with, and
+/// the block's content hash (`QueryInputs::canonical_text`).
+#[derive(Serialize, Deserialize)]
+struct InputsBlock {
+    encoding: String,
+    /// The assignment as a `0`/`1` string, input 0 first.
+    bits: String,
+    vars: Vec<InputVarEntry>,
+    sha256: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct InputVarEntry {
+    name: String,
+    width: u32,
+    node: usize,
+}
+
+/// The v2 SAT envelope: the v1 witness envelope's fields plus `query` and
+/// `inputs` after `witness`, so it reads as the v1 bundle with two more
+/// blocks and a different `format`.
+#[derive(Serialize)]
+struct SatEnvelopeV2 {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    query: QueryBlock,
+    inputs: InputsBlock,
+    recheck: SatWitnessRecheck,
+}
+
+#[derive(Deserialize)]
+struct SatEnvelopeV2In {
+    format: String,
+    verdict: String,
+    attests: Attests,
+    produced_by: Tool,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    query: QueryBlock,
+    inputs: InputsBlock,
+    recheck: SatWitnessRecheck,
+}
+
+/// A parsed, hash-verified `ordeal-cert/v2` SAT bundle: the v1 witness
+/// plus the query it satisfies and the DAG's input assignment.
+#[derive(Debug)]
+pub struct QuerySatBundle {
+    /// The witness with its query and inputs, reconstructed.
+    pub certificate: QuerySatCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl QuerySatBundle {
+    /// Re-run the trusted MODEL re-check (`ordeal_lrat::check_query_model`)
+    /// over the reconstructed DAG and inputs — the operation a v2-aware
+    /// consumer performs to turn this bundle into a verification link about
+    /// the query being satisfiable. The v1 (CNF-level) recheck stays
+    /// available as `certificate.witness.recheck()`.
+    pub fn recheck(&self) -> Result<(), QueryModelRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+impl QuerySatCertificate {
+    /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v2`
+    /// SAT bundle: the v1 witness envelope (same `problem`, `model` and
+    /// `witness` blocks, same hashes) plus the `query` and `inputs`
+    /// blocks, `format: "ordeal-cert/v2"`. A v1 reader rejects it by
+    /// format (opt-in, no silent downgrade); `SatCertificate::to_cert_v1`
+    /// on `self.witness` still produces the v1 bundle unchanged.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v2(&self, attests: &Attests) -> String {
+        let w = &self.witness;
+        let problem_text = cnf_text(&w.cnf);
+        let env = SatEnvelopeV2 {
+            format: "ordeal-cert/v2".into(),
+            verdict: "sat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
             },
-            cnf: env.problem.clauses,
-            assignment,
-            bit_map,
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: w.cnf.len(),
+                clauses: w.cnf.clone(),
+            },
+            model: SatModelBlock {
+                encoding: "assignments".into(),
+                assignments: w.model.assignments.clone(),
+            },
+            witness: w.witness_block(),
+            query: query_to_block(&self.query),
+            inputs: InputsBlock {
+                encoding: crate::query::INPUTS_ENCODING.into(),
+                bits: bits_string(&self.inputs.bits),
+                vars: self
+                    .inputs
+                    .vars
+                    .iter()
+                    .map(|(name, width, node)| InputVarEntry {
+                        name: name.clone(),
+                        width: *width,
+                        node: *node,
+                    })
+                    .collect(),
+                sha256: self.inputs.sha256(),
+            },
+            recheck: SatWitnessRecheck {
+                tool: "ordeal-lrat".into(),
+                min_version: "0.29.0".into(),
+                cmd: "ordeal_lrat::check_sat(problem, witness.assignment) + \
+                      ordeal_lrat::check_binding per model binding + \
+                      ordeal_lrat::check_query_model(query.nodes, query.bits, query.roots, \
+                      inputs.bits) == Ok(())"
+                    .into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v2` SAT bundle, verifying all five content
+    /// hashes (problem, witness assignment, bit map, query, inputs) BEFORE
+    /// returning. The caller then runs [`QuerySatBundle::recheck`] — the
+    /// hash check proves integrity, the recheck proves the mathematics
+    /// about the query. A v1 bundle is [`BundleError::WrongFormat`]: read
+    /// it with `SatCertificate::from_cert_v1`; an UNSAT v2 bundle is
+    /// [`BundleError::WrongVerdict`]: read it with
+    /// `QueryCertificate::from_cert_v2`.
+    pub fn from_cert_v2(json: &str) -> Result<QuerySatBundle, BundleError> {
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some("ordeal-cert/v2") => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        match head.get("verdict").and_then(|f| f.as_str()) {
+            Some("sat") => {}
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
+        }
+        let env: SatEnvelopeV2In =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.format != "ordeal-cert/v2" {
+            return Err(BundleError::WrongFormat(env.format));
+        }
+        if env.verdict != "sat" {
+            return Err(BundleError::WrongVerdict(env.verdict));
+        }
+        let witness = sat_witness_from_blocks(env.problem, env.model, env.witness, &env.recheck)?;
+        let query = query_from_block(env.query)?;
+        if env.inputs.encoding != crate::query::INPUTS_ENCODING {
+            return Err(BundleError::Unsupported(format!(
+                "inputs encoding {}",
+                env.inputs.encoding
+            )));
+        }
+        let bits = bits_from_string(&env.inputs.bits).ok_or_else(|| {
+            BundleError::Malformed("inputs bits contain a character other than '0'/'1'".into())
+        })?;
+        let inputs = QueryInputs {
+            bits,
+            vars: env
+                .inputs
+                .vars
+                .iter()
+                .map(|e| (e.name.clone(), e.width, e.node))
+                .collect(),
+        };
+        if inputs.sha256() != env.inputs.sha256 {
+            return Err(BundleError::HashMismatch("inputs"));
+        }
+        Ok(QuerySatBundle {
+            certificate: QuerySatCertificate {
+                witness,
+                query,
+                inputs,
+            },
+            attests: env.attests,
+            produced_by: env.produced_by,
         })
     }
 }
@@ -1277,5 +1541,146 @@ mod tests {
             WitnessCheckResult::Unsat(cert) => cert.recheck().expect("unsat leg re-checks"),
             other => panic!("expected Unsat, got {other:?}"),
         }
+    }
+
+    // ── #192 phase 6: ordeal-cert/v2, the query-carrying SAT bundle ─────
+
+    fn a_query_sat_certificate() -> QuerySatCertificate {
+        use crate::QueryCheckResult;
+        match a_sat_query().check_with_query() {
+            QueryCheckResult::Sat(c) => c,
+            other => panic!("expected Sat with query, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-065
+    /// Round trip: emit the SAT v2 → parse → five hashes verify → the
+    /// trusted MODEL re-check passes; the v1 witness inside still
+    /// re-checks, the v1 serialization of the same witness is the v1
+    /// bundle (same blocks and hashes, no `query` / `inputs`), and the
+    /// readers refuse each other's shapes by format / verdict.
+    #[test]
+    fn v2_sat_bundle_round_trips_and_rechecks_the_model() {
+        let cert = a_query_sat_certificate();
+        let json = cert.to_cert_v2(&attests());
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["format"], "ordeal-cert/v2");
+        assert_eq!(v["verdict"], "sat");
+        assert_eq!(v["query"]["sha256"], cert.query.sha256());
+        assert_eq!(v["inputs"]["encoding"], crate::query::INPUTS_ENCODING);
+        assert_eq!(v["inputs"]["sha256"], cert.inputs.sha256());
+        assert_eq!(v["inputs"]["bits"], bits_string(&cert.inputs.bits));
+        assert_eq!(v["recheck"]["min_version"], "0.29.0");
+        assert!(
+            v["recheck"]["cmd"]
+                .as_str()
+                .unwrap()
+                .contains("check_query_model")
+        );
+        let bundle = QuerySatCertificate::from_cert_v2(&json).expect("v2 sat bundle parses");
+        assert_eq!(bundle.attests, attests());
+        assert!(bundle.certificate.query == cert.query);
+        assert!(bundle.certificate.inputs == cert.inputs);
+        bundle.recheck().expect("model re-check passes");
+        bundle
+            .certificate
+            .witness
+            .recheck()
+            .expect("the v1 witness inside re-checks");
+        // Same problem / model / witness blocks and hashes as the v1 bundle
+        // of the same witness; v1 carries neither query nor inputs.
+        let v1: serde_json::Value =
+            serde_json::from_str(&cert.witness.to_cert_v1(&attests())).unwrap();
+        assert_eq!(v1["format"], "ordeal-cert/v1");
+        assert_eq!(v1["problem"], v["problem"]);
+        assert_eq!(v1["model"], v["model"]);
+        assert_eq!(v1["witness"], v["witness"]);
+        assert_eq!(
+            v1["recheck"]["problem_sha256"],
+            v["recheck"]["problem_sha256"]
+        );
+        assert!(v1.get("query").is_none() && v1.get("inputs").is_none());
+        // Cross-reader refusals.
+        assert!(matches!(
+            SatCertificate::from_cert_v1(&json),
+            Err(BundleError::WrongFormat(_))
+        ));
+        assert!(matches!(
+            QueryCertificate::from_cert_v2(&json),
+            Err(BundleError::WrongVerdict(_))
+        ));
+        assert!(matches!(
+            QuerySatCertificate::from_cert_v2(&cert.witness.to_cert_v1(&attests())),
+            Err(BundleError::WrongFormat(_))
+        ));
+        let unsat_v2 = a_query_certificate().to_cert_v2(&attests());
+        assert!(matches!(
+            QuerySatCertificate::from_cert_v2(&unsat_v2),
+            Err(BundleError::WrongVerdict(_))
+        ));
+    }
+
+    // rivet: verifies VER-065
+    /// The phase-6 bundle-level negative control: flip ONE input bit of
+    /// the `inputs` block. With the stale hash the parse fails on
+    /// integrity; with the hash recomputed (so integrity passes) and the
+    /// problem / model / witness blocks UNTOUCHED — the v1 witness keeps
+    /// re-checking — the model re-check FAILS: the model is no longer the
+    /// inputs, and the inputs are no longer a model of the query.
+    #[test]
+    fn v2_sat_bundle_flipped_input_bit_fails_recheck_with_witness_untouched() {
+        let cert = a_query_sat_certificate();
+        let json = cert.to_cert_v2(&attests());
+        let mut v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let bits = v["inputs"]["bits"].as_str().unwrap().to_string();
+        let flipped: String = bits
+            .chars()
+            .enumerate()
+            .map(|(i, c)| {
+                if i == 0 {
+                    if c == '0' { '1' } else { '0' }
+                } else {
+                    c
+                }
+            })
+            .collect();
+        v["inputs"]["bits"] = serde_json::Value::String(flipped.clone());
+        match QuerySatCertificate::from_cert_v2(&v.to_string()) {
+            Err(BundleError::HashMismatch("inputs")) => {}
+            other => panic!("stale inputs hash must be an inputs-hash mismatch, got {other:?}"),
+        }
+        let mut tampered = cert.inputs.clone();
+        tampered.bits[0] = !tampered.bits[0];
+        v["inputs"]["sha256"] = serde_json::Value::String(tampered.sha256());
+        let bundle = QuerySatCertificate::from_cert_v2(&v.to_string())
+            .expect("integrity passes with the recomputed hash");
+        assert_eq!(bundle.certificate.witness.cnf, cert.witness.cnf);
+        assert_eq!(
+            bundle.certificate.witness.assignment,
+            cert.witness.assignment
+        );
+        assert_eq!(
+            bundle.certificate.witness.model.assignments,
+            cert.witness.model.assignments
+        );
+        bundle
+            .certificate
+            .witness
+            .recheck()
+            .expect("the v1 witness is untouched and re-checks");
+        assert!(
+            bundle.recheck().is_err(),
+            "a flipped input bit must fail the model re-check"
+        );
+        // The trusted crate alone, on the tampered inputs: a false root.
+        assert!(matches!(
+            ordeal_lrat::check_query_model(
+                &bundle.certificate.query.nodes,
+                &bundle.certificate.query.bits,
+                &bundle.certificate.query.roots,
+                &bundle.certificate.inputs.bits
+            ),
+            Err(ordeal_lrat::ModelError::RootFalse { .. })
+        ));
     }
 }

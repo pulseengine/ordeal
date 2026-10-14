@@ -190,8 +190,11 @@ fn query_json(q: &QueryDag) -> String {
 }
 
 /// `--format json --with-query`: [`print_outcome_json`]'s shape, with the
-/// `unsat` certificate additionally carrying the `query` block. `sat` and
-/// `unknown` print exactly as without the flag.
+/// `unsat` certificate additionally carrying the `query` block and (since
+/// #192 phase 6) the `sat` certificate carrying the `query` block plus
+/// the `inputs` block — the DAG's input assignment the trusted
+/// `check_query_model` accepted. `unknown` prints exactly as without the
+/// flag.
 fn print_query_outcome_json(
     result: Option<&QueryCheckResult>,
     declared: &[(String, u32)],
@@ -208,8 +211,18 @@ fn print_query_outcome_json(
             );
             ExitCode::SUCCESS
         }
-        Some(QueryCheckResult::Sat(w)) => {
-            print_outcome_json(Some(&WitnessCheckResult::Sat(w.clone())), declared)
+        Some(QueryCheckResult::Sat(cert)) => {
+            let head = format!(
+                "{{\"tool\":\"ordeal\",\"version\":\"{}\"",
+                env!("CARGO_PKG_VERSION")
+            );
+            let extra = format!(
+                ",\"query\":{},\"inputs\":{}",
+                query_json(&cert.query),
+                inputs_json(&cert.inputs)
+            );
+            println!("{}", sat_json(&head, &cert.witness, declared, &extra));
+            ExitCode::SUCCESS
         }
         Some(QueryCheckResult::Unknown) => {
             print_outcome_json(Some(&WitnessCheckResult::Unknown), declared)
@@ -267,51 +280,7 @@ fn print_outcome_json(result: Option<&WitnessCheckResult>, declared: &[(String, 
         env!("CARGO_PKG_VERSION")
     );
     match result {
-        WitnessCheckResult::Sat(cert) => {
-            let model = &cert.model;
-            let value_of = |name: &str| -> u128 {
-                model
-                    .assignments
-                    .iter()
-                    .find(|(k, _)| k == name)
-                    .map(|(_, v)| *v)
-                    .unwrap_or(0)
-            };
-            let bindings: Vec<String> = declared
-                .iter()
-                .map(|(name, width)| {
-                    format!(
-                        "{{\"name\":\"{}\",\"width\":{},\"value\":\"{}\"}}",
-                        json_escape(name),
-                        width,
-                        fmt_bv(*width, value_of(name))
-                    )
-                })
-                .collect();
-            let bit_map: Vec<String> = cert
-                .bit_map
-                .iter()
-                .map(|(name, width, bits)| {
-                    let lits: Vec<String> = bits.iter().map(ToString::to_string).collect();
-                    format!(
-                        "{{\"name\":\"{}\",\"width\":{},\"bits\":[{}]}}",
-                        json_escape(name),
-                        width,
-                        lits.join(",")
-                    )
-                })
-                .collect();
-            println!(
-                "{head},\"verdict\":\"sat\",\"model\":[{}],\"certificate\":{{\"clauses\":[{}],\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}}}}}}",
-                bindings.join(","),
-                clauses_json(&cert.cnf),
-                ordeal::witness::WITNESS_ENCODING,
-                cert.assignment_bitstring(),
-                bit_map.join(","),
-                cert.assignment_sha256(),
-                cert.bit_map_sha256()
-            );
-        }
+        WitnessCheckResult::Sat(cert) => println!("{}", sat_json(&head, cert, declared, "")),
         WitnessCheckResult::Unsat(cert) => {
             let lrat = cert.lrat_text().unwrap_or_default();
             println!(
@@ -323,6 +292,87 @@ fn print_outcome_json(result: Option<&WitnessCheckResult>, declared: &[(String, 
         WitnessCheckResult::Unknown => println!("{head},\"verdict\":\"unknown\"}}"),
     }
     ExitCode::SUCCESS
+}
+
+/// The `sat` JSON line: the model bindings, then the `certificate` object
+/// with the CNF clauses and the `witness` block — and `extra` (empty, or
+/// `,"query":…,"inputs":…` under `--with-query`) appended inside
+/// `certificate` after the witness, so the shape without the flag is the
+/// v0.26.0 one byte for byte.
+fn sat_json(
+    head: &str,
+    cert: &ordeal::witness::SatCertificate,
+    declared: &[(String, u32)],
+    extra: &str,
+) -> String {
+    let model = &cert.model;
+    let value_of = |name: &str| -> u128 {
+        model
+            .assignments
+            .iter()
+            .find(|(k, _)| k == name)
+            .map(|(_, v)| *v)
+            .unwrap_or(0)
+    };
+    let bindings: Vec<String> = declared
+        .iter()
+        .map(|(name, width)| {
+            format!(
+                "{{\"name\":\"{}\",\"width\":{},\"value\":\"{}\"}}",
+                json_escape(name),
+                width,
+                fmt_bv(*width, value_of(name))
+            )
+        })
+        .collect();
+    let bit_map: Vec<String> = cert
+        .bit_map
+        .iter()
+        .map(|(name, width, bits)| {
+            let lits: Vec<String> = bits.iter().map(ToString::to_string).collect();
+            format!(
+                "{{\"name\":\"{}\",\"width\":{},\"bits\":[{}]}}",
+                json_escape(name),
+                width,
+                lits.join(",")
+            )
+        })
+        .collect();
+    format!(
+        "{head},\"verdict\":\"sat\",\"model\":[{}],\"certificate\":{{\"clauses\":[{}],\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}}{extra}}}}}",
+        bindings.join(","),
+        clauses_json(&cert.cnf),
+        ordeal::witness::WITNESS_ENCODING,
+        cert.assignment_bitstring(),
+        bit_map.join(","),
+        cert.assignment_sha256(),
+        cert.bit_map_sha256()
+    )
+}
+
+/// The `inputs` block (#192 phase 6) as a JSON object body — the same
+/// fields, spelling and hash as the `ordeal-cert/v2` SAT bundle's
+/// `inputs` block (`QueryInputs::canonical_text` / `sha256`).
+fn inputs_json(inputs: &ordeal::QueryInputs) -> String {
+    let vars: Vec<String> = inputs
+        .vars
+        .iter()
+        .map(|(name, width, node)| {
+            format!(
+                "{{\"name\":\"{}\",\"width\":{},\"node\":{}}}",
+                json_escape(name),
+                width,
+                node
+            )
+        })
+        .collect();
+    format!(
+        "{{\"encoding\":\"{}\",\"bits\":\"{}\",\"vars\":[{}],\"sha256\":\"{}\"}}",
+        ordeal::query::INPUTS_ENCODING,
+        ordeal::query::bits_string(&inputs.bits),
+        vars.join(","),
+        inputs.sha256()
+    )
 }
 
 /// Print the verdict (and, on `sat`, the model) and return the exit code.
@@ -416,7 +466,9 @@ fn banner() {
     println!("                             pair (CNF clauses + LRAT text)");
     println!("  --with-query               (check, with --format json) the unsat");
     println!("                             certificate also carries the lowered");
-    println!("                             query, re-checked by the trusted crate");
+    println!("                             query, re-checked by the trusted crate;");
+    println!("                             the sat certificate carries the query");
+    println!("                             and the input assignment it satisfies");
     println!();
     println!("engine: certificate-checked pipeline (bit-blast -> AIG -> Tseitin ->");
     println!("own CDCL core -> LRAT). SAT verdicts carry self-checked models;");

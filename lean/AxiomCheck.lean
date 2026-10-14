@@ -163,6 +163,19 @@ import QueryCheck
 #guard_msgs in
 #print axioms kernel.spec.check_query_refutes_cnf
 
+-- The model re-check (QueryCheck.lean, issue #192 phase 6 / TR-065): the
+-- SAT twin of `check_query_sound` — `check_query_model_sound` (an accepted
+-- input assignment makes every root true, in the SAME `dagBool` semantics)
+-- and `query_verdicts_exclusive` (no query has both an accepted refutation
+-- and an accepted model).
+/-- info: 'kernel.spec.check_query_model_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_query_model_sound
+
+/-- info: 'kernel.spec.query_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.query_verdicts_exclusive
+
 -- The SAT-witness checker (SatWitness.lean, TR-044 / VER-039). These pins
 -- are what surfaced the TR-038 regression: `clause_satisfied` used
 -- `i32::unsigned_abs`, which the pinned Aeneas extracts as an opaque

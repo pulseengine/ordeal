@@ -1791,3 +1791,27 @@ artifacts:
         target: SYS-001
       - type: allocated-to
         target: ARC-002
+  - id: TR-065
+    type: sw-req
+    title: The sat answer is checked against the query by the trusted crate — check_query_model, the SAT twin of check_query (#192 phase 6)
+    status: verified
+    release: v0.29.0
+    description: "Phase 6 of #192: until v0.28.0 an unsat answer was re-checked against the query by the trusted crate (check_query, check_query_sound) but a sat answer was not — check_sat / check_binding prove the model at the CNF level only, and the step 'this model satisfies the QUERY' went through the untrusted, unproven eval.rs evaluator. The trusted ordeal-lrat crate gains kernel::check_query_model(ns, bits, roots, inp): the same dag_wf / roots_wf / max_width / encode_fits checks as check_query, then dag_nin (the DAG's primary-input count, the Var widths summed in node order; an assignment shorter than it is rejected as ModelTooShort, never padded; an overflowing sum is TooLarge), then the proven encode and the proven simulate, and every asserted output literal must evaluate to true (RootFalse otherwise). No new evaluator is trusted. Lean (lean/QueryCheck.lean): dag_nin_spec, check_query_model_loop_spec, and the capstone check_query_model_sound — accepted ⟹ ∀ k < roots.len, dagBool inp bits ns roots[k] = true, the SAME dagBool denotation check_query_sound negates — plus check_query_model_satisfiable and query_verdicts_exclusive (no query has both an accepted refutation and an accepted model), all axiom-clean and pinned in AxiomCheck.lean; Kernel.lean keeps 0 axioms. Solver::check_with_query returns Sat only after the trusted check accepted the model's input bits (QueryInputs::from_model; a rejected model degrades to Unknown via Solver::sat_verdict); the eval.rs self-check and the CNF-level witness recheck still run first as defence in depth. QueryCheckResult::Sat carries a QuerySatCertificate (the v1 SatCertificate as .witness, the QueryDag, and the inputs block tagged ordeal-inputs/v1 with the (name, width, Var node) map and its sha256). The ordeal-cert/v2 SAT bundle (to_cert_v2 / from_cert_v2 / QuerySatBundle, min_version 0.29.0, five hashes) and ordeal check --format json --with-query on sat carry the query and inputs blocks; without the flag, and for every v1 format and reader, output is byte-identical. Honest remaining trust for sat (docs/design/query-cnf-gap.md phase 6, docs/formal-verification.md): the DAG builder (dag.rs) incl. which Var node a model value is written into, and canonicalization; the default check path still returns Sat on the CNF witness plus the evaluator."
+    tags: [soundness, checker, trusted-core, "192", cert-bundle, sat-witness]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "lake build and the axiom gate pass from the regenerated single-unit model with check_query_model_sound and query_verdicts_exclusive pinned axiom-clean, every earlier capstone still proven, 0 sorry, Kernel.lean 0 axioms before and after; a negative control (a one-line kernel mutation making check_query_model accept every assignment) fails the Lean proof after regen AND the Rust tamper tests, source restored byte-for-byte and rebuilt clean; real sat queries through check_with_query get Sat via the trusted check (kernel, API, CLI and bundle tests); negative controls with the v1 witness untouched: every flipped input bit of a unique-model query, a negated root, every flipped constant bit and a wrong var map are rejected and the solver degrades to Unknown; the SAT v2 bundle round-trips, re-checks, and a flipped input bit fails it with the witness untouched; default output and v1 bundles byte-identical; Z3 differential through check_with_query over the corpus with 0 disagreements; cargo test --workspace debug and release, clippy -D warnings, fmt clean; ordeal-lrat declares no dependencies."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-062
+      - type: traces-to
+        target: TR-044
+      - type: allocated-to
+        target: ARC-006
+      - type: allocated-to
+        target: ARC-011

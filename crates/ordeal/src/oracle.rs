@@ -1244,11 +1244,38 @@ mod tests {
         }
         match solver.check_with_query() {
             crate::query::QueryCheckResult::Sat(w) => {
-                EngineVerdict::Sat(Env::from_iter(w.model.assignments.iter().cloned()))
+                EngineVerdict::Sat(Env::from_iter(w.witness.model.assignments.iter().cloned()))
             }
             crate::query::QueryCheckResult::Unsat(_) => EngineVerdict::Unsat,
             crate::query::QueryCheckResult::Unknown => EngineVerdict::Unknown,
         }
+    }
+
+    // rivet: verifies VER-065
+    /// #192 phase 6: the SAT direction through `check_with_query` against
+    /// Z3 over the seeded corpus — every `Sat` here was evaluated to true
+    /// by the trusted `check_query_model` before it was returned, and
+    /// `differential_check` additionally re-evaluates the model on both
+    /// sides and compares the verdict with Z3's. Zero disagreements, and
+    /// enough SAT verdicts for the direction to be exercised.
+    #[test]
+    fn sat_models_differential_through_check_with_query() {
+        let corpus = gen_corpus(0x0D1F_FCEC, 100);
+        let (mut sats, mut unsats) = (0usize, 0usize);
+        for (i, query) in corpus.iter().enumerate() {
+            match ordeal_engine_with_query(query) {
+                EngineVerdict::Sat(_) => sats += 1,
+                EngineVerdict::Unsat => unsats += 1,
+                EngineVerdict::Unknown => {}
+            }
+            if let Some(d) = differential_check(query, ordeal_engine_with_query) {
+                panic!("query {i}: ordeal(check_with_query)-vs-Z3 disagreement — {d:?}");
+            }
+        }
+        assert!(
+            sats >= 20,
+            "too few SAT verdicts for the model re-check to be exercised: {sats} (unsat {unsats})"
+        );
     }
 
     /// #192 phase 5: the five derived ops' PROVEN RULES against Z3's native

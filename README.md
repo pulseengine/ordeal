@@ -190,9 +190,16 @@ DAG itself and checks the proof against the CNF it produced
 bundle certifies the query, not a CNF it has to take on faith. Since
 phase 5 (v0.28.0) the five formerly derived ops (`bvnot bvneg bvrotl
 bvsdiv bvsrem`) are DAG nodes with proven rules, so a v2 bundle carries
-the operation rather than its rewrite. Everything above the DAG —
-building the DAG from the terms, rewriting, the front ends — is defended
-by tests and by a differential against Z3, not by proof.
+the operation rather than its rewrite. Since phase 6 the `sat` direction
+is symmetric on that path: `ordeal_lrat::check_query_model` evaluates the
+term DAG under the model's input bits with the proven encoder and
+simulator (`check_query_model_sound`, the same semantics
+`check_query_sound` negates), so `check_with_query` returns `Sat` only
+after the trusted crate confirmed the model satisfies the query, and a v2
+SAT bundle carries the query and the inputs for an independent re-check.
+Everything above the DAG — building the DAG from the terms (incl. which
+`Var` node a model value is written into), rewriting, the front ends — is
+defended by tests and by a differential against Z3, not by proof.
 Closing that gap is tracked in [#192](https://github.com/pulseengine/ordeal/issues/192).
 Details and exact scope: [docs/formal-verification.md](docs/formal-verification.md).
 
