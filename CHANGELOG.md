@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-10-14
+
+**Both answers rest on the query now** (#192 phase 6). `check_with_query`
+returns a `sat` answer only after the trusted crate has checked the model
+against the query with the proven encoder, just as phase 4 did for
+`unsat`. The loom sliver also lifts every core operator over arrays and
+calls (#231).
+
 **The sat answer is checked against the query, too** (#192 phase 6,
 TR-065). The trusted crate gains `check_query_model`, the SAT twin of
 `check_query`: it evaluates the lowered term DAG under the model's input
@@ -1579,7 +1587,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.29.0
 [0.28.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.28.0
 [0.27.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.27.0
 [0.26.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.26.0
