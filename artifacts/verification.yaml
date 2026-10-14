@@ -1491,7 +1491,7 @@ artifacts:
   - id: VER-066
     type: sw-verification
     title: Lifted sliver operators — model preservation, Z3 differential, the issue's shapes decided with checked certificates (TR-066)
-    status: implemented
+    status: verified
     release: v0.29.0
     description: "sliver::lowering::sliver_lowering_preserves_every_model now draws from every lifted operator (urem, sdiv, srem, rotl, not, neg, and ite whose condition and branches hold select/pure_call) and checks that the lowered core and the extended query agree on 400 random total models. solver tests ite_over_select_is_decided, ite_over_pure_call_keeps_congruence, lifted_arith_over_pure_call_keeps_congruence and loom_trap_guard_over_sdiv_of_select_and_call decide the #231 shapes: every Unsat goes through check_sliver's certificate-checked pipeline and each has a Sat twin. Under the oracle feature, oracle::tests::sliver_diff_lifted_ops compares ordeal's verdict on the lowered core with Z3's array/UF theories over a 300-query seeded corpus (gen_sliver_lifted_corpus) — the existing sliver_diff corpus is unchanged. Negative control: swapping the ite branches in Lowering::lower_op fails 2 of these tests."
     tags: [sliver, loom, differential, negative-control]

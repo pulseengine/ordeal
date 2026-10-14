@@ -1776,7 +1776,7 @@ artifacts:
   - id: TR-066
     type: sw-req
     title: Every core operator lifts over sliver children — ite, urem, sdiv, srem, rotl, not, neg above a select/pure_call (#231)
-    status: implemented
+    status: verified
     release: v0.29.0
     description: "Ordeal's sliver ExtOp shall lift every BvTerm operator that has bitvector children, so a select or pure_call may sit beneath any of them. Issue #231 (loom #313 slices 3-5): ExtOp lacked Ite and Urem (and, since phase 5 made them core nodes, Sdiv/Srem/Rotl/Not/Neg), so ite(cond, select(mem, i), x), ite(cond, pure_call(f, a), x) and urem(pure_call(f, a), b) could not be constructed, and loom's trap guard — [trap] ++ ite(trap, 0, value) — could not wrap a value that touches memory or a call. Each new variant lowers to the BvTerm node of the same name, so the closed core fragment gains no operator (the sliver design keeps every sliver construct away from the blaster) and the blaster sees nothing new. Soundness of ite over eliminated constructs: read-over-write and the Ackermann/array congruence constraints are emitted unconditionally, so a call or read under the untaken branch is still constrained consistently — the constraints hold in every model."
     tags: [sliver, loom, ite, ackermannization, read-over-write]
