@@ -2447,6 +2447,144 @@ mod tests {
             other => panic!("loom's LE chain over a symbolic base must round-trip; got {other:?}"),
         }
     }
+
+    // ── #231: operators lifted over sliver children ──────────────────────
+    //
+    // loom's encoder models `select`/`if` and its trap guard as `ite`, so
+    // these are the shapes slices 3-5 of loom #313 emit. Each `Unsat` is
+    // certificate-checked by construction; each has a `Sat` twin so a
+    // lowering that made everything unsat could not pass.
+
+    fn xop(op: crate::sliver::ExtOp) -> crate::sliver::ExtBvTerm {
+        crate::sliver::ExtBvTerm::Op(Box::new(op))
+    }
+    fn f8(arg: crate::sliver::ExtBvTerm) -> crate::sliver::ExtBvTerm {
+        crate::sliver::ExtBvTerm::PureCall {
+            name: "f".into(),
+            args: vec![arg],
+            sort: Sort::new(8),
+        }
+    }
+
+    /// `ite(c, select(store(m, i, v), i), v) = v` for symbolic `c`, `i`, `v`:
+    /// a conditional over an array read. The `= x` twin is satisfiable.
+    // rivet: verifies VER-066
+    #[test]
+    fn ite_over_select_is_decided() {
+        use crate::sliver::{ExtBoolTerm, ExtOp};
+        let i = sym_bv32("i");
+        let v = sym_bv8("v");
+        let read = sel(st(base("mem"), i.clone(), v.clone()), i);
+        let ite = |else_: crate::sliver::ExtBvTerm| {
+            xop(ExtOp::Ite {
+                cond: ExtBoolTerm::Ult(sym_bv8("p"), sym_bv8("q")),
+                then_: read.clone(),
+                else_,
+            })
+        };
+        match Solver::prove_equiv_sliver(ite(v.clone()), v.clone()) {
+            CheckResult::Unsat(_) => {}
+            other => panic!("ite over a read-over-write hit must equal v; got {other:?}"),
+        }
+        match Solver::prove_equiv_sliver(ite(sym_bv8("x")), v) {
+            CheckResult::Sat(_) => {}
+            other => panic!("the else branch is free, so this must be sat; got {other:?}"),
+        }
+    }
+
+    /// `ite(c, f(a), x)` with `a = b`: equals `ite(c, f(b), x)` by congruence
+    /// even though the call sits under one branch of a conditional.
+    // rivet: verifies VER-066
+    #[test]
+    fn ite_over_pure_call_keeps_congruence() {
+        use crate::sliver::{ExtBoolTerm, ExtOp};
+        let ite = |arg: &str| {
+            xop(ExtOp::Ite {
+                cond: ExtBoolTerm::Ult(sym_bv8("p"), sym_bv8("q")),
+                then_: f8(sym_bv8(arg)),
+                else_: sym_bv8("x"),
+            })
+        };
+        let differ = ExtBoolTerm::Ne(ite("a"), ite("b"));
+        let same_arg = ExtBoolTerm::Eq(sym_bv8("a"), sym_bv8("b"));
+        match Solver::check_sliver(&[same_arg, differ.clone()]) {
+            CheckResult::Unsat(_) => {}
+            other => panic!("congruence under an ite must hold; got {other:?}"),
+        }
+        match Solver::check_sliver(&[differ]) {
+            CheckResult::Sat(_) => {}
+            other => panic!("with a, b free the calls may differ; got {other:?}"),
+        }
+    }
+
+    /// `urem`, `sdiv`, `srem`, `rotl`, `not`, `neg` of a call result: each is
+    /// a function of the call, so equal arguments give equal results.
+    // rivet: verifies VER-066
+    #[test]
+    fn lifted_arith_over_pure_call_keeps_congruence() {
+        use crate::sliver::{ExtBoolTerm, ExtOp};
+        type Mk = fn(crate::sliver::ExtBvTerm, crate::sliver::ExtBvTerm) -> ExtOp;
+        let ops: [(&str, Mk); 6] = [
+            ("urem", ExtOp::Urem),
+            ("sdiv", ExtOp::Sdiv),
+            ("srem", ExtOp::Srem),
+            ("rotl", ExtOp::Rotl),
+            ("not", |a, _| ExtOp::Not(a)),
+            ("neg", |a, _| ExtOp::Neg(a)),
+        ];
+        for (name, mk) in ops {
+            let t = |arg: &str| xop(mk(f8(sym_bv8(arg)), sym_bv8("d")));
+            let same_arg = ExtBoolTerm::Eq(sym_bv8("a"), sym_bv8("b"));
+            match Solver::check_sliver(&[same_arg, ExtBoolTerm::Ne(t("a"), t("b"))]) {
+                CheckResult::Unsat(_) => {}
+                other => {
+                    panic!("{name}(f(a), d) must equal {name}(f(b), d) when a = b; got {other:?}")
+                }
+            }
+        }
+    }
+
+    /// loom #313's trap guard: `[trap] ++ ite(trap, 0, value)` with the value
+    /// a signed division of a memory read by a call result. Whenever the trap
+    /// flag is set the value half is forced to zero.
+    // rivet: verifies VER-066
+    #[test]
+    fn loom_trap_guard_over_sdiv_of_select_and_call() {
+        use crate::sliver::{ExtBoolTerm, ExtOp};
+        let read = sel(base("mem"), sym_bv32("addr"));
+        let value = xop(ExtOp::Sdiv(read, f8(sym_bv8("a"))));
+        let trap = ExtBoolTerm::Eq(
+            f8(sym_bv8("a")),
+            crate::sliver::ExtBvTerm::Core(BvTerm::Const {
+                value: 0,
+                sort: Sort::new(8),
+            }),
+        );
+        let guarded = xop(ExtOp::Ite {
+            cond: trap.clone(),
+            then_: crate::sliver::ExtBvTerm::Core(BvTerm::Const {
+                value: 0,
+                sort: Sort::new(8),
+            }),
+            else_: value,
+        });
+        let zero = crate::sliver::ExtBvTerm::Core(BvTerm::Const {
+            value: 0,
+            sort: Sort::new(8),
+        });
+        match Solver::check_sliver(&[trap.clone(), ExtBoolTerm::Ne(guarded.clone(), zero.clone())])
+        {
+            CheckResult::Unsat(_) => {}
+            other => panic!("a trapping value must be forced to 0; got {other:?}"),
+        }
+        match Solver::check_sliver(&[
+            ExtBoolTerm::Not(Box::new(trap)),
+            ExtBoolTerm::Ne(guarded, zero),
+        ]) {
+            CheckResult::Sat(_) => {}
+            other => panic!("a non-trapping value is free to be nonzero; got {other:?}"),
+        }
+    }
 }
 
 /// VER-008 — three-way SAT-backend parity: own pure-Rust CDCL core vs the

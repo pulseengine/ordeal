@@ -81,7 +81,9 @@ pub enum ExtBvTerm {
 
 /// The recursive core operations lifted over `ExtBvTerm` children.
 /// (One variant per `BvTerm` operator that has bitvector children;
-/// leaves — `Const`/`Var` — use [`ExtBvTerm::Core`].)
+/// leaves — `Const`/`Var` — use [`ExtBvTerm::Core`].) Each lowers to the
+/// `BvTerm` node of the same name, so no operator is added to the closed
+/// core: the sliver only lets a `select`/`pure_call` sit beneath it (#231).
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 #[non_exhaustive]
@@ -90,6 +92,9 @@ pub enum ExtOp {
     Sub(ExtBvTerm, ExtBvTerm),
     Mul(ExtBvTerm, ExtBvTerm),
     Udiv(ExtBvTerm, ExtBvTerm),
+    Urem(ExtBvTerm, ExtBvTerm),
+    Sdiv(ExtBvTerm, ExtBvTerm),
+    Srem(ExtBvTerm, ExtBvTerm),
     And(ExtBvTerm, ExtBvTerm),
     Or(ExtBvTerm, ExtBvTerm),
     Xor(ExtBvTerm, ExtBvTerm),
@@ -97,10 +102,33 @@ pub enum ExtOp {
     Lshr(ExtBvTerm, ExtBvTerm),
     Ashr(ExtBvTerm, ExtBvTerm),
     Rotr(ExtBvTerm, ExtBvTerm),
-    Extract { hi: u32, lo: u32, arg: ExtBvTerm },
+    Rotl(ExtBvTerm, ExtBvTerm),
+    Not(ExtBvTerm),
+    Neg(ExtBvTerm),
+    Extract {
+        hi: u32,
+        lo: u32,
+        arg: ExtBvTerm,
+    },
     Concat(ExtBvTerm, ExtBvTerm),
-    ZeroExt { by: u32, arg: ExtBvTerm },
-    SignExt { by: u32, arg: ExtBvTerm },
+    ZeroExt {
+        by: u32,
+        arg: ExtBvTerm,
+    },
+    SignExt {
+        by: u32,
+        arg: ExtBvTerm,
+    },
+    /// `cond ? then_ : else_`, where the condition and both branches may
+    /// contain sliver constructs. Lowers to [`BvTerm::Ite`]. The Ackermann
+    /// and array congruence constraints are emitted unconditionally, so a
+    /// call or read under the untaken branch is still constrained
+    /// consistently: they hold in every model.
+    Ite {
+        cond: ExtBoolTerm,
+        then_: ExtBvTerm,
+        else_: ExtBvTerm,
+    },
 }
 
 /// A boolean-sorted term in the extended language.
@@ -374,6 +402,29 @@ impl Lowering {
                 let (a, b) = bin(self, a, b)?;
                 BvTerm::Rotr(a, b)
             }
+            ExtOp::Urem(a, b) => {
+                let (a, b) = bin(self, a, b)?;
+                BvTerm::Urem(a, b)
+            }
+            ExtOp::Sdiv(a, b) => {
+                let (a, b) = bin(self, a, b)?;
+                BvTerm::Sdiv(a, b)
+            }
+            ExtOp::Srem(a, b) => {
+                let (a, b) = bin(self, a, b)?;
+                BvTerm::Srem(a, b)
+            }
+            ExtOp::Rotl(a, b) => {
+                let (a, b) = bin(self, a, b)?;
+                BvTerm::Rotl(a, b)
+            }
+            ExtOp::Not(x) => BvTerm::Not(Box::new(self.lower_bv(x)?)),
+            ExtOp::Neg(x) => BvTerm::Neg(Box::new(self.lower_bv(x)?)),
+            ExtOp::Ite { cond, then_, else_ } => BvTerm::Ite {
+                cond: Box::new(self.lower_bool(cond)?),
+                then_: Box::new(self.lower_bv(then_)?),
+                else_: Box::new(self.lower_bv(else_)?),
+            },
             ExtOp::Extract { hi, lo, arg } => BvTerm::Extract {
                 hi: *hi,
                 lo: *lo,
@@ -739,6 +790,29 @@ fn concretize_op(op: &ExtOp, model: &SliverModel) -> Result<BvTerm, EvalError> {
             let (a, b) = bin(a, b)?;
             BvTerm::Rotr(a, b)
         }
+        ExtOp::Urem(a, b) => {
+            let (a, b) = bin(a, b)?;
+            BvTerm::Urem(a, b)
+        }
+        ExtOp::Sdiv(a, b) => {
+            let (a, b) = bin(a, b)?;
+            BvTerm::Sdiv(a, b)
+        }
+        ExtOp::Srem(a, b) => {
+            let (a, b) = bin(a, b)?;
+            BvTerm::Srem(a, b)
+        }
+        ExtOp::Rotl(a, b) => {
+            let (a, b) = bin(a, b)?;
+            BvTerm::Rotl(a, b)
+        }
+        ExtOp::Not(x) => BvTerm::Not(Box::new(concretize_bv(x, model)?)),
+        ExtOp::Neg(x) => BvTerm::Neg(Box::new(concretize_bv(x, model)?)),
+        ExtOp::Ite { cond, then_, else_ } => BvTerm::Ite {
+            cond: Box::new(concretize_bool(cond, model)?),
+            then_: Box::new(concretize_bv(then_, model)?),
+            else_: Box::new(concretize_bv(else_, model)?),
+        },
         ExtOp::Extract { hi, lo, arg } => BvTerm::Extract {
             hi: *hi,
             lo: *lo,
@@ -875,6 +949,24 @@ pub fn eval_const(t: &ExtBvTerm) -> Option<u128> {
             ExtBvTerm::PureCall { .. } => false,
         }
     }
+    fn ground_ext_bool(t: &ExtBoolTerm) -> bool {
+        match t {
+            ExtBoolTerm::Eq(a, b)
+            | ExtBoolTerm::Ne(a, b)
+            | ExtBoolTerm::Ult(a, b)
+            | ExtBoolTerm::Ule(a, b)
+            | ExtBoolTerm::Ugt(a, b)
+            | ExtBoolTerm::Uge(a, b)
+            | ExtBoolTerm::Slt(a, b)
+            | ExtBoolTerm::Sle(a, b)
+            | ExtBoolTerm::Sgt(a, b)
+            | ExtBoolTerm::Sge(a, b) => ground_bv(a) && ground_bv(b),
+            ExtBoolTerm::Not(x) => ground_ext_bool(x),
+            ExtBoolTerm::And(a, b) | ExtBoolTerm::Or(a, b) => {
+                ground_ext_bool(a) && ground_ext_bool(b)
+            }
+        }
+    }
     fn ground_array(a: &ArrayTerm) -> bool {
         match a {
             ArrayTerm::Var { .. } => true, // reads may still miss; see dual-fill check
@@ -946,10 +1038,19 @@ pub fn eval_const(t: &ExtBvTerm) -> Option<u128> {
             | ExtOp::Lshr(a, b)
             | ExtOp::Ashr(a, b)
             | ExtOp::Rotr(a, b)
+            | ExtOp::Urem(a, b)
+            | ExtOp::Sdiv(a, b)
+            | ExtOp::Srem(a, b)
+            | ExtOp::Rotl(a, b)
             | ExtOp::Concat(a, b) => ground_bv(a) && ground_bv(b),
             ExtOp::Extract { arg, .. }
+            | ExtOp::Not(arg)
+            | ExtOp::Neg(arg)
             | ExtOp::ZeroExt { by: _, arg }
             | ExtOp::SignExt { by: _, arg } => ground_bv(arg),
+            ExtOp::Ite { cond, then_, else_ } => {
+                ground_ext_bool(cond) && ground_bv(then_) && ground_bv(else_)
+            }
         }
     }
 
@@ -1389,14 +1490,27 @@ mod lowering {
                 }
             };
         }
-        let a = Box::new(gen_bv(rng, depth - 1));
-        let b = Box::new(gen_bv(rng, depth - 1));
-        match rng.below(4) {
-            0 => ExtBvTerm::Op(Box::new(ExtOp::Add(*a, *b))),
-            1 => ExtBvTerm::Op(Box::new(ExtOp::Xor(*a, *b))),
-            2 => ExtBvTerm::Op(Box::new(ExtOp::And(*a, *b))),
-            _ => ExtBvTerm::Op(Box::new(ExtOp::Sub(*a, *b))),
-        }
+        let a = gen_bv(rng, depth - 1);
+        let b = gen_bv(rng, depth - 1);
+        // #231: every lifted operator, including an `ite` whose condition
+        // and branches can hold a select/pure_call.
+        ExtBvTerm::Op(Box::new(match rng.below(11) {
+            0 => ExtOp::Add(a, b),
+            1 => ExtOp::Xor(a, b),
+            2 => ExtOp::And(a, b),
+            3 => ExtOp::Sub(a, b),
+            4 => ExtOp::Urem(a, b),
+            5 => ExtOp::Sdiv(a, b),
+            6 => ExtOp::Srem(a, b),
+            7 => ExtOp::Rotl(a, b),
+            8 => ExtOp::Not(a),
+            9 => ExtOp::Neg(a),
+            _ => ExtOp::Ite {
+                cond: ExtBoolTerm::Ult(gen_bv(rng, 1), gen_bv(rng, 1)),
+                then_: a,
+                else_: b,
+            },
+        }))
     }
 
     fn gen_array(rng: &mut Rng, depth: u32) -> ArrayTerm {

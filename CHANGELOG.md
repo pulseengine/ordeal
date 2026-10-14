@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Every core operator lifts over sliver children** (#231, TR-066). The
+  sliver's `ExtOp` gains `Ite`, `Urem`, `Sdiv`, `Srem`, `Rotl`, `Not` and
+  `Neg`, so a `select` or `pure_call` can sit under any of them, for example
+  `ite(c, select(mem, i), x)`, `ite(c, pure_call(f, a), x)`,
+  `urem(pure_call(f, a), b)`, or loom's trap guard
+  `ite(trap, 0, sdiv(select(..), call(..)))`. Each lowers to the core node
+  of the same name, so the closed fragment gains no operator. A call or read
+  under the untaken branch of an `ite` stays constrained: the congruence
+  constraints are emitted unconditionally. `ExtOp` is `#[non_exhaustive]`,
+  so the change is additive.
+
 ## [0.28.0] - 2026-10-13
 
 **The derived ops are proven, not rewritten** (#192 phase 5). `bvnot`,

@@ -2694,3 +2694,28 @@ artifacts:
         target: VER-064
       - type: part-of-execution
         target: VE-054
+
+  - id: VE-056
+    type: verification-execution
+    title: "#231 lifted sliver operators verified (VER-066)"
+    status: implemented
+    description: "cargo test --workspace (sources touched first): 228 + 13 + 2 + 28 passed / 0 failed / 3 ignored in debug and in release, including sliver::lowering::sliver_lowering_preserves_every_model drawing from every lifted operator and the solver tests ite_over_select_is_decided, ite_over_pure_call_keeps_congruence, lifted_arith_over_pure_call_keeps_congruence (urem, sdiv, srem, rotl, not, neg) and loom_trap_guard_over_sdiv_of_select_and_call (every Unsat certificate-checked; each has a Sat twin). Z3 differential (LIBRARY_PATH=/opt/homebrew/lib, --features oracle --release, oracle:: + lowering_diff::): 22 passed / 0 failed, including the new oracle::tests::sliver_diff_lifted_ops over a 300-query seeded corpus and the unchanged sliver_diff corpus. Negative control: swapping the ite branches in Lowering::lower_op fails 2 of the targeted tests (31 passed / 2 failed); the source was restored and re-tested green. clippy -D warnings clean for the default build and for --features oracle (which caught a non-exhaustive in-test match the default build never compiles); cargo fmt --check clean."
+    fields:
+      environment: "note: macOS arm64, local, Z3 via Homebrew; branch feat/231-sliver-ite-urem on deaafb5 (v0.28.0 + #229)"
+      executor: local
+      timestamp: 2026-10-14T19:07:28Z
+      version: deaafb5+231
+
+  - id: VV-116
+    type: verification-verdict
+    title: "VER-066 pass — every core operator lifts over sliver children; Z3 agrees; the #231 shapes decide"
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-056
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-066
+      - type: part-of-execution
+        target: VE-056
