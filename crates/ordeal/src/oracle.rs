@@ -205,6 +205,15 @@ fn ext_op_to_z3(op: &ExtOp) -> BV {
         ExtOp::Lshr(a, b) => ext_bv_to_z3(a).bvlshr(ext_bv_to_z3(b)),
         ExtOp::Ashr(a, b) => ext_bv_to_z3(a).bvashr(ext_bv_to_z3(b)),
         ExtOp::Rotr(a, b) => ext_bv_to_z3(a).bvrotr(ext_bv_to_z3(b)),
+        ExtOp::Urem(a, b) => ext_bv_to_z3(a).bvurem(ext_bv_to_z3(b)),
+        ExtOp::Sdiv(a, b) => ext_bv_to_z3(a).bvsdiv(ext_bv_to_z3(b)),
+        ExtOp::Srem(a, b) => ext_bv_to_z3(a).bvsrem(ext_bv_to_z3(b)),
+        ExtOp::Rotl(a, b) => ext_bv_to_z3(a).bvrotl(ext_bv_to_z3(b)),
+        ExtOp::Not(a) => ext_bv_to_z3(a).bvnot(),
+        ExtOp::Neg(a) => ext_bv_to_z3(a).bvneg(),
+        ExtOp::Ite { cond, then_, else_ } => {
+            ext_bool_to_z3(cond).ite(&ext_bv_to_z3(then_), &ext_bv_to_z3(else_))
+        }
         ExtOp::Extract { hi, lo, arg } => ext_bv_to_z3(arg).extract(*hi, *lo),
         ExtOp::Concat(a, b) => ext_bv_to_z3(a).concat(ext_bv_to_z3(b)),
         ExtOp::ZeroExt { by, arg } => ext_bv_to_z3(arg).zero_ext(*by),
@@ -440,6 +449,59 @@ pub fn gen_sliver_corpus(seed: u64, n: usize) -> Vec<Vec<ExtBoolTerm>> {
         .map(|_| {
             let k = 1 + rng.below(3) as usize;
             (0..k).map(|_| gen_ext_bool(&mut rng, 2)).collect()
+        })
+        .collect()
+}
+
+/// A BV8 extended term over EVERY lifted operator (#231): the
+/// [`gen_ext_bv`] leaves and ops, plus `urem`/`sdiv`/`srem`/`rotl`/`not`/
+/// `neg` and an `ite` whose condition and branches may themselves contain
+/// `select`/`pure_call`. A separate generator so [`gen_sliver_corpus`]'s
+/// seeded corpus (UV-014) is unchanged.
+fn gen_ext_bv_lifted(rng: &mut XorShift64, depth: u32) -> ExtBvTerm {
+    if depth == 0 || rng.below(3) == 0 {
+        return gen_ext_bv(rng, 1);
+    }
+    let a = gen_ext_bv_lifted(rng, depth - 1);
+    let b = gen_ext_bv_lifted(rng, depth - 1);
+    ExtBvTerm::Op(Box::new(match rng.below(8) {
+        0 => ExtOp::Urem(a, b),
+        1 => ExtOp::Sdiv(a, b),
+        2 => ExtOp::Srem(a, b),
+        3 => ExtOp::Rotl(a, b),
+        4 => ExtOp::Not(a),
+        5 => ExtOp::Neg(a),
+        6 => ExtOp::Add(a, b),
+        _ => ExtOp::Ite {
+            cond: gen_ext_bool(rng, 0),
+            then_: a,
+            else_: b,
+        },
+    }))
+}
+
+/// Generate `n` seeded sliver queries over every lifted operator (#231),
+/// each a conjunction of 1–2 comparisons between [`gen_ext_bv_lifted`]
+/// terms. Reproducible from `(seed, n)` like [`gen_sliver_corpus`].
+pub fn gen_sliver_lifted_corpus(seed: u64, n: usize) -> Vec<Vec<ExtBoolTerm>> {
+    let mut rng = XorShift64::new(seed);
+    (0..n)
+        .map(|_| {
+            let k = 1 + rng.below(2) as usize;
+            (0..k)
+                .map(|_| {
+                    let (a, b) = (
+                        gen_ext_bv_lifted(&mut rng, 3),
+                        gen_ext_bv_lifted(&mut rng, 3),
+                    );
+                    match rng.below(4) {
+                        0 => ExtBoolTerm::Eq(a, b),
+                        1 => ExtBoolTerm::Ne(a, b),
+                        2 => ExtBoolTerm::Ult(a, b),
+                        _ => ExtBoolTerm::Sle(a, b),
+                    }
+                })
+                .collect()
         })
         .collect()
 }
@@ -1342,6 +1404,29 @@ mod sliver_oracle_tests {
         assert!(unsats > 0, "corpus produced no UNSAT verdicts");
     }
 
+    /// #231: every operator lifted over sliver children — `ite`, `urem`,
+    /// `sdiv`, `srem`, `rotl`, `not`, `neg` above a `select`/`pure_call` —
+    /// lowers to a core query whose ordeal verdict matches Z3's array/UF
+    /// theories on the extended query.
+    // rivet: verifies VER-066
+    #[test]
+    fn sliver_diff_lifted_ops() {
+        let corpus = gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300);
+        let (mut sats, mut unsats) = (0u32, 0u32);
+        for (i, query) in corpus.iter().enumerate() {
+            match ordeal_engine(&crate::sliver::lower(query).expect("in-sliver")) {
+                EngineVerdict::Sat(_) => sats += 1,
+                EngineVerdict::Unsat => unsats += 1,
+                EngineVerdict::Unknown => {}
+            }
+            if let Some(d) = sliver_differential(query) {
+                panic!("lifted-ops corpus query {i}: ordeal-vs-Z3 disagreement — {d:?}");
+            }
+        }
+        assert!(sats > 0, "corpus produced no SAT verdicts");
+        assert!(unsats > 0, "corpus produced no UNSAT verdicts");
+    }
+
     /// UV-014: bad sorts are rejected out of the sliver.
     ///
     /// A symbolic BV32 index is no longer rejected — that is TR-028, and it
@@ -1505,8 +1590,17 @@ mod sliver_oracle_tests {
                 | Lshr(a, b)
                 | Ashr(a, b)
                 | Rotr(a, b)
+                | Urem(a, b)
+                | Sdiv(a, b)
+                | Srem(a, b)
+                | Rotl(a, b)
                 | Concat(a, b) => in_bv(a) || in_bv(b),
-                Extract { arg, .. } | ZeroExt { arg, .. } | SignExt { arg, .. } => in_bv(arg),
+                Extract { arg, .. }
+                | ZeroExt { arg, .. }
+                | SignExt { arg, .. }
+                | Not(arg)
+                | Neg(arg) => in_bv(arg),
+                Ite { cond, then_, else_ } => in_bool(cond) || in_bv(then_) || in_bv(else_),
             }
         }
         fn in_bool(t: &ExtBoolTerm) -> bool {
