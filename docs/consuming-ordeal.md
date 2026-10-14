@@ -240,7 +240,13 @@ match solver.check_with_query() {
         #[cfg(feature = "cert-bundle")]
         let json = cert.to_cert_v2(&attests);          // "format": "ordeal-cert/v2"
     }
-    QueryCheckResult::Sat(witness) => { /* the usual re-checkable witness */ }
+    QueryCheckResult::Sat(cert) => {
+        // cert.witness: the v1 witness (model, cnf, assignment, bit_map), still recheck()-able.
+        // cert.query:   the lowered DAG;  cert.inputs: its input bits + the (name, width, node) map.
+        cert.recheck().expect("the trusted crate evaluates the query to true under the inputs");
+        #[cfg(feature = "cert-bundle")]
+        let json = cert.to_cert_v2(&attests);          // "format": "ordeal-cert/v2", "verdict": "sat"
+    }
     QueryCheckResult::Unknown => { /* no claim */ }
 }
 ```
@@ -294,6 +300,35 @@ default `check` still rewrites them first, so its certificates are
 byte-identical to v0.27.0's (for a few queries the two paths' CNFs differ
 in variable numbering — both certified; `docs/design/query-cnf-gap.md`,
 phase 5).
+
+Since v0.29.0 (#192 phase 6, TR-065) the `sat` direction is symmetric on
+this path. `QueryCheckResult::Sat` carries a `QuerySatCertificate`: the
+v1 witness (`.witness`, exactly what the variant used to carry), the same
+`query` block, and an `inputs` block — the DAG's primary-input assignment
+(`"bits"`: a `0`/`1` string, input 0 first; the `Var` nodes' bits in node
+order, LSB first within a variable) plus the `(name, width, node)` map
+from each model variable to its `Var` node, with its own `sha256` over a
+canonical text tagged `ordeal-inputs/v1`. `check_with_query` returns
+`Sat` only after the trusted `ordeal_lrat::check_query_model(nodes, bits,
+roots, inputs.bits)` evaluated EVERY root of the DAG to true under those
+bits (`kernel.spec.check_query_model_sound`, the same `dagBool` semantics
+`check_query_sound` negates; `query_verdicts_exclusive` says no query has
+both an accepted refutation and an accepted model). A model it rejects
+degrades to `Unknown`. `QuerySatCertificate::to_cert_v2` /
+`from_cert_v2` emit and read the SAT bundle (`"verdict": "sat"`, the v1
+witness envelope plus `query` and `inputs`, `recheck.min_version`
+`0.29.0`; five hashes verified before `QuerySatBundle::recheck`), and
+`ordeal check --format json --with-query` prints the two blocks inside
+`certificate` on `sat` — without the flag, and for every v1 bundle and
+reader, nothing changed. Re-check a received SAT bundle without the
+feature by decoding `query` and `inputs.bits` and calling
+`ordeal_lrat::check_query_model`; the CNF-level `check_sat` /
+`check_binding` re-check still applies to the `witness` block and is run
+first by `recheck()` as defence in depth. What the trusted step does not
+establish: that the DAG is your question, and that the `Var` node a
+model value is written into is the one made for that name — the builder's
+`(name, width, node)` map; `QueryInputs::check_consistent` (untrusted)
+confirms the printed model agrees with the carried inputs.
 
 What a v2 recheck does *not* cover (still the solver's word): the
 untrusted DAG builder's choice of DAG for your assertions (now visible in

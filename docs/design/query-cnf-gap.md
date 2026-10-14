@@ -1100,6 +1100,146 @@ width reproduces the rewrite's three remainders rather than the two it
 needs, deliberately (gate identity with the rewrite); a cheaper rule
 changes the bytes of such queries and is a separate decision.
 
+## Phase 6: what was delivered — the SAT direction (TR-065)
+
+### The gap
+
+Phases 3–5 closed the query→CNF gap for **unsat**: `check_query` is
+proven to refute the term DAG. The **sat** direction had no such step.
+A `Sat` answer rested on three checks, two of them trusted-by-proof at
+the CNF level only (`check_sat`: the assignment satisfies the CNF;
+`check_binding`: the advertised model is the assignment's input bits) and
+one untrusted and unproven: `eval.rs::eval_bool`, the solver's own
+evaluator, re-running the ORIGINAL assertions under the model
+(`solver.rs::decode_and_check`). Whether the model satisfies the *query*
+— the DAG, in the semantics the unsat theorem is stated over — was the
+evaluator's word. A bug in `eval.rs` (or in the CNF-side claim that a
+model of the CNF is a model of the DAG, which `tseitin_satisfiable`
+states only for the raw AIG) could yield a `Sat` with a wrong model and
+nothing proven to notice.
+
+### Design: no new evaluator — the proven encoder plus the proven simulator
+
+`kernel::check_query_model(ns, bits, roots, inp)` (TR-065) is
+`check_query`'s SAT twin, built entirely from pieces the unsat direction
+already proved, so nothing new has to be trusted:
+
+1. `dag_wf`, `roots_wf`, `max_width`, `encode_fits` — the same checks,
+   establishing `encode_sound`'s hypotheses (`dag_wf_spec`,
+   `roots_wf_spec`, `max_width_spec`, `encode_fits_spec`, unchanged).
+2. `dag_nin` (the one new kernel function, 15 lines): the DAG's
+   primary-input count — the sum of the `Var` widths in node order,
+   which is how `encode` numbers the AIG inputs and how `dagSim` reads a
+   `Var`'s bits off the input list. `inp.len() < nin` is rejected
+   (`ModelTooShort`), never padded: `simulate` indexes `inputs[k]`, so
+   the proof needs `AigWF aig inp.len`, which `AigWF_mono` gives from
+   `encode_sound`'s `AigWF aig (dagNin ns)` exactly when `dagNin ns ≤
+   inp.len`. (`dag_nin_spec`: `Ok n ⟹ n = dagNin ns`; the overflow guard
+   is unreachable after `encode_fits` accepted — `nin ≤ n·W ≤
+   n·gateBound W` — and kept so the function is total on its own.)
+3. `aig_new` → `encode` (the proven encoder), then `simulate` (the
+   proven simulator, `simulate_spec`: the kernel's run IS `pSim`), then
+   `eval_lit` on every asserted output literal (`eval_lit_spec`); the
+   first false literal is `RootFalse { root }`.
+
+No compaction and no Tseitin: the model is checked against the raw
+encoding, which is what `encode_sound` speaks about. The CNF-level
+witness (`check_sat` / `check_binding`) stays the v1 check and still runs
+first in the untrusted `recheck()` (defence in depth), but the answer now
+rests on the trusted evaluation.
+
+### The theorems
+
+`lean/QueryCheck.lean` (namespace `kernel.spec`), `sorry`-free and
+axiom-clean (pinned in `lean/AxiomCheck.lean`):
+
+```lean
+theorem check_query_model_sound (ns : Slice kernel.blast_kernel.DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (inp : Slice Bool)
+    (h : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) :
+    ∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp.val bits.val ns.val (roots.val[k]).val = true
+
+theorem check_query_model_satisfiable … (h : … = ok (core.result.Result.Ok ())) :
+    ¬ ∀ inp' : List Bool, ¬ (∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp' bits.val ns.val (roots.val[k]).val = true)
+
+theorem query_verdicts_exclusive (ns bits roots hints steps cnf inp)
+    (hu : kernel.check_query ns bits roots hints steps = ok (core.result.Result.Ok cnf))
+    (hs : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) : False
+```
+
+The conclusion is **the same `dagBool`** that `check_query_sound`
+negates (`∀ inp, ¬ ∀ k, dagBool inp … = true`), so the SAT and the UNSAT
+claim about one query are about one semantics — `query_verdicts_exclusive`
+is the one-line composition, the query-level twin of `verdicts_exclusive`
+(TR-044). The proof (~170 lines, incl. the two loop specs
+`dag_nin_loop_spec` and `check_query_model_loop_spec`) is the
+composition described above: `encode_sound`'s last conjunct — `∀ inp k,
+pEvalLit (pSim inp aig) outs[k] = dagBool inp bits ns roots[k]` — does the
+heavy lifting; nothing about any blast rule is re-proven. Statements of
+every earlier theorem are unchanged; `Kernel.lean`: 0 axioms before and
+after.
+
+### Negative controls
+
+One mutation of the trusted function, `lean/regen.sh all`, the proof
+must fail; then a byte-for-byte restore, regen, clean rebuild:
+
+| mutation | what fails |
+|---|---|
+| `check_query_model`: the output loop no longer returns `RootFalse` (`if !eval_lit(…) && false`) — the check accepts every assignment | Rust: `check_query_model_accepts_a_witness_and_rejects_a_falsified_root`, `check_query_model_reads_inputs_in_node_order_lsb_first`, `tampering_the_inputs_or_the_query_fails_the_model_recheck`, `a_rejected_model_degrades_to_unknown_not_sat`, `v2_sat_bundle_flipped_input_bit_fails_recheck_with_witness_untouched`, `format_json_with_query_carries_a_recheckable_model`; Lean: `QueryCheck` (`check_query_model_loop_spec`: the `done (Ok ())` arm no longer carries `pEvalLit … = true`, hence `check_query_model_sound`) |
+
+(Exit codes and first error lines in VE-055.)
+
+And the API- and bundle-level controls the phase was specified by, all
+with the v1 witness (CNF, assignment, bit map) UNTOUCHED and still
+re-checking — exactly what the CNF-level checks cannot see: every single
+flipped input bit of a unique-model query is rejected (`RootFalse`); a
+negated root is rejected with the inputs untouched too; every flipped
+constant bit of the query is rejected; a `vars` entry pointing at the
+other variable's node fails the untrusted consistency check; and in the
+solver the rejected certificate degrades to `Unknown`, never a wrong
+`Sat` (`Solver::sat_verdict`).
+
+### The v2 SAT bundle and `--with-query` on `sat`
+
+`QueryCheckResult::Sat` now carries a `QuerySatCertificate` — `witness`
+(the v1 `SatCertificate`, unchanged), `query` (the same `QueryDag` block
+as the unsat side) and `inputs` (`QueryInputs`: the DAG's input bits as
+a `0`/`1` string, input 0 first, plus the untrusted `(name, width, Var
+node)` map, with its own sha256 over a canonical text tagged
+`ordeal-inputs/v1`). `QuerySatCertificate::to_cert_v2` /
+`from_cert_v2` emit and read the SAT `ordeal-cert/v2` bundle: the v1
+witness envelope plus `query` and `inputs` after `witness`,
+`recheck.min_version` `0.29.0` and a `cmd` naming `check_query_model`;
+all five hashes verified before `QuerySatBundle::recheck`. `ordeal check
+--format json --with-query` prints the same two blocks inside
+`certificate` on `sat`; without the flag the output is byte-identical,
+and every v1 reader and bundle is untouched. The API change: the payload
+of `QueryCheckResult::Sat` (a one-release-old, opt-in entry) is the
+wrapper; `.witness` is what it used to be.
+
+### What phase 6 does not claim
+
+The trusted re-check certifies that the DAG a v2 SAT bundle carries is
+satisfied by the input bits it carries. Still trusted, as for the unsat
+direction: the DAG builder (`dag.rs`) — that the DAG asks the caller's
+question, and that the `Var` node it made for a name is the one the
+model's value is written into (`QueryInputs::from_model`, the
+`(name, width, node)` map; the untrusted `check_consistent` only confirms
+the advertised model agrees with the carried inputs); canonicalization
+(`canon.rs`, constant folding via `eval.rs`); the sliver and the front
+ends. The CNF-level witness is NOT what the sat answer rests on any
+more; it is kept as defence in depth and for v1 readers. `eval.rs` stays
+in `decode_and_check` for the same reason — and because `check` /
+`check_with_witness` (the default paths) still return `Sat` on the CNF
+witness plus the evaluator: closing the sat gap on the DEFAULT path means
+paying the second encoding there too, which is the maintainer's call, as
+it was for unsat (phase 4 kept it opt-in). Until then, the trusted sat
+gate is where the trusted unsat gate is: `check_with_query` and
+`--with-query`.
+
 ## Open risks
 
 - ~~Aeneas/Charon at the pinned revision with a single translation unit

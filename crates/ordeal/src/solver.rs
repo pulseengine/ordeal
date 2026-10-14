@@ -317,6 +317,11 @@ struct Blaster {
     /// re-encode it. `None` for the measurement-only configurations that
     /// skip compaction (the re-check always compacts).
     query: Option<crate::query::QueryDag>,
+    /// The builder's variable map `(name, width, Var node)` (#192 phase 6):
+    /// what turns a model into the DAG's input assignment for the trusted
+    /// `check_query_model`, and what the `ordeal-cert/v2` SAT bundle
+    /// carries so a reader can confirm the model IS that assignment.
+    query_vars: Vec<(String, u32, usize)>,
 }
 
 impl Blaster {
@@ -787,6 +792,7 @@ impl Solver {
                 vars,
                 var_order,
                 query,
+                query_vars: dag.vars,
             },
             cnf,
         ))
@@ -860,11 +866,22 @@ impl Solver {
     /// its certificates are unchanged. For a query with `bvsdiv` / `bvsrem`
     /// operands that canonicalization reorders inside the rewrite, the CNF
     /// here therefore differs from `check`'s (same verdict, both certified).
+    ///
+    /// Since #192 phase 6 (TR-065) `Sat` is symmetric: it carries a
+    /// [`crate::query::QuerySatCertificate`] — the v1 witness plus the
+    /// lowered query and the DAG's input assignment derived from the model
+    /// — and the trusted `ordeal_lrat::check_query_model` must have
+    /// evaluated EVERY root of that DAG to true under the assignment
+    /// (`kernel.spec.check_query_model_sound`, the same `dagBool` semantics
+    /// `check_query_sound` negates) before `Sat` is returned. The
+    /// untrusted `eval.rs` self-check and the CNF-level witness re-check
+    /// still run first (defence in depth); the answer rests on the trusted
+    /// evaluation. A model it rejects degrades to `Unknown`.
     pub fn check_with_query(&self) -> crate::query::QueryCheckResult {
-        use crate::query::{QueryCertificate, QueryCheckResult};
+        use crate::query::{QueryCertificate, QueryCheckResult, QueryInputs, QuerySatCertificate};
         use crate::witness::WitnessCheckResult;
         match self.solve_witness(DerivedOps::Nodes) {
-            (WitnessCheckResult::Unsat(certificate), Some(query)) => {
+            (WitnessCheckResult::Unsat(certificate), Some((query, _))) => {
                 let cert = QueryCertificate { certificate, query };
                 match cert.recheck() {
                     Ok(()) => QueryCheckResult::Unsat(cert),
@@ -874,29 +891,64 @@ impl Solver {
                     }
                 }
             }
-            // `lower()` always compacts, so an Unsat always has its query;
-            // never reached, but Unknown is the sound answer regardless.
-            (WitnessCheckResult::Unsat(_), None) => QueryCheckResult::Unknown,
-            (WitnessCheckResult::Sat(w), _) => QueryCheckResult::Sat(w),
+            (WitnessCheckResult::Sat(witness), Some((query, vars))) => {
+                let inputs = QueryInputs::from_model(&query, &vars, &witness.model);
+                let cert = QuerySatCertificate {
+                    witness,
+                    query,
+                    inputs,
+                };
+                // The trusted crate evaluates the QUERY under the model
+                // BEFORE Sat is asserted — the query-level twin of the
+                // `check_query` gate above.
+                let verdict = Self::sat_verdict(cert);
+                debug_assert!(
+                    !matches!(verdict, QueryCheckResult::Unknown),
+                    "trusted crate rejected our model — ordeal bug"
+                );
+                verdict
+            }
+            // `lower()` always compacts, so a decided verdict always has its
+            // query; never reached, but Unknown is the sound answer anyway.
+            (WitnessCheckResult::Unsat(_) | WitnessCheckResult::Sat(_), None) => {
+                QueryCheckResult::Unknown
+            }
             (WitnessCheckResult::Unknown, _) => QueryCheckResult::Unknown,
         }
     }
 
+    /// The SAT gate of [`Solver::check_with_query`] (#192 phase 6): `Sat`
+    /// only if the trusted crate accepts the certificate's input
+    /// assignment as a model of the query; anything it rejects — a wrong
+    /// model, a malformed query, an assignment the model disagrees with —
+    /// degrades to `Unknown`. Separate from `check_with_query` so the
+    /// degradation is testable with a tampered certificate (the caller's
+    /// `debug_assert` is what flags an ordeal bug in the real pipeline).
+    fn sat_verdict(cert: crate::query::QuerySatCertificate) -> crate::query::QueryCheckResult {
+        use crate::query::QueryCheckResult;
+        match cert.recheck() {
+            Ok(()) => QueryCheckResult::Sat(cert),
+            Err(_) => QueryCheckResult::Unknown,
+        }
+    }
+
     /// The witness-carrying solve, also returning the lowered query the
-    /// CNF came from (for `check_with_query`). This is the body
-    /// `check_with_witness` always had; the query is threaded out, not
-    /// recomputed.
+    /// CNF came from and the builder's variable map (for
+    /// `check_with_query`). This is the body `check_with_witness` always
+    /// had; the query is threaded out, not recomputed.
+    #[allow(clippy::type_complexity)] // (verdict, Some((query, var map))); an alias obscures more than it helps
     fn solve_witness(
         &self,
         derived: DerivedOps,
     ) -> (
         crate::witness::WitnessCheckResult,
-        Option<crate::query::QueryDag>,
+        Option<(crate::query::QueryDag, Vec<(String, u32, usize)>)>,
     ) {
         use crate::witness::{SatCertificate, WitnessCheckResult};
         if self.assertions.is_empty() {
             // Trivially satisfiable: the empty witness re-checks vacuously
-            // (no clauses to satisfy, no bindings to verify).
+            // (no clauses to satisfy, no bindings to verify), and so does
+            // the empty query (no roots to evaluate).
             return (
                 WitnessCheckResult::Sat(SatCertificate {
                     model: Model {
@@ -906,14 +958,17 @@ impl Solver {
                     assignment: Vec::new(),
                     bit_map: Vec::new(),
                 }),
-                None,
+                Some((crate::query::QueryDag::default(), Vec::new())),
             );
         }
         let Some((mut blaster, cnf)) = self.lower_with(AigOptions::default(), derived) else {
             return (WitnessCheckResult::Unknown, None);
         };
         // Moved out, not cloned: the default path pays no copy for it.
-        let query = blaster.query.take();
+        let query = blaster
+            .query
+            .take()
+            .map(|q| (q, std::mem::take(&mut blaster.query_vars)));
         let mut sat_solver = SatSolver::new();
         match sat_solver.solve(&cnf) {
             SatResult::Unsat => {
@@ -954,7 +1009,7 @@ impl Solver {
                 // The trusted crate validates the witness BEFORE Sat is
                 // asserted — the SAT twin of the LRAT gate above.
                 match cert.recheck() {
-                    Ok(()) => (WitnessCheckResult::Sat(cert), None),
+                    Ok(()) => (WitnessCheckResult::Sat(cert), query),
                     Err(_) => {
                         debug_assert!(false, "trusted crate rejected our witness — ordeal bug");
                         (WitnessCheckResult::Unknown, None)
@@ -2584,6 +2639,78 @@ mod tests {
             CheckResult::Sat(_) => {}
             other => panic!("a non-trapping value is free to be nonzero; got {other:?}"),
         }
+    }
+
+    // rivet: verifies VER-065
+    /// #192 phase 6: the SAT gate of `check_with_query` is the trusted
+    /// `check_query_model`. A genuine certificate passes it; the same
+    /// witness and the same inputs against a query whose first root is
+    /// negated — the v1 witness still re-checks (same CNF, assignment and
+    /// bit map) and the model still IS the inputs, so the only layer that
+    /// can see the DAG is no longer satisfied is the trusted evaluation —
+    /// is rejected, and the answer degrades to `Unknown`, never a wrong
+    /// `Sat`. A flipped input bit is caught too (by the untrusted
+    /// consistency check first, by the trusted check regardless).
+    #[test]
+    fn a_rejected_model_degrades_to_unknown_not_sat() {
+        use crate::query::QueryCheckResult;
+        // `a urem 5 = 3` at width 8: a = 3 is a model.
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(
+            Box::new(BvTerm::Urem(Box::new(var("a", 8)), Box::new(c(5, 8)))),
+            Box::new(c(3, 8)),
+        ));
+        let QueryCheckResult::Sat(cert) = s.check_with_query() else {
+            panic!("expected Sat");
+        };
+        assert!(matches!(
+            Solver::sat_verdict(cert.clone()),
+            QueryCheckResult::Sat(_)
+        ));
+        // The negated root: witness and inputs untouched.
+        let mut negated = cert.clone();
+        let root = negated.query.roots[0];
+        negated.query.nodes.push(k::DagNode::Not(root));
+        negated.query.roots[0] = negated.query.nodes.len() - 1;
+        negated
+            .witness
+            .recheck()
+            .expect("the v1 witness is untouched");
+        negated
+            .inputs
+            .check_consistent(&negated.query, &negated.witness.model)
+            .expect("the model is still the inputs");
+        assert!(
+            ordeal_lrat::check_query_model(
+                &negated.query.nodes,
+                &negated.query.bits,
+                &negated.query.roots,
+                &negated.inputs.bits
+            )
+            .is_err(),
+            "the trusted crate must reject the negated root"
+        );
+        assert!(
+            matches!(Solver::sat_verdict(negated), QueryCheckResult::Unknown),
+            "a query the trusted crate does not accept the model of must degrade to Unknown"
+        );
+        // A flipped input bit.
+        let mut flipped = cert;
+        flipped.inputs.bits[0] = !flipped.inputs.bits[0];
+        assert!(
+            ordeal_lrat::check_query_model(
+                &flipped.query.nodes,
+                &flipped.query.bits,
+                &flipped.query.roots,
+                &flipped.inputs.bits
+            )
+            .is_err(),
+            "the trusted crate must reject the flipped input"
+        );
+        assert!(matches!(
+            Solver::sat_verdict(flipped),
+            QueryCheckResult::Unknown
+        ));
     }
 }
 

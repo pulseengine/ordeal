@@ -387,6 +387,18 @@ pub use kernel::blast_kernel;
 /// the text-facing entry).
 pub use kernel::{QueryError, check_query as check_query_steps, dag_wf};
 
+/// The model re-check (issue #192 phase 6, TR-065): the SAT twin of
+/// [`check_query`]. `check_query_model(ns, bits, roots, inp)` returns
+/// `Ok(())` only if the term DAG is well-formed and the primary-input
+/// assignment `inp` (the `Var` nodes' bits in node order, LSB first)
+/// makes EVERY asserted root true — machine-checked as
+/// `kernel.spec.check_query_model_sound` (`lean/QueryCheck.lean`), over
+/// the same `dagBool` semantics `check_query_sound` negates
+/// (`query_verdicts_exclusive`). No text is involved, so there is no
+/// parser between a caller and the kernel; [`dag_nin`] is the input count
+/// the assignment must cover. See [`kernel::check_query_model`].
+pub use kernel::{ModelError, check_query_model, dag_nin};
+
 /// Why a query re-check ([`check_query`]) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryCheckError {

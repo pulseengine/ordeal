@@ -40,7 +40,7 @@
 #[path = "blast_kernel.rs"]
 pub mod blast_kernel;
 
-use blast_kernel::{DagNode, aig_new, compact, encode, map_word, tseitin};
+use blast_kernel::{DagNode, aig_new, compact, encode, eval_lit, map_word, simulate, tseitin};
 
 /// One already-parsed certificate step.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -895,6 +895,124 @@ pub fn check_query(
     }
 }
 
+// ───────────── The model re-check (issue #192 phase 6, TR-065) ─────────────
+
+/// Why [`check_query_model`] rejected. Data-only, like [`QueryError`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ModelError {
+    /// The DAG is malformed, a root is not boolean, or the query exceeds
+    /// the proven capacity — the same checks [`check_query`] runs first
+    /// (`QueryError::Check` cannot occur here: no steps are involved).
+    Query(QueryError),
+    /// The input assignment is shorter than the DAG's primary inputs: the
+    /// `Var` nodes take `needed` bits in node order, `given` were supplied.
+    /// (An assignment with MORE bits than needed is accepted; the surplus
+    /// is never read.)
+    ModelTooShort {
+        /// Bits the DAG's variables take (the Lean `dagNin`).
+        needed: usize,
+        /// Bits supplied.
+        given: usize,
+    },
+    /// Root entry `root` evaluates to false under the assignment.
+    RootFalse {
+        /// 0-based index into the root list.
+        root: usize,
+    },
+}
+
+/// The number of primary-input bits the DAG's variables take — the sum of
+/// the `Var` widths in node order (the Lean `dagNin`), which is how the
+/// encoder numbers the AIG inputs and how `dagSim` reads a `Var` node's
+/// bits off the input list. `Err(TooLarge)` if the sum would overflow
+/// `usize` (rejected rather than wrapped; unreachable after
+/// [`encode_fits`] accepted, kept so this function is total on its own).
+pub fn dag_nin(ns: &[DagNode]) -> Result<usize, ModelError> {
+    let mut nin = 0usize;
+    let n = ns.len();
+    let mut i = 0usize;
+    while i < n {
+        // Copied into a local first: the pinned Aeneas cannot interpret a
+        // slice index as a pattern scrutinee (`dag_wf` does the same).
+        let node = ns[i];
+        if let DagNode::Var(w) = node {
+            if w > usize::MAX - nin {
+                return Err(ModelError::Query(QueryError::TooLarge));
+            }
+            nin += w;
+        }
+        i += 1;
+    }
+    Ok(nin)
+}
+
+/// **The model re-check** (issue #192 phase 6, TR-065): the SAT twin of
+/// [`check_query`]. Accept iff the term DAG `ns` (constants in `bits`,
+/// asserted roots `roots`) is well-formed and, under the primary-input
+/// assignment `inp` — bit `nin + j` is bit `j` (LSB first) of the `Var`
+/// node that is reached after `nin` earlier input bits, exactly the
+/// `inp : List Bool` the DAG semantics `dagSim` reads — EVERY root
+/// evaluates to true.
+///
+/// > If `check_query_model(ns, bits, roots, inp)` returns `Ok(())`, then
+/// > `inp` makes every root of the DAG true: the DAG is satisfiable, and
+/// > `inp` is a witness.
+///
+/// Built from the same proven pieces as the UNSAT direction, with no new
+/// evaluator to trust: `dag_wf` / `roots_wf` / `encode_fits` establish
+/// the hypotheses of `encode_sound`, [`dag_nin`] checks the assignment
+/// covers every input the encoder will create (`simulate` reads
+/// `inputs[k]`; a short assignment is rejected, never padded), then the
+/// proven `encode` builds the AIG and the proven `simulate` evaluates it
+/// — `encode_sound` says every asserted output literal simulates to its
+/// root's `dagBool` value, so checking the output literals IS checking
+/// the roots. Machine-checked as `kernel.spec.check_query_model_sound`
+/// (`lean/QueryCheck.lean`): accepted ⟹ `∀ k < roots.len, dagBool inp
+/// bits ns roots[k] = true` — the SAME `dagBool` that `check_query_sound`
+/// negates, so a SAT and an UNSAT claim about one query are about one
+/// semantics (`query_verdicts_exclusive`). No compaction and no Tseitin
+/// here: the model is checked against the raw encoding, which is what
+/// the theorem is about; the CNF-level witness (`check_sat` /
+/// `check_binding`) remains the v1 check.
+pub fn check_query_model(
+    ns: &[DagNode],
+    bits: &[bool],
+    roots: &[usize],
+    inp: &[bool],
+) -> Result<(), ModelError> {
+    let ws = match dag_wf(ns, bits.len()) {
+        Ok(ws) => ws,
+        Err(e) => return Err(ModelError::Query(e)),
+    };
+    match roots_wf(&ws, roots) {
+        Ok(()) => {}
+        Err(e) => return Err(ModelError::Query(e)),
+    }
+    let wmax = max_width(&ws);
+    if !encode_fits(wmax, ns.len()) {
+        return Err(ModelError::Query(QueryError::TooLarge));
+    }
+    let nin = dag_nin(ns)?;
+    if inp.len() < nin {
+        return Err(ModelError::ModelTooShort {
+            needed: nin,
+            given: inp.len(),
+        });
+    }
+    let mut raw = aig_new();
+    let (_words, outs) = encode(&mut raw, ns, bits, roots);
+    let vals = simulate(&raw, inp);
+    let m = outs.len();
+    let mut k = 0usize;
+    while k < m {
+        if !eval_lit(&vals, outs[k]) {
+            return Err(ModelError::RootFalse { root: k });
+        }
+        k += 1;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1153,6 +1271,115 @@ mod tests {
             check_query(&ns, &bits, &[2, 2], &[], &[add(4, &[], &[2, 3])]),
             Err(QueryError::Check(_))
         ));
+    }
+
+    // ── #192 phase 6: the model re-check ────────────────────────────────
+
+    // rivet: verifies VER-065
+    /// The tiny DAG (`x : BV1`, node 2 = `x = 1`, node 3 = `¬(x = 1)`): the
+    /// assignment `x = 1` satisfies root 2 and falsifies root 3, `x = 0`
+    /// the other way round, and no assignment satisfies both — the pair
+    /// `check_query` refutes.
+    #[test]
+    fn check_query_model_accepts_a_witness_and_rejects_a_falsified_root() {
+        let (ns, bits, _) = tiny_dag();
+        assert_eq!(dag_nin(&ns), Ok(1));
+        assert_eq!(check_query_model(&ns, &bits, &[2], &[true]), Ok(()));
+        assert_eq!(
+            check_query_model(&ns, &bits, &[3], &[true]),
+            Err(ModelError::RootFalse { root: 0 })
+        );
+        assert_eq!(check_query_model(&ns, &bits, &[3], &[false]), Ok(()));
+        assert_eq!(
+            check_query_model(&ns, &bits, &[2], &[false]),
+            Err(ModelError::RootFalse { root: 0 })
+        );
+        assert_eq!(
+            check_query_model(&ns, &bits, &[2, 3], &[true]),
+            Err(ModelError::RootFalse { root: 1 })
+        );
+        assert_eq!(
+            check_query_model(&ns, &bits, &[2, 3], &[false]),
+            Err(ModelError::RootFalse { root: 0 })
+        );
+        // Surplus input bits are never read; no roots is vacuously true.
+        assert_eq!(
+            check_query_model(&ns, &bits, &[2], &[true, false, true]),
+            Ok(())
+        );
+        assert_eq!(check_query_model(&ns, &bits, &[], &[true]), Ok(()));
+    }
+
+    // rivet: verifies VER-065
+    /// Inputs are read in node order, LSB first within a variable (the
+    /// `dagSim` convention): `a + b = 7 ∧ a < b` at width 4 with `a = 3`,
+    /// `b = 4`; swapping the values keeps the sum but fails `a < b`; one
+    /// flipped input bit (`a = 2`) fails the sum.
+    #[test]
+    fn check_query_model_reads_inputs_in_node_order_lsb_first() {
+        let ns = vec![
+            N::Var(4),
+            N::Var(4),
+            N::Add(0, 1),
+            N::Const(0, 4),
+            N::Eq(2, 3),
+            N::Ult(0, 1),
+        ];
+        let bits = vec![true, true, true, false]; // 7, LSB first
+        assert_eq!(dag_nin(&ns), Ok(8));
+        let inp = [true, true, false, false, false, false, true, false];
+        assert_eq!(check_query_model(&ns, &bits, &[4, 5], &inp), Ok(()));
+        let swapped = [false, false, true, false, true, true, false, false];
+        assert_eq!(
+            check_query_model(&ns, &bits, &[4, 5], &swapped),
+            Err(ModelError::RootFalse { root: 1 })
+        );
+        let mut tampered = inp;
+        tampered[0] = false;
+        assert_eq!(
+            check_query_model(&ns, &bits, &[4, 5], &tampered),
+            Err(ModelError::RootFalse { root: 0 })
+        );
+    }
+
+    // rivet: verifies VER-065
+    /// Malformed input fails closed before anything is evaluated: a short
+    /// assignment is rejected (never padded), a malformed DAG, a word root
+    /// and a short constant table are the `check_query` rejections, and an
+    /// input count past `usize::MAX` is `TooLarge`, not a wrap.
+    #[test]
+    fn check_query_model_fails_closed_on_malformed_input() {
+        let (ns, bits, roots) = tiny_dag();
+        assert_eq!(
+            check_query_model(&ns, &bits, &roots, &[]),
+            Err(ModelError::ModelTooShort {
+                needed: 1,
+                given: 0
+            })
+        );
+        let mut bad = ns.clone();
+        bad[2] = N::Eq(0, 9);
+        assert_eq!(
+            check_query_model(&bad, &bits, &[2], &[true]),
+            Err(ModelError::Query(QueryError::NodeNotWellFormed { node: 2 }))
+        );
+        assert_eq!(
+            check_query_model(&[N::Var(8)], &[], &[0], &[true; 8]),
+            Err(ModelError::Query(QueryError::BadRoot { root: 0 }))
+        );
+        assert_eq!(
+            check_query_model(&ns, &[], &[2], &[true]),
+            Err(ModelError::Query(QueryError::NodeNotWellFormed { node: 1 }))
+        );
+        assert_eq!(
+            dag_nin(&[N::Var(usize::MAX), N::Var(1)]),
+            Err(ModelError::Query(QueryError::TooLarge))
+        );
+        // Through the entry point the capacity check fires first.
+        assert_eq!(
+            check_query_model(&[N::Var(usize::MAX), N::Var(1)], &[], &[], &[]),
+            Err(ModelError::Query(QueryError::TooLarge))
+        );
     }
 
     #[test]

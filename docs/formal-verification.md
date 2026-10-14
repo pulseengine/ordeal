@@ -230,6 +230,69 @@ is checked equal to the re-encoding on the untrusted side
 (`QueryRecheckError::CnfMismatch`) — not part of the theorem, which does
 not depend on the `Ok` payload.
 
+## The SAT direction at the query level: the model re-check (#192 phase 6 / TR-065)
+
+Until phase 6 a `Sat` answer was proven only at the CNF level
+(`check_sat_sound` / `check_binding_sound`, above): that the model
+satisfies the *query* — the DAG, in the semantics `check_query_sound` is
+stated over — went through the untrusted, unproven `eval.rs` evaluator
+(`solver.rs::decode_and_check`). `kernel::check_query_model` closes that:
+
+```rust
+pub fn check_query_model(ns: &[DagNode], bits: &[bool], roots: &[usize],
+                         inp: &[bool]) -> Result<(), ModelError>
+```
+
+It runs the same `dag_wf` / `roots_wf` / `max_width` / `encode_fits`
+checks as `check_query`, then `dag_nin` (the DAG's primary-input count —
+the `Var` widths summed in node order; an `inp` shorter than that is
+rejected, never padded), then `aig_new` → `encode` → `simulate` — the
+proven encoder and the proven simulator — and requires every asserted
+output literal (`eval_lit`) to be true. No new evaluator: `encode_sound`
+already says each output literal simulates to its root's `dagBool`
+value under every input list. `lean/QueryCheck.lean` proves, `sorry`-free
+and axiom-clean (pinned in `lean/AxiomCheck.lean`):
+
+```lean
+theorem check_query_model_sound (ns : Slice kernel.blast_kernel.DagNode) (bits : Slice Bool)
+    (roots : Slice Std.Usize) (inp : Slice Bool)
+    (h : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) :
+    ∀ (k : Nat) (hk : k < roots.val.length),
+      dagBool inp.val bits.val ns.val (roots.val[k]).val = true
+
+theorem query_verdicts_exclusive (ns bits roots hints steps cnf inp)
+    (hu : kernel.check_query ns bits roots hints steps = ok (core.result.Result.Ok cnf))
+    (hs : kernel.check_query_model ns bits roots inp = ok (core.result.Result.Ok ())) : False
+```
+
+`inp.val` is exactly the `inp : List Bool` that `dagBool` reads a `Var`
+node's bits from (bit `nin + j` is bit `j`, LSB first, of the `Var`
+reached after `nin` earlier input bits), and the conclusion is **the
+same `dagBool`** that `check_query_sound` negates — so a SAT and an UNSAT
+claim about one query are claims about one semantics, and
+`query_verdicts_exclusive` is their one-line contradiction (the
+query-level twin of `verdicts_exclusive`). `dag_nin_spec` (`Ok n ⟹ n =
+dagNin ns`) and `AigWF_mono` discharge `simulate_spec`'s well-formedness
+hypothesis; `check_query_model_loop_spec` carries "the first `k` output
+literals are true" through the loop. Direction: soundness only — a
+rejected model (`RootFalse`, `ModelTooShort`, a malformed DAG) says
+nothing, and the solver degrades such an answer to `Unknown`.
+
+What a v2 SAT recheck therefore proves: **the input bits the bundle
+carries satisfy every root of the lowered term DAG it carries**, under
+`dagSim`. What it does NOT prove — the remaining trust for `sat`, stated
+plainly: that the DAG is the caller's question (the DAG builder,
+`dag.rs`), and that the model's named values are the carried input bits
+(the builder's `(name, width, Var node)` map, carried in the `inputs`
+block; the untrusted `QueryInputs::check_consistent` confirms the
+advertised model agrees with the inputs but is not part of the theorem).
+The CNF-level witness (`check_sat` / `check_binding`) and the `eval.rs`
+self-check still run first in `Solver::check_with_query` as defence in
+depth; the answer rests on `check_query_model`. The default `check` /
+`check_with_witness` paths are unchanged (CNF witness + evaluator): the
+trusted sat gate is where the trusted unsat gate is, `check_with_query`
+and `ordeal check --with-query`.
+
 ## Out of scope (explicitly NOT proven)
 
 - **Certificate text parsing.** The public entry point
@@ -315,7 +378,12 @@ not depend on the `Ok` payload.
   such, so the v2 certificate carries the operation and the re-check
   covers it; the default path keeps the rewrite so its bytes are
   unchanged, a decision recorded in `docs/design/query-cnf-gap.md`);
-  the sliver (`sliver.rs`); the SMT-LIB and Verus front ends.
+  the sliver (`sliver.rs`); the SMT-LIB and Verus front ends. For a
+  **`sat`** verdict the same list applies (since #192 phase 6 / TR-065
+  the model is evaluated against the DAG by the proven
+  `check_query_model`, above — on the `check_with_query` path), plus the
+  builder's variable map: that the `Var` node the model value is written
+  into is the one made for that name.
   `dag::strash_hints` is untrusted by design: it only reproduces the
   sharing decisions of the old `Aig::and` strash so the shipped CNF stays
   byte-identical, and `compact_sound` holds for any hints. The shipped
@@ -381,7 +449,9 @@ import QueryCheck
 #print axioms kernel.spec.lrat_check_sound
 #print axioms kernel.spec.check_binding_sound
 #print axioms kernel.spec.check_sat_sound
-#print axioms kernel.spec.check_query_sound' > /tmp/ax.lean
+#print axioms kernel.spec.check_query_sound
+#print axioms kernel.spec.check_query_model_sound
+#print axioms kernel.spec.query_verdicts_exclusive' > /tmp/ax.lean
 lake env lean /tmp/ax.lean          # inspect the axiom lists (three standard axioms each)
 lake build AxiomCheck               # the pinned lists, as a gate
 grep -c '^axiom' Kernel.lean        # expect 0 (CI-gated)

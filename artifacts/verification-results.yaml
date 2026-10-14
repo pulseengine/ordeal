@@ -2719,3 +2719,69 @@ artifacts:
         target: VER-066
       - type: part-of-execution
         target: VE-056
+  - id: VE-055
+    type: verification-execution
+    title: "#192 phase 6 verified (VER-065)"
+    status: implemented
+    description: "Model regenerated (lean/regen.sh all): Kernel.lean 0 axioms before and after (dag_nin, dag_nin_loop, check_query_model, check_query_model_loop and ModelError extracted; `let node = ns[i]` needed before the match, as in dag_wf, because the pinned Aeneas cannot interpret a slice index as a pattern scrutinee). lake build: Build completed successfully (1726 jobs); 0 'declaration uses sorry' in Sound, SatWitness, QueryCheck, BlasterCapstone, BlasterDag (the only sorry warnings are inside the Aeneas library); scripts/axiom_check.sh passes with check_query_model_sound and query_verdicts_exclusive pinned to propext / Classical.choice / Quot.sound next to every earlier capstone (check_query_sound, check_query_refutes_cnf, dag_wf_spec, encode_sound, compact_sound, dag_refuted and the rule capstones re-established, statements unchanged). Negative control (one-line mutation `if !eval_lit(&vals, outs[k]) && false` in check_query_model, so it accepts every assignment; model regenerated; proof must fail; source restored byte-for-byte — SHA-256 436f5615… — touched, regenerated 0 axioms, full tree rebuilt clean 1726 jobs): Rust under the mutation — kernel check_query_model_accepts_a_witness_and_rejects_a_falsified_root FAILED, check_query_model_reads_inputs_in_node_order_lsb_first FAILED (2 failed / 1 passed), query::tests::tampering_the_inputs_or_the_query_fails_the_model_recheck FAILED, cert_bundle::tests::v2_sat_bundle_flipped_input_bit_fails_recheck_with_witness_untouched FAILED, cli_baseline format_json_with_query_carries_a_recheckable_model FAILED; Lean under the mutation — lake build QueryCheck exit 1: QueryCheck.lean:1036 Type mismatch (check_query_model_loop_spec, the done(Ok ()) arm no longer carries pEvalLit = true), :1070 simp made no progress, :1073 introN failed (check_query_model_sound). cargo test --workspace (sources touched first): debug 227 + 0 + 14 + 2 + 31 passed / 0 failed / 3 ignored; release 227 + 14 + 2 + 31 passed / 0 failed / 3 ignored; --features cert-bundle 246 + 14 + 2 passed. clippy -D warnings clean on default and on --features oracle,cert-bundle; cargo fmt --check clean. Z3 differential (LIBRARY_PATH=/opt/homebrew/lib, --features oracle --release): 249 passed / 0 failed incl. the new sat_models_differential_through_check_with_query (seeded corpus 0x0D1FFCEC, 100 queries, every Sat passed the trusted check_query_model, ≥ 20 SAT verdicts, 0 disagreements), differential_ordeal_vs_z3_on_corpus and derived_ops_differential_through_check_with_query. Positive controls: kernel (tiny DAG, LSB-first node-order inputs on a two-variable adder/comparator DAG), API (a + b = 9 ∧ a < b ∧ 2a = b: unique model a = 3, b = 6, inputs are the model bits per Var node, deterministic hash), CLI (--format json --with-query on sat: query + inputs decoded from the JSON, ordeal_lrat::check_query_model accepts, independent SHA-256 of the inputs hash, printed model equals the inputs), bundle (SAT v2 round trip, five hashes, v1 serialization of the same witness identical, cross-reader refusals by format / verdict). Negative controls with the v1 witness untouched and still re-checking: all 16 input-bit flips of the unique-model query rejected (RootFalse), a negated root rejected with the inputs untouched (RootFalse root 0), all constant-bit flips rejected, a swapped var map InputMismatch, a malformed node NodeNotWellFormed, a short assignment; Solver::sat_verdict degrades a negated-root and a flipped-input certificate to Unknown; a flipped input bit in a SAT v2 bundle fails on the stale hash and, with the hash recomputed, fails the recheck while the witness inside re-checks. Default output: with_query_is_opt_in_and_json_only shows the sat JSON under --with-query is the default JSON plus exactly the query and inputs keys; the existing baseline tests (v1 bundles, fixtures) pass unchanged. ordeal-lrat declares no dependencies (cargo tree shows the crate alone)."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2; branch proof/192-sat-query-check on deaafb5 (v0.28.0)"
+      executor: local
+      timestamp: 2026-10-14T19:38:13Z
+      version: deaafb5+phase6
+
+  - id: VV-112
+    type: verification-verdict
+    title: VER-065 pass — check_query_model proven (check_query_model_sound, query_verdicts_exclusive), axiom-clean, Kernel.lean 0 axioms, negative control fails the proof
+    status: implemented
+    description: Executed pass as recorded in the linked execution (Lean leg).
+    fields:
+      evidence: see VE-055
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-065
+      - type: part-of-execution
+        target: VE-055
+
+  - id: VV-113
+    type: verification-verdict
+    title: VER-065 pass — real sat queries get Sat through the trusted check at the kernel, API, CLI and bundle level; tampered inputs, roots, constants and var maps are rejected and degrade to Unknown
+    status: implemented
+    description: Executed pass as recorded in the linked execution (Rust positive and negative controls, the v1 witness untouched throughout).
+    fields:
+      evidence: see VE-055
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-065
+      - type: part-of-execution
+        target: VE-055
+
+  - id: VV-114
+    type: verification-verdict
+    title: VER-065 pass — Z3 differential through check_with_query over the seeded corpus, 0 disagreements, every Sat trusted-rechecked
+    status: implemented
+    description: Executed pass as recorded in the linked execution (oracle leg, run locally).
+    fields:
+      evidence: see VE-055
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-065
+      - type: part-of-execution
+        target: VE-055
+
+  - id: VV-115
+    type: verification-verdict
+    title: VER-065 pass — default output and every v1 format byte-identical; workspace tests debug and release, clippy and fmt clean; trusted crate dependency-free
+    status: implemented
+    description: Executed pass as recorded in the linked execution (non-regression leg).
+    fields:
+      evidence: see VE-055
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-065
+      - type: part-of-execution
+        target: VE-055

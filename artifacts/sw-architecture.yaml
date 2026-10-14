@@ -215,6 +215,8 @@ artifacts:
         target: TR-063
       - type: allocated-from
         target: TR-064
+      - type: allocated-from
+        target: TR-065
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)
@@ -303,6 +305,8 @@ artifacts:
         target: TR-048
       - type: allocated-from
         target: TR-062
+      - type: allocated-from
+        target: TR-065
   - id: ARC-012
     type: sw-arch-component
     title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)

@@ -472,17 +472,239 @@ impl QueryCertificate {
     }
 }
 
+// ── #192 phase 6: the SAT direction at the query level ─────────────────
+
+/// The `inputs.encoding` value: `bits` is the DAG's primary-input
+/// assignment as a `0`/`1` string, input 0 first — the `Var` nodes' bits
+/// in node order, LSB first within each variable (exactly the `inp` list
+/// the DAG semantics `dagSim` reads and `check_query_model` evaluates).
+pub const INPUTS_ENCODING: &str = "ordeal-inputs/v1";
+
+/// The DAG's primary-input assignment a SAT verdict is re-checked with
+/// (issue #192 phase 6, TR-065): what the trusted
+/// `ordeal_lrat::check_query_model` consumes, plus the untrusted map from
+/// the model's named variables to the `Var` nodes that read those bits.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct QueryInputs {
+    /// `bits[k]` is primary input `k` (see [`INPUTS_ENCODING`]).
+    pub bits: Vec<bool>,
+    /// Per model variable: (name, width, index of its `Var` node in the
+    /// DAG). Untrusted glue — the DAG builder's choice of node for a name
+    /// — carried so a reader can confirm the advertised model IS the
+    /// assignment the trusted check accepted
+    /// ([`QueryInputs::check_consistent`]).
+    pub vars: Vec<(String, u32, usize)>,
+}
+
+impl std::fmt::Debug for QueryInputs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryInputs")
+            .field("bits", &self.bits.len())
+            .field("vars", &self.vars.len())
+            .field("sha256", &self.sha256())
+            .finish()
+    }
+}
+
+/// The input offset of every `Var` node: `(node, offset, width)` in node
+/// order — the encoder numbers the inputs this way (`dagNin`).
+fn var_offsets(nodes: &[k::DagNode]) -> Vec<(usize, usize, usize)> {
+    let mut out = Vec::new();
+    let mut nin = 0usize;
+    for (i, n) in nodes.iter().enumerate() {
+        if let k::DagNode::Var(w) = *n {
+            out.push((i, nin, w));
+            nin = nin.saturating_add(w);
+        }
+    }
+    out
+}
+
+impl QueryInputs {
+    /// Build the assignment from a model: for every `Var` node of the
+    /// DAG, the bits (LSB first) of the model value of the variable the
+    /// builder mapped to it (`vars`, from `dag::Dag::vars`); a variable
+    /// without a binding reads as zero (and fails
+    /// [`QueryInputs::check_consistent`]).
+    #[must_use]
+    pub fn from_model(
+        query: &QueryDag,
+        vars: &[(String, u32, usize)],
+        model: &crate::solver::Model,
+    ) -> QueryInputs {
+        let mut bits = Vec::new();
+        for (node, _offset, width) in var_offsets(&query.nodes) {
+            let value = vars
+                .iter()
+                .find(|(_, _, n)| *n == node)
+                .and_then(|(name, _, _)| model.assignments.iter().find(|(k, _)| k == name))
+                .map_or(0u128, |(_, v)| *v);
+            for j in 0..width {
+                // A `Var` wider than 128 never reaches here (`Sort` caps the
+                // width); the guard keeps the shift in range regardless.
+                bits.push(j < 128 && (value >> j) & 1 == 1);
+            }
+        }
+        QueryInputs {
+            bits,
+            vars: vars.to_vec(),
+        }
+    }
+
+    /// The canonical text the content hash covers: the encoding tag,
+    /// `bits <bitstring>`, then one `var <name> <width> <node>` line per
+    /// variable.
+    pub fn canonical_text(&self) -> String {
+        let mut s = String::new();
+        s.push_str(INPUTS_ENCODING);
+        s.push('\n');
+        s.push_str("bits ");
+        s.push_str(&bits_string(&self.bits));
+        s.push('\n');
+        for (name, width, node) in &self.vars {
+            s.push_str("var ");
+            s.push_str(name);
+            s.push(' ');
+            s.push_str(&width.to_string());
+            s.push(' ');
+            s.push_str(&node.to_string());
+            s.push('\n');
+        }
+        s
+    }
+
+    /// `sha256(canonical_text)` — the bundle's `inputs.sha256`. Integrity
+    /// only: the verdict rests on the recheck.
+    #[must_use]
+    pub fn sha256(&self) -> String {
+        sha256_hex(self.canonical_text().as_bytes())
+    }
+
+    /// The UNTRUSTED half of a SAT recheck: the advertised model is the
+    /// assignment. Every model binding names a `vars` entry whose node is
+    /// a `Var` node of that width, and the model value's bits equal the
+    /// input bits at that node's offset. (What this does NOT establish —
+    /// that the DAG asks the caller's question — is the DAG builder's
+    /// trust, as for the UNSAT direction.)
+    pub fn check_consistent(
+        &self,
+        query: &QueryDag,
+        model: &crate::solver::Model,
+    ) -> Result<(), QueryModelRecheckError> {
+        let offsets = var_offsets(&query.nodes);
+        for (name, value) in &model.assignments {
+            let Some((_, width, node)) = self.vars.iter().find(|(n, _, _)| n == name) else {
+                return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
+            };
+            let Some((_, offset, w)) = offsets.iter().find(|(n, _, _)| n == node) else {
+                return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
+            };
+            if *w != *width as usize || offset.saturating_add(*w) > self.bits.len() {
+                return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
+            }
+            for j in 0..*w {
+                let bit = j < 128 && (value >> j) & 1 == 1;
+                if self.bits[offset + j] != bit {
+                    return Err(QueryModelRecheckError::InputMismatch(name.clone()));
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A SAT witness together with the query it satisfies (issue #192 phase
+/// 6): the v1 [`SatCertificate`] (model, CNF, assignment, bit map) plus
+/// the lowered [`QueryDag`] and the DAG's input assignment
+/// ([`QueryInputs`]). [`QuerySatCertificate::recheck`] is the stronger
+/// re-check: the trusted crate evaluates the DAG itself under the inputs
+/// (`ordeal_lrat::check_query_model`), so an accepted re-check proves the
+/// DAG satisfiable — `kernel.spec.check_query_model_sound`, in the same
+/// semantics `check_query_sound` negates. The SAT twin of
+/// [`QueryCertificate`].
+#[derive(Clone, Debug)]
+pub struct QuerySatCertificate {
+    /// The v1 witness: CNF-level, re-checked by `check_sat` /
+    /// `check_binding` (`witness.recheck()`), still available.
+    pub witness: SatCertificate,
+    /// The lowered query the witness is a model of.
+    pub query: QueryDag,
+    /// The DAG's input assignment and the model-to-node map.
+    pub inputs: QueryInputs,
+}
+
+/// Why a [`QuerySatCertificate::recheck`] could not confirm the model.
+#[derive(Debug)]
+pub enum QueryModelRecheckError {
+    /// The v1 (CNF-level) witness failed its own recheck.
+    Witness(crate::witness::SatRecheckError),
+    /// A model binding has no `vars` entry, its entry does not name a
+    /// `Var` node of its width, or that node's bits are not in the
+    /// assignment — the advertised model is not covered by the inputs.
+    UnmappedVariable(String),
+    /// A model binding's value disagrees with the input bits of its node.
+    InputMismatch(String),
+    /// The trusted crate rejected: the DAG is malformed or too large, the
+    /// assignment is too short, or a root evaluates to false under it.
+    Rejected(ordeal_lrat::ModelError),
+}
+
+impl std::fmt::Display for QueryModelRecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            QueryModelRecheckError::Witness(e) => write!(f, "witness recheck failed: {e}"),
+            QueryModelRecheckError::UnmappedVariable(n) => {
+                write!(
+                    f,
+                    "model binding '{n}' is not mapped to a Var node of the query"
+                )
+            }
+            QueryModelRecheckError::InputMismatch(n) => {
+                write!(f, "model binding '{n}' disagrees with the query inputs")
+            }
+            QueryModelRecheckError::Rejected(e) => {
+                write!(f, "trusted model re-check rejected: {e:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for QueryModelRecheckError {}
+
+impl QuerySatCertificate {
+    /// Re-establish the verdict at the QUERY level, with zero trust in the
+    /// solver: the v1 witness recheck first (defence in depth — the
+    /// CNF-level claim), the untrusted consistency check that the
+    /// advertised model is the assignment, then the trusted
+    /// `ordeal_lrat::check_query_model`: the DAG well-formed (`dag_wf`),
+    /// the assignment covering its inputs, and EVERY root true under it
+    /// (`check_query_model_sound`). The verdict rests on the last step.
+    pub fn recheck(&self) -> Result<(), QueryModelRecheckError> {
+        self.witness
+            .recheck()
+            .map_err(QueryModelRecheckError::Witness)?;
+        self.inputs
+            .check_consistent(&self.query, &self.witness.model)?;
+        let q = &self.query;
+        ordeal_lrat::check_query_model(&q.nodes, &q.bits, &q.roots, &self.inputs.bits)
+            .map_err(QueryModelRecheckError::Rejected)
+    }
+}
+
 /// The result of [`crate::Solver::check_with_query`]: like
-/// [`crate::witness::WitnessCheckResult`] but `Unsat` carries a
-/// [`QueryCertificate`] — the certificate with the lowered query — whose
-/// trusted re-check passed before it was returned.
+/// [`crate::witness::WitnessCheckResult`] but both decided verdicts carry
+/// the lowered query — `Unsat` a [`QueryCertificate`], `Sat` (since #192
+/// phase 6) a [`QuerySatCertificate`] — whose trusted re-check passed
+/// before it was returned.
 #[derive(Clone, Debug)]
 pub enum QueryCheckResult {
     /// Unsatisfiable, with the certificate and the query it refutes; the
     /// trusted `check_query` accepted it before return.
     Unsat(QueryCertificate),
-    /// Satisfiable, with a witness the trusted crate already validated.
-    Sat(SatCertificate),
+    /// Satisfiable, with the witness, the query and the input assignment
+    /// that satisfies it; the trusted `check_query_model` accepted it
+    /// before return (`.witness` is the v1 [`SatCertificate`]).
+    Sat(QuerySatCertificate),
     /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
     Unknown,
 }
@@ -808,7 +1030,7 @@ mod tests {
     // rivet: verifies VER-062
     /// `check_with_query` agrees with `check` / `check_with_witness` on
     /// every verdict direction, and a SAT query comes back with the usual
-    /// witness.
+    /// witness (inside the query-carrying certificate since phase 6).
     #[test]
     fn check_with_query_matches_the_other_entries() {
         let s = unsat_query();
@@ -820,10 +1042,204 @@ mod tests {
             Box::new(konst(3, 8)),
         ));
         match sat.check_with_query() {
-            QueryCheckResult::Sat(w) => w.recheck().expect("witness re-checks"),
+            QueryCheckResult::Sat(w) => {
+                w.witness.recheck().expect("v1 witness re-checks");
+                w.recheck().expect("query-level model re-checks");
+            }
             other => panic!("expected Sat, got {other:?}"),
         }
         let empty = Solver::new();
-        assert!(matches!(empty.check_with_query(), QueryCheckResult::Sat(_)));
+        match empty.check_with_query() {
+            QueryCheckResult::Sat(w) => {
+                assert!(w.query.nodes.is_empty() && w.inputs.bits.is_empty());
+                w.recheck().expect("the empty query re-checks vacuously");
+            }
+            other => panic!("expected Sat, got {other:?}"),
+        }
+    }
+
+    // ── #192 phase 6: the SAT direction at the query level ─────────────
+
+    /// `(a + b = 9) ∧ (a < b) ∧ (a * 2 = b)` at width 8 — a two-variable
+    /// SAT query with arithmetic, so the input assignment has two `Var`
+    /// nodes to map, and a UNIQUE model (`3a = 9` mod 256 ⟹ `a = 3`,
+    /// `b = 6`), so every single input-bit flip is a non-model.
+    fn sat_query_certificate() -> QuerySatCertificate {
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Eq(
+            Box::new(BvTerm::Add(Box::new(var("a", 8)), Box::new(var("b", 8)))),
+            Box::new(konst(9, 8)),
+        ));
+        s.assert(BoolTerm::Ult(Box::new(var("a", 8)), Box::new(var("b", 8))));
+        s.assert(BoolTerm::Eq(
+            Box::new(BvTerm::Mul(Box::new(var("a", 8)), Box::new(konst(2, 8)))),
+            Box::new(var("b", 8)),
+        ));
+        match s.check_with_query() {
+            QueryCheckResult::Sat(c) => c,
+            other => panic!("expected Sat, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-065
+    /// The positive path: a real SAT query comes back with a certificate
+    /// the trusted `check_query_model` accepts; the inputs are the model's
+    /// bits at each variable's `Var` node (LSB first), the model is the
+    /// expected one, and the block is deterministic.
+    #[test]
+    fn query_sat_certificate_rechecks_through_the_trusted_crate() {
+        let cert = sat_query_certificate();
+        cert.recheck().expect("fresh SAT certificate re-checks");
+        ordeal_lrat::check_query_model(
+            &cert.query.nodes,
+            &cert.query.bits,
+            &cert.query.roots,
+            &cert.inputs.bits,
+        )
+        .expect("the trusted crate alone accepts the inputs");
+        assert_eq!(cert.query.roots.len(), 3);
+        assert_eq!(cert.inputs.vars.len(), 2);
+        assert_eq!(cert.inputs.bits.len(), 16);
+        let value = |name: &str| {
+            cert.witness
+                .model
+                .assignments
+                .iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| *v)
+                .expect(name)
+        };
+        assert_eq!((value("a"), value("b")), (3, 6));
+        // The inputs ARE the model: for each var, the bits at its node's
+        // offset spell its value LSB first.
+        let mut nin = 0;
+        for (i, n) in cert.query.nodes.iter().enumerate() {
+            if let k::DagNode::Var(w) = *n {
+                let (name, width, _) = cert
+                    .inputs
+                    .vars
+                    .iter()
+                    .find(|(_, _, node)| *node == i)
+                    .expect("every Var node is a model variable");
+                assert_eq!(*width as usize, w);
+                let v: u128 = (0..w)
+                    .map(|j| u128::from(cert.inputs.bits[nin + j]) << j)
+                    .sum();
+                assert_eq!(v, value(name), "{name}");
+                nin += w;
+            }
+        }
+        assert_eq!(nin, 16);
+        assert_eq!(
+            cert.inputs.sha256(),
+            sat_query_certificate().inputs.sha256()
+        );
+        assert!(
+            cert.inputs
+                .canonical_text()
+                .starts_with("ordeal-inputs/v1\nbits ")
+        );
+    }
+
+    // rivet: verifies VER-065
+    /// The phase-6 negative controls: with the v1 witness UNTOUCHED (same
+    /// CNF, assignment, bit map — it keeps re-checking), (1) one flipped
+    /// input bit fails the trusted check; (2) a negated root fails it with
+    /// the inputs untouched too; (3) a constant bit of the query flipped
+    /// fails it; (4) a `vars` entry pointing at the wrong node fails the
+    /// consistency check. The CNF-level witness cannot see any of these —
+    /// exactly the gap the query-level check closes.
+    #[test]
+    fn tampering_the_inputs_or_the_query_fails_the_model_recheck() {
+        let cert = sat_query_certificate();
+        let (cnf, assignment) = (cert.witness.cnf.clone(), cert.witness.assignment.clone());
+        // (1) Every single input bit matters here: a = 3, b = 6 is the
+        // unique model (a + 2a = 9, a < 2a), so each flip is rejected.
+        let mut rejected = 0;
+        for i in 0..cert.inputs.bits.len() {
+            let mut t = cert.clone();
+            t.inputs.bits[i] = !t.inputs.bits[i];
+            let direct = ordeal_lrat::check_query_model(
+                &t.query.nodes,
+                &t.query.bits,
+                &t.query.roots,
+                &t.inputs.bits,
+            );
+            assert!(
+                matches!(direct, Err(ordeal_lrat::ModelError::RootFalse { .. })),
+                "bit {i}: {direct:?}"
+            );
+            assert!(t.witness.recheck().is_ok(), "the v1 witness is untouched");
+            assert!(t.recheck().is_err(), "bit {i}");
+            rejected += 1;
+        }
+        assert_eq!(rejected, 16);
+        // (2) The negated root.
+        let mut t = cert.clone();
+        let root = t.query.roots[0];
+        t.query.nodes.push(k::DagNode::Not(root));
+        t.query.roots[0] = t.query.nodes.len() - 1;
+        t.inputs
+            .check_consistent(&t.query, &t.witness.model)
+            .expect("the model is still the inputs");
+        match t.recheck() {
+            Err(QueryModelRecheckError::Rejected(ordeal_lrat::ModelError::RootFalse {
+                root: 0,
+            })) => {}
+            other => panic!("expected RootFalse at root 0, got {other:?}"),
+        }
+        // (3) A flipped constant bit (the `9`, the `2`: every constant bit
+        // of this query is load-bearing).
+        let mut rejected = 0;
+        for i in 0..cert.query.bits.len() {
+            let mut t = cert.clone();
+            t.query.bits[i] = !t.query.bits[i];
+            if t.recheck().is_err() {
+                rejected += 1;
+            }
+            assert_eq!(t.witness.cnf, cnf);
+            assert_eq!(t.witness.assignment, assignment);
+        }
+        assert_eq!(
+            rejected,
+            cert.query.bits.len(),
+            "every constant bit flip is rejected"
+        );
+        // (4) A model variable mapped to the other variable's node.
+        let mut t = cert.clone();
+        let (na, nb) = (t.inputs.vars[0].2, t.inputs.vars[1].2);
+        t.inputs.vars[0].2 = nb;
+        t.inputs.vars[1].2 = na;
+        assert!(matches!(
+            t.recheck(),
+            Err(QueryModelRecheckError::InputMismatch(_))
+        ));
+        // (5) A malformed query and a short assignment are the trusted
+        // crate's own rejections (the malformed node is a non-`Var`, so
+        // the untrusted var map stays intact and the trusted `dag_wf` is
+        // what rejects).
+        let mut t = cert.clone();
+        let j = t
+            .query
+            .nodes
+            .iter()
+            .position(|n| !matches!(n, k::DagNode::Var(_)))
+            .expect("a non-Var node");
+        t.query.nodes[j] = k::DagNode::Add(usize::MAX, 0);
+        match t.recheck() {
+            Err(QueryModelRecheckError::Rejected(ordeal_lrat::ModelError::Query(
+                ordeal_lrat::QueryError::NodeNotWellFormed { node },
+            ))) if node == j => {}
+            other => panic!("expected NodeNotWellFormed at node {j}, got {other:?}"),
+        }
+        let mut t = cert;
+        t.inputs.bits.pop();
+        assert!(matches!(
+            t.recheck(),
+            Err(QueryModelRecheckError::UnmappedVariable(_))
+                | Err(QueryModelRecheckError::Rejected(
+                    ordeal_lrat::ModelError::ModelTooShort { .. }
+                ))
+        ));
     }
 }

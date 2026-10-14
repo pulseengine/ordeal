@@ -87,7 +87,10 @@ pub mod oracle;
 #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
 pub mod sat_cadical;
 
-pub use query::{QueryCertificate, QueryCheckResult, QueryDag, QueryRecheckError};
+pub use query::{
+    QueryCertificate, QueryCheckResult, QueryDag, QueryInputs, QueryModelRecheckError,
+    QueryRecheckError, QuerySatCertificate,
+};
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};
 pub use witness::{SatCertificate, SatRecheckError, WitnessCheckResult};
