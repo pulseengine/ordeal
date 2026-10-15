@@ -2902,3 +2902,70 @@ artifacts:
       executor: local
       timestamp: 2026-10-15T06:24:14Z
       version: 8e5bdb5+phase7
+
+  - id: VE-060
+    type: verification-execution
+    title: "#192 default path on the term check verified (VER-070)"
+    status: implemented
+    description: "cargo test --workspace (sources touched first): debug 245 + 0 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored; release 245 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored; --features ordeal/cert-bundle 268 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored. cargo +stable clippy -D warnings (rustc 1.99.0) clean on default, oracle+cert-bundle and cadical; cargo fmt --check clean; scripts/check_verification_citations.sh PASS (73 legs, the measure's query_term_tests -> 9 tests, denotation_guard -> 2). The new tests: default_check_rests_on_the_trusted_term_check, default_sat_rests_on_the_trusted_binding, sliver_one_shots_rest_on_the_trusted_term_check, every_entry_point_returns_the_gated_certificate, term_map_resolves_equal_bits_constants_from_the_roots (failed on the old term_map with RootMismatch in the 'lo first' case before the fix). Potency control (solver.rs sha256 2f457af8… before and after): term_verdict and term_sat_verdict made to run the v2 recheck only (cert.query.recheck(), i.e. the term check and the term bindings skipped) — query_term_tests 5 passed / 4 failed: default_check_rests_on_the_trusted_term_check, default_sat_rests_on_the_trusted_binding, sliver_one_shots_rest_on_the_trusted_term_check and a_rejected_term_map_degrades_to_unknown_not_a_verdict FAILED; restored, hash identical. Z3 oracle suite (LIBRARY_PATH=/opt/homebrew/lib, --features oracle --release --lib -- oracle::): 16 passed / 0 failed in 36.2 s, incl. differential_ordeal_vs_z3_on_corpus (300 seeded queries through the gated check, 0 disagreements, 0 Unknown), term_differential_through_check_with_term (100, none degraded), sat_models_differential_through_check_with_query, derived_ops_differential_through_check_with_query, the sliver differentials. Byte identity: the published v0.31.0 aarch64-apple-darwin binary (gh release download, --version = ordeal 0.31.0) against this branch's release build over 29 query files (crates/ordeal/tests/fixtures + differential/, evidence/certs, fuzz/seeds/smtlib, .rivet/repos/gale/proofs/ordeal-bv) in text, JSON and JSON --with-query mode, sha256 of stdout + stderr + exit code: 87 same / 0 differ (the same 87/87 between v0.31.0 and a local build of main, as the control). cnf_gap_digest (release, oracle): latency 7b35d569…, bmc 5c14a69e…, 0x192 a1d80de9…, 0xC0FFEE 42d44115… — unchanged. Verdict scan (scratchpad harness, best-of-1 check vs check_with_term on the v0.31.0 sources): latency 6/6, bmc 5/5, gen_corpus(0x192, 200) 200/200 decided and accepted by the term check; gen_corpus(0xC0FFEE, 1000) refused 4 (q140 sat, q150 sat, q169 unsat, q216 unsat; all RootMismatch, the term_map gap above, not capacity) in its first ~250 queries before the run was stopped; after the fix the four are accepted on this branch with the same digests as the old check (sat 9f596c02…, sat 0d5892ec…, unsat 4c57396b…, unsat ed33d64a…). NOT completed: the full per-query digest diff over gen_corpus(0xC0FFEE, 1000) beyond q216, gen_corpus(0x0D1FFCEC, 100), the eight sliver one-shots and the width sweep (every operator at widths 1..=128) — both scans were first stopped for memory pressure (one gen_corpus(0xC0FFEE, 1000) query takes about 7 GB unbounded, on v0.31.0 as well as on this branch); re-run in the foreground with check_with_deadline(10 s) per query and per-line streaming (peak RSS 2.9 GB / 2.8 GB): v0.31.0 sources (tag-identical snapshot, 0 differing .rs files) vs this branch, 8230 queries (latency, bmc, gen_corpus 0x192/200, 0xC0FFEE/1000, 0x0D1FFCEC/100, hard_mul_6, the 6910-query width sweep 1..=128, and the sliver one-shots with their deadline/limit twins): verdict and certificate digest identical on all 8230 (4021 sat, 4207 unsat, the same 2 deadline Unknowns q174/q317 on both sides); v0.31.0's opt-in check_with_term refused 6 of them (C0FFEE q140, q150, q169, q216, q419, q620 — the term_map gap fixed here) and this branch refuses 0. Performance (release, best of 3, quiet machine; the old sources from a scratchpad snapshot of v0.31.0's crates): latency corpus total check 12.238 ms (v0.31.0) vs 14.870 ms (this branch) = 1.21x (target <= 1.25x), check_with_term 14.802 ms (was 1.72x check, now equal); srem_vc_32 4.652 -> 5.889, urem_vc_32 4.187 -> 5.365, ult_cycle_64 3.355 -> 3.519 ms, the three microsecond queries 1.9-2.5x; components on srem_vc_32: flatten + term_map 0.108, check_term_dag 0.111, check_query 1.343 of which LRAT 0.681 (so the trusted re-encoding ~0.66 ms), CNF compare below resolution; criterion benches/latency.rs: srem 5.42 -> 6.92 ms, urem 5.10 -> 6.45, ult_cycle 4.28 -> 4.42, layout 5.7 -> 12.9 us, trap 13.5 -> 24.8 us, shl1 18.1 -> 48.1 us, check_cnf 776 -> 803 ns; slow queries: hard_mul_6 2329.7 -> 2330.8 ms, queue_overflow_k128 2540.4 -> 2519.0 ms. ordeal-lrat untouched: no Lean regeneration."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, rustc 1.99.0 stable, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib); branch feat/192-term-check-default on 2847a2b (v0.31.0)"
+      executor: local
+      timestamp: 2026-10-15T13:30:00Z
+      version: 2847a2b+term-default
+
+  - id: VV-123
+    type: verification-verdict
+    title: VER-070 pass — the tamper hook makes every entry point (check, the bounded twins, witness, query, term, the sliver one-shots) degrade to Unknown on UNSAT and SAT; the potency control fails 4 of 9 tests
+    status: implemented
+    description: Executed pass as recorded in the linked execution (negative controls and potency).
+    fields:
+      evidence: see VE-060
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-070
+      - type: part-of-execution
+        target: VE-060
+
+  - id: VV-124
+    type: verification-verdict
+    title: VER-070 pass — the term_map root resolution accepts the four refused gen_corpus(0xC0FFEE) queries with the old digests and the equal-bits regression test; the denotation guard and the Z3 differentials pass on the gated path with 0 Unknown
+    status: implemented
+    description: Executed pass as recorded in the linked execution (verdict non-regression on the scanned corpora; the systematic scan's remainder is recorded there as not completed).
+    fields:
+      evidence: see VE-060
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-070
+      - type: part-of-execution
+        target: VE-060
+
+  - id: VV-125
+    type: verification-verdict
+    title: VER-070 pass — byte identity against the published v0.31.0 binary, 87 of 87 (29 query files x text / JSON / --with-query); the four cnf_gap digests unchanged
+    status: implemented
+    description: Executed pass as recorded in the linked execution (output identity).
+    fields:
+      evidence: see VE-060
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-070
+      - type: part-of-execution
+        target: VE-060
+
+  - id: VV-126
+    type: verification-verdict
+    title: VER-070 pass — latency corpus 1.21x of v0.31.0's check (target 1.25x), seconds-long queries unchanged, cost broken down; workspace tests debug / release / cert-bundle, clippy on three feature sets and fmt clean
+    status: implemented
+    description: Executed pass as recorded in the linked execution (performance and the build gates).
+    fields:
+      evidence: see VE-060
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-070
+      - type: part-of-execution
+        target: VE-060

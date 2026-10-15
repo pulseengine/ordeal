@@ -18,14 +18,22 @@
 //! optimization / accept the codegen when they receive `Unknown`. Only a
 //! checked `Unsat` certificate authorizes a transformation.
 //!
-//! # Pipeline status (P2: certificate-checked)
+//! # Pipeline status (certificate-checked, term-checked since TR-070)
 //!
-//! `check` runs blast → AIG → Tseitin CNF → CDCL. On SAT it returns a
-//! self-checked model. On UNSAT the LRAT certificate emitted from the CDCL
-//! proof trace is validated by the `ordeal-lrat` checker **before** `Unsat`
-//! is returned — an `Unsat` the checker did not accept degrades to `Unknown`
-//! (AGENTS.md rule 1: no unchecked `Unsat`, ever). The raw engine verdict is
-//! exposed crate-internally for the differential oracle only.
+//! Every entry point runs one pipeline (`solve_core`): blast → AIG →
+//! Tseitin CNF → CDCL, then the trusted gate. The gate hands the trusted
+//! `ordeal-lrat` crate the assertions flattened as asked, the DAG the
+//! solver lowered them to, and the proof or the model; `Unsat` is returned
+//! only once `check_term_dag` has related the term to the DAG and
+//! `check_query` has re-encoded the DAG and checked the LRAT certificate
+//! against the CNF it produced; `Sat` only once `check_term_dag`,
+//! `check_query_model` and `check_input_value` have accepted the model
+//! (after the untrusted evaluator's self-check, kept as defence in depth).
+//! Anything rejected degrades to `Unknown` (AGENTS.md rule 1: no unchecked
+//! `Unsat`, ever). What the gate leaves trusted: the 1:1 flattening of the
+//! assertions (`dag::flatten`), the variable names, the sliver lowering and
+//! the front ends (`docs/formal-verification.md`). The raw engine verdict
+//! is exposed crate-internally for the differential oracle only.
 //!
 //! Trust status: the checker is small and dependency-free, and is tested
 //! against mutated *certificates* (no code-mutation tool runs over it); its
@@ -450,7 +458,7 @@ impl Solver {
     ) -> CheckResult {
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
         match Self::from_sliver(assertions) {
-            Ok(solver) => Self::verdict(solver.solve_pipeline(Bound::Deadline(deadline))),
+            Ok(solver) => Self::verdict(solver.solve_core(Bound::Deadline(deadline))),
             Err(_) => CheckResult::Unknown,
         }
     }
@@ -492,31 +500,41 @@ impl Solver {
 
     /// Decide satisfiability of the conjunction of all asserted terms.
     ///
-    /// Pipeline: blast → AIG → Tseitin CNF → CDCL. `Sat` carries a model
-    /// that has been re-evaluated against every assertion (self-check).
-    /// On engine-UNSAT the LRAT certificate emitted from the proof trace is
-    /// validated by the `ordeal-lrat` checker before `Unsat` is returned —
-    /// an `Unsat` the checker did not accept is never reported (it degrades
-    /// to `Unknown`, which is always sound).
+    /// Pipeline: blast → AIG → Tseitin CNF → CDCL, then the **trusted gate**
+    /// (TR-070, v0.32.0): the answer is only returned once the trusted
+    /// `ordeal-lrat` crate has related the assertions, flattened as asked,
+    /// to the DAG the solver built from them (`check_term_dag`,
+    /// `check_term_dag_sound`) and, on engine-UNSAT, re-encoded that DAG and
+    /// checked the LRAT certificate against the CNF *it* produced
+    /// (`check_query`, `check_term_unsat_sound`) — or, on engine-SAT,
+    /// evaluated every root of the DAG under the model (`check_query_model`)
+    /// and bound every model value through the term's own variable map
+    /// (`check_input_value`, `check_term_model_sound`). The model is also
+    /// re-evaluated against every assertion by the untrusted evaluator first
+    /// (defence in depth). The proof is checked once, by `check_query`.
+    /// Anything the trusted crate rejects degrades to `Unknown`, which is
+    /// always sound — an unchecked `Unsat` or `Sat` is never reported. The
+    /// certificate and the model are byte-for-byte what v0.31.0 returned;
+    /// [`Solver::check_with_term`] exposes the term and the DAG the gate
+    /// checked.
     pub fn check(&self) -> CheckResult {
-        Self::verdict(self.solve_pipeline(Bound::None))
+        Self::verdict(self.solve_core(Bound::None))
     }
 
     /// Decide satisfiability under a conflict budget (DES-019 / TR-016).
     ///
     /// Runs the identical pipeline as [`Solver::check`] — blast → AIG →
-    /// Tseitin CNF → bounded CDCL — but caps the SAT core at `max_conflicts`
-    /// search conflicts. On budget exhaustion the core reaches no verdict and
-    /// this returns [`CheckResult::Unknown`]; on any decided verdict it
-    /// behaves exactly like `check` (self-checked model on SAT, and on
-    /// engine-UNSAT the LRAT certificate is validated by `ordeal-lrat` before
-    /// `Unsat` is returned, degrading to `Unknown` on rejection).
+    /// Tseitin CNF → bounded CDCL, then the same trusted gate — but caps the
+    /// SAT core at `max_conflicts` search conflicts. On budget exhaustion
+    /// the core reaches no verdict and this returns
+    /// [`CheckResult::Unknown`]; on any decided verdict it behaves exactly
+    /// like `check`.
     ///
-    /// The budget bounds only completeness: the certificate gate and the
-    /// model self-check are untouched, so an exhausted budget yields `Unknown`
-    /// and never a wrong or unchecked verdict.
+    /// The budget bounds only completeness: the trusted gate and the model
+    /// self-check are untouched, so an exhausted budget yields `Unknown` and
+    /// never a wrong or unchecked verdict.
     pub fn check_with_limit(&self, max_conflicts: u64) -> CheckResult {
-        Self::verdict(self.solve_pipeline(Bound::Conflicts(max_conflicts)))
+        Self::verdict(self.solve_core(Bound::Conflicts(max_conflicts)))
     }
 
     /// Decide under a **wall-clock deadline** (TR-029, issue #71): the
@@ -529,11 +547,12 @@ impl Solver {
     /// [`CheckResult::Unknown`] — never a wrong or unchecked verdict, per the
     /// module-level soundness contract. `timeout_ms == 0` admits only queries
     /// decided before the first search conflict (like a zero conflict
-    /// budget). Blasting/canonicalization time is not bounded — the deadline
-    /// governs the SAT search, which dominates on hard queries.
+    /// budget). Blasting/canonicalization time is not bounded, nor is the
+    /// trusted gate after the search — the deadline governs the SAT search,
+    /// which dominates on hard queries.
     pub fn check_with_deadline(&self, timeout_ms: u64) -> CheckResult {
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
-        Self::verdict(self.solve_pipeline(Bound::Deadline(deadline)))
+        Self::verdict(self.solve_core(Bound::Deadline(deadline)))
     }
 
     /// Prove a boolean **goal valid** — true for *every* assignment to its free
@@ -646,51 +665,79 @@ impl Solver {
         }
     }
 
-    /// Map an internal pipeline outcome to the caller-facing verdict, applying
-    /// the soundness gate uniformly for `check` and `check_with_limit`.
-    fn verdict(outcome: Pipeline) -> CheckResult {
+    /// Map the core's gated outcome to the caller-facing verdict: the
+    /// certificate (CNF + LRAT) or the model, as every entry point returned
+    /// them before TR-070 — the term and the query the gate checked are
+    /// dropped here and kept by [`Solver::check_with_term`].
+    fn verdict(outcome: crate::query::TermCheckResult) -> CheckResult {
+        use crate::query::TermCheckResult;
         match outcome {
-            Pipeline::Sat(env) => CheckResult::Sat(Model {
-                assignments: {
-                    let mut a: Vec<(String, u128)> = env.into_iter().collect();
-                    a.sort();
-                    a
-                },
-            }),
-            Pipeline::Unsat {
-                certificate: Some(lrat),
-                cnf,
-            } => CheckResult::Unsat(Certificate { lrat, cnf }),
-            // The checker rejected our own certificate: an ordeal bug, but a
-            // sound outcome — degrade to Unknown rather than assert UNSAT.
-            Pipeline::Unsat {
-                certificate: None, ..
-            }
-            | Pipeline::Unknown => CheckResult::Unknown,
+            TermCheckResult::Sat(cert) => CheckResult::Sat(cert.query.witness.model),
+            TermCheckResult::Unsat(cert) => CheckResult::Unsat(cert.query.certificate),
+            // The trusted crate rejected our own certificate, model or term
+            // map: an ordeal bug, but a sound outcome — degrade to Unknown
+            // rather than assert a verdict.
+            TermCheckResult::Unknown => CheckResult::Unknown,
         }
     }
 
     /// The engine's raw verdict — crate-internal, differential oracle only.
     #[cfg(any(test, feature = "oracle"))]
     pub(crate) fn check_raw(&self) -> RawVerdict {
-        match self.solve_pipeline(Bound::None) {
-            Pipeline::Sat(env) => RawVerdict::Sat(env),
-            Pipeline::Unsat { .. } => RawVerdict::Unsat,
-            Pipeline::Unknown => RawVerdict::Unknown,
+        use crate::query::TermCheckResult;
+        match self.solve_core(Bound::None) {
+            TermCheckResult::Sat(cert) => {
+                RawVerdict::Sat(cert.query.witness.model.assignments.into_iter().collect())
+            }
+            TermCheckResult::Unsat(_) => RawVerdict::Unsat,
+            TermCheckResult::Unknown => RawVerdict::Unknown,
         }
     }
 
-    /// Run the full pipeline once, producing the internal outcome. `budget`
-    /// bounds the CDCL core's search conflicts (`None` is unbounded); an
-    /// exhausted budget surfaces as [`Pipeline::Unknown`].
-    fn solve_pipeline(&self, bound: Bound) -> Pipeline {
-        if self.assertions.is_empty() {
-            // An empty conjunction is trivially satisfiable by the empty model.
-            return Pipeline::Sat(Env::new());
-        }
-        let Some((blaster, cnf)) = self.lower() else {
-            return Pipeline::Unknown;
+    /// **The one pipeline every entry point runs** (TR-070): lower, search
+    /// under `bound`, then the trusted gate — [`Solver::gate_unsat`] or
+    /// [`Solver::gate_sat`] — whose acceptance is what the returned verdict
+    /// rests on. `check` / `check_with_limit` / `check_with_deadline` keep
+    /// the certificate or the model of the result, `check_with_witness` the
+    /// witness, `check_with_query` the query, `check_with_term` all of it.
+    /// An exhausted bound, a refused lowering (disabled op, ill-sorted
+    /// input) and a rejection by the trusted crate all surface as
+    /// [`crate::query::TermCheckResult::Unknown`].
+    fn solve_core(&self, bound: Bound) -> crate::query::TermCheckResult {
+        use crate::query::{
+            QueryInputs, QuerySatCertificate, QueryTerm, TermCheckResult, TermSatCertificate,
         };
+        use crate::witness::SatCertificate;
+        if self.assertions.is_empty() {
+            // An empty conjunction is trivially satisfiable by the empty
+            // model: the empty witness re-checks vacuously (no clauses, no
+            // bindings), and so do the empty query and the empty term (no
+            // roots to evaluate, no nodes to relate).
+            return TermCheckResult::Sat(TermSatCertificate {
+                query: QuerySatCertificate {
+                    witness: SatCertificate {
+                        model: Model {
+                            assignments: Vec::new(),
+                        },
+                        cnf: Vec::new(),
+                        assignment: Vec::new(),
+                        bit_map: Vec::new(),
+                    },
+                    query: crate::query::QueryDag::default(),
+                    inputs: QueryInputs::default(),
+                },
+                term: QueryTerm::default(),
+            });
+        }
+        let Some((mut blaster, cnf)) = self.lower() else {
+            return TermCheckResult::Unknown;
+        };
+        // `lower()` always compacts, so the lowered query is always there;
+        // moved out, not cloned. (Unknown is the sound answer regardless.)
+        let Some(query) = blaster.query.take() else {
+            return TermCheckResult::Unknown;
+        };
+        let vars = std::mem::take(&mut blaster.query_vars);
         let mut sat_solver = SatSolver::new();
         let verdict = match bound {
             // Bounded solve: exhaustion ⇒ no verdict ⇒ conservative Unknown
@@ -698,38 +745,129 @@ impl Solver {
             // budget and a wall-clock deadline.
             Bound::Conflicts(max) => match sat_solver.solve_with_budget(&cnf, max) {
                 Some(v) => v,
-                None => return Pipeline::Unknown,
+                None => return TermCheckResult::Unknown,
             },
             Bound::Deadline(d) => match sat_solver.solve_with_deadline(&cnf, d) {
                 Some(v) => v,
-                None => return Pipeline::Unknown,
+                None => return TermCheckResult::Unknown,
             },
             Bound::None => sat_solver.solve(&cnf),
         };
         match verdict {
             SatResult::Unsat => {
-                // Emit the LRAT certificate from the proof trace and have the
-                // trusted checker validate it BEFORE asserting UNSAT.
-                let cert =
+                // Emit the LRAT certificate from the proof trace; the trusted
+                // gate checks it (once, inside `check_query`, against the
+                // CNF the trusted crate re-encodes from the query) BEFORE
+                // UNSAT is asserted. The carried CNF is the solver's, checked
+                // equal to the re-encoding, so the caller's Certificate is a
+                // self-contained, independently re-checkable proof.
+                let lrat =
                     crate::lrat::emit_lrat_trimmed(cnf.clauses.len(), sat_solver.proof_trace());
-                match ordeal_lrat::check(&cnf.clauses, &cert) {
-                    Ok(()) => Pipeline::Unsat {
-                        certificate: Some(cert.into_bytes()),
-                        // Carry the refuted CNF so the caller's Certificate is a
-                        // self-contained, independently re-checkable proof.
+                self.gate_unsat(
+                    query,
+                    &vars,
+                    Certificate {
+                        lrat: lrat.into_bytes(),
                         cnf: cnf.clauses,
                     },
-                    Err(_) => {
-                        debug_assert!(false, "checker rejected our certificate — ordeal bug");
-                        Pipeline::Unsat {
-                            certificate: None,
-                            cnf: Vec::new(),
-                        }
-                    }
-                }
+                )
             }
-            SatResult::Sat(assignment) => self.decode_and_check(&blaster, &assignment),
+            SatResult::Sat(assignment) => {
+                self.gate_sat(query, &vars, &blaster, cnf.clauses, assignment)
+            }
         }
+    }
+
+    /// The trusted UNSAT gate of every entry point (TR-070): flatten the
+    /// assertions as asked and map them onto the lowered `query`
+    /// (`dag::flatten` / `dag::term_map`, untrusted advice), then the
+    /// trusted crate verifies the DAG is a semantics-preserving rewrite of
+    /// the term along the map (`check_term_dag`), re-encodes the DAG and
+    /// checks the LRAT proof against the CNF it produced (`check_query`),
+    /// which must equal the carried CNF. `Unsat` only on acceptance
+    /// (`check_term_unsat_sound`: the proof refutes the TERM); a rejection
+    /// degrades to `Unknown`.
+    fn gate_unsat(
+        &self,
+        query: crate::query::QueryDag,
+        vars: &[(String, u32, usize)],
+        certificate: Certificate,
+    ) -> crate::query::TermCheckResult {
+        use crate::query::{QueryCertificate, QueryTerm, TermCertificate, TermCheckResult};
+        let Ok(term) = QueryTerm::flatten(&self.assertions, &query, vars) else {
+            return TermCheckResult::Unknown;
+        };
+        let (term, tampered) = tamper::apply(term);
+        let result = Self::term_verdict(TermCertificate {
+            query: QueryCertificate { certificate, query },
+            term,
+        });
+        debug_assert!(
+            tampered || !matches!(result, TermCheckResult::Unknown),
+            "trusted crate rejected our certificate or term map — ordeal bug"
+        );
+        result
+    }
+
+    /// The trusted SAT gate of every entry point (TR-070): the model is
+    /// decoded and re-evaluated against the ORIGINAL assertions by the
+    /// untrusted evaluator (defence in depth, [`Solver::decode_and_check`]),
+    /// packed into the CNF-level witness, turned into the DAG's input
+    /// assignment, and the assertions are flattened and mapped as for
+    /// UNSAT; then the trusted crate verifies the term-to-DAG
+    /// correspondence (`check_term_dag`), the witness (`check_sat` /
+    /// `check_binding`), that EVERY root of the DAG is true under the
+    /// inputs (`check_query_model`) and that every model value is the
+    /// inputs at its term variable's image (`var_offset` /
+    /// `check_input_value`). `Sat` only on acceptance
+    /// (`check_term_model_sound`: the model satisfies the TERM); a rejection
+    /// degrades to `Unknown`.
+    fn gate_sat(
+        &self,
+        query: crate::query::QueryDag,
+        vars: &[(String, u32, usize)],
+        blaster: &Blaster,
+        cnf: Vec<Vec<i32>>,
+        assignment: Vec<bool>,
+    ) -> crate::query::TermCheckResult {
+        use crate::query::TermCheckResult;
+        use crate::query::{QueryInputs, QuerySatCertificate, QueryTerm, TermSatCertificate};
+        use crate::witness::SatCertificate;
+        let Some(env) = self.decode_and_check(blaster, &assignment) else {
+            return TermCheckResult::Unknown;
+        };
+        let mut assignments: Vec<(String, u128)> = env.into_iter().collect();
+        assignments.sort();
+        let mut bit_map: Vec<(String, u32, Vec<i32>)> = Vec::with_capacity(blaster.var_order.len());
+        for (name, width) in &blaster.var_order {
+            let word = &blaster.vars[name];
+            let bits: Vec<i32> = word.iter().map(|l| k::cnf_lit(*l)).collect();
+            bit_map.push((name.clone(), *width, bits));
+        }
+        let witness = SatCertificate {
+            model: Model { assignments },
+            cnf,
+            assignment,
+            bit_map,
+        };
+        let inputs = QueryInputs::from_model(&query, vars, &witness.model);
+        let Ok(term) = QueryTerm::flatten(&self.assertions, &query, vars) else {
+            return TermCheckResult::Unknown;
+        };
+        let (term, tampered) = tamper::apply(term);
+        let result = Self::term_sat_verdict(TermSatCertificate {
+            query: QuerySatCertificate {
+                witness,
+                query,
+                inputs,
+            },
+            term,
+        });
+        debug_assert!(
+            tampered || !matches!(result, TermCheckResult::Unknown),
+            "trusted crate rejected our model or term map — ordeal bug"
+        );
+        result
     }
 
     /// The pipeline's front half — validation, canonicalization, blasting,
@@ -852,10 +990,11 @@ impl Solver {
     }
 
     /// Decode a SAT assignment into a model and self-check it against the
-    /// ORIGINAL assertions — shared by every backend. A failing self-check
-    /// means an ordeal bug; the outcome degrades to Unknown, never a wrong
-    /// Sat.
-    fn decode_and_check(&self, blaster: &Blaster, assignment: &[bool]) -> Pipeline {
+    /// ORIGINAL assertions with the untrusted evaluator — shared by every
+    /// backend, and defence in depth under the trusted gate
+    /// ([`Solver::gate_sat`]). A failing self-check means an ordeal bug; the
+    /// outcome degrades to Unknown (`None`), never a wrong Sat.
+    fn decode_and_check(&self, blaster: &Blaster, assignment: &[bool]) -> Option<Env> {
         let mut env = Env::new();
         for (name, _width) in &blaster.var_order {
             let word = &blaster.vars[name];
@@ -873,10 +1012,10 @@ impl Solver {
             .iter()
             .all(|a| eval::eval_bool(a, &env) == Ok(true));
         if ok {
-            Pipeline::Sat(env)
+            Some(env)
         } else {
             debug_assert!(false, "SAT model failed self-check — ordeal bug");
-            Pipeline::Unknown
+            None
         }
     }
 
@@ -889,10 +1028,18 @@ impl Solver {
     /// not accept is never reported"; it degrades to `Unknown`).
     ///
     /// Always available (no feature gate since #162 / TR-045: the CLI emits
-    /// the witness on every `sat`); `check` is untouched and pays nothing —
-    /// the witness capture happens only when this entry is called.
+    /// the witness on every `sat`). Since TR-070 this is [`Solver::check`]'s
+    /// own pipeline — the witness is built and checked on every path — so
+    /// this entry costs nothing beyond `check` and returns the same
+    /// certificate or model.
     pub fn check_with_witness(&self) -> crate::witness::WitnessCheckResult {
-        self.solve_witness(DerivedOps::Nodes).0
+        use crate::query::TermCheckResult;
+        use crate::witness::WitnessCheckResult;
+        match self.solve_core(Bound::None) {
+            TermCheckResult::Unsat(cert) => WitnessCheckResult::Unsat(cert.query.certificate),
+            TermCheckResult::Sat(cert) => WitnessCheckResult::Sat(cert.query.witness),
+            TermCheckResult::Unknown => WitnessCheckResult::Unknown,
+        }
     }
 
     /// Decide and, on `Unsat`, return the certificate TOGETHER WITH THE
@@ -908,17 +1055,14 @@ impl Solver {
     /// certificate it would reject degrades to `Unknown`. `Sat` is the
     /// usual re-checkable witness.
     ///
-    /// Opt-in: `check` / `check_with_witness` are untouched and pay
-    /// nothing; this entry costs one extra lowering (the re-check).
-    ///
-    /// Since #192 phase 5 this is also the path on which the formerly
-    /// derived ops (`bvnot`, `bvneg`, `bvrotl`, `bvsdiv`, `bvsrem`) are
-    /// lowered as their own DAG nodes through the proven composite rules
-    /// ([`DerivedOps::Nodes`]), so the query block carries the operation and
-    /// the trusted re-check covers it; `check` keeps the v0.27.0 rewrite so
-    /// its certificates are unchanged. For a query with `bvsdiv` / `bvsrem`
-    /// operands that canonicalization reorders inside the rewrite, the CNF
-    /// here therefore differs from `check`'s (same verdict, both certified).
+    /// Since TR-070 (v0.32.0) this is [`Solver::check`]'s own pipeline: the
+    /// trusted query re-check (and the term check on top of it) runs on
+    /// every path, so this entry costs nothing beyond `check` and returns
+    /// the same certificate; only the query block is kept here. The
+    /// formerly derived ops (`bvnot`, `bvneg`, `bvrotl`, `bvsdiv`,
+    /// `bvsrem`) are lowered as their own DAG nodes through the proven
+    /// composite rules ([`DerivedOps::Nodes`]) on every path since #192
+    /// phase 5, so the query block carries the operation.
     ///
     /// Since #192 phase 6 (TR-065) `Sat` is symmetric: it carries a
     /// [`crate::query::QuerySatCertificate`] — the v1 witness plus the
@@ -931,51 +1075,11 @@ impl Solver {
     /// still run first (defence in depth); the answer rests on the trusted
     /// evaluation. A model it rejects degrades to `Unknown`.
     pub fn check_with_query(&self) -> crate::query::QueryCheckResult {
-        self.query_verdict().0
-    }
-
-    /// [`Solver::check_with_query`]'s body, also returning the lowered
-    /// DAG's `(name, width, Var node)` map (for [`Solver::check_with_term`],
-    /// which needs it on both verdicts).
-    pub(crate) fn query_verdict(
-        &self,
-    ) -> (crate::query::QueryCheckResult, Vec<(String, u32, usize)>) {
-        use crate::query::{QueryCertificate, QueryCheckResult, QueryInputs, QuerySatCertificate};
-        use crate::witness::WitnessCheckResult;
-        match self.solve_witness(DerivedOps::Nodes) {
-            (WitnessCheckResult::Unsat(certificate), Some((query, vars))) => {
-                let cert = QueryCertificate { certificate, query };
-                match cert.recheck() {
-                    Ok(()) => (QueryCheckResult::Unsat(cert), vars),
-                    Err(_) => {
-                        debug_assert!(false, "trusted crate rejected our query — ordeal bug");
-                        (QueryCheckResult::Unknown, vars)
-                    }
-                }
-            }
-            (WitnessCheckResult::Sat(witness), Some((query, vars))) => {
-                let inputs = QueryInputs::from_model(&query, &vars, &witness.model);
-                let cert = QuerySatCertificate {
-                    witness,
-                    query,
-                    inputs,
-                };
-                // The trusted crate evaluates the QUERY under the model
-                // BEFORE Sat is asserted — the query-level twin of the
-                // `check_query` gate above.
-                let verdict = Self::sat_verdict(cert);
-                debug_assert!(
-                    !matches!(verdict, QueryCheckResult::Unknown),
-                    "trusted crate rejected our model — ordeal bug"
-                );
-                (verdict, vars)
-            }
-            // `lower()` always compacts, so a decided verdict always has its
-            // query; never reached, but Unknown is the sound answer anyway.
-            (WitnessCheckResult::Unsat(_) | WitnessCheckResult::Sat(_), None) => {
-                (QueryCheckResult::Unknown, Vec::new())
-            }
-            (WitnessCheckResult::Unknown, _) => (QueryCheckResult::Unknown, Vec::new()),
+        use crate::query::{QueryCheckResult, TermCheckResult};
+        match self.solve_core(Bound::None) {
+            TermCheckResult::Unsat(cert) => QueryCheckResult::Unsat(cert.query),
+            TermCheckResult::Sat(cert) => QueryCheckResult::Sat(cert.query),
+            TermCheckResult::Unknown => QueryCheckResult::Unknown,
         }
     }
 
@@ -993,33 +1097,12 @@ impl Solver {
     /// asked and not about the DAG the solver built. Anything the trusted
     /// crate rejects degrades to `Unknown`.
     ///
-    /// Opt-in, like `check_with_query`, which it runs first: the default
-    /// paths and the v2 output are untouched.
+    /// Since TR-070 (v0.32.0) this is [`Solver::check`]'s own pipeline
+    /// ([`Solver::solve_core`]), returned whole: every entry point runs the
+    /// same term gate, and this one keeps the term, the query and the
+    /// certificate or witness it checked. It costs nothing beyond `check`.
     pub fn check_with_term(&self) -> crate::query::TermCheckResult {
-        use crate::query::{
-            QueryCheckResult, QueryTerm, TermCertificate, TermCheckResult, TermSatCertificate,
-        };
-        let (verdict, vars) = self.query_verdict();
-        let result = match verdict {
-            QueryCheckResult::Unsat(query) => {
-                match QueryTerm::flatten(&self.assertions, &query.query, &vars) {
-                    Ok(term) => Self::term_verdict(TermCertificate { query, term }),
-                    Err(_) => TermCheckResult::Unknown,
-                }
-            }
-            QueryCheckResult::Sat(query) => {
-                match QueryTerm::flatten(&self.assertions, &query.query, &vars) {
-                    Ok(term) => Self::term_sat_verdict(TermSatCertificate { query, term }),
-                    Err(_) => TermCheckResult::Unknown,
-                }
-            }
-            QueryCheckResult::Unknown => return TermCheckResult::Unknown,
-        };
-        debug_assert!(
-            !matches!(result, TermCheckResult::Unknown),
-            "trusted crate rejected our term map — ordeal bug"
-        );
-        result
+        self.solve_core(Bound::None)
     }
 
     /// The UNSAT gate of [`Solver::check_with_term`]: `Unsat` only if the
@@ -1050,14 +1133,16 @@ impl Solver {
         }
     }
 
-    /// The SAT gate of [`Solver::check_with_query`] (#192 phase 6): `Sat`
-    /// only if the trusted crate accepts the certificate's input
-    /// assignment as a model of the query; anything it rejects — a wrong
-    /// model, a malformed query, an assignment the model disagrees with —
-    /// degrades to `Unknown`. Separate from `check_with_query` so the
-    /// degradation is testable with a tampered certificate (the caller's
-    /// `debug_assert` is what flags an ordeal bug in the real pipeline).
-    fn sat_verdict(cert: crate::query::QuerySatCertificate) -> crate::query::QueryCheckResult {
+    /// The query-level SAT gate of #192 phase 6, kept for its negative
+    /// controls: `Sat` only if the trusted crate accepts the certificate's
+    /// input assignment as a model of the query; anything it rejects — a
+    /// wrong model, a malformed query, an assignment the model disagrees
+    /// with — degrades to `Unknown`. Since TR-070 the production gate is
+    /// [`Solver::term_sat_verdict`], whose re-check runs this one inside.
+    #[cfg(test)]
+    pub(crate) fn sat_verdict(
+        cert: crate::query::QuerySatCertificate,
+    ) -> crate::query::QueryCheckResult {
         use crate::query::QueryCheckResult;
         match cert.recheck() {
             Ok(()) => QueryCheckResult::Sat(cert),
@@ -1065,98 +1150,12 @@ impl Solver {
         }
     }
 
-    /// The witness-carrying solve, also returning the lowered query the
-    /// CNF came from and the builder's variable map (for
-    /// `check_with_query`). This is the body `check_with_witness` always
-    /// had; the query is threaded out, not recomputed.
-    #[allow(clippy::type_complexity)] // (verdict, Some((query, var map))); an alias obscures more than it helps
-    fn solve_witness(
-        &self,
-        derived: DerivedOps,
-    ) -> (
-        crate::witness::WitnessCheckResult,
-        Option<(crate::query::QueryDag, Vec<(String, u32, usize)>)>,
-    ) {
-        use crate::witness::{SatCertificate, WitnessCheckResult};
-        if self.assertions.is_empty() {
-            // Trivially satisfiable: the empty witness re-checks vacuously
-            // (no clauses to satisfy, no bindings to verify), and so does
-            // the empty query (no roots to evaluate).
-            return (
-                WitnessCheckResult::Sat(SatCertificate {
-                    model: Model {
-                        assignments: Vec::new(),
-                    },
-                    cnf: Vec::new(),
-                    assignment: Vec::new(),
-                    bit_map: Vec::new(),
-                }),
-                Some((crate::query::QueryDag::default(), Vec::new())),
-            );
-        }
-        let Some((mut blaster, cnf)) = self.lower_with(AigOptions::default(), derived) else {
-            return (WitnessCheckResult::Unknown, None);
-        };
-        // Moved out, not cloned: the default path pays no copy for it.
-        let query = blaster
-            .query
-            .take()
-            .map(|q| (q, std::mem::take(&mut blaster.query_vars)));
-        let mut sat_solver = SatSolver::new();
-        match sat_solver.solve(&cnf) {
-            SatResult::Unsat => {
-                let cert =
-                    crate::lrat::emit_lrat_trimmed(cnf.clauses.len(), sat_solver.proof_trace());
-                match ordeal_lrat::check(&cnf.clauses, &cert) {
-                    Ok(()) => (
-                        WitnessCheckResult::Unsat(Certificate {
-                            lrat: cert.into_bytes(),
-                            cnf: cnf.clauses,
-                        }),
-                        query,
-                    ),
-                    Err(_) => {
-                        debug_assert!(false, "checker rejected our certificate — ordeal bug");
-                        (WitnessCheckResult::Unknown, None)
-                    }
-                }
-            }
-            SatResult::Sat(assignment) => {
-                let Pipeline::Sat(env) = self.decode_and_check(&blaster, &assignment) else {
-                    return (WitnessCheckResult::Unknown, None);
-                };
-                let mut assignments: Vec<(String, u128)> = env.into_iter().collect();
-                assignments.sort();
-                let mut bit_map: Vec<(String, u32, Vec<i32>)> = Vec::new();
-                for (name, width) in &blaster.var_order {
-                    let word = &blaster.vars[name];
-                    let bits: Vec<i32> = word.iter().map(|l| k::cnf_lit(*l)).collect();
-                    bit_map.push((name.clone(), *width, bits));
-                }
-                let cert = SatCertificate {
-                    model: Model { assignments },
-                    cnf: cnf.clauses,
-                    assignment,
-                    bit_map,
-                };
-                // The trusted crate validates the witness BEFORE Sat is
-                // asserted — the SAT twin of the LRAT gate above.
-                match cert.recheck() {
-                    Ok(()) => (WitnessCheckResult::Sat(cert), query),
-                    Err(_) => {
-                        debug_assert!(false, "trusted crate rejected our witness — ordeal bug");
-                        (WitnessCheckResult::Unknown, None)
-                    }
-                }
-            }
-        }
-    }
-
     /// Decide with the optional CaDiCaL accelerator (TR-004's "benchmark
-    /// yardstick" role) — identical pipeline and identical soundness gates,
-    /// only the SAT engine differs: `sat_cadical::solve` returns Unsat solely
-    /// with an LRAT proof the verified checker already accepted, and Sat
-    /// models pass the same evaluator self-check as [`Solver::check`].
+    /// yardstick" role) — identical pipeline and identical trusted gate
+    /// ([`Solver::gate_unsat`] / [`Solver::gate_sat`]), only the SAT engine
+    /// differs: `sat_cadical::solve` returns Unsat solely with an LRAT proof
+    /// the verified checker already accepted (the gate then checks it once
+    /// more, against the re-encoded query, as on every path).
     ///
     /// Hidden from docs on purpose: the production entry point is `check` on
     /// the pure-Rust core (TR-004 — CaDiCaL is never load-bearing). This
@@ -1164,34 +1163,41 @@ impl Solver {
     #[doc(hidden)]
     #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
     pub fn check_with_cadical(&self) -> CheckResult {
-        Self::verdict(self.solve_pipeline_cadical())
+        Self::verdict(self.solve_core_cadical())
     }
 
     #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
-    fn solve_pipeline_cadical(&self) -> Pipeline {
+    fn solve_core_cadical(&self) -> crate::query::TermCheckResult {
+        use crate::query::TermCheckResult;
         use crate::sat_cadical::{self, CadicalVerdict};
         if self.assertions.is_empty() {
-            return Pipeline::Sat(Env::new());
+            return self.solve_core(Bound::None);
         }
-        let Some((blaster, cnf)) = self.lower() else {
-            return Pipeline::Unknown;
+        let Some((mut blaster, cnf)) = self.lower() else {
+            return TermCheckResult::Unknown;
         };
+        let Some(query) = blaster.query.take() else {
+            return TermCheckResult::Unknown;
+        };
+        let vars = std::mem::take(&mut blaster.query_vars);
         match sat_cadical::solve(&cnf) {
-            // `solve` already fed the proof to `ordeal_lrat::check`; carry the
-            // validated pair so the caller's Certificate re-checks offline.
-            Ok(CadicalVerdict::Unsat { lrat }) => Pipeline::Unsat {
-                certificate: Some(lrat.into_bytes()),
-                cnf: cnf.clauses,
-            },
-            Ok(CadicalVerdict::Sat(assignment)) => self.decode_and_check(&blaster, &assignment),
+            Ok(CadicalVerdict::Unsat { lrat }) => self.gate_unsat(
+                query,
+                &vars,
+                Certificate {
+                    lrat: lrat.into_bytes(),
+                    cnf: cnf.clauses,
+                },
+            ),
+            Ok(CadicalVerdict::Sat(assignment)) => {
+                self.gate_sat(query, &vars, &blaster, cnf.clauses, assignment)
+            }
             // Every CaDiCaL error is conservative no-verdict.
-            Err(_) => Pipeline::Unknown,
+            Err(_) => TermCheckResult::Unknown,
         }
     }
 }
 
-/// Internal pipeline outcome: like [`RawVerdict`] but carrying the
-/// checker-validated certificate on UNSAT (None = checker rejected it).
 /// How a solve is bounded (crate-internal): unbounded, a conflict budget
 /// (DES-019), or a wall-clock deadline (TR-029). Exhaustion of either bound
 /// surfaces uniformly as a conservative `Unknown`.
@@ -1201,15 +1207,84 @@ enum Bound {
     Deadline(std::time::Instant),
 }
 
-enum Pipeline {
-    Sat(Env),
-    Unsat {
-        certificate: Option<Vec<u8>>,
-        /// The refuted DIMACS CNF, carried to the caller's [`Certificate`] so
-        /// the proof is independently re-checkable.
-        cnf: Vec<Vec<i32>>,
-    },
-    Unknown,
+/// The test-only tamper hook of the trusted gate (TR-070's negative
+/// control): a unit test arms a [`tamper::Tamper`] for its thread, calls
+/// the REAL entry point (`check`, `check_with_limit`, …), and the gate
+/// hands the trusted crate a corrupted term map or variable map. The
+/// verdict must then be `Unknown` — which shows that the answer rests on
+/// the trusted rejection, not on the solver's say-so. Compiled out of every
+/// non-test build: [`tamper::apply`] is the identity there.
+#[cfg(test)]
+pub(crate) mod tamper {
+    use crate::query::QueryTerm;
+    use std::cell::Cell;
+
+    /// What to corrupt before the trusted check sees it.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub(crate) enum Tamper {
+        /// Point the first mapped operator node of the term at a different
+        /// DAG node: `check_term_dag` must reject (on SAT and on UNSAT).
+        MapEntry,
+        /// Swap the `Var` nodes of the term's first two variables: on SAT
+        /// the proven binding (`var_offset` / `check_input_value`) must
+        /// reject a model whose two values differ; UNSAT does not read the
+        /// variable map and must be unaffected.
+        SwapVars,
+    }
+
+    thread_local! {
+        static ACTIVE: Cell<Option<Tamper>> = const { Cell::new(None) };
+    }
+
+    /// Arm (or, with `None`, disarm) the hook for the calling thread; the
+    /// returned guard disarms it on drop, panic included.
+    pub(crate) fn arm(t: Tamper) -> Armed {
+        ACTIVE.with(|c| c.set(Some(t)));
+        Armed
+    }
+
+    /// Disarms the hook when dropped.
+    pub(crate) struct Armed;
+
+    impl Drop for Armed {
+        fn drop(&mut self) {
+            ACTIVE.with(|c| c.set(None));
+        }
+    }
+
+    /// Apply the armed tamper, if any; the flag says whether one was.
+    pub(crate) fn apply(mut term: QueryTerm) -> (QueryTerm, bool) {
+        use crate::blast_kernel::DagNode;
+        match ACTIVE.with(|c| c.get()) {
+            None => (term, false),
+            Some(Tamper::MapEntry) => {
+                let target = term.nodes.iter().enumerate().position(|(i, n)| {
+                    !matches!(n, DagNode::Var(_) | DagNode::Const(_, _))
+                        && term.map[i] != crate::dag::NO_IMAGE
+                });
+                let i = target.expect("a term with a mapped operator node");
+                term.map[i] = if term.map[i] == 0 { 1 } else { 0 };
+                (term, true)
+            }
+            Some(Tamper::SwapVars) => {
+                assert!(term.vars.len() >= 2, "a term with two variables");
+                let (n0, n1) = (term.vars[0].2, term.vars[1].2);
+                term.vars[0].2 = n1;
+                term.vars[1].2 = n0;
+                (term, true)
+            }
+        }
+    }
+}
+
+/// The non-test twin of [`tamper::apply`]: the identity, so the gate's
+/// code is the same in every build and the hook costs nothing.
+#[cfg(not(test))]
+mod tamper {
+    #[inline]
+    pub(crate) fn apply(term: crate::query::QueryTerm) -> (crate::query::QueryTerm, bool) {
+        (term, false)
+    }
 }
 
 /// Sort-check a boolean term without needing variable bindings.

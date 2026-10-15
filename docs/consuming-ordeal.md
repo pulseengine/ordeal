@@ -165,12 +165,26 @@ depth and per property. That independence is where your speedup lives:
   Keep the original.
 - **`Unsat` is the only verdict that authorizes a transformation.** It
   carries a self-contained proof — the refuted CNF (`cert.cnf`) and the LRAT
-  refutation (`cert.lrat`) — that the formally-scrutinized `ordeal-lrat`
-  checker already validated. Call `cert.recheck()` (or `ordeal_lrat::check(
-  &cert.cnf, cert.lrat_text().unwrap())`) to re-validate it independently: your
-  trust rests on the proof, not on the solver.
-- **`Sat` carries a counterexample** already re-evaluated against your
-  assertions.
+  refutation (`cert.lrat`) — that the formally-verified `ordeal-lrat`
+  checker already validated. Since v0.32.0 (TR-070) it validated more than
+  the proof: before `check` returned, the trusted crate related your
+  assertions (flattened as asked) to the DAG the solver lowered them to
+  (`check_term_dag`), re-encoded that DAG with the proven lowering and
+  checked the LRAT proof against the CNF *it* produced (`check_query`) —
+  so the certificate is about the term you asked, not a CNF you take on
+  faith (`docs/formal-verification.md`, "the default path"). Call
+  `cert.recheck()` (or `ordeal_lrat::check(&cert.cnf,
+  cert.lrat_text().unwrap())`) to re-validate the proof independently, or
+  `check_with_term()` to receive the term and the DAG the gate checked,
+  re-checkable with `TermCertificate::recheck()`: your trust rests on the
+  proof, not on the solver.
+- **`Sat` carries a counterexample** re-evaluated against your assertions
+  by the evaluator and, since v0.32.0, accepted by the trusted crate as a
+  model of the term (`check_query_model` and the proven binding of every
+  value through the term's variable map) before it was returned.
+- **Anything the trusted crate rejects is `Unknown`**, on every entry
+  point — the solver, the search, the proof and the model are all
+  untrusted, and a rejection never becomes a verdict.
 
 ## Reporting trials back
 
@@ -366,7 +380,12 @@ canonicalization and no hash-consing — variables shared by name,
 constants interned, every other subterm its own node, in the `query`
 block's node spelling — plus the variable names and an index map
 `term node → query node` (`18446744073709551615` = no image: the inside
-of a folded constant). Opt in:
+of a folded constant). In v0.31.0 this was opt-in; **since v0.32.0
+(TR-070) it is what every entry point does** — `check`,
+`check_with_limit`, `check_with_deadline`, `check_with_witness`,
+`check_with_query`, the sliver one-shots and the CLI all run the same
+pipeline and return a projection of the same gated result, so
+`check_with_term` costs nothing beyond `check` and only keeps more:
 
 ```rust
 use ordeal::{Solver, TermCheckResult};
@@ -401,7 +420,9 @@ term.map[term.vars[name].node]), width, value)` (both proven, 7d). At
 the command line, `ordeal check foo.smt2 --format json --with-term`
 prints the `--with-query` output plus the `term` block inside
 `certificate` (JSON only); `--with-query` and the default output are
-byte-identical to v0.30.0.
+byte-identical to v0.30.0 — and to v0.31.0 after the default path
+switched to the term check: the verdict, the certificate bytes and the
+model are unchanged, only what they rest on is.
 
 **What to compare it against.** Flatten your own assertions with
 `ordeal::dag::flatten` (or by hand: it is a post-order, left-to-right

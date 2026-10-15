@@ -502,18 +502,37 @@ fn mirror(n: &k::DagNode) -> k::DagNode {
 /// hits, a closed operator by the constant its value interned to: the
 /// value comes from the proven encoder and simulator at the all-false
 /// assignment, which is exactly how the trusted check will evaluate it.
+///
+/// A constant may have SEVERAL DAG nodes with the same bits (the builder
+/// interns by the `u128` value, and two input constants can agree on
+/// their low `w` bits and differ above), and then a parent's key may
+/// exist for more than one of them too — the DAG built `mul(c, v)` over
+/// both. So every term node keeps every candidate image, each with the
+/// operand images its key used, and the map is resolved top-down: the
+/// DAG's `roots` fix the term roots' images, a chosen image fixes its
+/// operands' (the trusted check demands exactly that), and only a node
+/// nothing above it reaches — the inside of a fold — takes its first
+/// candidate. (TR-070: the greedy first-hit choice refused four queries
+/// of `gen_corpus(0xC0FFEE, 1000)` at the root.)
 pub fn term_map(
     term: &Dag,
     nodes: &[k::DagNode],
     bits: &[bool],
+    roots: &[usize],
     vars: &[(String, u32, usize)],
 ) -> Vec<usize> {
     use k::DagNode as N;
-    // The lowered DAG's lookup tables. A constant may have SEVERAL nodes
-    // with the same bits (the builder interns by the `u128` value, and
-    // two input constants can agree on their low `w` bits and differ
-    // above), so a term constant keeps every candidate until a parent's
-    // structural lookup picks the one the DAG actually used.
+    /// A candidate image of a term node, with the operand images its
+    /// structural key used (`(term operand, image)`; empty for a variable,
+    /// a constant and a fold, which constrain nothing below them).
+    struct Cand {
+        image: usize,
+        choice: Vec<(usize, usize)>,
+    }
+    /// The most operand-image combinations tried for one node (the
+    /// product of its operands' candidate counts is almost always 1).
+    const COMBO_LIMIT: usize = 256;
+    // The lowered DAG's lookup tables.
     let mut by_key: HashMap<(&'static str, Vec<usize>), usize> = HashMap::new();
     let mut by_bits: HashMap<Vec<bool>, Vec<usize>> = HashMap::new();
     for (j, n) in nodes.iter().enumerate() {
@@ -529,8 +548,6 @@ pub fn term_map(
             }
         }
     }
-    // Term constant node → its remaining candidates (more than one).
-    let mut cands: HashMap<usize, Vec<usize>> = HashMap::new();
     let var_by_name: HashMap<&str, usize> = vars
         .iter()
         .map(|(name, _, node)| (name.as_str(), *node))
@@ -579,53 +596,60 @@ pub fn term_map(
             .or_else(|| by_key.get(&crate::query::node_op(&mirror(e))))
             .copied()
     };
-    let mut map: Vec<usize> = Vec::with_capacity(term.nodes.len());
+    let consts = |value: &[bool]| -> Vec<Cand> {
+        by_bits
+            .get(value)
+            .map(|cs| {
+                cs.iter()
+                    .map(|&j| Cand {
+                        image: j,
+                        choice: Vec::new(),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    // Forward: every node's candidates, operands before operators.
+    let mut cands: Vec<Vec<Cand>> = Vec::with_capacity(term.nodes.len());
     for (i, n) in term.nodes.iter().enumerate() {
-        let image = match *n {
+        let cs: Vec<Cand> = match *n {
             N::Var(_) => name_of
                 .get(&i)
                 .and_then(|name| var_by_name.get(name))
-                .copied(),
-            N::Const(s, w) => {
-                let cs = by_bits
-                    .get(&term.bits[s..s + w])
-                    .cloned()
-                    .unwrap_or_default();
-                if cs.len() > 1 {
-                    cands.insert(i, cs.clone());
-                }
-                cs.first().copied()
-            }
+                .map(|&j| {
+                    vec![Cand {
+                        image: j,
+                        choice: Vec::new(),
+                    }]
+                })
+                .unwrap_or_default(),
+            N::Const(s, w) => consts(&term.bits[s..s + w]),
             _ => {
-                // The structural lookup, over every choice of candidate for
-                // the constant operands still undecided (almost always one
-                // choice); a hit commits the choices.
+                // The structural lookup, over every combination of the
+                // operands' candidate images (almost always one); every
+                // hit is a candidate of this node, with the combination
+                // that produced it.
                 let ops = operands(n);
-                let mut undecided: Vec<usize> = ops
-                    .iter()
-                    .copied()
-                    .filter(|a| map[*a] != NO_IMAGE && cands.contains_key(a))
-                    .collect();
-                undecided.sort_unstable();
-                undecided.dedup();
-                let mut structural: Option<usize> = None;
-                if ops.iter().all(|&a| map[a] != NO_IMAGE) {
-                    let mut idx = vec![0usize; undecided.len()];
+                let mut out: Vec<Cand> = Vec::new();
+                if ops.iter().all(|&a| !cands[a].is_empty()) {
+                    let mut idx = vec![0usize; ops.len()];
+                    let mut combos = 0usize;
                     loop {
-                        let choice: HashMap<usize, usize> = undecided
+                        let choice: Vec<(usize, usize)> = ops
                             .iter()
                             .zip(&idx)
-                            .map(|(&a, &k)| (a, cands[&a][k]))
+                            .map(|(&a, &c)| (a, cands[a][c].image))
                             .collect();
                         let at = |a: usize| -> Option<usize> {
-                            Some(choice.get(&a).copied().unwrap_or(map[a]))
+                            choice.iter().find(|(x, _)| *x == a).map(|(_, img)| *img)
                         };
-                        if let Some(hit) = map_operands(n, at).and_then(|e| lookup(&e)) {
-                            for (&a, &c) in &choice {
-                                map[a] = c;
-                                cands.remove(&a);
-                            }
-                            structural = Some(hit);
+                        if let Some(hit) = map_operands(n, at).and_then(|e| lookup(&e))
+                            && !out.iter().any(|c| c.image == hit)
+                        {
+                            out.push(Cand { image: hit, choice });
+                        }
+                        combos += 1;
+                        if combos >= COMBO_LIMIT {
                             break;
                         }
                         // The next combination (mixed radix), or done.
@@ -635,7 +659,7 @@ pub fn term_map(
                                 break;
                             }
                             idx[pos] += 1;
-                            if idx[pos] < cands[&undecided[pos]].len() {
+                            if idx[pos] < cands[ops[pos]].len() {
                                 break;
                             }
                             idx[pos] = 0;
@@ -646,24 +670,45 @@ pub fn term_map(
                         }
                     }
                 }
-                structural.or_else(|| {
-                    // A fold: the constant with the node's value — every
-                    // candidate kept, as for a constant node.
-                    if closed[i] {
-                        let value: Vec<bool> =
-                            words[i].iter().map(|l| k::eval_lit(&vals, *l)).collect();
-                        let cs = by_bits.get(&value).cloned().unwrap_or_default();
-                        if cs.len() > 1 {
-                            cands.insert(i, cs.clone());
-                        }
-                        cs.first().copied()
-                    } else {
-                        None
-                    }
-                })
+                if out.is_empty() && closed[i] {
+                    // A fold: the constants with the node's value.
+                    let value: Vec<bool> =
+                        words[i].iter().map(|l| k::eval_lit(&vals, *l)).collect();
+                    out = consts(&value);
+                }
+                out
             }
         };
-        map.push(image.unwrap_or(NO_IMAGE));
+        cands.push(cs);
+    }
+    // Backward: the DAG's roots demand the term roots' images; a chosen
+    // image demands its operands'; a node nothing demands takes its first
+    // candidate (the inside of a fold keeps its natural image). A demand
+    // no candidate meets — only possible for a root the DAG does not have
+    // — leaves the node without an image; the trusted check then rejects.
+    let mut demanded: Vec<Option<usize>> = vec![None; term.nodes.len()];
+    for (k, &r) in term.roots.iter().enumerate() {
+        if let (Some(&dr), Some(slot)) = (roots.get(k), demanded.get_mut(r))
+            && cands[r].iter().any(|c| c.image == dr)
+        {
+            *slot = Some(dr);
+        }
+    }
+    let mut map: Vec<usize> = vec![NO_IMAGE; term.nodes.len()];
+    for i in (0..term.nodes.len()).rev() {
+        let pick = match demanded[i] {
+            Some(x) => cands[i].iter().find(|c| c.image == x),
+            None => cands[i].first(),
+        };
+        if let Some(c) = pick {
+            map[i] = c.image;
+            for &(a, img) in &c.choice {
+                // The first demand wins; a conflict (a shared constant
+                // reached through two swapped keys) is the trusted
+                // check's to reject.
+                demanded[a].get_or_insert(img);
+            }
+        }
     }
     map
 }
@@ -1057,9 +1102,17 @@ mod denotation_guard {
     /// `a` — `canon` + `DagBuilder` against `flatten` + `term_map` — is
     /// accepted by the trusted `check_term_dag`.
     fn term_is_mapped_and_accepted(a: &BoolTerm, case: usize) {
-        let canon = crate::canon::canonicalize_bool(a);
+        terms_are_mapped_and_accepted(std::slice::from_ref(a), &format!("case {case}"));
+    }
+
+    /// The same for a whole assertion set (the production lowering
+    /// canonicalizes each assertion and builds one hash-consed DAG).
+    fn terms_are_mapped_and_accepted(assertions: &[BoolTerm], what: &str) {
         let mut builder = DagBuilder::new(true);
-        builder.assert_root(&canon).expect("well-sorted");
+        for a in assertions {
+            let canon = crate::canon::canonicalize_bool(a);
+            builder.assert_root(&canon).expect("well-sorted");
+        }
         let dag = builder.finish();
         let query = QueryDag {
             nodes: dag.nodes,
@@ -1067,14 +1120,54 @@ mod denotation_guard {
             roots: dag.roots,
             hints: Vec::new(),
         };
-        let term = crate::query::QueryTerm::flatten(std::slice::from_ref(a), &query, &dag.vars)
-            .expect("well-sorted");
+        let term =
+            crate::query::QueryTerm::flatten(assertions, &query, &dag.vars).expect("well-sorted");
         assert_eq!(
             term.check(&query),
             Ok(()),
-            "case {case}: the trusted term check must accept the production translation of {a:?} (map {:?})",
+            "{what}: the trusted term check must accept the production translation of {assertions:?} (map {:?})",
             term.map
         );
+    }
+
+    // rivet: verifies VER-070
+    /// TR-070 regression, found by the default-path verdict scan over
+    /// `oracle::gen_corpus(0xC0FFEE, 1000)` (query 140, and three more):
+    /// two input constants with equal low bits are two DAG constant nodes
+    /// (the builder interns by the `u128` value), and when BOTH `mul(c, v)`
+    /// keys exist in the DAG — one per constant — a term parent must take
+    /// the one the DAG built above it, which only the root tells. The old
+    /// `term_map` committed the first candidate that hit, mapped the
+    /// `bvnot` above it to nothing, and the trusted check rejected the
+    /// root; the verdict degraded to `Unknown`.
+    #[test]
+    fn term_map_resolves_equal_bits_constants_from_the_roots() {
+        let b = Box::new;
+        let v = BvTerm::Var {
+            name: "v".into(),
+            sort: Sort::new(3),
+        };
+        let c_lo = BvTerm::Const {
+            value: 5,
+            sort: Sort::new(3),
+        }; // bits 101
+        let c_hi = BvTerm::Const {
+            value: (1u128 << 64) + 5,
+            sort: Sort::new(3),
+        }; // bits 101 too, another node
+        let a1 = BoolTerm::Eq(b(BvTerm::Mul(b(c_lo.clone()), b(v.clone()))), b(v.clone()));
+        let a2 = BoolTerm::Eq(
+            b(BvTerm::Not(b(BvTerm::Mul(b(c_hi.clone()), b(v.clone()))))),
+            b(v.clone()),
+        );
+        terms_are_mapped_and_accepted(&[a1.clone(), a2.clone()], "lo first");
+        terms_are_mapped_and_accepted(&[a2, a1], "hi first");
+        // And with the ambiguity on a root itself: both `ult(v, c)` keys
+        // exist, and only the DAG's root list says which is which.
+        let r1 = BoolTerm::Ult(b(v.clone()), b(c_lo));
+        let r2 = BoolTerm::Ult(b(v), b(c_hi));
+        terms_are_mapped_and_accepted(&[r1.clone(), r2.clone()], "roots lo first");
+        terms_are_mapped_and_accepted(&[r2, r1], "roots hi first");
     }
 
     fn env_for(rng: &mut Rng) -> Env {

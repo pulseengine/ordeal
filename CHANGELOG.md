@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Every answer rests on the term check** (#192, TR-070). The proven
+query and term checks of v0.31.0 stop being opt-in: `Solver::check`,
+`check_with_limit`, `check_with_deadline`, `check_with_witness`, the
+sliver one-shots and the CLI's default output now return a verdict only
+after the trusted crate has related the assertions, flattened as asked,
+to the DAG the solver lowered them to (`check_term_dag`) and either
+re-encoded that DAG and checked the LRAT proof against the CNF it
+produced (`check_query`) or evaluated every root under the model and
+bound every model value through the term's variable map
+(`check_query_model`, `check_input_value`). `canon.rs`, `dag.rs` and
+`eval.rs` leave every answer's trust path. Output is byte-identical to
+v0.31.0: same verdicts, same certificate bytes, same models, no new JSON
+fields unless `--with-term` is given.
+
+### Changed
+- **One pipeline, one trusted gate** (TR-070). `Solver::solve_core`
+  replaces the three former pipelines (`solve_pipeline`, `solve_witness`
+  and `query_verdict` / `check_with_term` on top of them): lower,
+  search, then `gate_unsat` (`check_term_dag` + `check_query`, which
+  checks the LRAT proof **once**; the solver's CNF is compared with the
+  trusted re-encoding) or `gate_sat` (the `eval.rs` self-check kept as
+  defence in depth, then `check_term_dag`, the CNF-level witness check,
+  `check_query_model` and the per-value `check_input_value`). Every
+  entry point is a projection of the same `TermCheckResult`:
+  `check` keeps the certificate or model, `check_with_witness` the
+  witness, `check_with_query` the query block, `check_with_term` all of
+  it — so the opt-in entries now cost nothing beyond `check`. The
+  CaDiCaL lane runs the same gate. Anything the trusted crate rejects
+  degrades to `Unknown` on every entry point.
+- **`dag::term_map` resolves the map from the roots** (found by the
+  default-path verdict scan): two input constants with equal low bits
+  are two DAG constant nodes, and a parent key can exist for both; the
+  greedy first-hit choice refused queries at the root. On the new default
+  path that would have been an `Unknown` regression. It also affects
+  v0.31.0's opt-in `--with-term` / `check_with_term`: those return
+  `Unknown`, never a wrong answer, on 6 of the 1000 queries of
+  `oracle::gen_corpus(0xC0FFEE, 1000)` (q140, q150, q169, q216, q419,
+  q620). This release decides all six. Every term node
+  now keeps every candidate image with the operand images its key
+  used, and the DAG's roots fix the choice top-down. The function takes
+  the DAG's roots as a new parameter. The denotation guard and a new
+  regression test cover it; the trusted check is unchanged.
+- Still trusted, stated honestly (`docs/formal-verification.md`): the
+  1:1 flattening of the assertions into the term (`dag::flatten`), the
+  variable names, the sliver lowering and the SMT-LIB / Verus front
+  ends.
+
+### Added
+- **The default-path negative control** (VER-070): a test-only hook
+  (`solver::tamper`, compiled out of every non-test build) corrupts one
+  term-map entry, or swaps two term variables, before the trusted crate
+  sees them — solver, search, proof and model untouched — and `check`
+  with its five siblings and the sliver one-shots must all return
+  `Unknown`, then decide again when disarmed. A gate that skipped the
+  term check fails these tests.
+
 ## [0.31.0] - 2026-10-15
 
 **The answer is about the term you asked** (#192 phase 7, TR-069). The

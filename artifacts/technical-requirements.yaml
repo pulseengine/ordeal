@@ -1876,3 +1876,28 @@ artifacts:
         target: ARC-006
       - type: allocated-to
         target: ARC-011
+
+  - id: TR-070
+    type: sw-req
+    title: Every answer rests on the proven term check — the default entry points run check_term_dag + check_query / check_query_model + check_input_value, so canon.rs, dag.rs and eval.rs leave every answer's trust path (#192, v0.32.0)
+    status: verified
+    release: v0.32.0
+    description: "After TR-069 the proven query and term checks (check_query, check_query_model, check_input_value, check_term_dag) ran only on the opt-in check_with_term / --with-term path; the default entry points — Solver::check, check_with_limit, check_with_deadline, check_with_witness, the sliver one-shots check_sliver / check_sliver_with_deadline / check_sliver_with_limit and the CLI's default output — still validated the LRAT proof against the solver's own CNF (ordeal_lrat::check) and the model with the untrusted eval.rs, so canon.rs, dag.rs and eval.rs stayed on every default answer's trust path. Maintainer decision (v0.32.0): REPLACE, not add. One pipeline, Solver::solve_core (lower, search under the bound, then the trusted gate), that every entry point projects: gate_unsat flattens the assertions as asked (dag::flatten), maps them onto the lowered DAG (dag::term_map, untrusted advice) and hands the trusted crate the term, the map, the DAG and the LRAT proof — check_term_dag then check_query, which re-encodes the DAG and checks the proof against the CNF it produced (the proof is checked ONCE; the solver's CNF is compared with the re-encoding and carried); gate_sat keeps the eval.rs self-check as defence in depth, then check_term_dag, the CNF-level witness (check_sat / check_binding), check_query_model and check_input_value through the term's own variable map for every advertised value. Unsat => check_term_unsat_sound, Sat => check_term_model_sound, on every entry point; a rejection degrades to Unknown, never to a wrong answer. check / check_with_limit / check_with_deadline return the certificate or the model of the TermCheckResult, check_with_witness the witness, check_with_query the query block, check_with_term all of it; the opt-in entries therefore cost nothing beyond check. The CaDiCaL lane runs the same gate. The test-only hook solver::tamper (compiled out of every non-test build; the identity in release) is the negative control: it corrupts one term-map entry or swaps two term variables before the trusted crate sees them, with the solver, the search, the proof and the model untouched. Verdicts must not regress: a scan of every decided query of every corpus (the repository's query files, the latency and bmc corpora, oracle::gen_corpus seeds 0x192/200, 0xC0FFEE/1000, 0x0D1FFCEC/100, the sliver one-shots, every operator at widths 1..=128) through the trusted checks found NO capacity refusal (encode_fits, tseitin_fits, dag_wf and the width caps are not reached by any of them) but four queries of gen_corpus(0xC0FFEE, 1000) refused at the root by check_term_dag: a term_map gap — two input constants with equal low bits are two DAG constant nodes, a parent key existed for both, and the greedy first hit committed the wrong one. Fixed on the untrusted side: term_map keeps every candidate image per node with the operand images its key used and resolves the map top-down from the DAG's roots (new parameter). Output is byte-identical to the published v0.31.0 binary: verdicts, certificate bytes (cnf + lrat), models, text / JSON / --with-query over every query file in the repository, and the four cnf_gap digests. Honest remaining trust on every path (docs/formal-verification.md, 'the default path'): the 1:1 flattening of the assertions into the term (dag::flatten), the variable names, the sliver lowering, the SMT-LIB and Verus front ends."
+    tags: [soundness, checker, trusted-core, "192", canon, dag, eval, default-path]
+    fields:
+      priority: must
+      req-type: safety
+      verification-criteria: "the default-path negative control: with the tamper hook armed, check, check_with_limit, check_with_deadline, check_with_witness, check_with_query, check_with_term and the three sliver one-shots all return Unknown on an UNSAT and on a SAT query (a corrupted map entry), and the SAT query under swapped term variables (the proven binding), and all decide again disarmed; potency: the gate with the term check skipped fails those tests; every entry point returns the same certificate bytes / the same model, the certificate re-checked by check_query and related to the term by check_term_dag; the term_map regression (equal-bits constants, both orders, on an operator and on a root) accepted; the denotation guard's 1500 cases accepted through the trusted check; the Z3 differential over the seeded corpus with 0 disagreements and 0 Unknown through the gated check; the verdict scan over every corpus (above) with no decided query refused and every certificate / model digest identical to v0.31.0's; the CLI byte-identical to the published v0.31.0 binary over every query file in text, JSON and --with-query mode; the four cnf_gap digests unchanged; the latency corpus within 1.25x of v0.31.0's check, with the cost broken down (re-encode, term_map, check_term_dag, LRAT); cargo test --workspace debug and release and with cert-bundle, clippy -D warnings on default, oracle+cert-bundle and cadical, fmt clean; ordeal-lrat untouched (no Lean regeneration needed)."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: traces-to
+        target: TR-069
+      - type: traces-to
+        target: TR-065
+      - type: allocated-to
+        target: ARC-006
+      - type: allocated-to
+        target: ARC-011
