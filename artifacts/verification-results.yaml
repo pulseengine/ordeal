@@ -2810,3 +2810,28 @@ artifacts:
         target: VER-067
       - type: part-of-execution
         target: VE-057
+
+  - id: VE-058
+    type: verification-execution
+    title: "#192 term-to-DAG denotation guard verified (VER-068)"
+    status: implemented
+    description: "cargo test --workspace --features ordeal/cert-bundle (sources touched first): 251 + 14 + 2 + 31 passed / 0 failed / 3 ignored; release default features: 232 passed / 0 failed / 3 ignored. dag::denotation_guard::dag_translation_agrees_with_the_evaluator passes in 3.2 s (debug) over 1500 seeded assertions, each through both lowering paths. Mutation controls (each restored, file state verified by git status): Ashr built as DagNode::Lshr in dag.rs fails at case 58; canon.rs mapping a > b to Ult(a, b) instead of Ult(b, a) fails at case 4; QueryInputs::from_model dropping input bit 127 fails at case 159. clippy -D warnings clean for the default build and --features oracle,cert-bundle; cargo fmt --check clean."
+    fields:
+      environment: "note: macOS arm64, local; branch test/192-dag-denotation-guard on ca424f0 (v0.29.0)"
+      executor: local
+      timestamp: 2026-10-15T04:00:09Z
+      version: ca424f0+guard
+
+  - id: VV-118
+    type: verification-verdict
+    title: VER-068 pass — the term-to-DAG translation agrees with eval.rs; one planted bug per layer is caught
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-058
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-068
+      - type: part-of-execution
+        target: VE-058

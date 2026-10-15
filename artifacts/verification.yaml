@@ -1535,3 +1535,19 @@ artifacts:
         target: TR-067
       - type: part-of-execution
         target: VE-057
+
+  - id: VER-068
+    type: sw-verification
+    title: Term-to-DAG translation agrees with eval.rs on every operator and odd width; one planted bug per layer is caught (TR-068)
+    status: implemented
+    release: v0.30.0
+    description: "dag::denotation_guard::dag_translation_agrees_with_the_evaluator: 1500 seeded random assertions (depth 3) over all 24 BvTerm operators (incl. ite, the width-changing constructs and the formerly derived ops), comparisons at widths 1, 3, 5, 8, 12, 16, 24, 32, 64, 128 (width-changing constructs reach every width up to 128), and random models with 1/6 of values each at 0, all-ones, 1 and the sign bit. Per assertion: eval.rs on canonicalize_bool(a) equals eval.rs on a; and for the derived-ops-as-nodes path and the rewrite path, canonicalize then DagBuilder then QueryInputs::from_model then ordeal_lrat::check_query_model accepts exactly when eval.rs says a holds (a refusal of a well-sorted DAG is a failure). Mutation controls, each restored: dag.rs Ashr built as DagNode::Lshr (fails at case 58, rewrite path); canon.rs Ugt not mirrored (case 4); QueryInputs::from_model dropping bit 127 (case 159)."
+    tags: [dag, canon, query, negative-control]
+    fields:
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- denotation_guard"
+    links:
+      - type: verifies
+        target: TR-068
+      - type: part-of-execution
+        target: VE-058
