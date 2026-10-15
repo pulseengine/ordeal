@@ -1207,10 +1207,14 @@ mod tests {
         assert!(matches!(d.oracle, OracleVerdict::Sat(_)));
     }
 
+    // rivet: verifies VER-070
     /// The P1 milestone (UV-010 / VER-001): ordeal's REAL pipeline against
     /// Z3 across the seeded corpus — any disagreement is an ordeal bug and
     /// fails the build (the kill criterion: that op gets disabled until its
-    /// rule is fixed).
+    /// rule is fixed). Since TR-070 the real pipeline IS the term-gated one
+    /// (`check_term_dag` + `check_query` / `check_query_model`), so this is
+    /// also the default path's differential: a decided verdict here passed
+    /// the trusted gate, and `unknowns` counts any it refused.
     #[test]
     fn differential_ordeal_vs_z3_on_corpus() {
         let corpus = gen_corpus(0xC0FF_EE00_5EED_0001, 300);

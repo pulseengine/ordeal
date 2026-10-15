@@ -372,3 +372,243 @@ fn check_with_term_matches_check_with_query() {
     let sat = sat_term_cert();
     assert_eq!(sat.query.witness.model.assignments.len(), 2);
 }
+
+// ── TR-070: the default path rests on the trusted term check ─────────────
+
+use crate::CheckResult;
+use crate::solver::tamper::{self, Tamper};
+
+/// `a + b = 9 ∧ b > a ∧ a * 2 = b` as a solver (the SAT twin of
+/// [`rewrite_heavy_unsat`]; unique model `a = 3, b = 6`).
+fn sat_solver() -> Solver {
+    let mut s = Solver::new();
+    s.assert(BoolTerm::Eq(
+        b(BvTerm::Add(b(var("a", 8)), b(var("b", 8)))),
+        b(konst(9, 8)),
+    ));
+    s.assert(BoolTerm::Ugt(b(var("b", 8)), b(var("a", 8))));
+    s.assert(BoolTerm::Eq(
+        b(BvTerm::Mul(b(var("a", 8)), b(konst(2, 8)))),
+        b(var("b", 8)),
+    ));
+    s
+}
+
+/// Every default-path verdict of `s` is `Unknown` right now (the tamper
+/// hook is armed by the caller): the four core entry points, the witness
+/// and the query entries, and the term entry they all share.
+fn every_entry_point_is_unknown(s: &Solver, what: &str) {
+    use crate::query::QueryCheckResult;
+    use crate::witness::WitnessCheckResult;
+    assert!(
+        matches!(s.check(), CheckResult::Unknown),
+        "{what}: check must degrade to Unknown"
+    );
+    assert!(
+        matches!(s.check_with_limit(u64::MAX), CheckResult::Unknown),
+        "{what}: check_with_limit must degrade to Unknown"
+    );
+    assert!(
+        matches!(s.check_with_deadline(600_000), CheckResult::Unknown),
+        "{what}: check_with_deadline must degrade to Unknown"
+    );
+    assert!(
+        matches!(s.check_with_witness(), WitnessCheckResult::Unknown),
+        "{what}: check_with_witness must degrade to Unknown"
+    );
+    assert!(
+        matches!(s.check_with_query(), QueryCheckResult::Unknown),
+        "{what}: check_with_query must degrade to Unknown"
+    );
+    assert!(
+        matches!(s.check_with_term(), TermCheckResult::Unknown),
+        "{what}: check_with_term must degrade to Unknown"
+    );
+}
+
+// rivet: verifies VER-070
+/// The default path's negative control (TR-070): `check` and the other
+/// default entry points answer only because the trusted `check_term_dag`
+/// accepted the term-to-DAG map the gate handed it. With the test-only
+/// hook corrupting ONE map entry before the trusted crate sees it — the
+/// solver, the SAT search, the proof and the model all untouched — every
+/// entry point degrades to `Unknown`, on UNSAT and on SAT; disarmed, the
+/// same solvers decide again. (Potency: a gate that skipped the term
+/// check would return the verdict regardless and fail this test.)
+#[test]
+fn default_check_rests_on_the_trusted_term_check() {
+    let unsat = rewrite_heavy_unsat();
+    let sat = sat_solver();
+    assert!(matches!(unsat.check(), CheckResult::Unsat(_)));
+    assert!(matches!(sat.check(), CheckResult::Sat(_)));
+    {
+        let _armed = tamper::arm(Tamper::MapEntry);
+        every_entry_point_is_unknown(&unsat, "tampered map, unsat");
+        every_entry_point_is_unknown(&sat, "tampered map, sat");
+    }
+    match unsat.check() {
+        CheckResult::Unsat(cert) => cert.recheck().expect("disarmed: decided and re-checkable"),
+        other => panic!("disarmed: expected Unsat, got {other:?}"),
+    }
+    match sat.check() {
+        CheckResult::Sat(m) => assert_eq!(m.assignments, vec![("a".into(), 3), ("b".into(), 6)]),
+        other => panic!("disarmed: expected Sat, got {other:?}"),
+    }
+}
+
+// rivet: verifies VER-070
+/// The SAT side of the negative control: a `Sat` rests on the proven
+/// binding of every model value through the TERM's variable map
+/// (`var_offset` / `check_input_value`). With the term's two variables
+/// swapped before the trusted crate sees them — the model `a = 3, b = 6`
+/// is read at the other variable's inputs — every entry point degrades to
+/// `Unknown`. The same tamper leaves an UNSAT verdict untouched: the
+/// refutation does not read the variable map, which is the point of
+/// checking the model through it.
+#[test]
+fn default_sat_rests_on_the_trusted_binding() {
+    let sat = sat_solver();
+    let unsat = rewrite_heavy_unsat();
+    {
+        let _armed = tamper::arm(Tamper::SwapVars);
+        every_entry_point_is_unknown(&sat, "swapped variables, sat");
+        assert!(
+            matches!(unsat.check(), CheckResult::Unsat(_)),
+            "an UNSAT verdict does not depend on the variable map"
+        );
+    }
+    assert!(matches!(sat.check(), CheckResult::Sat(_)));
+}
+
+// rivet: verifies VER-070
+/// The sliver one-shots go through the same gate: an array query lowered
+/// by `Solver::check_sliver` and its bounded twins degrade to `Unknown`
+/// under the tampered map, and decide again disarmed.
+#[test]
+fn sliver_one_shots_rest_on_the_trusted_term_check() {
+    use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm};
+    let c32 = |v: u128| ExtBvTerm::Core(konst(v, 32));
+    let v8 = |n: &str| ExtBvTerm::Core(var(n, 8));
+    // select(store(A, 4, v), 4) ≠ v: UNSAT after read-over-write.
+    let unsat = vec![ExtBoolTerm::Ne(
+        ExtBvTerm::Select {
+            array: b(ArrayTerm::Store {
+                array: b(ArrayTerm::Var { name: "A".into() }),
+                index: b(c32(4)),
+                value: b(v8("v")),
+            }),
+            index: b(c32(4)),
+        },
+        v8("v"),
+    )];
+    // select(store(A, 4, v), 5) ≠ v: SAT (a miss reads the base array).
+    let sat = vec![ExtBoolTerm::Ne(
+        ExtBvTerm::Select {
+            array: b(ArrayTerm::Store {
+                array: b(ArrayTerm::Var { name: "A".into() }),
+                index: b(c32(4)),
+                value: b(v8("v")),
+            }),
+            index: b(c32(5)),
+        },
+        v8("v"),
+    )];
+    assert!(matches!(
+        Solver::check_sliver(&unsat),
+        CheckResult::Unsat(_)
+    ));
+    assert!(matches!(Solver::check_sliver(&sat), CheckResult::Sat(_)));
+    {
+        let _armed = tamper::arm(Tamper::MapEntry);
+        for q in [&unsat, &sat] {
+            assert!(matches!(Solver::check_sliver(q), CheckResult::Unknown));
+            assert!(matches!(
+                Solver::check_sliver_with_deadline(q, 600_000),
+                CheckResult::Unknown
+            ));
+            assert!(matches!(
+                Solver::check_sliver_with_limit(q, u64::MAX),
+                CheckResult::Unknown
+            ));
+            assert!(matches!(
+                Solver::from_sliver(q).expect("in the sliver").check(),
+                CheckResult::Unknown
+            ));
+        }
+    }
+    assert!(matches!(
+        Solver::check_sliver(&unsat),
+        CheckResult::Unsat(_)
+    ));
+    assert!(matches!(
+        Solver::check_sliver_with_limit(&sat, u64::MAX),
+        CheckResult::Sat(_)
+    ));
+}
+
+// rivet: verifies VER-070
+/// Every entry point returns the SAME gated answer: `check`'s certificate
+/// is byte-for-byte the one `check_with_witness`, `check_with_query` and
+/// `check_with_term` carry (the CNF the trusted crate re-encoded and
+/// compared, the LRAT it checked), and `check`'s model is the witness's
+/// model that `check_query_model` and the bindings accepted.
+#[test]
+fn every_entry_point_returns_the_gated_certificate() {
+    use crate::query::QueryCheckResult;
+    use crate::witness::WitnessCheckResult;
+    let s = rewrite_heavy_unsat();
+    let CheckResult::Unsat(plain) = s.check() else {
+        panic!("unsat")
+    };
+    let CheckResult::Unsat(limited) = s.check_with_limit(u64::MAX) else {
+        panic!("unsat")
+    };
+    let WitnessCheckResult::Unsat(witnessed) = s.check_with_witness() else {
+        panic!("unsat")
+    };
+    let QueryCheckResult::Unsat(queried) = s.check_with_query() else {
+        panic!("unsat")
+    };
+    let TermCheckResult::Unsat(termed) = s.check_with_term() else {
+        panic!("unsat")
+    };
+    for other in [
+        &limited,
+        &witnessed,
+        &queried.certificate,
+        &termed.query.certificate,
+    ] {
+        assert_eq!(plain.cnf, other.cnf);
+        assert_eq!(plain.lrat, other.lrat);
+    }
+    // The carried CNF is the trusted crate's re-encoding of the query.
+    let re = ordeal_lrat::check_query(
+        &termed.query.query.nodes,
+        &termed.query.query.bits,
+        &termed.query.query.roots,
+        &termed.query.query.hints,
+        plain.lrat_text().expect("text"),
+    )
+    .expect("the trusted crate re-checks the default certificate");
+    assert_eq!(re, plain.cnf);
+    termed
+        .term
+        .check(&termed.query.query)
+        .expect("and relates it to the term");
+
+    let s = sat_solver();
+    let CheckResult::Sat(plain) = s.check() else {
+        panic!("sat")
+    };
+    let WitnessCheckResult::Sat(witnessed) = s.check_with_witness() else {
+        panic!("sat")
+    };
+    let TermCheckResult::Sat(termed) = s.check_with_term() else {
+        panic!("sat")
+    };
+    assert_eq!(plain.assignments, witnessed.model.assignments);
+    assert_eq!(plain.assignments, termed.query.witness.model.assignments);
+    termed
+        .recheck()
+        .expect("the default model re-checks at the term level");
+}

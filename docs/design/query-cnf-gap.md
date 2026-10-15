@@ -6,10 +6,12 @@
 (maintainer, 2026-10-01) · **Status:** phases 1–5 delivered (this
 document records all five); the default path's switch to the phase-5
 nodes is an open maintainer decision (see phase 5, "byte identity");
-phase 6 (v0.29.0) delivered; **phase 7 delivered** (the last two
-sections: the design, option (C) approved by the maintainer 2026-10-15,
-and what shipped — `check_term_dag`, `lean/TermCheck.lean`,
-`ordeal-cert/v3`, `--with-term`, the proven model binding).
+phase 6 (v0.29.0) delivered; **phase 7 delivered** (the design, option
+(C) approved by the maintainer 2026-10-15, and what shipped —
+`check_term_dag`, `lean/TermCheck.lean`, `ordeal-cert/v3`,
+`--with-term`, the proven model binding); **the default path switched
+to the term check** (v0.32.0, TR-070, maintainer decision 2026-10-15;
+the last section).
 
 ## The claim being protected
 
@@ -1853,3 +1855,166 @@ kernel, API, solver and bundle tests), the 24-fixture byte identity in
 JSON and text mode against the `main` build, the four `cnf_gap_digest`
 digests unchanged, the Z3 differential through `check_with_term`, and
 the workspace test / clippy / fmt gates.
+
+## The default path: every answer rests on the term check (v0.32.0, TR-070)
+
+**Decision (maintainer, 2026-10-15):** replace, don't add. Phases 4–7
+built the proven query and term checks beside the default pipeline and
+left them opt-in (`check_with_query`, `check_with_term`). Through
+v0.31.0 the entry points consumers actually call — `Solver::check`,
+`check_with_limit`, `check_with_deadline`, `check_with_witness`, the
+sliver one-shots, the CLI's default output — still validated the LRAT
+proof against the solver's own CNF with `ordeal_lrat::check` and the
+model with the untrusted `eval.rs`, so `canon.rs`, `dag.rs` and
+`eval.rs` stayed on every default answer's trust path. v0.32.0 makes
+the trusted gate the only gate.
+
+### Design: one pipeline, projected
+
+`Solver::solve_core(bound)` is the only pipeline (`solve_pipeline`,
+`solve_witness` and the `query_verdict` / `check_with_term` layers on
+top of them are gone): lower, search under the bound, then
+
+- **`gate_unsat`**: `dag::flatten` + `dag::term_map` (untrusted
+  advice) produce the term and the map; the trusted crate runs
+  `check_term_dag` and then `check_query`, which re-encodes the DAG
+  and checks the LRAT proof against the CNF *it* produced; the
+  solver's CNF is checked equal to the re-encoding and carried. The
+  proof is checked **once** — `ordeal_lrat::check` on the solver's CNF
+  no longer runs on this path.
+- **`gate_sat`**: the `eval.rs` self-check (kept as defence in depth),
+  the CNF-level witness (`check_sat` / `check_binding`),
+  `check_term_dag`, `check_query_model`, and `var_offset` /
+  `check_input_value` for every advertised value through the term's
+  own variable map.
+
+The result is a `TermCheckResult`; `check` keeps its certificate or
+model, `check_with_witness` the witness, `check_with_query` the query
+block, `check_with_term` all of it. The opt-in entries therefore cost
+nothing beyond `check` now. The CaDiCaL lane runs the same gate.
+Anything the trusted crate rejects degrades to `Unknown` on every
+entry point; the `debug_assert!`s that flag an ordeal bug in a debug
+build stay, bypassed only by the test hook below.
+
+### Negative control and potency
+
+A gate that *ran* the term check but whose verdict did not *rest* on it
+would be the vacuous-gate class. The control is a test-only hook,
+`solver::tamper` (compiled out of every non-test build; the identity
+in release), armed per thread: it corrupts one term-map entry (an
+operator pointed at a different DAG node) or swaps the `Var` nodes of
+the term's first two variables *before the trusted crate sees them*,
+with the solver, the search, the proof and the model untouched. Then
+`check`, `check_with_limit`, `check_with_deadline`,
+`check_with_witness`, `check_with_query`, `check_with_term` and the
+three sliver one-shots must all return `Unknown`, on UNSAT and on SAT
+(the swapped variables only on SAT: a refutation does not read the
+variable map, which is why the model is bound through it), and decide
+again disarmed (`query_term_tests::default_check_rests_on_the_trusted_term_check`,
+`default_sat_rests_on_the_trusted_binding`,
+`sliver_one_shots_rest_on_the_trusted_term_check`). Potency: with the
+term check skipped in the gate (`TermCertificate::recheck` /
+`TermSatCertificate::recheck` replaced by the v2 recheck alone) those
+three tests and `a_rejected_term_map_degrades_to_unknown_not_a_verdict`
+fail (4 of 9); the source was restored byte for byte (VE-060).
+
+### What the verdict scan found: a `term_map` gap, not a capacity limit
+
+The trusted checks have capacity conditions (`encode_fits`,
+`tseitin_fits`, `dag_wf`, the `w ≤ 128` of `check_input_value`), so
+switching the default path could turn a decided verdict into
+`Unknown`. A scratchpad harness ran every decided query of every
+corpus through `check` and `check_with_term` on the v0.31.0 sources:
+the latency and bmc corpora, `gen_corpus(0x192, 200)`,
+`gen_corpus(0xC0FFEE, 1000)`, the sliver one-shots. No query was
+refused for capacity — `encode_fits` admits `1.2·10^6` gates per node
+at `w = 128` against `usize::MAX`, and nothing a solver produces comes
+near it — but **four queries of `gen_corpus(0xC0FFEE, 1000)`** (140,
+150 `sat`; 169, 216 `unsat`) were refused by `check_term_dag` with
+`RootMismatch`. The cause was on the untrusted side: two input
+constants with equal low bits are two DAG constant nodes (the builder
+interns by the `u128` value), the DAG had built `mul(c, v)` over
+**both**, and `term_map` committed a term constant's candidate at the
+first parent key that hit — the wrong one, so the `bvnot` above it had
+no image and the root did not correspond. v0.31.0's `check_with_term`
+returned `Unknown` on those four; on the new default path that would
+have been a verdict regression.
+
+The fix (`dag::term_map`, untrusted): every term node keeps every
+candidate image, each with the operand images its structural key used;
+the map is resolved top-down — the DAG's roots (a new parameter) fix
+the term roots' images, a chosen image fixes its operands' (exactly
+what `term_node_corr` demands), and only a node nothing above it
+reaches, the inside of a fold, takes its first candidate. The four
+queries are accepted with the same certificate and model digests the
+old `check` produced; the regression test
+`term_map_resolves_equal_bits_constants_from_the_roots` (both
+assertion orders, on an operator and on two roots) failed on the old
+`term_map` and passes; the denotation guard's 1500 cases still pass
+through the trusted check. The trusted crate is unchanged (no Lean
+regeneration).
+
+### Cost: the latency corpus within 1.25x
+
+Release, Apple M4, best of three, the same corpus as
+`benches/latency.rs`, `check` on the v0.31.0 sources against `check`
+on this branch (the harness and the raw tables are in the VE-060
+record):
+
+| query | v0.31.0 `check` | v0.32.0 `check` | ratio | flatten + `term_map` | `check_term_dag` | `check_query` (of which LRAT) |
+|---|---:|---:|---:|---:|---:|---:|
+| srem_vc_32 | 4.652 ms | 5.889 ms | 1.27 | 0.108 | 0.111 | 1.343 (0.681) |
+| urem_vc_32 | 4.187 ms | 5.365 ms | 1.28 | 0.094 | 0.091 | 1.253 (0.645) |
+| layout_roundtrip_32 | 0.008 ms | 0.016 ms | 2.0 | 0.004 | 0.002 | 0.002 (0.000) |
+| trap_vc_32 | 0.014 ms | 0.026 ms | 1.9 | 0.005 | 0.003 | 0.004 (0.002) |
+| ult_cycle_64 | 3.355 ms | 3.519 ms | 1.05 | 0.009 | 0.007 | 1.111 (1.052) |
+| shl1_eq_add_64 | 0.022 ms | 0.055 ms | 2.5 | 0.010 | 0.008 | 0.012 (0.000) |
+| **total** | **12.238 ms** | **14.870 ms** | **1.21** | | | |
+
+Where the time goes, on the two queries that dominate: `check_query`
+is ≈ 1.3 ms, of which the LRAT check (which the old path paid too) is
+≈ 0.65 ms, so the trusted re-encoding (`encode` + `compact` +
+`tseitin` of the DAG inside the trusted crate) is ≈ 0.65 ms; `term_map`
+(which encodes and simulates the term once to find the folded nodes)
+≈ 0.1 ms; `check_term_dag` (which encodes and simulates it again, by
+its proven API) ≈ 0.1 ms; the CNF comparison is below the timer's
+resolution. On `ult_cycle_64` the LRAT check is the whole of
+`check_query` and the gate adds 5%. The microsecond queries double:
+the gate's fixed cost (three more encodes of a tiny DAG, the lookup
+tables) is the same order as the solve. `check_with_term` now equals
+`check` (14.80 ms against 14.87 ms) where it was 1.72x before. The
+criterion bench (`cargo bench -p ordeal --bench latency`, which also
+re-checks the certificate in its loop) tells the same story:
+srem_vc_32 5.42 → 6.92 ms, urem_vc_32 5.10 → 6.45 ms, ult_cycle_64
+4.28 → 4.42 ms, the three microsecond queries 1.8–2.7x, total ≈ 1.21x.
+Seconds-long queries do not move: `hard_mul_6` (the 6-bit `a·(b+c) ≠
+a·b + a·c`) 2.330 s → 2.331 s, `queue_overflow_k128` 2.540 s → 2.519 s
+— the search dominates and the gate is linear in the DAG.
+
+What would buy the rest, if ever needed: `term_map`'s own encode of the
+term is only there to decide which operator nodes are constant-valued
+(the fold rule); a cheaper closedness pass would save ≈ 0.1 ms on the
+div queries, and the re-encoding inside `check_query` is the point of
+the design and stays.
+
+### Acceptance: the shipped bytes are unchanged
+
+The release binary of this branch against the **published v0.31.0
+aarch64-apple-darwin binary** (`gh release download v0.31.0`, verified
+to print `ordeal 0.31.0`), over every query file in the repository —
+`crates/ordeal/tests/fixtures` (incl. `differential/`),
+`evidence/certs`, `fuzz/seeds/smtlib`,
+`.rivet/repos/gale/proofs/ordeal-bv`: 29 files — in text, `--format
+json` and `--format json --with-query` mode, sha256 of stdout + stderr
++ exit code: **87 same, 0 differ**. The four `cnf_gap_digest` digests
+(latency `7b35d569…`, bmc `5c14a69e…`, `0x192` `a1d80de9…`, `0xC0FFEE`
+`42d44115…`) are unchanged. No JSON field is added unless `--with-term`
+is given.
+
+### What stays trusted, on every path
+
+The 1:1 flattening of the assertions into the term (`dag::flatten`: a
+post-order, left-to-right walk with no semantic decision, which a
+consumer holding the assertions re-runs and compares by hash), the
+variable names, the sliver lowering (`sliver.rs`) and the SMT-LIB /
+Verus front ends. `docs/formal-verification.md` states the same list.

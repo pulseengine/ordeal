@@ -373,9 +373,66 @@ compares by hash), the variable names, the sliver and the front ends.
 `canon.rs`, `dag.rs`, `dag::term_map` and `QueryInputs::from_model` are
 no longer trusted: a wrong decision in any of them is rejected by the
 trusted check, and the solver degrades the verdict to `Unknown`
-(`Solver::term_verdict`, `term_sat_verdict`). The default paths and
-`--with-query` are unchanged; the trusted term gate is
-`Solver::check_with_term` and `ordeal check --with-term`.
+(`Solver::term_verdict`, `term_sat_verdict`). In v0.31.0 the trusted
+term gate was the opt-in `Solver::check_with_term` / `ordeal check
+--with-term`; since v0.32.0 it is every entry point's gate (next
+section).
+
+## Every answer rests on the term check: the default path (v0.32.0 / TR-070)
+
+Until v0.31.0 the default entry points — `Solver::check`,
+`check_with_limit`, `check_with_deadline`, `check_with_witness`, the
+sliver one-shots and the CLI's default output — validated the LRAT
+proof against the solver's own CNF (`ordeal_lrat::check`) and the model
+against the assertions with the untrusted `eval.rs`; the proven query
+and term checks ran only when a caller opted in. Since v0.32.0 there is
+**one pipeline** (`Solver::solve_core`): lower, search, then the
+trusted gate, and every entry point keeps a projection of its result:
+
+- **UNSAT** (`Solver::gate_unsat`): the assertions are flattened as
+  asked and mapped onto the lowered DAG (`dag::flatten`,
+  `dag::term_map`, untrusted advice); the trusted crate runs
+  `check_term_dag` (the DAG is a semantics-preserving rewrite of the
+  term, `check_term_dag_sound`) and then `check_query` (the DAG
+  re-encoded by the proven lowering, the LRAT proof checked against
+  the CNF *it* produced, `check_query_sound`), and the solver's CNF is
+  checked equal to the re-encoding. The proof is checked **once**, by
+  `check_query`; `ordeal_lrat::check` on the solver's CNF no longer
+  runs on this path. `Unsat` ⟹ `check_term_unsat_sound`: no assignment
+  to the term's variables makes every asserted root true.
+- **SAT** (`Solver::gate_sat`): the model is decoded and re-evaluated
+  against the original assertions by `eval.rs` (kept, as defence in
+  depth); then the trusted crate runs `check_term_dag`, the CNF-level
+  witness check (`check_sat` / `check_binding`), `check_query_model`
+  (every root of the DAG true under the model's input bits,
+  `check_query_model_sound`) and, for every advertised model value,
+  `var_offset` / `check_input_value` through the **term's** own
+  variable map (`check_input_value_sound`). `Sat` ⟹
+  `check_term_model_sound`: the advertised model satisfies the term.
+- Anything the trusted crate rejects degrades to `Unknown` on every
+  entry point — never to a wrong answer. The negative control is a
+  test-only hook (`solver::tamper`) that corrupts one map entry, or
+  swaps two term variables, before the trusted crate sees them, with
+  the solver, the search, the proof and the model untouched: `check`
+  and its five siblings all return `Unknown`, and decide again when
+  the hook is disarmed (`query_term_tests::default_check_rests_on_the_trusted_term_check`,
+  `default_sat_rests_on_the_trusted_binding`,
+  `sliver_one_shots_rest_on_the_trusted_term_check`). A gate that
+  skipped the term check fails those tests (recorded in VE-060).
+
+What this changes for a consumer: nothing in the bytes — the
+certificate (CNF + LRAT) and the model `check` returns are the ones
+`check_with_term` carries, byte-identical to v0.31.0's over every query
+file in the repository; `--with-query` and `--with-term` are unchanged
+and cost nothing beyond `check` now. What it changes in the trust base:
+`canon.rs`, `dag.rs` (the builder, `term_map`), `eval.rs` and the
+model-to-inputs glue leave **every** answer's trust path, not only the
+`--with-term` one. **What is still trusted, on every path:** the 1:1
+flattening of the assertions into the term (`dag::flatten`, a
+post-order walk with no semantic decision — a consumer holding the
+assertions re-runs and compares it), the variable names, the sliver
+lowering (`sliver.rs`, array/UF elimination into the closed core) and
+the SMT-LIB / Verus front ends.
 
 ## Out of scope (explicitly NOT proven)
 
@@ -445,36 +502,28 @@ trusted check, and the solver degrades the verdict to `Unknown`
   `check_query_sound` has no hypotheses. What is *still not* proven, and
   therefore trusted when a verdict is read **as a statement about the
   assertions a caller made** rather than about the DAG a v2 bundle
-  carries: the DAG builder (`dag.rs`: which `DagNode` is made for which
-  term, variable sharing by name, hash-consing) — a wrong decision there
-  changes the question asked, as the old term walk could, but the DAG it
-  produced is now in the certificate, where a consumer can audit it;
-  canon (`canon.rs`, including constant folding via `eval.rs`); the
-  **rewrite of the derived ops on the default path** (`lowering.rs`:
-  `Solver::check` still rewrites `bvnot`, `bvneg`, `bvrotl`, `bvsdiv`,
-  `bvsrem` into the closed core *before* the DAG is built, so a v1
-  certificate from `check` carries the rewritten query — since #192
-  phase 5 / TR-064 the five are `DagNode` constructs with **proven**
-  composite rules, `lean/BlasterDerived.lean`'s `blast_bvnot_bitvec`,
-  `blast_neg_bitvec`, `blast_rotl_bitvec`, `blast_sdiv_bitvec`,
-  `blast_srem_bitvec` against `~~~A`, `-A`, `A.rotateLeft (B.toNat % w)`,
-  `A.smtSDiv B`, `A.srem B`, and `Solver::check_with_query` lowers them as
-  such, so the v2 certificate carries the operation and the re-check
-  covers it; the default path keeps the rewrite so its bytes are
-  unchanged, a decision recorded in `docs/design/query-cnf-gap.md`);
-  the sliver (`sliver.rs`); the SMT-LIB and Verus front ends. For a
-  **`sat`** verdict the same list applies (since #192 phase 6 / TR-065
-  the model is evaluated against the DAG by the proven
-  `check_query_model`, above — on the `check_with_query` path), plus the
-  builder's variable map: that the `Var` node the model value is written
-  into is the one made for that name. **Since #192 phase 7 / TR-069**
-  (the section above) the DAG builder and canonicalization leave this
-  list on the `check_with_term` / `--with-term` path: the trusted
-  `check_term_dag` relates the term a v3 bundle carries to the DAG, and
-  the proven `var_offset` / `check_input_value` bind the model values
-  through the term's own variable map. What stays: the 1:1 flattening of
-  the assertions into the term block, the variable names, the sliver and
-  the front ends.
+  carries, was (through v0.31.0 on the default path): the DAG builder
+  (`dag.rs`: which `DagNode` is made for which term, variable sharing by
+  name, hash-consing) — a wrong decision there changes the question
+  asked, as the old term walk could; canon (`canon.rs`, including
+  constant folding via `eval.rs`); the sliver (`sliver.rs`); the SMT-LIB
+  and Verus front ends; and for a **`sat`** verdict the builder's
+  variable map, that the `Var` node the model value is written into is
+  the one made for that name. The derived ops (`bvnot`, `bvneg`,
+  `bvrotl`, `bvsdiv`, `bvsrem`) are `DagNode` constructs with **proven**
+  composite rules since #192 phase 5 / TR-064 (`lean/BlasterDerived.lean`'s
+  `blast_bvnot_bitvec`, `blast_neg_bitvec`, `blast_rotl_bitvec`,
+  `blast_sdiv_bitvec`, `blast_srem_bitvec` against `~~~A`, `-A`,
+  `A.rotateLeft (B.toNat % w)`, `A.smtSDiv B`, `A.srem B`), lowered as
+  nodes on every path since v0.28.0, so no rewrite of them is trusted.
+  **Since #192 phase 7 / TR-069** the trusted `check_term_dag` relates
+  the term to the DAG and the proven `var_offset` / `check_input_value`
+  bind the model values through the term's own variable map — on the
+  `check_with_term` / `--with-term` path in v0.31.0, and **on every path
+  since v0.32.0 / TR-070** (the section above), so the DAG builder,
+  canonicalization and `eval.rs` have left this list. What stays: the
+  1:1 flattening of the assertions into the term (`dag::flatten`), the
+  variable names, the sliver and the front ends.
   `dag::strash_hints` is untrusted by design: it only reproduces the
   sharing decisions of the old `Aig::and` strash so the shipped CNF stays
   byte-identical, and `compact_sound` holds for any hints. The shipped

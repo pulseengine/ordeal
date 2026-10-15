@@ -771,7 +771,7 @@ impl QueryTerm {
         query_vars: &[(String, u32, usize)],
     ) -> Result<QueryTerm, crate::eval::EvalError> {
         let term = crate::dag::flatten(assertions)?;
-        let map = crate::dag::term_map(&term, &query.nodes, &query.bits, query_vars);
+        let map = crate::dag::term_map(&term, &query.nodes, &query.bits, &query.roots, query_vars);
         Ok(QueryTerm {
             nodes: term.nodes,
             bits: term.bits,
