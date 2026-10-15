@@ -1523,7 +1523,7 @@ artifacts:
   - id: VER-067
     type: sw-verification
     title: Bounded sliver entries — refusal as Err, every core entry point on the lowered solver, exhaustion is Unknown (TR-067)
-    status: implemented
+    status: verified
     release: v0.30.0
     description: "solver tests: from_sliver_reports_the_refusal_not_unknown (a BV8 array index is SliverError::BadArraySort from from_sliver, Unknown from check_sliver_with_deadline / check_sliver_with_limit); from_sliver_solver_takes_every_core_entry_point (a symbolic read-over-write identity is Unsat under check, check_with_deadline, check_with_limit and check_with_query on the from_sliver solver, as from check_sliver; its free twin is Sat both ways); bounded_sliver_entries_are_conservative (x*(y+z) != x*y + x*z over three 32-bit words read from mem at a symbolic base is strictly Unknown at a zero conflict budget — an unbounded entry would decide it — and Unknown or a re-checked Unsat at a zero deadline; generous bounds decide the read-over-write identity with a re-checked certificate). The existing check_sliver tests run through from_sliver unchanged."
     tags: [sliver, loom, deadline, negative-control]
@@ -1539,7 +1539,7 @@ artifacts:
   - id: VER-068
     type: sw-verification
     title: Term-to-DAG translation agrees with eval.rs on every operator and odd width; one planted bug per layer is caught (TR-068)
-    status: implemented
+    status: verified
     release: v0.30.0
     description: "dag::denotation_guard::dag_translation_agrees_with_the_evaluator: 1500 seeded random assertions (depth 3) over all 24 BvTerm operators (incl. ite, the width-changing constructs and the formerly derived ops), comparisons at widths 1, 3, 5, 8, 12, 16, 24, 32, 64, 128 (width-changing constructs reach every width up to 128), and random models with 1/6 of values each at 0, all-ones, 1 and the sign bit. Per assertion: eval.rs on canonicalize_bool(a) equals eval.rs on a; and for the derived-ops-as-nodes path and the rewrite path, canonicalize then DagBuilder then QueryInputs::from_model then ordeal_lrat::check_query_model accepts exactly when eval.rs says a holds (a refusal of a well-sorted DAG is a failure). Mutation controls, each restored: dag.rs Ashr built as DagNode::Lshr (fails at case 58, rewrite path); canon.rs Ugt not mirrored (case 4); QueryInputs::from_model dropping bit 127 (case 159)."
     tags: [dag, canon, query, negative-control]
