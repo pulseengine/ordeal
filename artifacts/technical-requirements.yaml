@@ -1815,3 +1815,22 @@ artifacts:
         target: ARC-006
       - type: allocated-to
         target: ARC-011
+
+  - id: TR-067
+    type: sw-req
+    title: Bounded sliver entry points that keep an out-of-sliver refusal distinct from Unknown (#236)
+    status: implemented
+    release: v0.30.0
+    description: "Ordeal shall offer the sliver the same bounded entry points as the core, and a way to lower a sliver query that reports a refusal as an error rather than an undecided verdict. Issue #236 (loom #313 slice 4): check_sliver/prove_equiv_sliver ran the unbounded check, so a whole-function memory obligation could hang rather than revert; and every SliverError became CheckResult::Unknown, so a consumer could not tell 'outside the fragment, defer to another engine' from 'undecided'. Solver::from_sliver returns Result<Solver, SliverError> carrying the lowered core, to which every core entry point applies; check_sliver_with_deadline (clock started before lowering) and check_sliver_with_limit are the bounded one-shots. An exhausted bound is Unknown, never a wrong or unchecked verdict. The sliver's documentation shall match the symbolic-index requirement: symbolic BV32 indices are in the sliver, and SliverError::NonConcreteIndex is never returned."
+    tags: [sliver, loom, deadline, conflict-budget, api]
+    fields:
+      priority: should
+      req-type: functional
+      verification-criteria: from_sliver returns the BadArraySort refusal as an Err while the bounded one-shots return Unknown for it; the solver from_sliver returns decides as check_sliver does under check, check_with_deadline, check_with_limit and check_with_query; a 32-bit sliver distributivity query that canonicalization does not decide is strictly Unknown at a zero conflict budget and Unknown or a re-checked Unsat at a zero deadline; generous bounds decide with a re-checked certificate.
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-002

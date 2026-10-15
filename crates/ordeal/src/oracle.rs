@@ -440,7 +440,8 @@ fn gen_ext_bool(rng: &mut XorShift64, depth: u32) -> ExtBoolTerm {
 }
 
 /// Generate `n` seeded, reproducible sliver queries (stores/selects over
-/// concrete offsets and shared-name `pure_call`s), each a conjunction of
+/// concrete, symbolic and symbolic+offset BV32 indices — [`any_index`] —
+/// and shared-name `pure_call`s), each a conjunction of
 /// 1–3 extended assertions. The same `(seed, n)` always yields the same
 /// corpus, so a differential disagreement found in CI replays locally.
 pub fn gen_sliver_corpus(seed: u64, n: usize) -> Vec<Vec<ExtBoolTerm>> {

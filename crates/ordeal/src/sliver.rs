@@ -154,8 +154,11 @@ pub enum ExtBoolTerm {
 /// Why a sliver query is outside the supported fragment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SliverError {
-    /// A `select`/`store` used a non-concrete (symbolic) index — the eager
-    /// read-over-write elimination requires concrete offsets (TR-008).
+    /// **Never returned.** Symbolic BV32 indices have been decided since
+    /// v0.11.0 (TR-028): [`lower`] accepts any BV32 index, concrete or not,
+    /// and builds the read-over-write `ite` over the index equality. The
+    /// variant is kept only so that consumers who match `SliverError`
+    /// exhaustively keep compiling; it will be removed in a breaking release.
     NonConcreteIndex,
     /// A `select`/`store` index was not BV32, or a value not BV8.
     BadArraySort,

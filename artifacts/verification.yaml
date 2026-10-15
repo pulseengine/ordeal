@@ -1519,3 +1519,19 @@ artifacts:
         target: TR-065
       - type: part-of-execution
         target: VE-055
+
+  - id: VER-067
+    type: sw-verification
+    title: Bounded sliver entries — refusal as Err, every core entry point on the lowered solver, exhaustion is Unknown (TR-067)
+    status: implemented
+    release: v0.30.0
+    description: "solver tests: from_sliver_reports_the_refusal_not_unknown (a BV8 array index is SliverError::BadArraySort from from_sliver, Unknown from check_sliver_with_deadline / check_sliver_with_limit); from_sliver_solver_takes_every_core_entry_point (a symbolic read-over-write identity is Unsat under check, check_with_deadline, check_with_limit and check_with_query on the from_sliver solver, as from check_sliver; its free twin is Sat both ways); bounded_sliver_entries_are_conservative (x*(y+z) != x*y + x*z over three 32-bit words read from mem at a symbolic base is strictly Unknown at a zero conflict budget — an unbounded entry would decide it — and Unknown or a re-checked Unsat at a zero deadline; generous bounds decide the read-over-write identity with a re-checked certificate). The existing check_sliver tests run through from_sliver unchanged."
+    tags: [sliver, loom, deadline, negative-control]
+    fields:
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib -- from_sliver bounded_sliver check_sliver"
+    links:
+      - type: verifies
+        target: TR-067
+      - type: part-of-execution
+        target: VE-057
