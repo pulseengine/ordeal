@@ -1834,3 +1834,20 @@ artifacts:
         target: SYS-001
       - type: allocated-to
         target: ARC-002
+
+  - id: TR-068
+    type: sw-req
+    title: The untrusted term-to-DAG translation (canon.rs, dag.rs, model-to-inputs) is checked against the independent evaluator (#192 evidence before proof)
+    status: implemented
+    release: v0.30.0
+    description: "Since #192 phases 4-6 the trusted crate re-checks both answers against the query DAG, whose Lean semantics is Lean BitVec (SMT-LIB). What remains trusted on the query path is the translation from the term to that DAG: canonicalization (canon.rs), the DAG builder (dag.rs), and the glue that writes a model into the DAG's input bits. Until that translation is proven (the next #192 phase), ordeal shall check it against the independent evaluator eval.rs: for random assertions over every operator of the closed fragment, at the widths the #182 class hid at, and random models biased toward the SMT-LIB edge values, the trusted check_query_model must accept exactly when eval.rs says the original assertion holds, on both the derived-ops-as-nodes path and the rewrite path; and canonicalization alone must preserve the evaluator's value. A translation bug that changes a term's meaning then fails a test rather than producing a certified wrong answer."
+    tags: [dag, canon, query, evidence, closed-fragment]
+    fields:
+      priority: must
+      req-type: functional
+      verification-criteria: dag::denotation_guard::dag_translation_agrees_with_the_evaluator passes over 1500 seeded assertions with both outcomes represented (more than 300 each); planting a bug in each layer fails it (dag.rs Ashr translated as Lshr; canon.rs a > b not mirrored; inputs glue dropping bit 127).
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-002

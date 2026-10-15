@@ -16,6 +16,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applies to the result. `Solver::check_sliver_with_deadline` and
   `Solver::check_sliver_with_limit` are the bounded one-shots; the
   deadline's clock starts before the sliver is lowered.
+- **The term-to-DAG translation is checked against the evaluator** (#192,
+  TR-068). This is evidence, ahead of a proof. The trusted crate now
+  re-checks both answers against the query DAG, so what remains trusted is
+  the step that builds that DAG: `canon.rs`, `dag.rs`, and the glue that
+  writes a model into the DAG's inputs. A new seeded test runs 1500 random
+  assertions, over every operator at widths 1 to 128 (including 3, 5, 12
+  and 24), under models biased to the edge values. `check_query_model` must
+  accept exactly when `eval.rs` says the original assertion holds, on both
+  lowering paths. Canonicalization alone must preserve the value too. A
+  bug planted in each layer is caught.
 
 ### Fixed
 - **The sliver docs no longer say concrete indices only** (#236).

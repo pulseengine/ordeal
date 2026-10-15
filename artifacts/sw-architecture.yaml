@@ -83,6 +83,8 @@ artifacts:
         target: TR-066
       - type: allocated-from
         target: TR-067
+      - type: allocated-from
+        target: TR-068
   - id: ARC-003
     type: sw-arch-component
     title: ordeal-aig (bit-blaster and And-Inverter Graph)

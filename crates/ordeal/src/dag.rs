@@ -539,3 +539,234 @@ mod tests {
         }
     }
 }
+
+/// #192 evidence before proof: the untrusted translation from a term to the
+/// trusted crate's DAG — `canon.rs`, `dag.rs` and the model→inputs glue —
+/// checked against the independent evaluator `eval.rs`. For random
+/// assertions over every operator at the odd widths the #182 class hid at,
+/// and random models, `ordeal_lrat::check_query_model` (proven against the
+/// Lean `BitVec` semantics of the DAG) must accept exactly when `eval.rs`
+/// says the ORIGINAL assertion holds. A translation bug that changes the
+/// meaning of a term shows up as a disagreement here.
+#[cfg(test)]
+mod denotation_guard {
+    use super::DagBuilder;
+    use crate::eval::{self, Env};
+    use crate::query::{QueryDag, QueryInputs};
+    use crate::solver::Model;
+    use crate::term::{BoolTerm, BvTerm, Sort};
+    use ordeal_lrat as k;
+
+    struct Rng(u64);
+    impl Rng {
+        fn next(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn below(&mut self, n: u64) -> u64 {
+            self.next() % n
+        }
+        fn value(&mut self, w: u32) -> u128 {
+            let r = (u128::from(self.next()) << 64) | u128::from(self.next());
+            // Bias toward the edge values the SMT-LIB corner cases live at.
+            let v = match self.below(6) {
+                0 => 0,
+                1 => u128::MAX,
+                2 => 1,
+                3 => 1u128 << (w - 1),
+                _ => r,
+            };
+            if w >= 128 { v } else { v & ((1u128 << w) - 1) }
+        }
+    }
+
+    /// The widths: the odd ones #182 hid at, the powers of two, and the
+    /// extremes.
+    const WIDTHS: [u32; 10] = [1, 3, 5, 8, 12, 16, 24, 32, 64, 128];
+
+    fn b<T>(t: T) -> Box<T> {
+        Box::new(t)
+    }
+
+    fn var(w: u32, k: u64) -> BvTerm {
+        BvTerm::Var {
+            name: format!("v{w}_{k}"),
+            sort: Sort::new(w),
+        }
+    }
+
+    /// A random term of exactly width `w`.
+    fn gen_bv(rng: &mut Rng, w: u32, depth: u32) -> BvTerm {
+        if depth == 0 || rng.below(4) == 0 {
+            return if rng.below(3) == 0 {
+                BvTerm::Const {
+                    value: rng.value(w),
+                    sort: Sort::new(w),
+                }
+            } else {
+                var(w, rng.below(3))
+            };
+        }
+        let d = depth - 1;
+        let sub = |rng: &mut Rng| gen_bv(rng, w, d);
+        match rng.below(24) {
+            0 => BvTerm::Add(b(sub(rng)), b(sub(rng))),
+            1 => BvTerm::Sub(b(sub(rng)), b(sub(rng))),
+            2 => BvTerm::Mul(b(sub(rng)), b(sub(rng))),
+            3 => BvTerm::Udiv(b(sub(rng)), b(sub(rng))),
+            4 => BvTerm::Urem(b(sub(rng)), b(sub(rng))),
+            5 => BvTerm::And(b(sub(rng)), b(sub(rng))),
+            6 => BvTerm::Or(b(sub(rng)), b(sub(rng))),
+            7 => BvTerm::Xor(b(sub(rng)), b(sub(rng))),
+            8 => BvTerm::Shl(b(sub(rng)), b(sub(rng))),
+            9 => BvTerm::Lshr(b(sub(rng)), b(sub(rng))),
+            10 => BvTerm::Ashr(b(sub(rng)), b(sub(rng))),
+            11 => BvTerm::Rotr(b(sub(rng)), b(sub(rng))),
+            12 => BvTerm::Rotl(b(sub(rng)), b(sub(rng))),
+            13 => BvTerm::Sdiv(b(sub(rng)), b(sub(rng))),
+            14 => BvTerm::Srem(b(sub(rng)), b(sub(rng))),
+            15 => BvTerm::Not(b(sub(rng))),
+            16 => BvTerm::Neg(b(sub(rng))),
+            17 => BvTerm::Ite {
+                cond: b(gen_bool(rng, d)),
+                then_: b(sub(rng)),
+                else_: b(sub(rng)),
+            },
+            // Width-changing constructs, each producing exactly `w`.
+            18 if w > 1 => {
+                let lo_w = 1 + rng.below(u64::from(w - 1)) as u32;
+                BvTerm::Concat(b(gen_bv(rng, w - lo_w, d)), b(gen_bv(rng, lo_w, d)))
+            }
+            19 if w < 128 => {
+                let wider = w + 1 + rng.below(u64::from(128 - w).min(16)) as u32;
+                let lo = rng.below(u64::from(wider - w + 1)) as u32;
+                BvTerm::Extract {
+                    hi: lo + w - 1,
+                    lo,
+                    arg: b(gen_bv(rng, wider, d)),
+                }
+            }
+            20 | 21 if w > 1 => {
+                let by = 1 + rng.below(u64::from(w - 1)) as u32;
+                let arg = b(gen_bv(rng, w - by, d));
+                if rng.below(2) == 0 {
+                    BvTerm::ZeroExt { by, arg }
+                } else {
+                    BvTerm::SignExt { by, arg }
+                }
+            }
+            // Commuted operands, so canonicalization's reordering is hit.
+            _ => {
+                let (x, y) = (sub(rng), sub(rng));
+                BvTerm::Add(
+                    b(BvTerm::Mul(b(x.clone()), b(y.clone()))),
+                    b(BvTerm::Mul(b(y), b(x))),
+                )
+            }
+        }
+    }
+
+    fn gen_bool(rng: &mut Rng, depth: u32) -> BoolTerm {
+        if depth == 0 || rng.below(3) != 0 {
+            let w = WIDTHS[rng.below(WIDTHS.len() as u64) as usize];
+            let d = depth.min(2);
+            let (x, y) = (b(gen_bv(rng, w, d)), b(gen_bv(rng, w, d)));
+            return match rng.below(10) {
+                0 => BoolTerm::Eq(x, y),
+                1 => BoolTerm::Ne(x, y),
+                2 => BoolTerm::Ult(x, y),
+                3 => BoolTerm::Ule(x, y),
+                4 => BoolTerm::Ugt(x, y),
+                5 => BoolTerm::Uge(x, y),
+                6 => BoolTerm::Slt(x, y),
+                7 => BoolTerm::Sle(x, y),
+                8 => BoolTerm::Sgt(x, y),
+                _ => BoolTerm::Sge(x, y),
+            };
+        }
+        let d = depth - 1;
+        match rng.below(3) {
+            0 => BoolTerm::Not(b(gen_bool(rng, d))),
+            1 => BoolTerm::And(b(gen_bool(rng, d)), b(gen_bool(rng, d))),
+            _ => BoolTerm::Or(b(gen_bool(rng, d)), b(gen_bool(rng, d))),
+        }
+    }
+
+    /// Does the trusted crate accept the assertion under `env`, after the
+    /// production translation (optionally rewriting the derived ops first,
+    /// as the default path does)?
+    fn trusted_accepts(a: &BoolTerm, env: &Env, rewrite: bool) -> bool {
+        let a = if rewrite {
+            crate::lowering::expand_bool(a).expect("well-sorted")
+        } else {
+            a.clone()
+        };
+        let a = crate::canon::canonicalize_bool(&a);
+        let mut builder = DagBuilder::new(true);
+        builder.assert_root(&a).expect("well-sorted");
+        let dag = builder.finish();
+        let query = QueryDag {
+            nodes: dag.nodes,
+            bits: dag.bits,
+            roots: dag.roots,
+            hints: Vec::new(),
+        };
+        let model = Model {
+            assignments: env.iter().map(|(k, v)| (k.clone(), *v)).collect(),
+        };
+        let inputs = QueryInputs::from_model(&query, &dag.vars, &model);
+        match k::check_query_model(&query.nodes, &query.bits, &query.roots, &inputs.bits) {
+            Ok(()) => true,
+            Err(k::ModelError::RootFalse { .. }) => false,
+            Err(e) => panic!("the DAG of a well-sorted assertion was refused: {e:?}"),
+        }
+    }
+
+    fn env_for(rng: &mut Rng) -> Env {
+        let mut env = Env::new();
+        // Every width: Concat / Extract / ZeroExt / SignExt reach widths
+        // outside WIDTHS.
+        for w in 1..=128u32 {
+            for k in 0..3 {
+                env.insert(format!("v{w}_{k}"), rng.value(w));
+            }
+        }
+        env
+    }
+
+    // rivet: verifies VER-068
+    #[test]
+    fn dag_translation_agrees_with_the_evaluator() {
+        let mut rng = Rng(0x0192_DE40_7A71_0001);
+        let (mut trues, mut falses) = (0u32, 0u32);
+        for i in 0..1500 {
+            let a = gen_bool(&mut rng, 3);
+            let env = env_for(&mut rng);
+            let want = eval::eval_bool(&a, &env).expect("well-sorted");
+            // canon.rs alone must preserve the meaning…
+            assert_eq!(
+                eval::eval_bool(&crate::canon::canonicalize_bool(&a), &env),
+                Ok(want),
+                "case {i}: canonicalization changed the value of {a:?}"
+            );
+            // …and so must the whole translation, on both paths.
+            for rewrite in [false, true] {
+                assert_eq!(
+                    trusted_accepts(&a, &env, rewrite),
+                    want,
+                    "case {i} (rewrite = {rewrite}): the trusted DAG value differs from eval.rs for {a:?} under {env:?}"
+                );
+            }
+            if want { trues += 1 } else { falses += 1 }
+        }
+        // Both outcomes must be well represented, or the check is lopsided.
+        assert!(
+            trues > 300 && falses > 300,
+            "trues {trues}, falses {falses}"
+        );
+    }
+}
