@@ -341,6 +341,333 @@ pub fn no_hints(raw: &k::Aig) -> Vec<usize> {
     (0..raw.nodes.len()).collect()
 }
 
+// ── #192 phase 7: the term as asked, and its map to the lowered DAG ──────
+
+/// The term as the caller asked it (#192 phase 7, `ordeal-term/v1`): the
+/// assertions flattened with NO canonicalization and NO hash-consing —
+/// variables shared by name, constants interned, every other subterm its
+/// own node, operands before operators, left to right. The same
+/// [`DagBuilder`] walk the lowered DAG comes from, minus the two things a
+/// consumer cannot audit without re-running them. The trusted
+/// `ordeal_lrat::check_term_dag` relates this to the lowered DAG along
+/// [`term_map`]'s map.
+pub fn flatten(assertions: &[BoolTerm]) -> Result<Dag, EvalError> {
+    let mut builder = DagBuilder::new(false);
+    for a in assertions {
+        builder.assert_root(a)?;
+    }
+    Ok(builder.finish())
+}
+
+/// `usize::MAX`: the map entry of a term node that has no image.
+pub const NO_IMAGE: usize = usize::MAX;
+
+/// The operands of a node (the earlier nodes whose values it reads), in
+/// constructor order.
+fn operands(n: &k::DagNode) -> Vec<usize> {
+    use k::DagNode as N;
+    match *n {
+        N::Var(_) | N::Const(_, _) => vec![],
+        N::Extract(_, _, a)
+        | N::ZeroExt(a, _)
+        | N::SignExt(a, _)
+        | N::Not(a)
+        | N::BvNot(a)
+        | N::Neg(a) => vec![a],
+        N::Ite(c, t, e) => vec![c, t, e],
+        N::Add(a, b)
+        | N::Sub(a, b)
+        | N::Mul(a, b)
+        | N::Udiv(a, b)
+        | N::Urem(a, b)
+        | N::And(a, b)
+        | N::Or(a, b)
+        | N::Xor(a, b)
+        | N::Shl(a, b)
+        | N::Lshr(a, b)
+        | N::Ashr(a, b)
+        | N::Rotr(a, b)
+        | N::Concat(a, b)
+        | N::Eq(a, b)
+        | N::Ne(a, b)
+        | N::Ult(a, b)
+        | N::Ule(a, b)
+        | N::Ugt(a, b)
+        | N::Uge(a, b)
+        | N::Slt(a, b)
+        | N::Sle(a, b)
+        | N::Sgt(a, b)
+        | N::Sge(a, b)
+        | N::BoolAnd(a, b)
+        | N::BoolOr(a, b)
+        | N::Rotl(a, b)
+        | N::Sdiv(a, b)
+        | N::Srem(a, b) => vec![a, b],
+    }
+}
+
+/// A node with its operands replaced by `f(operand)`; `None` if `f` has no
+/// image for one of them.
+fn map_operands(n: &k::DagNode, f: impl Fn(usize) -> Option<usize>) -> Option<k::DagNode> {
+    use k::DagNode as N;
+    Some(match *n {
+        N::Var(w) => N::Var(w),
+        N::Const(s, w) => N::Const(s, w),
+        N::Extract(hi, lo, a) => N::Extract(hi, lo, f(a)?),
+        N::ZeroExt(a, by) => N::ZeroExt(f(a)?, by),
+        N::SignExt(a, by) => N::SignExt(f(a)?, by),
+        N::Not(a) => N::Not(f(a)?),
+        N::BvNot(a) => N::BvNot(f(a)?),
+        N::Neg(a) => N::Neg(f(a)?),
+        N::Ite(c, t, e) => N::Ite(f(c)?, f(t)?, f(e)?),
+        N::Add(a, b) => N::Add(f(a)?, f(b)?),
+        N::Sub(a, b) => N::Sub(f(a)?, f(b)?),
+        N::Mul(a, b) => N::Mul(f(a)?, f(b)?),
+        N::Udiv(a, b) => N::Udiv(f(a)?, f(b)?),
+        N::Urem(a, b) => N::Urem(f(a)?, f(b)?),
+        N::And(a, b) => N::And(f(a)?, f(b)?),
+        N::Or(a, b) => N::Or(f(a)?, f(b)?),
+        N::Xor(a, b) => N::Xor(f(a)?, f(b)?),
+        N::Shl(a, b) => N::Shl(f(a)?, f(b)?),
+        N::Lshr(a, b) => N::Lshr(f(a)?, f(b)?),
+        N::Ashr(a, b) => N::Ashr(f(a)?, f(b)?),
+        N::Rotr(a, b) => N::Rotr(f(a)?, f(b)?),
+        N::Concat(a, b) => N::Concat(f(a)?, f(b)?),
+        N::Eq(a, b) => N::Eq(f(a)?, f(b)?),
+        N::Ne(a, b) => N::Ne(f(a)?, f(b)?),
+        N::Ult(a, b) => N::Ult(f(a)?, f(b)?),
+        N::Ule(a, b) => N::Ule(f(a)?, f(b)?),
+        N::Ugt(a, b) => N::Ugt(f(a)?, f(b)?),
+        N::Uge(a, b) => N::Uge(f(a)?, f(b)?),
+        N::Slt(a, b) => N::Slt(f(a)?, f(b)?),
+        N::Sle(a, b) => N::Sle(f(a)?, f(b)?),
+        N::Sgt(a, b) => N::Sgt(f(a)?, f(b)?),
+        N::Sge(a, b) => N::Sge(f(a)?, f(b)?),
+        N::BoolAnd(a, b) => N::BoolAnd(f(a)?, f(b)?),
+        N::BoolOr(a, b) => N::BoolOr(f(a)?, f(b)?),
+        N::Rotl(a, b) => N::Rotl(f(a)?, f(b)?),
+        N::Sdiv(a, b) => N::Sdiv(f(a)?, f(b)?),
+        N::Srem(a, b) => N::Srem(f(a)?, f(b)?),
+    })
+}
+
+/// A commutative node with its operands swapped (what `canon.rs` may do).
+fn swap_comm(n: &k::DagNode) -> k::DagNode {
+    use k::DagNode as N;
+    match *n {
+        N::Add(a, b) => N::Add(b, a),
+        N::Mul(a, b) => N::Mul(b, a),
+        N::And(a, b) => N::And(b, a),
+        N::Or(a, b) => N::Or(b, a),
+        N::Xor(a, b) => N::Xor(b, a),
+        N::Eq(a, b) => N::Eq(b, a),
+        N::Ne(a, b) => N::Ne(b, a),
+        N::BoolAnd(a, b) => N::BoolAnd(b, a),
+        N::BoolOr(a, b) => N::BoolOr(b, a),
+        other => other,
+    }
+}
+
+/// A comparison mirrored (`a > b` as `b < a`, …; what `canon.rs` does to
+/// the four "greater" forms).
+fn mirror(n: &k::DagNode) -> k::DagNode {
+    use k::DagNode as N;
+    match *n {
+        N::Ult(a, b) => N::Ugt(b, a),
+        N::Ule(a, b) => N::Uge(b, a),
+        N::Ugt(a, b) => N::Ult(b, a),
+        N::Uge(a, b) => N::Ule(b, a),
+        N::Slt(a, b) => N::Sgt(b, a),
+        N::Sle(a, b) => N::Sge(b, a),
+        N::Sgt(a, b) => N::Slt(b, a),
+        N::Sge(a, b) => N::Sle(b, a),
+        other => other,
+    }
+}
+
+/// The map from the term's nodes to the lowered DAG's (#192 phase 7):
+/// `map[i]` is the DAG node term node `i` became under canonicalization
+/// and hash-consing, or [`NO_IMAGE`] — the inside of a folded constant
+/// subterm, whose children do not exist in the DAG. UNTRUSTED: the
+/// trusted `ordeal_lrat::check_term_dag` verifies every entry (a wrong
+/// map is rejected and the verdict degrades to `Unknown`, never
+/// accepted on a different formula); `denotation_guard` is its positive
+/// control.
+///
+/// Computed after the fact, with no access to the builder's tables: a
+/// variable by its name (`vars`, the lowered DAG's `(name, width, node)`
+/// map), a constant by its bits, an operator by the structural key of its
+/// mapped image — as is, with a commutative swap, or with a comparison
+/// mirror (hash-consing made each key unique) — and, when none of those
+/// hits, a closed operator by the constant its value interned to: the
+/// value comes from the proven encoder and simulator at the all-false
+/// assignment, which is exactly how the trusted check will evaluate it.
+pub fn term_map(
+    term: &Dag,
+    nodes: &[k::DagNode],
+    bits: &[bool],
+    vars: &[(String, u32, usize)],
+) -> Vec<usize> {
+    use k::DagNode as N;
+    // The lowered DAG's lookup tables. A constant may have SEVERAL nodes
+    // with the same bits (the builder interns by the `u128` value, and
+    // two input constants can agree on their low `w` bits and differ
+    // above), so a term constant keeps every candidate until a parent's
+    // structural lookup picks the one the DAG actually used.
+    let mut by_key: HashMap<(&'static str, Vec<usize>), usize> = HashMap::new();
+    let mut by_bits: HashMap<Vec<bool>, Vec<usize>> = HashMap::new();
+    for (j, n) in nodes.iter().enumerate() {
+        match *n {
+            N::Var(_) => {}
+            N::Const(s, w) => {
+                if s.saturating_add(w) <= bits.len() {
+                    by_bits.entry(bits[s..s + w].to_vec()).or_default().push(j);
+                }
+            }
+            _ => {
+                by_key.entry(crate::query::node_op(n)).or_insert(j);
+            }
+        }
+    }
+    // Term constant node → its remaining candidates (more than one).
+    let mut cands: HashMap<usize, Vec<usize>> = HashMap::new();
+    let var_by_name: HashMap<&str, usize> = vars
+        .iter()
+        .map(|(name, _, node)| (name.as_str(), *node))
+        .collect();
+    let name_of: HashMap<usize, &str> = term
+        .vars
+        .iter()
+        .map(|(name, _, node)| (*node, name.as_str()))
+        .collect();
+    // The term's values under the proven encoder and simulator, all
+    // inputs false, and from them which nodes are constant-valued — the
+    // trusted check's own rule (`kernel::node_const`): a constant is, a
+    // variable is not, an operator is iff its operands are, except the
+    // three short-circuits of the evaluator behind canonicalization: an
+    // `ite` with a constant condition through the branch it selects, a
+    // boolean `and` / `or` with a constant operand that decides it.
+    let nin: usize = term
+        .nodes
+        .iter()
+        .map(|n| if let N::Var(w) = n { *w } else { 0 })
+        .sum();
+    let mut raw = k::aig_new();
+    let (words, _) = k::encode(&mut raw, &term.nodes, &term.bits, &[]);
+    let vals = k::simulate(&raw, &vec![false; nin]);
+    let cond = |c: usize| k::eval_lit(&vals, words[c][0]);
+    let mut closed: Vec<bool> = Vec::with_capacity(term.nodes.len());
+    for n in &term.nodes {
+        let c = match *n {
+            N::Var(_) => false,
+            N::Const(_, _) => true,
+            N::Ite(c, t, e) => closed[c] && if cond(c) { closed[t] } else { closed[e] },
+            N::BoolAnd(a, b) => {
+                (closed[a] && !cond(a)) || (closed[b] && !cond(b)) || (closed[a] && closed[b])
+            }
+            N::BoolOr(a, b) => {
+                (closed[a] && cond(a)) || (closed[b] && cond(b)) || (closed[a] && closed[b])
+            }
+            _ => operands(n).iter().all(|&a| closed[a]),
+        };
+        closed.push(c);
+    }
+    let lookup = |e: &k::DagNode| -> Option<usize> {
+        by_key
+            .get(&crate::query::node_op(e))
+            .or_else(|| by_key.get(&crate::query::node_op(&swap_comm(e))))
+            .or_else(|| by_key.get(&crate::query::node_op(&mirror(e))))
+            .copied()
+    };
+    let mut map: Vec<usize> = Vec::with_capacity(term.nodes.len());
+    for (i, n) in term.nodes.iter().enumerate() {
+        let image = match *n {
+            N::Var(_) => name_of
+                .get(&i)
+                .and_then(|name| var_by_name.get(name))
+                .copied(),
+            N::Const(s, w) => {
+                let cs = by_bits
+                    .get(&term.bits[s..s + w])
+                    .cloned()
+                    .unwrap_or_default();
+                if cs.len() > 1 {
+                    cands.insert(i, cs.clone());
+                }
+                cs.first().copied()
+            }
+            _ => {
+                // The structural lookup, over every choice of candidate for
+                // the constant operands still undecided (almost always one
+                // choice); a hit commits the choices.
+                let ops = operands(n);
+                let mut undecided: Vec<usize> = ops
+                    .iter()
+                    .copied()
+                    .filter(|a| map[*a] != NO_IMAGE && cands.contains_key(a))
+                    .collect();
+                undecided.sort_unstable();
+                undecided.dedup();
+                let mut structural: Option<usize> = None;
+                if ops.iter().all(|&a| map[a] != NO_IMAGE) {
+                    let mut idx = vec![0usize; undecided.len()];
+                    loop {
+                        let choice: HashMap<usize, usize> = undecided
+                            .iter()
+                            .zip(&idx)
+                            .map(|(&a, &k)| (a, cands[&a][k]))
+                            .collect();
+                        let at = |a: usize| -> Option<usize> {
+                            Some(choice.get(&a).copied().unwrap_or(map[a]))
+                        };
+                        if let Some(hit) = map_operands(n, at).and_then(|e| lookup(&e)) {
+                            for (&a, &c) in &choice {
+                                map[a] = c;
+                                cands.remove(&a);
+                            }
+                            structural = Some(hit);
+                            break;
+                        }
+                        // The next combination (mixed radix), or done.
+                        let mut pos = 0;
+                        loop {
+                            if pos == idx.len() {
+                                break;
+                            }
+                            idx[pos] += 1;
+                            if idx[pos] < cands[&undecided[pos]].len() {
+                                break;
+                            }
+                            idx[pos] = 0;
+                            pos += 1;
+                        }
+                        if pos == idx.len() {
+                            break;
+                        }
+                    }
+                }
+                structural.or_else(|| {
+                    // A fold: the constant with the node's value — every
+                    // candidate kept, as for a constant node.
+                    if closed[i] {
+                        let value: Vec<bool> =
+                            words[i].iter().map(|l| k::eval_lit(&vals, *l)).collect();
+                        let cs = by_bits.get(&value).cloned().unwrap_or_default();
+                        if cs.len() > 1 {
+                            cands.insert(i, cs.clone());
+                        }
+                        cs.first().copied()
+                    } else {
+                        None
+                    }
+                })
+            }
+        };
+        map.push(image.unwrap_or(NO_IMAGE));
+    }
+    map
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -726,6 +1053,30 @@ mod denotation_guard {
         }
     }
 
+    /// The term-to-DAG correspondence of the production translation of
+    /// `a` — `canon` + `DagBuilder` against `flatten` + `term_map` — is
+    /// accepted by the trusted `check_term_dag`.
+    fn term_is_mapped_and_accepted(a: &BoolTerm, case: usize) {
+        let canon = crate::canon::canonicalize_bool(a);
+        let mut builder = DagBuilder::new(true);
+        builder.assert_root(&canon).expect("well-sorted");
+        let dag = builder.finish();
+        let query = QueryDag {
+            nodes: dag.nodes,
+            bits: dag.bits,
+            roots: dag.roots,
+            hints: Vec::new(),
+        };
+        let term = crate::query::QueryTerm::flatten(std::slice::from_ref(a), &query, &dag.vars)
+            .expect("well-sorted");
+        assert_eq!(
+            term.check(&query),
+            Ok(()),
+            "case {case}: the trusted term check must accept the production translation of {a:?} (map {:?})",
+            term.map
+        );
+    }
+
     fn env_for(rng: &mut Rng) -> Env {
         let mut env = Env::new();
         // Every width: Concat / Extract / ZeroExt / SignExt reach widths
@@ -739,6 +1090,7 @@ mod denotation_guard {
     }
 
     // rivet: verifies VER-068
+    // rivet: verifies VER-069
     #[test]
     fn dag_translation_agrees_with_the_evaluator() {
         let mut rng = Rng(0x0192_DE40_7A71_0001);
@@ -761,6 +1113,10 @@ mod denotation_guard {
                     "case {i} (rewrite = {rewrite}): the trusted DAG value differs from eval.rs for {a:?} under {env:?}"
                 );
             }
+            // #192 phase 7 (TR-069): the production translation is also
+            // accepted by the trusted term-to-DAG check — the positive
+            // control of `term_map` on every operator and width.
+            term_is_mapped_and_accepted(&a, i);
             if want { trues += 1 } else { falses += 1 }
         }
         // Both outcomes must be well represented, or the check is lopsided.

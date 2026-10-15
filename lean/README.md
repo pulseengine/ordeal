@@ -200,6 +200,39 @@ theorem compact_sound (aig : Aig) (hints : Slice Std.Usize) (L : Nat)
   `bin_pure_of_sim`, `sim_of_pure`, `WordFrame`) BlasterDag builds on.
   `encode_node_spec` has 37 arms since; `gateBound` is `70·W² + 70·W + 1`.
 
+## The term-to-DAG correspondence check (issue #192, phase 7 / TR-069)
+
+`TermCheck.lean` proves `kernel::check_term_dag` — the trusted check
+that the DAG a certificate carries (what `check_query` refutes and
+`check_query_model` satisfies) is a semantics-preserving rewrite of the
+TERM the caller asked, along an untrusted index map — and composes it
+with the two query-level capstones. `sorry`-free, axiom-clean (pinned
+in `AxiomCheck.lean`), a default `lake build` target:
+
+```lean
+theorem check_term_unsat_sound … (ht : kernel.check_term_dag t tbits troots map ns bits roots = ok (Ok ()))
+    (hq : kernel.check_query ns bits roots hints steps = ok (Ok cnf)) :
+    ∀ inp0 : List Bool, ¬ (∀ k (hk : k < troots.val.length),
+      dagBool inp0 tbits.val t.val (troots.val[k]).val = true)
+
+theorem check_term_model_sound … (ht : …) (hm : kernel.check_query_model ns bits roots inp1 = ok (Ok ())) :
+    ∃ inp0 : List Bool, VarsAgree t.val ns.val map.val inp0 inp1.val ∧
+      ∀ k (hk : k < troots.val.length), dagBool inp0 tbits.val t.val (troots.val[k]).val = true
+
+theorem term_verdicts_exclusive … : False
+theorem check_input_value_sound … : ∀ k < w.val, inp.val.getD (offset.val + k) false = value.val.testBit k
+```
+
+The term is a `DagNode` list with variables shared by name only, so its
+semantics is `dagSim`; the proof is the induction `corr_values` (every
+mapped term node has the value of its image) over a syntactic
+correspondence the main loop establishes, with `const_indep` (a
+constant-valued node's value does not depend on the inputs — the fold
+rule) and the two transports `pullback` / `pushforward` between a term
+assignment and a DAG assignment. `docs/formal-verification.md` and
+`docs/design/query-cnf-gap.md` (phase 7) state what is and is not
+covered.
+
 ## The SAT-witness checker (TR-038 → TR-044 / VER-039)
 
 `SatWitness.lean` extends the same semantics — nothing in `Sound.lean`

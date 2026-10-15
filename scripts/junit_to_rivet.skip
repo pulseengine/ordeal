@@ -4,3 +4,4 @@ crates/ordeal/src/blast/proofs.rs VER-044   # Kani harnesses (cfg(kani)), not un
 crates/ordeal/src/solver.rs VER-008         # needs features cadical+oracle (C++ build, Z3); the "CaDiCaL backend" and "Z3 Oracle" CI jobs run it
 crates/ordeal/src/oracle.rs VER-066         # sliver_diff_lifted_ops needs feature oracle (Z3); the "Z3 Oracle" CI job runs it. VER-066's solver.rs/sliver.rs markers map here
 crates/ordeal/src/oracle.rs VER-065         # sat_models_differential_through_check_with_query needs feature oracle (Z3); the "Z3 Oracle" CI job runs it
+crates/ordeal/src/oracle.rs VER-069         # term_differential_through_check_with_term needs feature oracle (Z3); the "Z3 Oracle" CI job runs it. VER-069's other markers (kernel, query, bundle, CLI, dag) are covered by the default run

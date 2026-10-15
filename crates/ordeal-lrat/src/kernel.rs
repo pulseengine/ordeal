@@ -40,7 +40,7 @@
 #[path = "blast_kernel.rs"]
 pub mod blast_kernel;
 
-use blast_kernel::{DagNode, aig_new, compact, encode, eval_lit, map_word, simulate, tseitin};
+use blast_kernel::{DagNode, Lit, aig_new, compact, encode, eval_lit, map_word, simulate, tseitin};
 
 /// One already-parsed certificate step.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1013,6 +1013,736 @@ pub fn check_query_model(
     Ok(())
 }
 
+// ───────────── The term-to-DAG correspondence check (issue #192 phase 7) ─────────────
+
+/// Why [`check_term_dag`] rejected. Data-only, like [`QueryError`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TermError {
+    /// The term (the flattened, un-canonicalized assertions) is malformed
+    /// or too large (`dag_wf` on it).
+    Term(QueryError),
+    /// The lowered DAG is malformed or too large (`dag_wf` on it).
+    Query(QueryError),
+    /// The map does not have one entry per term node.
+    MapLength {
+        /// The term's node count.
+        expected: usize,
+        /// The map's length.
+        found: usize,
+    },
+    /// Term node `node` is mapped past the end of the lowered DAG.
+    MapOutOfRange {
+        /// 0-based index of the term node.
+        node: usize,
+    },
+    /// Term node `node` is a variable whose image is not a variable of the
+    /// same width, or whose image is already the image of another
+    /// variable (two term variables aliased to one DAG variable would make
+    /// the DAG MORE constrained — a refutation of it would say nothing
+    /// about the term).
+    VarMismatch {
+        /// 0-based index of the term node.
+        node: usize,
+    },
+    /// Term node `node` is a constant whose image is not the same constant.
+    ConstMismatch {
+        /// 0-based index of the term node.
+        node: usize,
+    },
+    /// Term node `node` is an operator whose image is neither the same
+    /// operator over the images of its operands, nor that with the
+    /// operands of a commutative operator swapped, nor the mirror of a
+    /// comparison.
+    NodeMismatch {
+        /// 0-based index of the term node.
+        node: usize,
+    },
+    /// Term node `node` is an operator whose image is a constant, but the
+    /// node is not closed (its cone reads a variable), its width differs,
+    /// or the constant is not the node's value.
+    FoldMismatch {
+        /// 0-based index of the term node.
+        node: usize,
+    },
+    /// The asserted roots do not correspond one for one through the map.
+    RootMismatch,
+}
+
+/// A node's constructor, as a number (`Var` 0, `Const` 1, then the
+/// operators in declaration order). Comparing tags and fields
+/// ([`node_f1`], [`node_f2`], [`node_f3`]) is how the fragment spells
+/// structural equality of two nodes without a derived `==` (which the
+/// pinned Aeneas has no model of), and without a nested match on two
+/// enums (which it expands to 37 × 37 arms).
+fn node_tag(node: DagNode) -> usize {
+    match node {
+        DagNode::Var(_) => 0,
+        DagNode::Const(_, _) => 1,
+        DagNode::Add(_, _) => 2,
+        DagNode::Sub(_, _) => 3,
+        DagNode::Mul(_, _) => 4,
+        DagNode::Udiv(_, _) => 5,
+        DagNode::Urem(_, _) => 6,
+        DagNode::And(_, _) => 7,
+        DagNode::Or(_, _) => 8,
+        DagNode::Xor(_, _) => 9,
+        DagNode::Shl(_, _) => 10,
+        DagNode::Lshr(_, _) => 11,
+        DagNode::Ashr(_, _) => 12,
+        DagNode::Rotr(_, _) => 13,
+        DagNode::Extract(_, _, _) => 14,
+        DagNode::Concat(_, _) => 15,
+        DagNode::ZeroExt(_, _) => 16,
+        DagNode::SignExt(_, _) => 17,
+        DagNode::Ite(_, _, _) => 18,
+        DagNode::Eq(_, _) => 19,
+        DagNode::Ne(_, _) => 20,
+        DagNode::Ult(_, _) => 21,
+        DagNode::Ule(_, _) => 22,
+        DagNode::Ugt(_, _) => 23,
+        DagNode::Uge(_, _) => 24,
+        DagNode::Slt(_, _) => 25,
+        DagNode::Sle(_, _) => 26,
+        DagNode::Sgt(_, _) => 27,
+        DagNode::Sge(_, _) => 28,
+        DagNode::Not(_) => 29,
+        DagNode::BoolAnd(_, _) => 30,
+        DagNode::BoolOr(_, _) => 31,
+        DagNode::BvNot(_) => 32,
+        DagNode::Neg(_) => 33,
+        DagNode::Rotl(_, _) => 34,
+        DagNode::Sdiv(_, _) => 35,
+        DagNode::Srem(_, _) => 36,
+    }
+}
+
+/// The first field of a node in constructor order (0 when absent).
+fn node_f1(node: DagNode) -> usize {
+    match node {
+        DagNode::Var(w) => w,
+        DagNode::Const(s, _) => s,
+        DagNode::Add(a, _) => a,
+        DagNode::Sub(a, _) => a,
+        DagNode::Mul(a, _) => a,
+        DagNode::Udiv(a, _) => a,
+        DagNode::Urem(a, _) => a,
+        DagNode::And(a, _) => a,
+        DagNode::Or(a, _) => a,
+        DagNode::Xor(a, _) => a,
+        DagNode::Shl(a, _) => a,
+        DagNode::Lshr(a, _) => a,
+        DagNode::Ashr(a, _) => a,
+        DagNode::Rotr(a, _) => a,
+        DagNode::Extract(hi, _, _) => hi,
+        DagNode::Concat(a, _) => a,
+        DagNode::ZeroExt(a, _) => a,
+        DagNode::SignExt(a, _) => a,
+        DagNode::Ite(c, _, _) => c,
+        DagNode::Eq(a, _) => a,
+        DagNode::Ne(a, _) => a,
+        DagNode::Ult(a, _) => a,
+        DagNode::Ule(a, _) => a,
+        DagNode::Ugt(a, _) => a,
+        DagNode::Uge(a, _) => a,
+        DagNode::Slt(a, _) => a,
+        DagNode::Sle(a, _) => a,
+        DagNode::Sgt(a, _) => a,
+        DagNode::Sge(a, _) => a,
+        DagNode::Not(a) => a,
+        DagNode::BoolAnd(a, _) => a,
+        DagNode::BoolOr(a, _) => a,
+        DagNode::BvNot(a) => a,
+        DagNode::Neg(a) => a,
+        DagNode::Rotl(a, _) => a,
+        DagNode::Sdiv(a, _) => a,
+        DagNode::Srem(a, _) => a,
+    }
+}
+
+/// The second field of a node in constructor order (0 when absent).
+fn node_f2(node: DagNode) -> usize {
+    match node {
+        DagNode::Var(_) => 0,
+        DagNode::Const(_, w) => w,
+        DagNode::Add(_, b) => b,
+        DagNode::Sub(_, b) => b,
+        DagNode::Mul(_, b) => b,
+        DagNode::Udiv(_, b) => b,
+        DagNode::Urem(_, b) => b,
+        DagNode::And(_, b) => b,
+        DagNode::Or(_, b) => b,
+        DagNode::Xor(_, b) => b,
+        DagNode::Shl(_, b) => b,
+        DagNode::Lshr(_, b) => b,
+        DagNode::Ashr(_, b) => b,
+        DagNode::Rotr(_, b) => b,
+        DagNode::Extract(_, lo, _) => lo,
+        DagNode::Concat(_, b) => b,
+        DagNode::ZeroExt(_, by) => by,
+        DagNode::SignExt(_, by) => by,
+        DagNode::Ite(_, t, _) => t,
+        DagNode::Eq(_, b) => b,
+        DagNode::Ne(_, b) => b,
+        DagNode::Ult(_, b) => b,
+        DagNode::Ule(_, b) => b,
+        DagNode::Ugt(_, b) => b,
+        DagNode::Uge(_, b) => b,
+        DagNode::Slt(_, b) => b,
+        DagNode::Sle(_, b) => b,
+        DagNode::Sgt(_, b) => b,
+        DagNode::Sge(_, b) => b,
+        DagNode::Not(_) => 0,
+        DagNode::BoolAnd(_, b) => b,
+        DagNode::BoolOr(_, b) => b,
+        DagNode::BvNot(_) => 0,
+        DagNode::Neg(_) => 0,
+        DagNode::Rotl(_, b) => b,
+        DagNode::Sdiv(_, b) => b,
+        DagNode::Srem(_, b) => b,
+    }
+}
+
+/// The third field of a node in constructor order (0 when absent).
+fn node_f3(node: DagNode) -> usize {
+    match node {
+        DagNode::Extract(_, _, a) => a,
+        DagNode::Ite(_, _, e) => e,
+        _ => 0,
+    }
+}
+
+/// Structural equality of two nodes: the same constructor and the same
+/// fields.
+fn node_eq(a: DagNode, b: DagNode) -> bool {
+    node_tag(a) == node_tag(b)
+        && node_f1(a) == node_f1(b)
+        && node_f2(a) == node_f2(b)
+        && node_f3(a) == node_f3(b)
+}
+
+/// The image of term node `a` under the map (`usize::MAX`, "no image",
+/// past the end).
+fn map_at(map: &[usize], a: usize) -> usize {
+    if a < map.len() { map[a] } else { usize::MAX }
+}
+
+/// A term node with every operand replaced by its image under the map
+/// (parameters — widths, extract bounds, extension amounts — unchanged).
+fn map_node(map: &[usize], node: DagNode) -> DagNode {
+    match node {
+        DagNode::Var(w) => DagNode::Var(w),
+        DagNode::Const(s, w) => DagNode::Const(s, w),
+        DagNode::Add(a, b) => DagNode::Add(map_at(map, a), map_at(map, b)),
+        DagNode::Sub(a, b) => DagNode::Sub(map_at(map, a), map_at(map, b)),
+        DagNode::Mul(a, b) => DagNode::Mul(map_at(map, a), map_at(map, b)),
+        DagNode::Udiv(a, b) => DagNode::Udiv(map_at(map, a), map_at(map, b)),
+        DagNode::Urem(a, b) => DagNode::Urem(map_at(map, a), map_at(map, b)),
+        DagNode::And(a, b) => DagNode::And(map_at(map, a), map_at(map, b)),
+        DagNode::Or(a, b) => DagNode::Or(map_at(map, a), map_at(map, b)),
+        DagNode::Xor(a, b) => DagNode::Xor(map_at(map, a), map_at(map, b)),
+        DagNode::Shl(a, b) => DagNode::Shl(map_at(map, a), map_at(map, b)),
+        DagNode::Lshr(a, b) => DagNode::Lshr(map_at(map, a), map_at(map, b)),
+        DagNode::Ashr(a, b) => DagNode::Ashr(map_at(map, a), map_at(map, b)),
+        DagNode::Rotr(a, b) => DagNode::Rotr(map_at(map, a), map_at(map, b)),
+        DagNode::Extract(hi, lo, a) => DagNode::Extract(hi, lo, map_at(map, a)),
+        DagNode::Concat(a, b) => DagNode::Concat(map_at(map, a), map_at(map, b)),
+        DagNode::ZeroExt(a, by) => DagNode::ZeroExt(map_at(map, a), by),
+        DagNode::SignExt(a, by) => DagNode::SignExt(map_at(map, a), by),
+        DagNode::Ite(c, t, e) => DagNode::Ite(map_at(map, c), map_at(map, t), map_at(map, e)),
+        DagNode::Eq(a, b) => DagNode::Eq(map_at(map, a), map_at(map, b)),
+        DagNode::Ne(a, b) => DagNode::Ne(map_at(map, a), map_at(map, b)),
+        DagNode::Ult(a, b) => DagNode::Ult(map_at(map, a), map_at(map, b)),
+        DagNode::Ule(a, b) => DagNode::Ule(map_at(map, a), map_at(map, b)),
+        DagNode::Ugt(a, b) => DagNode::Ugt(map_at(map, a), map_at(map, b)),
+        DagNode::Uge(a, b) => DagNode::Uge(map_at(map, a), map_at(map, b)),
+        DagNode::Slt(a, b) => DagNode::Slt(map_at(map, a), map_at(map, b)),
+        DagNode::Sle(a, b) => DagNode::Sle(map_at(map, a), map_at(map, b)),
+        DagNode::Sgt(a, b) => DagNode::Sgt(map_at(map, a), map_at(map, b)),
+        DagNode::Sge(a, b) => DagNode::Sge(map_at(map, a), map_at(map, b)),
+        DagNode::Not(a) => DagNode::Not(map_at(map, a)),
+        DagNode::BoolAnd(a, b) => DagNode::BoolAnd(map_at(map, a), map_at(map, b)),
+        DagNode::BoolOr(a, b) => DagNode::BoolOr(map_at(map, a), map_at(map, b)),
+        DagNode::BvNot(a) => DagNode::BvNot(map_at(map, a)),
+        DagNode::Neg(a) => DagNode::Neg(map_at(map, a)),
+        DagNode::Rotl(a, b) => DagNode::Rotl(map_at(map, a), map_at(map, b)),
+        DagNode::Sdiv(a, b) => DagNode::Sdiv(map_at(map, a), map_at(map, b)),
+        DagNode::Srem(a, b) => DagNode::Srem(map_at(map, a), map_at(map, b)),
+    }
+}
+
+/// A commutative operator with its operands swapped (`bvadd`, `bvmul`,
+/// `bvand`, `bvor`, `bvxor`, `=`, `distinct`, boolean `and` / `or`) —
+/// what canonicalization may do to a node; every other node unchanged.
+fn swap_comm(node: DagNode) -> DagNode {
+    match node {
+        DagNode::Add(a, b) => DagNode::Add(b, a),
+        DagNode::Mul(a, b) => DagNode::Mul(b, a),
+        DagNode::And(a, b) => DagNode::And(b, a),
+        DagNode::Or(a, b) => DagNode::Or(b, a),
+        DagNode::Xor(a, b) => DagNode::Xor(b, a),
+        DagNode::Eq(a, b) => DagNode::Eq(b, a),
+        DagNode::Ne(a, b) => DagNode::Ne(b, a),
+        DagNode::BoolAnd(a, b) => DagNode::BoolAnd(b, a),
+        DagNode::BoolOr(a, b) => DagNode::BoolOr(b, a),
+        _ => node,
+    }
+}
+
+/// A comparison mirrored (`a < b` is `b > a`, and so on, unsigned and
+/// signed) — the other rewrite canonicalization may make; every other
+/// node unchanged.
+fn mirror(node: DagNode) -> DagNode {
+    match node {
+        DagNode::Ult(a, b) => DagNode::Ugt(b, a),
+        DagNode::Ule(a, b) => DagNode::Uge(b, a),
+        DagNode::Ugt(a, b) => DagNode::Ult(b, a),
+        DagNode::Uge(a, b) => DagNode::Ule(b, a),
+        DagNode::Slt(a, b) => DagNode::Sgt(b, a),
+        DagNode::Sle(a, b) => DagNode::Sge(b, a),
+        DagNode::Sgt(a, b) => DagNode::Slt(b, a),
+        DagNode::Sge(a, b) => DagNode::Sle(b, a),
+        _ => node,
+    }
+}
+
+/// Does the lowered node `d` correspond to the term operator `tn`: is it
+/// `tn` over the images of its operands, or that with the operands of a
+/// commutative operator swapped, or the mirror of a comparison?
+fn node_corr(map: &[usize], tn: DagNode, d: DagNode) -> bool {
+    let e = map_node(map, tn);
+    node_eq(e, d) || node_eq(e, swap_comm(d)) || node_eq(e, mirror(d))
+}
+
+/// Is operand `a` an earlier node marked constant-valued?
+fn const_at(cval: &[bool], a: usize) -> bool {
+    a < cval.len() && cval[a]
+}
+
+/// The boolean value of node `c` (its word's first literal) under the
+/// simulation `vals`, as `(known, value)`: `known` is false when the word
+/// or the literal is out of range, and then the rules below do not fire
+/// (they never guess a branch).
+#[allow(clippy::len_zero)] // `is_empty` has no model in the pinned Aeneas (it became an `axiom`); `len` does
+fn cond_value(vals: &[bool], words: &[Vec<Lit>], c: usize) -> (bool, bool) {
+    if c < words.len() && words[c].len() > 0 {
+        let l = words[c][0];
+        if l.node < vals.len() {
+            return (true, eval_lit(vals, l));
+        }
+    }
+    (false, false)
+}
+
+/// Is a node's value independent of the inputs, given which earlier nodes'
+/// are? A constant's is; a variable's is not; an operator's is iff its
+/// operands' are — except the three the evaluator behind canonicalization
+/// short-circuits: an `ite` whose condition is constant and known is iff
+/// the branch that condition selects is; a boolean `and` (`or`) with a
+/// constant, known operand that decides it — `false` (`true`) — is.
+/// Canonicalization folds exactly such nodes even when the other branch
+/// or operand reads a variable. `vals` / `words` are the proven encoder's
+/// and simulator's: the values are read off them.
+fn node_const(cval: &[bool], vals: &[bool], words: &[Vec<Lit>], node: DagNode) -> bool {
+    match node {
+        DagNode::Var(_) => false,
+        DagNode::Const(_, _) => true,
+        DagNode::Add(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Sub(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Mul(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Udiv(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Urem(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::And(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Or(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Xor(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Shl(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Lshr(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Ashr(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Rotr(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Extract(_, _, a) => const_at(cval, a),
+        DagNode::Concat(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::ZeroExt(a, _) => const_at(cval, a),
+        DagNode::SignExt(a, _) => const_at(cval, a),
+        DagNode::Ite(c, t, e) => {
+            let (known, cv) = cond_value(vals, words, c);
+            if const_at(cval, c) && known {
+                if cv {
+                    const_at(cval, t)
+                } else {
+                    const_at(cval, e)
+                }
+            } else {
+                false
+            }
+        }
+        DagNode::Eq(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Ne(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Ult(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Ule(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Ugt(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Uge(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Slt(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Sle(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Sgt(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Sge(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Not(a) => const_at(cval, a),
+        DagNode::BoolAnd(a, b) => {
+            let (ka, va) = cond_value(vals, words, a);
+            let (kb, vb) = cond_value(vals, words, b);
+            (const_at(cval, a) && ka && !va)
+                || (const_at(cval, b) && kb && !vb)
+                || (const_at(cval, a) && const_at(cval, b))
+        }
+        DagNode::BoolOr(a, b) => {
+            let (ka, va) = cond_value(vals, words, a);
+            let (kb, vb) = cond_value(vals, words, b);
+            (const_at(cval, a) && ka && va)
+                || (const_at(cval, b) && kb && vb)
+                || (const_at(cval, a) && const_at(cval, b))
+        }
+        DagNode::BvNot(a) => const_at(cval, a),
+        DagNode::Neg(a) => const_at(cval, a),
+        DagNode::Rotl(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Sdiv(a, b) => const_at(cval, a) && const_at(cval, b),
+        DagNode::Srem(a, b) => const_at(cval, a) && const_at(cval, b),
+    }
+}
+
+/// Which nodes of a DAG are constant-valued, in node order.
+fn dag_const(ns: &[DagNode], vals: &[bool], words: &[Vec<Lit>]) -> Vec<bool> {
+    let mut cval: Vec<bool> = Vec::new();
+    let n = ns.len();
+    let mut i = 0usize;
+    while i < n {
+        let node = ns[i];
+        let c = node_const(&cval, vals, words, node);
+        cval.push(c);
+        i += 1;
+    }
+    cval
+}
+
+/// Are the `w` bits of `tbits` from `s0` the `w` bits of `bits` from `s1`?
+/// (`false`, never a panic, when either slice is out of range.)
+fn bits_eq(tbits: &[bool], s0: usize, bits: &[bool], s1: usize, w: usize) -> bool {
+    if s0 > tbits.len() || w > tbits.len() - s0 || s1 > bits.len() || w > bits.len() - s1 {
+        return false;
+    }
+    let mut j = 0usize;
+    while j < w {
+        if tbits[s0 + j] != bits[s1 + j] {
+            return false;
+        }
+        j += 1;
+    }
+    true
+}
+
+/// Are the `w` literals of `word`, under the simulation `vals`, the `w`
+/// bits of `bits` from `s1`? (`false`, never a panic, out of range.)
+fn fold_bits_ok(vals: &[bool], word: &[Lit], bits: &[bool], s1: usize, w: usize) -> bool {
+    if word.len() != w || s1 > bits.len() || w > bits.len() - s1 {
+        return false;
+    }
+    let mut j = 0usize;
+    while j < w {
+        let l = word[j];
+        if l.node >= vals.len() {
+            return false;
+        }
+        if eval_lit(vals, l) != bits[s1 + j] {
+            return false;
+        }
+        j += 1;
+    }
+    true
+}
+
+/// Term node `i` against its image `mi` (`mi < ns.len()`): the two must
+/// correspond node for node — a variable to a fresh variable of its width,
+/// a constant to the same constant, an operator to the same operator over
+/// the images of its operands up to a commutative swap or a comparison
+/// mirror — or the node is a constant-valued operator whose image is a
+/// constant of its width and of its value: a FOLD, the value coming from
+/// the proven encoder and simulator (`vals`, `words`, all inputs false —
+/// a constant-valued node reads none of them). `seen` marks the DAG
+/// variables already used as an image.
+#[allow(clippy::too_many_arguments)] // the fragment has no structs to bundle them
+fn term_node_corr(
+    t: &[DagNode],
+    tbits: &[bool],
+    ws0: &[usize],
+    cval: &[bool],
+    map: &[usize],
+    ns: &[DagNode],
+    bits: &[bool],
+    vals: &[bool],
+    words: &[Vec<Lit>],
+    seen: &mut [bool],
+    i: usize,
+    mi: usize,
+) -> Result<(), TermError> {
+    let tn = t[i];
+    let d = ns[mi];
+    let tt = node_tag(tn);
+    let td = node_tag(d);
+    if tt == 0 {
+        // A variable: its image is an unused variable of the same width.
+        if td != 0 || node_f1(tn) != node_f1(d) || seen[mi] {
+            return Err(TermError::VarMismatch { node: i });
+        }
+        seen[mi] = true;
+        return Ok(());
+    }
+    if tt == 1 {
+        // A constant: its image is the same constant (same width and bits).
+        if td != 1
+            || node_f2(tn) != node_f2(d)
+            || !bits_eq(tbits, node_f1(tn), bits, node_f1(d), node_f2(tn))
+        {
+            return Err(TermError::ConstMismatch { node: i });
+        }
+        return Ok(());
+    }
+    if td == 1 {
+        // An operator folded to a constant: constant-valued, same width,
+        // same bits as its simulated word.
+        if !cval[i]
+            || ws0[i] != node_f2(d)
+            || !fold_bits_ok(vals, &words[i], bits, node_f1(d), node_f2(d))
+        {
+            return Err(TermError::FoldMismatch { node: i });
+        }
+        return Ok(());
+    }
+    if node_corr(map, tn, d) {
+        Ok(())
+    } else {
+        Err(TermError::NodeMismatch { node: i })
+    }
+}
+
+/// One term node of the main loop of [`check_term_dag`]: nothing to check
+/// when node `i` has no image; otherwise the image must be a DAG node
+/// (`n1` is the DAG's length) and [`term_node_corr`] decides.
+#[allow(clippy::too_many_arguments)] // the fragment has no structs to bundle them
+fn term_step(
+    t: &[DagNode],
+    tbits: &[bool],
+    ws0: &[usize],
+    cval: &[bool],
+    map: &[usize],
+    ns: &[DagNode],
+    bits: &[bool],
+    vals: &[bool],
+    words: &[Vec<Lit>],
+    seen: &mut [bool],
+    i: usize,
+    n1: usize,
+) -> Result<(), TermError> {
+    let mi = map[i];
+    if mi == usize::MAX {
+        return Ok(());
+    }
+    if mi >= n1 {
+        return Err(TermError::MapOutOfRange { node: i });
+    }
+    term_node_corr(t, tbits, ws0, cval, map, ns, bits, vals, words, seen, i, mi)
+}
+
+/// Do the asserted roots correspond one for one: as many, and each term
+/// root's image is the DAG root?
+#[allow(clippy::if_same_then_else)] // two tests, two reasons; one `||` would change the model's shape
+fn roots_corr(troots: &[usize], map: &[usize], roots: &[usize]) -> bool {
+    let m = troots.len();
+    if m != roots.len() {
+        return false;
+    }
+    // The loop carries its verdict in `ok` (the pinned Charon rejects
+    // more than two early returns from one loop body).
+    let mut ok = true;
+    let mut k = 0usize;
+    while ok && k < m {
+        let r = troots[k];
+        if r < map.len() {
+            let image = map[r];
+            let rk = roots[k];
+            if image == usize::MAX {
+                ok = false;
+            } else if image != rk {
+                ok = false;
+            }
+        } else {
+            ok = false;
+        }
+        k += 1;
+    }
+    ok
+}
+
+/// **The term-to-DAG correspondence check** (issue #192 phase 7,
+/// `ordeal-cert/v3`): is the lowered DAG `ns` (constants `bits`, roots
+/// `roots`) — the DAG [`check_query`] refutes or [`check_query_model`]
+/// evaluates — a semantics-preserving rewrite of the TERM `t` (constants
+/// `tbits`, roots `troots`: the caller's assertions flattened as they
+/// were asked, variables shared by name and nothing else), along the
+/// untrusted index map `map` (term node → DAG node, `usize::MAX` for a
+/// node that has no image)?
+///
+/// Every mapped term node must correspond to its image: a variable to an
+/// unused variable of its width (the map is injective on variables), a
+/// constant to the same constant, an operator to the same operator over
+/// its operands' images — up to the two rewrites canonicalization makes,
+/// a commutative swap and a comparison mirror — or, when the operator's
+/// value does not depend on the inputs (its cone reads no variable, or
+/// only in the branch of an `ite` that a constant condition does not
+/// select), to a constant of its width that is its value, as the proven
+/// encoder and simulator compute it. The roots correspond one for one.
+///
+/// > If `check_term_dag(t, tbits, troots, map, ns, bits, roots)` returns
+/// > `Ok(())`, then under any pair of input assignments that agree on the
+/// > variables (through the map), every term root has the value of its
+/// > DAG root; both directions of transport exist, so a refutation of the
+/// > DAG refutes the term and a model of the DAG is a model of the term.
+///
+/// Machine-checked as `kernel.spec.check_term_dag_sound`,
+/// `check_term_unsat_sound`, `check_term_model_sound` and
+/// `term_verdicts_exclusive` (`lean/TermCheck.lean`), composed with
+/// `check_query_sound` / `check_query_model_sound`, whose statements are
+/// unchanged. The map is untrusted advice: a wrong one is rejected, never
+/// accepted on a different formula.
+pub fn check_term_dag(
+    t: &[DagNode],
+    tbits: &[bool],
+    troots: &[usize],
+    map: &[usize],
+    ns: &[DagNode],
+    bits: &[bool],
+    roots: &[usize],
+) -> Result<(), TermError> {
+    let ws0 = match dag_wf(t, tbits.len()) {
+        Ok(ws) => ws,
+        Err(e) => return Err(TermError::Term(e)),
+    };
+    let ws1 = match dag_wf(ns, bits.len()) {
+        Ok(ws) => ws,
+        Err(e) => return Err(TermError::Query(e)),
+    };
+    let n0 = t.len();
+    let n1 = ns.len();
+    if map.len() != n0 {
+        return Err(TermError::MapLength {
+            expected: n0,
+            found: map.len(),
+        });
+    }
+    // The term, encoded by the proven `encode` and simulated by the proven
+    // `simulate` under the all-false assignment: the evaluator the folds
+    // are checked with (a constant-valued node reads no input), and the
+    // source of the `ite` conditions' values for `dag_const`. No
+    // evaluator of its own.
+    let wmax = max_width(&ws0);
+    if !encode_fits(wmax, n0) {
+        return Err(TermError::Term(QueryError::TooLarge));
+    }
+    let nin = match dag_nin(t) {
+        Ok(n) => n,
+        Err(_) => return Err(TermError::Term(QueryError::TooLarge)),
+    };
+    let mut inp: Vec<bool> = Vec::new();
+    let mut k = 0usize;
+    while k < nin {
+        inp.push(false);
+        k += 1;
+    }
+    let no_roots: Vec<usize> = Vec::new();
+    let mut raw = aig_new();
+    let (words, _outs) = encode(&mut raw, t, tbits, &no_roots);
+    let vals = simulate(&raw, &inp);
+    let cval = dag_const(t, &vals, &words);
+    let mut seen: Vec<bool> = Vec::new();
+    let mut k1 = 0usize;
+    while k1 < n1 {
+        seen.push(false);
+        k1 += 1;
+    }
+    // The loop carries its outcome in `failure` instead of returning early
+    // from a `match` arm (the Aeneas constraint `check_steps` documents).
+    let mut failure: Option<TermError> = None;
+    let mut i = 0usize;
+    while failure.is_none() && i < n0 {
+        match term_step(
+            t, tbits, &ws0, &cval, map, ns, bits, &vals, &words, &mut seen, i, n1,
+        ) {
+            Ok(()) => {}
+            Err(e) => failure = Some(e),
+        }
+        i += 1;
+    }
+    if let Some(e) = failure {
+        return Err(e);
+    }
+    if !roots_corr(troots, map, roots) {
+        return Err(TermError::RootMismatch);
+    }
+    // `ws1` is read for its well-formedness verdict only (a malformed
+    // lowered DAG is rejected above); its widths enter the proof through
+    // `dag_wf_spec`.
+    let _ = ws1;
+    Ok(())
+}
+
+// ───────────── The model binding at the DAG level (issue #192 phase 7d) ─────────────
+
+/// The primary-input offset of DAG node `node`: the `Var` widths of the
+/// nodes BEFORE it summed (`dagNin` of the prefix) — where that node's
+/// bits start in the input assignment `check_query_model` evaluates.
+/// `Err(TooLarge)` on a `usize` overflow of the sum, or when `node` is
+/// past the end.
+pub fn var_offset(ns: &[DagNode], node: usize) -> Result<usize, ModelError> {
+    if node > ns.len() {
+        return Err(ModelError::Query(QueryError::TooLarge));
+    }
+    let mut nin = 0usize;
+    let mut i = 0usize;
+    while i < node {
+        let nd = ns[i];
+        if let DagNode::Var(w) = nd {
+            if w > usize::MAX - nin {
+                return Err(ModelError::Query(QueryError::TooLarge));
+            }
+            nin += w;
+        }
+        i += 1;
+    }
+    Ok(nin)
+}
+
+/// Is the `w`-bit value `value` (`w ≤ 128`) the bits `inp[offset .. offset
+/// + w]`, LSB first — the proven reading of a model binding off the DAG's
+/// input assignment (`check_binding`'s twin at the DAG level, #192 phase
+/// 7d). `false`, never a panic, out of range. Machine-checked as
+/// `kernel.spec.check_input_value_sound`: `true` ⟹ for every `j < w`,
+/// `inp[offset + j]` is bit `j` of `value`.
+pub fn check_input_value(inp: &[bool], offset: usize, w: usize, value: u128) -> bool {
+    if w > 128 || offset > inp.len() || w > inp.len() - offset {
+        return false;
+    }
+    let mut j = 0usize;
+    while j < w {
+        let bit = (value >> j) & 1;
+        let b = inp[offset + j];
+        if b {
+            if bit != 1 {
+                return false;
+            }
+        } else if bit != 0 {
+            return false;
+        }
+        j += 1;
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1390,5 +2120,228 @@ mod tests {
             check_steps(&cnf, &[add(4, &[], &[1])]),
             Err(CoreError::HintNotUnit { .. }) | Err(CoreError::HintsExhausted { .. })
         ));
+    }
+
+    // ── The term-to-DAG correspondence check (#192 phase 7) ─────────────
+
+    /// A `w`-bit constant table entry, LSB first.
+    fn cbits(v: u128, w: usize) -> Vec<bool> {
+        (0..w).map(|j| (v >> j) & 1 == 1).collect()
+    }
+
+    /// The term `y + x > 2 * 3`, `x = y` over 8-bit `x`, `y`, as flattened
+    /// (no canon, no sharing beyond the variables), and the DAG the solver
+    /// lowers it to: the sum's operands ordered, the product folded to the
+    /// constant 6, the comparison mirrored to `6 < x + y`.
+    type Pair = (
+        Vec<DagNode>,
+        Vec<bool>,
+        Vec<usize>,
+        Vec<usize>,
+        Vec<DagNode>,
+        Vec<bool>,
+        Vec<usize>,
+    );
+    fn term_and_dag() -> Pair {
+        use DagNode as N;
+        let t = vec![
+            N::Var(8),      // 0: x
+            N::Var(8),      // 1: y
+            N::Add(1, 0),   // 2: y + x
+            N::Const(0, 8), // 3: 2
+            N::Const(8, 8), // 4: 3
+            N::Mul(3, 4),   // 5: 2 * 3  (closed)
+            N::Ugt(2, 5),   // 6: y + x > 2 * 3
+            N::Eq(0, 1),    // 7: x = y
+        ];
+        let mut tbits = cbits(2, 8);
+        tbits.extend(cbits(3, 8));
+        let troots = vec![6, 7];
+        let ns = vec![
+            N::Var(8),      // 0: x
+            N::Var(8),      // 1: y
+            N::Add(0, 1),   // 2: x + y   (swapped)
+            N::Const(0, 8), // 3: 6       (the fold)
+            N::Ult(3, 2),   // 4: 6 < x + y (mirrored)
+            N::Eq(0, 1),    // 5: x = y
+        ];
+        let bits = cbits(6, 8);
+        let roots = vec![4, 5];
+        let none = usize::MAX;
+        let map = vec![0, 1, 2, none, none, 3, 4, 5];
+        (t, tbits, troots, map, ns, bits, roots)
+    }
+
+    // rivet: verifies VER-069
+    /// The positive control: a swap, a mirror, a fold and two shared
+    /// variables are all accepted, and the hand-written map is the one the
+    /// solver's pipeline would produce.
+    #[test]
+    fn check_term_dag_accepts_swap_mirror_fold_and_shared_vars() {
+        let (t, tbits, troots, map, ns, bits, roots) = term_and_dag();
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Ok(())
+        );
+    }
+
+    // rivet: verifies VER-069
+    /// One negative control per risk: two term variables aliased to one DAG
+    /// variable, a wrong fold value, a non-commutative operator swapped, a
+    /// wrong mirror, a tampered map entry, a root that does not correspond.
+    #[test]
+    fn check_term_dag_rejects_each_unsound_rewrite() {
+        use DagNode as N;
+        let none = usize::MAX;
+        // Aliasing: x and y both mapped to the DAG's y.
+        let (t, tbits, troots, mut map, ns, bits, roots) = term_and_dag();
+        map[0] = 1;
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::VarMismatch { node: 1 })
+        );
+        // A wrong fold: the constant says 7, the product is 6.
+        let (t, tbits, troots, map, ns, _, roots) = term_and_dag();
+        let bits7 = cbits(7, 8);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits7, &roots),
+            Err(TermError::FoldMismatch { node: 5 })
+        );
+        // A fold of an OPEN node: `x * 3` mapped to a constant.
+        let (mut t, tbits, troots, map, ns, bits, roots) = term_and_dag();
+        t[5] = N::Mul(0, 4);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::FoldMismatch { node: 5 })
+        );
+        // A fold of an open node whose value at the ALL-FALSE assignment
+        // happens to equal the constant (`x * 3` is 0 there; the DAG says
+        // 0): only the constant-valuedness check rejects it, not the bit
+        // comparison — the control for the fold rule itself.
+        let (mut t, tbits, troots, map, ns, _, roots) = term_and_dag();
+        t[5] = N::Mul(0, 4);
+        let bits0 = cbits(0, 8);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits0, &roots),
+            Err(TermError::FoldMismatch { node: 5 }),
+            "an open node is never a fold, even when the all-false value matches"
+        );
+        // An `ite` with a constant condition is constant-valued through
+        // the branch the condition selects, even if the other branch
+        // reads a variable — canonicalization folds exactly those: `ite(2
+        // < 3, 6, x)` is 6 (accepted), `ite(3 < 2, 6, x)` is `x` (not).
+        let (_, tbits, _, _, ns, bits, roots) = term_and_dag();
+        let t2 = vec![
+            N::Var(8),       // 0: x
+            N::Var(8),       // 1: y
+            N::Add(1, 0),    // 2: y + x
+            N::Const(0, 8),  // 3: 2
+            N::Const(8, 8),  // 4: 3
+            N::Ult(3, 4),    // 5: 2 < 3 (true)
+            N::Const(16, 8), // 6: 6
+            N::Ite(5, 6, 0), // 7: ite(2 < 3, 6, x) — constant-valued, reads x in the dead branch
+            N::Ugt(2, 7),    // 8: y + x > ite(...)
+            N::Eq(0, 1),     // 9: x = y
+        ];
+        let mut tbits2 = tbits.clone();
+        tbits2.extend(cbits(6, 8));
+        let troots2 = vec![8, 9];
+        let map2 = vec![0, 1, 2, none, none, none, none, 3, 4, 5];
+        assert_eq!(
+            check_term_dag(&t2, &tbits2, &troots2, &map2, &ns, &bits, &roots),
+            Ok(()),
+            "an ite with a constant condition and a constant selected branch folds"
+        );
+        let mut t3 = t2.clone();
+        t3[5] = N::Ult(4, 3); // 3 < 2 (false): the selected branch is x
+        assert_eq!(
+            check_term_dag(&t3, &tbits2, &troots2, &map2, &ns, &bits, &roots),
+            Err(TermError::FoldMismatch { node: 7 }),
+            "an ite whose selected branch reads a variable is not constant-valued"
+        );
+        // A non-commutative swap: y - x against x - y.
+        let (mut t, tbits, troots, map, mut ns, bits, roots) = term_and_dag();
+        t[2] = N::Sub(1, 0);
+        ns[2] = N::Sub(0, 1);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::NodeMismatch { node: 2 })
+        );
+        // The same without the swap is fine.
+        ns[2] = N::Sub(1, 0);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Ok(())
+        );
+        // A wrong mirror: `>` against `<=` with the operands swapped.
+        let (t, tbits, troots, map, mut ns, bits, roots) = term_and_dag();
+        ns[4] = N::Ule(3, 2);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::NodeMismatch { node: 6 })
+        );
+        // A tampered map entry: `x = y` pointed at the comparison.
+        let (t, tbits, troots, mut map, ns, bits, roots) = term_and_dag();
+        map[7] = 4;
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::NodeMismatch { node: 7 })
+        );
+        // A root with no image, a map of the wrong length, an image past
+        // the end.
+        let (t, tbits, troots, mut map, ns, bits, roots) = term_and_dag();
+        map[6] = none;
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::RootMismatch)
+        );
+        let (t, tbits, troots, map, ns, bits, roots) = term_and_dag();
+        assert!(matches!(
+            check_term_dag(&t, &tbits, &troots, &map[..7], &ns, &bits, &roots),
+            Err(TermError::MapLength {
+                expected: 8,
+                found: 7
+            })
+        ));
+        let mut far = map.clone();
+        far[2] = 99;
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &far, &ns, &bits, &roots),
+            Err(TermError::MapOutOfRange { node: 2 })
+        );
+        // A constant whose image has other bits.
+        let (mut t, mut tbits, troots, mut map, ns, bits, roots) = term_and_dag();
+        t.push(N::Const(16, 8));
+        tbits.extend(cbits(5, 8));
+        map.push(3);
+        assert_eq!(
+            check_term_dag(&t, &tbits, &troots, &map, &ns, &bits, &roots),
+            Err(TermError::ConstMismatch { node: 8 })
+        );
+    }
+
+    // rivet: verifies VER-069
+    /// The model binding at the DAG level (7d): the offset is the `Var`
+    /// widths before the node, and a value is accepted iff its bits are the
+    /// inputs at that offset, LSB first.
+    #[test]
+    fn var_offset_and_check_input_value_read_the_inputs_lsb_first() {
+        use DagNode as N;
+        let ns = vec![N::Var(3), N::Const(0, 2), N::Var(5), N::Add(0, 0)];
+        assert_eq!(var_offset(&ns, 0), Ok(0));
+        assert_eq!(var_offset(&ns, 2), Ok(3));
+        assert_eq!(var_offset(&ns, 4), Ok(8));
+        assert!(var_offset(&ns, 5).is_err());
+        // inputs: x = 0b101 (bits 1,0,1), y = 0b10110 (bits 0,1,1,0,1).
+        let inp = [true, false, true, false, true, true, false, true];
+        assert!(check_input_value(&inp, 0, 3, 0b101));
+        assert!(check_input_value(&inp, 3, 5, 0b10110));
+        assert!(!check_input_value(&inp, 3, 5, 0b10111));
+        assert!(!check_input_value(&inp, 0, 3, 0b100));
+        // Out of range, never a panic.
+        assert!(!check_input_value(&inp, 3, 6, 0));
+        assert!(!check_input_value(&inp, 9, 0, 0));
+        assert!(!check_input_value(&inp, 0, 129, 0));
+        assert!(check_input_value(&inp, 8, 0, 0));
     }
 }

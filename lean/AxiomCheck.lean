@@ -30,6 +30,7 @@ import BlasterDerived
 import BlasterDag
 import BlasterCapstone
 import QueryCheck
+import TermCheck
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -193,3 +194,29 @@ import QueryCheck
 /-- info: 'kernel.spec.verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms kernel.spec.verdicts_exclusive
+
+-- The term-to-DAG correspondence check (TermCheck.lean, issue #192 phase 7
+-- / TR-069): an accepted `check_term_dag` relates the TERM a v3 bundle
+-- carries to the DAG the solver built, so the two query-level capstones
+-- compose up to the term — the proof refutes the term, the model
+-- satisfies it — and the proven model binding ties a named value to the
+-- term variable's input bits.
+/-- info: 'kernel.spec.check_term_dag_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_term_dag_sound
+
+/-- info: 'kernel.spec.check_term_unsat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_term_unsat_sound
+
+/-- info: 'kernel.spec.check_term_model_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_term_model_sound
+
+/-- info: 'kernel.spec.term_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.term_verdicts_exclusive
+
+/-- info: 'kernel.spec.check_input_value_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_input_value_sound

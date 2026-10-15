@@ -2835,3 +2835,70 @@ artifacts:
         target: VER-068
       - type: part-of-execution
         target: VE-058
+
+  - id: VV-119
+    type: verification-verdict
+    title: VER-069 pass — check_term_dag proven (check_term_dag_sound, check_term_unsat_sound, check_term_model_sound, term_verdicts_exclusive, check_input_value_sound), axiom-clean, Kernel.lean 0 axioms, four Lean negative controls fail the proof
+    status: implemented
+    description: Executed pass as recorded in the linked execution (Lean leg).
+    fields:
+      evidence: see VE-059
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-069
+      - type: part-of-execution
+        target: VE-059
+
+  - id: VV-120
+    type: verification-verdict
+    title: VER-069 pass — rewrite-heavy queries get their verdict through the trusted term check at the kernel, API, CLI and bundle level; a tampered map, an aliased variable map and a wrong fold are rejected and degrade to Unknown; v2 and v3 readers refuse each other
+    status: implemented
+    description: Executed pass as recorded in the linked execution (Rust positive and negative controls, the v2 blocks untouched throughout; the injectivity mutation fails the kernel, API and bundle tests).
+    fields:
+      evidence: see VE-059
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-069
+      - type: part-of-execution
+        target: VE-059
+
+  - id: VV-121
+    type: verification-verdict
+    title: VER-069 pass — the denotation guard accepts every case through the trusted term check; Z3 differential through check_with_term over the seeded corpus, 0 disagreements, no decided query degraded
+    status: implemented
+    description: Executed pass as recorded in the linked execution (map positive controls; the oracle leg run locally).
+    fields:
+      evidence: see VE-059
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-069
+      - type: part-of-execution
+        target: VE-059
+
+  - id: VV-122
+    type: verification-verdict
+    title: VER-069 pass — default output, --with-query, v1 and v2 byte-identical (24 fixtures in JSON and text mode, four cnf_gap digests); workspace tests debug and release, clippy and fmt clean; trusted crate dependency-free
+    status: implemented
+    description: Executed pass as recorded in the linked execution (non-regression leg).
+    fields:
+      evidence: see VE-059
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-069
+      - type: part-of-execution
+        target: VE-059
+
+  - id: VE-059
+    type: verification-execution
+    title: "#192 phase 7 verified (VER-069)"
+    status: implemented
+    description: "Model regenerated (lean/regen.sh all, Kernel.lean deleted first for the baseline): 0 axioms before (7146 lines) and after (8840 lines; sha256 4eeae232…); the first attempt extracted `roots_corr` and `check_term_dag` as `axiom`s because the pinned Charon rejects an early return under a `||` of fallible reads inside a loop and more than two early returns from one loop body — both loops now carry their outcome in a flag / `Option`, as `check_steps` does; `Vec::is_empty` became an `axiom` once and was replaced by `len() > 0`. lake build: Build completed successfully (1728 jobs); 0 'declaration uses sorry' outside the Aeneas library; scripts/axiom_check.sh passes with check_term_dag_sound, check_term_unsat_sound, check_term_model_sound, term_verdicts_exclusive and check_input_value_sound pinned to propext / Classical.choice / Quot.sound next to every earlier capstone (statements unchanged). lean/TermCheck.lean 2658 lines. Four Lean negative controls, each a one-line kernel mutation (pristine kernel.rs sha256 fc32571d…, regenerated, proof must fail, source restored byte-for-byte, regenerated, Kernel.lean back to 4eeae232…, 0 axioms): (a) variable injectivity omitted (`|| seen[mi]` dropped) — lake build TermCheck exit 1, TermCheck.lean:1705 term_node_corr_spec (the `seen[mi] = false ∧ seen' = seen.set mi true` post of the variable branch cannot be established; VarInj, preimage_eq, pushforward and check_term_unsat_sound rest on it); under the same mutation the Rust tests fail: kernel check_term_dag_rejects_each_unsound_rewrite (33 passed / 1 failed), query_term_tests::tampering_the_map_the_var_map_or_a_fold_fails_the_term_recheck and cert_bundle_v3_tests::v3_tampered_term_fails_recheck_with_query_and_proof_untouched (8 passed / 2 failed) — the Rust potency control; (b) swap_comm also swaps bvsub — exit 1, TermCheck.lean:296 swap_comm_eq (rfl: the pure mirror no longer matches the model); with the wrong rewrite pushed through the pure mirror too (pSwap / CommShape admit Sub) the failure moves to the semantic lemma, TermCheck.lean:428 pSwap_val (A - B against B - A); (c) mirror maps bvult(a, b) to bvuge(b, a) — exit 1, TermCheck.lean:311 mirror_eq; with pMirror mutated too, TermCheck.lean:446 pMirror_val (decide (B ≤ A) against decide (A < B)); (d) the fold rule no longer requires constant-valuedness (`!cval[i] ||` dropped) — exit 1, TermCheck.lean:1766 term_node_corr_spec's fold branch; the Rust suite did NOT catch (d) at first (the open-node control's all-false value differed from the constant), so a control whose all-false value coincides (x * 3 folded to 0) was added to check_term_dag_rejects_each_unsound_rewrite: pristine rejects FoldMismatch, under (d) the test fails (1 passed / 1 failed), restored. Pristine TermCheck.lean sha256 53dac61f… restored after (b) and (c). cargo test --workspace (sources touched first): debug 240 + 0 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored; release 240 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored; --features ordeal/cert-bundle 263 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored. clippy -D warnings clean on default and on --features oracle,cert-bundle; cargo fmt --check clean; scripts/check_verification_citations.sh PASS (70 legs); 17 evidence markers on the new tests. Z3 differential (LIBRARY_PATH=/opt/homebrew/lib, --features oracle --release): oracle:: 16 passed / 0 failed in 49.4 s, incl. the new term_differential_through_check_with_term (seeded corpus 0x0D1FFCEC, 100 queries, every decided query decided by check_with_term with its certificate re-checked, none degraded to Unknown, 0 disagreements) and sat_models_differential_through_check_with_query, derived_ops_differential_through_check_with_query, differential_ordeal_vs_z3_on_corpus. The denotation guard of #240 (1500 cases) runs term_is_mapped_and_accepted on every case — it found two term_map gaps during development (an ite with a constant condition whose dead branch reads a variable; two input constants with equal low bits interned to two DAG nodes), both fixed on the untrusted side with the trusted rule generalized to constant-valuedness. Positive controls: kernel (swap + mirror + fold + shared variables on one query), API (a rewrite-heavy UNSAT: a * b ≠ b * a, x + 2 * 3 > x + 6, (a sdiv 1) ≠ a — the term has more nodes than the DAG, the folded children have no image, both products map to one DAG node; SAT a + b = 9 ∧ b > a ∧ a * 2 = b bound through the term's variables by var_offset / check_input_value), CLI (--with-term decoded from the JSON, check_term_dag + check_query / check_query_model + per-binding check_input_value, independent SHA-256 of the term hash, --with-term output is the --with-query output plus the term block, JSON only), bundle (v3 UNSAT round trip with four hashes and v3 SAT round trip with six, the v2 blocks and hashes byte-for-byte those of to_cert_v2). Negative controls with the v2 certificate untouched and still re-checking: a tampered map entry, two term variables aliased to one DAG variable (VarMismatch), a wrong fold (FoldMismatch), a term asking a different question (ne turned into eq: NodeMismatch), the term's variable map swapped on sat (Binding); Solver::term_verdict / term_sat_verdict degrade each to Unknown; a stale term hash fails at parse (HashMismatch(\"term\")); v1 and v2 readers refuse v3 by format, v3 readers refuse v1 and v2 and each other's verdict. Byte identity: release binaries from origin/main 8e5bdb5 (the #240 merge; v0.30.0 is not tagged) and from this branch over the 24 fixtures (crates/ordeal/tests/fixtures/differential, evidence/certs, fuzz/seeds/smtlib), `ordeal check <f> --format json` and text mode, sha256 of stdout + stderr + exit code: 48 same, 0 differ. cnf_gap_digest (release, oracle feature): latency 7b35d569…, bmc 5c14a69e…, oracle 0x192 a1d80de9…, oracle 0xC0FFEE 42d44115… — unchanged. ordeal-lrat declares no dependencies (manifest_declares_no_dependencies passes)."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2; branch proof/192-phase7-term-dag on 8e5bdb5 (main after #240)"
+      executor: local
+      timestamp: 2026-10-15T06:24:14Z
+      version: 8e5bdb5+phase7

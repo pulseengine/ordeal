@@ -749,6 +749,18 @@ pub fn solve_str_with_query(input: &str) -> Result<QueryOutcome, SmtError> {
 /// verdict (if any) plus the declared variables.
 pub type QueryOutcome = (Option<crate::query::QueryCheckResult>, Vec<(String, u32)>);
 
+/// The term-carrying twin of [`solve_str_with_query`] (#192 phase 7):
+/// `check-sat` runs [`Solver::check_with_term`], so a decided verdict
+/// comes back with the query AND the term it was lowered from, both
+/// re-checked by the trusted crate. The CLI runs this under `--with-term`.
+pub fn solve_str_with_term(input: &str) -> Result<TermOutcome, SmtError> {
+    run_script(input, |solver| solver.check_with_term())
+}
+
+/// [`solve_str_with_term`]'s result: the last `check-sat`'s term-carrying
+/// verdict (if any) plus the declared variables.
+pub type TermOutcome = (Option<crate::query::TermCheckResult>, Vec<(String, u32)>);
+
 /// The assertions active at the script's last `check-sat`, plus the declared
 /// variables, without solving. Same reader as [`solve_str`]. The fuzz target
 /// uses this to brute-force small queries through the evaluator, an oracle

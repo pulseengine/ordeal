@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The answer is about the term you asked** (#192 phase 7, TR-069). The
+trusted crate gains `check_term_dag`: given the assertions flattened as
+asked and the DAG the solver built from them, it verifies, node by node
+along an untrusted map, that the DAG is a semantics-preserving rewrite
+of the term — a commutative swap, a comparison mirror, a constant fold
+evaluated by the proven encoder, and hash-consing are all that is
+admitted. Proven: `check_term_unsat_sound` (the proof refutes the term),
+`check_term_model_sound` (the model satisfies the term) and
+`term_verdicts_exclusive`. `canon.rs` and `dag.rs` leave the trust base
+on the new `check_with_term` / `--with-term` / `ordeal-cert/v3` path;
+default output, `--with-query`, v1 and v2 are byte-identical.
+
+### Added
+- **`ordeal_lrat::check_term_dag`, the proven term-to-DAG correspondence
+  check** (#192 phase 7, TR-069). `lean/TermCheck.lean`:
+  `check_term_dag_sound` (under any two input assignments that agree on
+  the variables through the map, every term root has the value of its
+  DAG root), `check_term_unsat_sound`, `check_term_model_sound`,
+  `term_verdicts_exclusive`, all axiom-clean and pinned. The rule for a
+  fold is "constant-valued", which admits what `canon.rs` folds through
+  `eval.rs`'s short-circuits: an `ite` with a constant condition whose
+  dead branch reads a variable, a boolean `and` / `or` decided by a
+  constant operand.
+- **`ordeal_lrat::var_offset` and `check_input_value`** (7d): the proven
+  model binding at the DAG level (`check_input_value_sound`: an accepted
+  value's bits are the inputs at the variable's offset). The v3 SAT
+  re-check binds every advertised model value through the term's own
+  variable map; `QueryInputs::check_consistent` uses them too.
+- **`Solver::check_with_term`, `TermCheckResult`, `TermCertificate`,
+  `TermSatCertificate`, `QueryTerm`** (`ordeal-term/v1`), the untrusted
+  `dag::flatten` / `dag::term_map`, `smtlib::solve_str_with_term`, and
+  `ordeal check --format json --with-term` — the `--with-query` output
+  plus the `term` block.
+- **`ordeal-cert/v3`** (`to_cert_v3` / `from_cert_v3`, `TermBundle` /
+  `TermSatBundle`, `recheck.min_version` `0.31.0`): the v2 envelope plus
+  the `term` block, under a new `format` tag so that v1 and v2 readers
+  refuse it rather than ignore the block; the v3 readers refuse v1 and
+  v2.
+
 ## [0.30.0] - 2026-10-15
 
 **Bounded sliver entry points, and the DAG translation under test**
