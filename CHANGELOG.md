@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-15
+
 **The answer is about the term you asked** (#192 phase 7, TR-069). The
 trusted crate gains `check_term_dag`: given the assertions flattened as
 asked and the DAG the solver built from them, it verifies, node by node
@@ -1668,7 +1670,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.31.0
 [0.30.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.30.0
 [0.29.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.29.0
 [0.28.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.28.0
