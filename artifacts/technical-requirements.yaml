@@ -1819,7 +1819,7 @@ artifacts:
   - id: TR-067
     type: sw-req
     title: Bounded sliver entry points that keep an out-of-sliver refusal distinct from Unknown (#236)
-    status: implemented
+    status: verified
     release: v0.30.0
     description: "Ordeal shall offer the sliver the same bounded entry points as the core, and a way to lower a sliver query that reports a refusal as an error rather than an undecided verdict. Issue #236 (loom #313 slice 4): check_sliver/prove_equiv_sliver ran the unbounded check, so a whole-function memory obligation could hang rather than revert; and every SliverError became CheckResult::Unknown, so a consumer could not tell 'outside the fragment, defer to another engine' from 'undecided'. Solver::from_sliver returns Result<Solver, SliverError> carrying the lowered core, to which every core entry point applies; check_sliver_with_deadline (clock started before lowering) and check_sliver_with_limit are the bounded one-shots. An exhausted bound is Unknown, never a wrong or unchecked verdict. The sliver's documentation shall match the symbolic-index requirement: symbolic BV32 indices are in the sliver, and SliverError::NonConcreteIndex is never returned."
     tags: [sliver, loom, deadline, conflict-budget, api]
@@ -1838,7 +1838,7 @@ artifacts:
   - id: TR-068
     type: sw-req
     title: The untrusted term-to-DAG translation (canon.rs, dag.rs, model-to-inputs) is checked against the independent evaluator (#192 evidence before proof)
-    status: implemented
+    status: verified
     release: v0.30.0
     description: "Since #192 phases 4-6 the trusted crate re-checks both answers against the query DAG, whose Lean semantics is Lean BitVec (SMT-LIB). What remains trusted on the query path is the translation from the term to that DAG: canonicalization (canon.rs), the DAG builder (dag.rs), and the glue that writes a model into the DAG's input bits. Until that translation is proven (the next #192 phase), ordeal shall check it against the independent evaluator eval.rs: for random assertions over every operator of the closed fragment, at the widths the #182 class hid at, and random models biased toward the SMT-LIB edge values, the trusted check_query_model must accept exactly when eval.rs says the original assertion holds, on both the derived-ops-as-nodes path and the rewrite path; and canonicalization alone must preserve the evaluator's value. A translation bug that changes a term's meaning then fails a test rather than producing a certified wrong answer."
     tags: [dag, canon, query, evidence, closed-fragment]

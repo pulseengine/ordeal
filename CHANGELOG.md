@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-10-15
+
+**Bounded sliver entry points, and the DAG translation under test**
+(#236, #192). loom gets `Solver::from_sliver` and deadline- and
+conflict-bounded sliver one-shots. The untrusted term-to-DAG translation
+is now checked against the independent evaluator, ahead of its proof.
+
 ### Added
 - **Bounded sliver entry points, with the refusal kept visible** (#236,
   TR-067). `Solver::from_sliver(assertions) -> Result<Solver, SliverError>`
@@ -26,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accept exactly when `eval.rs` says the original assertion holds, on both
   lowering paths. Canonicalization alone must preserve the value too. A
   bug planted in each layer is caught.
+
+### Changed
+- **The optional CaDiCaL backend uses `cadical-sys` 0.8, which is CaDiCaL
+  3.0.1** (#237). `sat_cadical.rs` is ported to the new API. Every CaDiCaL
+  `Unsat` is still gated on `ordeal_lrat::check` of its LRAT proof.
+  CaDiCaL 3.0.1's proofs check, and the own-core / CaDiCaL / Z3 parity
+  holds.
 
 ### Fixed
 - **The sliver docs no longer say concrete indices only** (#236).
@@ -1615,7 +1629,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.30.0
 [0.29.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.29.0
 [0.28.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.28.0
 [0.27.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.27.0
