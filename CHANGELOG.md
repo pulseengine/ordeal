@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-15
+
 **Every answer rests on the term check** (#192, TR-070). The proven
 query and term checks of v0.31.0 stop being opt-in: `Solver::check`,
 `check_with_limit`, `check_with_deadline`, `check_with_witness`, the
@@ -1726,7 +1728,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.0
 [0.31.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.31.0
 [0.30.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.30.0
 [0.29.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.29.0
