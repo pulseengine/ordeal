@@ -147,26 +147,23 @@ fn solve_inner(
         ("lrat", 1, "lrat option rejected"),
         ("binary", 0, "binary option rejected"),
     ] {
-        if !solver.set(option.to_string(), value) {
+        if !solver.set(option, value) {
             cleanup();
             return Err(CadicalError::Configuration(err));
         }
     }
     // Tracer before parsing, so the id reservation lands in the proof state.
-    if !solver.trace_proof2(proof_path_str) {
+    if !solver.trace_proof2(&proof_path_str) {
         cleanup();
         return Err(CadicalError::Configuration("trace_proof rejected"));
     }
     let mut vars: i32 = 0;
-    // CaDiCaL's `read_dimacs` returns NULL on success; the cadical-sys cxx
-    // bridge stringifies that NULL as the literal "Null".
-    let parse_err = solver.read_dimacs2(dimacs_path_str, &mut vars, 1);
-    if parse_err != "Null" {
+    if let Err(parse_err) = solver.read_dimacs2(&dimacs_path_str, &mut vars, 1) {
         cleanup();
         return Err(CadicalError::ProofIo(format!("DIMACS parse: {parse_err}")));
     }
     if let Some(conflicts) = max_conflicts
-        && !solver.limit("conflicts".to_string(), conflicts)
+        && !solver.limit("conflicts", conflicts)
     {
         cleanup();
         return Err(CadicalError::Configuration("conflicts limit rejected"));
