@@ -2785,3 +2785,28 @@ artifacts:
         target: VER-065
       - type: part-of-execution
         target: VE-055
+
+  - id: VE-057
+    type: verification-execution
+    title: "#236 bounded sliver entries verified (VER-067)"
+    status: implemented
+    description: "cargo test --workspace --features ordeal/cert-bundle (sources touched first): 253 + 14 + 2 + 31 passed / 0 failed / 3 ignored; release default features: 234 passed / 0 failed / 3 ignored. The three new tests pass (0.11 s together): from_sliver_reports_the_refusal_not_unknown, from_sliver_solver_takes_every_core_entry_point, bounded_sliver_entries_are_conservative — the 32-bit sliver distributivity query is strictly Unknown at a zero conflict budget, so the exhaustion path is exercised rather than root-decided; the existing check_sliver tests pass through from_sliver unchanged. clippy -D warnings clean for the default build and --features oracle,cert-bundle; cargo fmt --check clean; oracle:: (Z3, release, LIBRARY_PATH=/opt/homebrew/lib) 15 passed."
+    fields:
+      environment: "note: macOS arm64, local, Z3 via Homebrew; branch feat/236-sliver-bounded-entry on ca424f0 (v0.29.0)"
+      executor: local
+      timestamp: 2026-10-15T03:50:30Z
+      version: ca424f0+236
+
+  - id: VV-117
+    type: verification-verdict
+    title: VER-067 pass — bounded sliver entries; the refusal is an Err; exhaustion is Unknown
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-057
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-067
+      - type: part-of-execution
+        target: VE-057

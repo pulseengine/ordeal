@@ -36,6 +36,24 @@ use ordeal::sliver::{ArrayTerm, ExtBvTerm, ExtBoolTerm};
 let verdict = Solver::check_sliver(&[/* ExtBoolTerm assertions */]);
 ```
 
+`check_sliver` is unbounded and maps an out-of-sliver query to `Unknown`.
+For a whole-function obligation, bound it and keep the refusal visible
+(#236):
+
+```rust
+// Bounded one-shots, the sliver twins of check_with_deadline / check_with_limit.
+// The deadline clock starts before the sliver is lowered.
+let v = Solver::check_sliver_with_deadline(&query, 2_000);
+let v = Solver::check_sliver_with_limit(&query, 100_000);
+
+// Or lower first: a refusal is an Err (SliverError), never confused with an
+// undecided Unknown, and every core entry point applies to the result.
+match Solver::from_sliver(&query) {
+    Ok(solver) => { let v = solver.check_with_deadline(2_000); }
+    Err(refusal) => { /* out of the sliver: defer to another engine */ }
+}
+```
+
 The fragment is the closed loom #246 op set (bit-widths 1 to 128) plus the sliver
 (`Array(BV32→BV8)` select/store over concrete **and symbolic** BV32 indices
 — symbolic decided since v0.11.0 — plus uninterpreted `pure_call`).

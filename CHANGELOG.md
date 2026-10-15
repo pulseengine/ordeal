@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Bounded sliver entry points, with the refusal kept visible** (#236,
+  TR-067). `Solver::from_sliver(assertions) -> Result<Solver, SliverError>`
+  lowers an array/UF query into a solver over the closed core, so an
+  out-of-sliver query is an `Err` rather than an `Unknown`. Every core entry
+  point (`check_with_deadline`, `check_with_limit`, `check_with_query`)
+  applies to the result. `Solver::check_sliver_with_deadline` and
+  `Solver::check_sliver_with_limit` are the bounded one-shots; the
+  deadline's clock starts before the sliver is lowered.
+
+### Fixed
+- **The sliver docs no longer say concrete indices only** (#236).
+  `SliverError::NonConcreteIndex` is documented as never returned:
+  symbolic BV32 indices have been decided since v0.11.0 (TR-028). The
+  variant stays so that exhaustive matches keep compiling. The
+  `check_sliver` doc, which sat on `prove_equiv_sliver`, is back on
+  `check_sliver` and says symbolic indices are in the sliver.
+
 ## [0.29.0] - 2026-10-14
 
 **Both answers rest on the query now** (#192 phase 6). `check_with_query`

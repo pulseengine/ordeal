@@ -371,19 +371,6 @@ impl Solver {
         self.assertions.len()
     }
 
-    /// One-shot decision for an **extended (array/UF sliver) query**.
-    ///
-    /// The sliver is eliminated into the closed QF_BV core by
-    /// [`crate::sliver::lower`] — eager read-over-write for `Array(BV32→BV8)`
-    /// select/store over concrete offsets, Ackermannization for
-    /// uninterpreted `pure_call` congruence — and the resulting pure
-    /// assertions are decided by the normal [`Solver::check`] pipeline.
-    ///
-    /// An **out-of-sliver** query (symbolic index, bad array sort, or an
-    /// inconsistent call signature — any [`crate::sliver::SliverError`])
-    /// returns [`CheckResult::Unknown`]: conservative by construction, never
-    /// a guess. Soundness is unchanged from `check` — no array/UF construct
-    /// ever reaches the bit-blaster; only the lowered core does.
     /// Prove two **extended** (sliver) terms equivalent — the sliver twin of
     /// [`Solver::prove_equiv`] (TR-029, issue #71), for consumers whose
     /// operands live in the extended language (`select`/`store`/`pure_call`)
@@ -402,16 +389,82 @@ impl Solver {
         Self::check_sliver(&[crate::sliver::ExtBoolTerm::Ne(a, b)])
     }
 
+    /// Lower an **extended (array/UF sliver) query** into a [`Solver`] over
+    /// the closed core, or say why it is outside the sliver (#236).
+    ///
+    /// The sliver is eliminated by [`crate::sliver::lower`]: eager
+    /// read-over-write for `Array(BV32→BV8)` select/store over concrete
+    /// **or symbolic** BV32 indices (TR-028), and Ackermannization for
+    /// uninterpreted `pure_call` congruence. The returned solver holds the
+    /// lowered assertions, so every entry point applies to it unchanged —
+    /// [`Solver::check`], [`Solver::check_with_deadline`],
+    /// [`Solver::check_with_limit`], [`Solver::check_with_query`].
+    ///
+    /// Use this rather than [`Solver::check_sliver`] when a refusal must be
+    /// told apart from an undecided verdict: an out-of-sliver query (a bad
+    /// array sort or an inconsistent call signature) is an `Err`, not
+    /// [`CheckResult::Unknown`]. Note that the elimination itself runs here,
+    /// before any bound you later apply to the search; it is quadratic in
+    /// the reads of one base array.
+    pub fn from_sliver(
+        assertions: &[crate::sliver::ExtBoolTerm],
+    ) -> Result<Solver, crate::sliver::SliverError> {
+        let mut solver = Solver::new();
+        for a in crate::sliver::lower(assertions)? {
+            solver.assert(a);
+        }
+        Ok(solver)
+    }
+
+    /// One-shot decision for an **extended (array/UF sliver) query**:
+    /// [`Solver::from_sliver`] then the unbounded [`Solver::check`].
+    ///
+    /// An **out-of-sliver** query (any [`crate::sliver::SliverError`])
+    /// returns [`CheckResult::Unknown`]: conservative by construction, never
+    /// a guess — but indistinguishable from an undecided verdict. Callers
+    /// that need the refusal, or a bound, use [`Solver::from_sliver`] or the
+    /// bounded twins [`Solver::check_sliver_with_deadline`] /
+    /// [`Solver::check_sliver_with_limit`]. Soundness is unchanged from
+    /// `check` — no array/UF construct ever reaches the bit-blaster; only the
+    /// lowered core does.
     pub fn check_sliver(assertions: &[crate::sliver::ExtBoolTerm]) -> CheckResult {
-        match crate::sliver::lower(assertions) {
-            Ok(core) => {
-                let mut solver = Solver::new();
-                for a in core {
-                    solver.assert(a);
-                }
-                solver.check()
-            }
+        match Self::from_sliver(assertions) {
+            Ok(solver) => solver.check(),
             // Out-of-sliver: conservative Unknown (callers must not optimize).
+            Err(_) => CheckResult::Unknown,
+        }
+    }
+
+    /// [`Solver::check_sliver`] under a **wall-clock deadline** (#236): the
+    /// sliver twin of [`Solver::check_with_deadline`]. The clock starts
+    /// before the sliver is lowered, so array elimination counts against
+    /// `timeout_ms`; on expiry the result is [`CheckResult::Unknown`], never
+    /// a wrong or unchecked verdict. As in the core twin, lowering and
+    /// blasting are not interrupted mid-way — the deadline governs the SAT
+    /// search, which starts with whatever budget lowering left.
+    /// Out-of-sliver input is `Unknown`; use [`Solver::from_sliver`] to see
+    /// the refusal.
+    pub fn check_sliver_with_deadline(
+        assertions: &[crate::sliver::ExtBoolTerm],
+        timeout_ms: u64,
+    ) -> CheckResult {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout_ms);
+        match Self::from_sliver(assertions) {
+            Ok(solver) => Self::verdict(solver.solve_pipeline(Bound::Deadline(deadline))),
+            Err(_) => CheckResult::Unknown,
+        }
+    }
+
+    /// [`Solver::check_sliver`] under a **conflict budget** (#236): the
+    /// sliver twin of [`Solver::check_with_limit`]. Exhaustion is
+    /// [`CheckResult::Unknown`]; out-of-sliver input is `Unknown` too (use
+    /// [`Solver::from_sliver`] to see the refusal).
+    pub fn check_sliver_with_limit(
+        assertions: &[crate::sliver::ExtBoolTerm],
+        max_conflicts: u64,
+    ) -> CheckResult {
+        match Self::from_sliver(assertions) {
+            Ok(solver) => solver.check_with_limit(max_conflicts),
             Err(_) => CheckResult::Unknown,
         }
     }
@@ -2352,6 +2405,151 @@ mod tests {
             }),
         );
         assert!(matches!(Solver::check_sliver(&[q]), CheckResult::Unknown));
+    }
+
+    // ── #236: the refusal is visible, and the sliver entry can be bounded ──
+
+    /// A bad array sort is the one refusal left (a symbolic index is in the
+    /// sliver since TR-028): `from_sliver` reports it as an `Err`, where the
+    /// one-shot entries can only say `Unknown`.
+    fn bad_sort_query() -> crate::sliver::ExtBoolTerm {
+        use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm};
+        let bv8 = Sort::new(8);
+        ExtBoolTerm::Eq(
+            ExtBvTerm::Select {
+                array: Box::new(ArrayTerm::Var { name: "a".into() }),
+                index: Box::new(ExtBvTerm::Core(BvTerm::Var {
+                    name: "i".into(),
+                    sort: bv8,
+                })),
+            },
+            ExtBvTerm::Core(BvTerm::Const {
+                value: 0,
+                sort: bv8,
+            }),
+        )
+    }
+
+    // rivet: verifies VER-067
+    #[test]
+    fn from_sliver_reports_the_refusal_not_unknown() {
+        let q = [bad_sort_query()];
+        assert_eq!(
+            Solver::from_sliver(&q).err(),
+            Some(crate::sliver::SliverError::BadArraySort)
+        );
+        assert!(matches!(
+            Solver::check_sliver_with_deadline(&q, 60_000),
+            CheckResult::Unknown
+        ));
+        assert!(matches!(
+            Solver::check_sliver_with_limit(&q, 1_000_000),
+            CheckResult::Unknown
+        ));
+    }
+
+    /// The lowered solver decides exactly as `check_sliver` does, and every
+    /// core entry point works on it — including the trusted query recheck.
+    // rivet: verifies VER-067
+    #[test]
+    fn from_sliver_solver_takes_every_core_entry_point() {
+        use crate::sliver::ExtBoolTerm;
+        let i = sym_bv32("i");
+        let v = sym_bv8("v");
+        let read = sel(st(base("mem"), i.clone(), v.clone()), i);
+        let valid = [ExtBoolTerm::Ne(read.clone(), v.clone())];
+        let free = [ExtBoolTerm::Ne(read, sym_bv8("w"))];
+        let s = Solver::from_sliver(&valid).expect("in the sliver");
+        assert!(matches!(s.check(), CheckResult::Unsat(_)));
+        assert!(matches!(
+            s.check_with_deadline(60_000),
+            CheckResult::Unsat(_)
+        ));
+        assert!(matches!(
+            s.check_with_limit(1_000_000),
+            CheckResult::Unsat(_)
+        ));
+        assert!(matches!(
+            s.check_with_query(),
+            crate::query::QueryCheckResult::Unsat(_)
+        ));
+        assert!(matches!(
+            Solver::check_sliver(&valid),
+            CheckResult::Unsat(_)
+        ));
+        let s = Solver::from_sliver(&free).expect("in the sliver");
+        assert!(matches!(s.check(), CheckResult::Sat(_)));
+        assert!(matches!(Solver::check_sliver(&free), CheckResult::Sat(_)));
+    }
+
+    /// `x*(y+z) != x*y + x*z` over values read from memory at a symbolic
+    /// base: UNSAT, and (like `hard_mul_equivalence`) not decided by
+    /// canonicalization, so it needs real search. Each operand is
+    /// `width/8` little-endian bytes read from `mem[addr + k]`.
+    fn sliver_distributivity(width: u32) -> Vec<crate::sliver::ExtBoolTerm> {
+        use crate::sliver::{ExtBoolTerm, ExtBvTerm, ExtOp};
+        let op = |o: ExtOp| ExtBvTerm::Op(Box::new(o));
+        let bytes = width / 8;
+        let word = |slot: u32| {
+            let at = |k: u32| {
+                sel(
+                    base("mem"),
+                    op(ExtOp::Add(
+                        sym_bv32("addr"),
+                        ExtBvTerm::Core(BvTerm::Const {
+                            value: (slot * bytes + k) as u128,
+                            sort: Sort::new(32),
+                        }),
+                    )),
+                )
+            };
+            (1..bytes).fold(at(0), |acc, k| op(ExtOp::Concat(at(k), acc)))
+        };
+        let (x, y, z) = (word(0), word(1), word(2));
+        let lhs = op(ExtOp::Mul(x.clone(), op(ExtOp::Add(y.clone(), z.clone()))));
+        let rhs = op(ExtOp::Add(
+            op(ExtOp::Mul(x.clone(), y)),
+            op(ExtOp::Mul(x, z)),
+        ));
+        vec![ExtBoolTerm::Ne(lhs, rhs)]
+    }
+
+    /// Exhausted bounds give `Unknown`, never a wrong verdict; generous bounds
+    /// decide like the unbounded entry, with a checked certificate.
+    // rivet: verifies VER-067
+    #[test]
+    fn bounded_sliver_entries_are_conservative() {
+        let hard = sliver_distributivity(32);
+        // A zero conflict budget cannot decide it: strictly Unknown, so this
+        // test does exercise the exhaustion path.
+        assert!(matches!(
+            Solver::check_sliver_with_limit(&hard, 0),
+            CheckResult::Unknown
+        ));
+        match Solver::check_sliver_with_deadline(&hard, 0) {
+            CheckResult::Unknown => {}
+            CheckResult::Unsat(cert) => cert.recheck().expect("decided-in-time cert must check"),
+            CheckResult::Sat(m) => {
+                panic!("an expired deadline must never yield a wrong Sat: {m:?}")
+            }
+        }
+        // read-over-write at a symbolic index: decided quickly, so generous
+        // bounds must return the same checked Unsat as the unbounded entry.
+        let i = sym_bv32("i");
+        let v = sym_bv8("v");
+        let easy = [crate::sliver::ExtBoolTerm::Ne(
+            sel(st(base("mem"), i.clone(), v.clone()), i),
+            v,
+        )];
+        for v in [
+            Solver::check_sliver_with_deadline(&easy, 600_000),
+            Solver::check_sliver_with_limit(&easy, u64::MAX),
+        ] {
+            match v {
+                CheckResult::Unsat(cert) => cert.recheck().expect("certificate must check"),
+                other => panic!("a generous bound must decide: {other:?}"),
+            }
+        }
     }
 
     // ── TR-028 semantics: symbolic read-over-write, end-to-end ───────────
