@@ -5,7 +5,10 @@
 (b), maintainer, 2026-10-01; phase 4 ships `ordeal-cert/v2` *alongside* v1
 (maintainer, 2026-10-01) · **Status:** phases 1–5 delivered (this
 document records all five); the default path's switch to the phase-5
-nodes is an open maintainer decision (see phase 5, "byte identity").
+nodes is an open maintainer decision (see phase 5, "byte identity");
+phase 6 (v0.29.0) delivered; **phase 7 is at the design stage** (the
+last section: the term-to-DAG translation, options and a
+recommendation — no code yet).
 
 ## The claim being protected
 
@@ -1275,3 +1278,432 @@ The stored `evidence/certs` bundles record producer version 0.23.0.
 Regenerated with a later ordeal, their CNF and proof payloads are
 byte-identical and only the two version fields differ (see OC-001 and
 OC-002).
+
+## Phase 7 design: the term-to-DAG translation
+
+**Status:** design, 2026-10-15; nothing below is implemented. **Scope:**
+what is still *trusted* on the query path after phase 6, and how to
+prove it. **Decision requested:** option (C) below.
+
+### What is still trusted, exactly (claims checked against the code)
+
+After phases 4–6 the trusted crate re-checks both answers against the
+query DAG — `check_query` (`check_query_sound`) and `check_query_model`
+(`check_query_model_sound`), both stated over `dagBool`, the Lean
+`BitVec` semantics of `lean/BlasterDag.lean`. The DAG they speak about
+is the one `solver.rs::lower_with` builds; the step from the caller's
+assertions to that DAG is unproven. Pinned to the code as of this
+design (v0.29.0 + #236):
+
+| piece | what it decides | where | status |
+|---|---|---|---|
+| `lowering::expand_bool` (the derived-op rewrite) | `bvnot`/`bvneg`/`bvrotl`/`bvsdiv`/`bvsrem` as core terms | `lowering.rs` | **not on any production path** since the 2026-10-13 switch (`Solver::lower` and `check_with_witness` use `DerivedOps::Nodes`; `DerivedOps::Rewrite` is `cfg_attr(not(test), allow(dead_code))` and reached only by the differential tests). Nothing to prove; the issue text predates the switch. |
+| `canon::canonicalize_bool` / `canonicalize_bv` | (1) order the operands of `Add`/`Mul`/`And`/`Or`/`Xor` and of `Eq`/`Ne` by the `Debug` string of the *canonicalized* operands (`cmp_bv`); (2) mirror `Ugt`/`Uge`/`Sgt`/`Sge` to `Ult`/`Ule`/`Slt`/`Sle` with the operands swapped; (3) fold every all-constant **bitvector** subterm to a `Const` through `eval::eval_bv` (`u128`, width-masked; `BoolTerm`s are never folded, but an `Ite` whose condition and branches are constant is) | `canon.rs`, 267 lines | trusted; `denotation_guard` (#240) checks it against `eval.rs` |
+| `dag::DagBuilder` | post-order, left-to-right (`Ite`: condition first); hash-consing on `(op, operands)` via `HashMap`; constants interned by `(value, width)` into one bit table; variables shared **by name**, their primary inputs numbered by first occurrence | `dag.rs` | trusted; same guard |
+| `query::QueryInputs::from_model` + `check_consistent` | the named model value → the `Var` node's input bits | `query.rs` | trusted (the `(name, width, node)` map is untrusted glue; `check_consistent` compares bits but is not part of any theorem) |
+| the front ends and the sliver | SMT-LIB / Verus text → `BoolTerm`; array/UF → core | `smtlib.rs`, `verus.rs`, `sliver.rs` | trusted; out of scope for #192 |
+
+#240's `dag::denotation_guard` (1500 seeded assertions, every operator,
+widths 1..=128, models biased to the edge values: `check_query_model`
+accepts iff `eval.rs` says the ORIGINAL assertion holds) is the
+regression oracle for all of the first three rows. It is evidence; phase
+7 is the proof.
+
+### The constraint that shapes the design
+
+`check_query` re-encodes the carried DAG and requires the result to be
+the CNF the LRAT proof refutes, gate for gate. The solver's CNF comes
+from the **canonicalized, hash-consed DAG in the solver's node order**
+— call it **D1**. So whatever the trusted side reasons about must be D1
+itself, not a semantically equal DAG. Three consequences:
+
+1. Anything that *rebuilds* D1 must reproduce canon's ordering
+   decisions. Those are comparisons of `format!("{:?}")` strings of
+   subterms (`canon::cmp_bv`), chosen for determinism and nothing else.
+   A `String` is outside the Aeneas fragment (`kernel.rs`: "no `&str`,
+   no `String`"), and re-specifying the order on the trusted side would
+   be proving a `Debug` impl. **The decision has to arrive as a hint.**
+2. D1's node order is the post-order of the tree *after* the swaps, and
+   a variable's primary inputs are numbered at its first occurrence in
+   that order (phase 5 measured exactly this: `srem_vc_32`'s CNF was
+   renumbered because `b` first occurs inside the second operand). So
+   D1's order is not the term's order, and a trusted *builder* driven by
+   the term would need an order hint on top of the swap hints.
+3. Constant folding needs an evaluation on the trusted side. A `u128`
+   evaluator proven against `BitVec` is a 37-arm re-proof of `eval.rs`
+   (the signed and rotate arms are the expensive ones — the ones phase 5
+   calls "tested, not proven" in `eval.rs`). Phase 6 showed the way
+   around it: **the proven encoder plus the proven simulator is an
+   evaluator** (`check_query_model` is `encode` + `simulate`, and
+   `encode_sound` already relates the result to `dagSim` under every
+   input).
+
+### The observation that simplifies everything
+
+The issue's option (A) asks for "a minimal term AST in `ordeal-lrat`,
+mirroring the closed `BvTerm`/`BoolTerm` fragment, encoded as a node
+list with a Lean term semantics over `BitVec`". **That AST exists:** a
+`DagNode` list whose variables are shared by name only — no
+hash-consing, no canon — *is* the term. Its constructors are the closed
+fragment one for one (the four "greater" comparisons and the five
+derived operators included), `dagSim` is its semantics (defined directly
+over Lean `BitVec`, SMT-LIB's meanings, phase 3), `dag_wf` its
+well-formedness check (phase 4). The flattening `BoolTerm → Vec<DagNode>`
+is a 37-arm 1:1 serialization (`Var` by name, `Const` to the bit table,
+every operator to its constructor with the operands' indices) with no
+semantic decision in it; a consumer holding the `BoolTerm` can re-run it
+and compare hashes, which is exactly how it audits the `query` block
+today. Call that list **D0**.
+
+So the translation to be proven is not "term → DAG" but **D0 → D1: the
+rewrite canon + hash-consing performs**, and the question is whether the
+trusted side *rebuilds* D1 from D0 (a builder, options A/B) or *checks*
+the D1 it is handed against D0 (a checker, option C).
+
+### Option (A): a trusted builder from the canonical term
+
+- **Data:** the certificate carries D0' — the term *after* canon, as the
+  solver's `DagBuilder` saw it — as `ordeal-term/v1`, plus per-node reuse
+  hints (`reuse[i]`: an earlier D1 node this term node may share, checked
+  structurally like `compact`'s `hint_matches`; `usize::MAX` = fresh).
+- **Trusted code:** `kernel::build_dag(t, tbits, reuse) -> (ns, bits,
+  roots)`: variables by id through a `Vec<usize>` table (ids assigned
+  densely by the untrusted flattener, `t.vars` carries the names),
+  constants copied, every operator pushed or — if the hint names an
+  earlier node of the same constructor and operands — reused. No
+  `HashMap`: the reuse hint replaces it, as the strash hints replace
+  `Aig::and`'s. Without hints the builder emits a tree-shaped DAG; that is
+  still *correct*, but the raw arena is larger and the hints the solver
+  computed on its own raw arena no longer apply, so the CNF differs and
+  the recheck fails — so the hints are mandatory for acceptance, never
+  for soundness.
+- **Theorem** (`lean/TermBuild.lean`, new semantics `termSim env tbits t`
+  reading `Var id w` from an environment `env : Nat → BitVec`):
+
+  ```lean
+  theorem build_dag_sound (t : Slice DagNode) (ids : Slice Usize) (tbits : Slice Bool)
+      (reuse : Slice Usize) (h : kernel.build_dag t ids tbits reuse = ok (Ok q)) :
+      ∀ env, ∃ inp, ∀ k (hk : k < q.roots.val.length),
+        termBool env tbits.val t.val ids.val (q.roots.val[k]).val
+          = dagBool inp q.bits.val q.nodes.val (q.roots.val[k]).val
+  ```
+  plus the converse (`∀ inp, ∃ env`), and the composition with
+  `check_query_sound` / `check_query_model_sound`.
+- **Leaves the trust base:** `dag.rs` (hash-consing, var sharing, the
+  constant table). **Stays:** `canon.rs` entirely — ordering, mirroring
+  and, above all, constant folding through `eval.rs`, which is the one
+  piece that evaluates `bvsdiv`/`bvsrem`/`bvrotl` with definitions that
+  are tested, not proven. That is the riskiest row of the table, and (A)
+  keeps it.
+- **Lean effort:** ~900–1300 lines (a second semantics `termSim`, the
+  builder's loop invariant in the `dag_wf_loop_spec` style, the
+  id-table/environment correspondence, the reuse check). Comparable to
+  phase 4.
+- **Certificate:** `ordeal-term/v1` carries the *canonical* term. A
+  consumer can compare it to its own query only by running canon itself
+  — the audit story is weaker than today's `query` block, not stronger.
+- **Byte identity:** preserved trivially (the solver's path is untouched;
+  the trusted builder runs only in the recheck), provided the reuse hints
+  make it rebuild D1 exactly — which they do by construction when
+  `DagBuilder` records them.
+
+### Option (B): (A) plus canon proven
+
+Move canon into the trusted crate and prove it semantics-preserving, so
+the certificate carries the ORIGINAL term. Two of canon's three rewrites
+cannot be *recomputed* there: the ordering (consequence 1 — it becomes a
+per-node swap hint, verified by `BitVec.add_comm` and friends) and the
+folding (consequence 3 — either the 37-arm `u128` evaluator proof, ~1500–
+3000 Lean lines, or the encode-and-simulate evaluation). Once both are
+hints verified by evaluation, (B)'s builder is (C)'s checker in the
+harder form: it must also produce D1 *in the solver's node order*
+(consequence 2), i.e. take an order hint and prove the permutation of
+primary inputs. Everything (B) removes from the trust base, (C) removes
+with less proof and no change to the production path. **Dominated by
+(C).**
+
+### Option (C), recommended: a proven correspondence check D0 → D1
+
+The certificate carries the term as flattened *before* canon (D0, with
+the variable names) and one untrusted index map `m : term node → D1
+node`. The trusted crate checks that D1 — the DAG `check_query` /
+`check_query_model` already judge — is a semantics-preserving rewrite
+of D0 along `m`, with exactly the rewrites canon and the builder are
+allowed to make, and the Lean proof composes with the two existing
+capstones. No builder, no term AST, no new semantics, no new evaluator;
+`check_query`, `check_query_model` and every theorem behind them are
+untouched.
+
+**The data (`ordeal-term/v1`, a block next to `query`):**
+
+```json
+"term": {
+  "encoding": "ordeal-term/v1",
+  "num_nodes": 9,
+  "nodes": [["var",8],["var",8],["add",0,1],["const",0,8],["const",8,8],["mul",3,4],["ugt",2,5], ...],
+  "bits": "…",
+  "roots": [8],
+  "vars": [["x", 8, 0], ["y", 8, 1]],
+  "map": [1, 0, 2, 18446744073709551615, 18446744073709551615, 3, 4, ...],
+  "sha256": "<sha256 of the canonical text>"
+}
+```
+
+`nodes`/`bits`/`roots` are the `ordeal-dag/v2` spelling applied to the
+flattened assertions (`term::flatten`, new, untrusted, ~80 lines: every
+`Var` once per name, every `Const` occurrence its own node, operators
+1:1, `Ugt` stays `ugt`). `vars` names the term's `Var` nodes. `map[i]`
+is the D1 node that term node `i` became, or `usize::MAX` for a node
+that became nothing (the inside of a folded constant subterm — its
+children do not exist in D1 — or an unreferenced node).
+
+**The check (`kernel::check_term_dag`, Aeneas fragment, ~300 lines):**
+
+```rust
+pub fn check_term_dag(t: &[DagNode], tbits: &[bool], troots: &[usize], map: &[usize],
+                      ns: &[DagNode], bits: &[bool], roots: &[usize]) -> Result<(), TermError>
+```
+
+1. `dag_wf(t, tbits.len())` and `dag_wf(ns, bits.len())` (proven,
+   reused): widths `ws0`, `ws1`. `map.len() == t.len()`.
+2. `closed: Vec<bool>` over D0 in node order (`Const` closed; `Var`
+   open; an operator closed iff its operands are) — `node_closed`, a
+   37-arm match in the `node_wf` style.
+3. `seen: Vec<bool>` over D1, for the variable map's injectivity.
+4. The main loop, `i` over D0, skipping `map[i] == usize::MAX`;
+   otherwise `mi = map[i] < ns.len()`, `d = ns[mi]`, `tn = t[i]`, and
+   exactly one of:
+   - `tn = Var(w)`: require `d = Var(w)` and `!seen[mi]`; set
+     `seen[mi]`. (Two term variables aliased to one D1 variable would
+     make D1 *more* constrained — an UNSAT of D1 would say nothing about
+     D0. This is the one check whose omission is unsound rather than
+     merely incomplete.)
+   - `tn = Const(s0, w)`: require `d = Const(s1, w)` and
+     `tbits[s0..s0+w] == bits[s1..s1+w]`.
+   - `d = Const(s1, w)` and `tn` an operator: a **fold**; require
+     `closed[i]` and `ws0[i] == w`; record `(i, s1, w)` for step 6.
+   - otherwise `node_corr(tn, d, map)`: `d` is the same constructor as
+     `tn` with operands `map[a]`, `map[b]` (37 arms); or, for `Add`,
+     `Mul`, `And`, `Or`, `Xor`, `Eq`, `Ne`, `BoolAnd`, `BoolOr`, the
+     operands swapped (9 arms); or the mirror `Ugt(a,b) ↦ Ult(map[b],
+     map[a])`, `Uge ↦ Ule`, `Sgt ↦ Slt`, `Sge ↦ Sle` (4 arms). Nested
+     `match`es, not tuple patterns, to stay inside what the pinned Charon
+     is known to translate (`node_wf` is the template).
+5. Roots: `troots.len() == roots.len()` and `map[troots[k]] == roots[k]`.
+6. The folds, if any: `encode_fits(max_width(ws0), t.len())`, `nin0 =
+   dag_nin(t)`, `inp0 = [false; nin0]`, `aig_new` → `encode(t, tbits,
+   [])` → `simulate(inp0)`; for every recorded `(i, s1, w)` and `j < w`:
+   `eval_lit(vals, words[i][j]) == bits[s1 + j]`. The proven encoder and
+   simulator evaluate the closed subterm; the closedness check is what
+   lets the proof drop the all-false assignment.
+
+**The theorems (`lean/TermCheck.lean`, hand-written, namespace
+`kernel.spec`):**
+
+```lean
+/-- The variable blocks agree along the map: a mapped `Var` of the term reads the same
+    bits as its image. `dagNinPrefix ns i` is the input offset of node `i` (`dagNin` of
+    the prefix). `NONE` is `Usize.max`. -/
+def VarsAgree (t ns : List DagNode) (map : List Nat) (inp0 inp1 : List Bool) : Prop :=
+  ∀ i (hi : i < t.length) w, t[i] = .Var w → map.getD i NONE ≠ NONE →
+    ∀ j < w.val, inp0.getD (dagNinPrefix t i + j) false
+               = inp1.getD (dagNinPrefix ns (map.getD i NONE) + j) false
+
+/-- A closed node's value does not depend on the inputs. -/
+theorem dagSim_closed_indep (ns : List DagNode) (bits : List Bool) (i : Nat)
+    (hc : (dagClosed ns).getD i false = true) (inp inp' : List Bool) :
+    (dagSim inp bits ns).getD i dDflt = (dagSim inp' bits ns).getD i dDflt
+
+/-- The per-node step: a structurally corresponding node computes the same value
+    from corresponding operand values (swap arms by `BitVec.add_comm` …, mirror arms
+    by unfolding `dagNodeVal`). -/
+theorem node_corr_spec (tn d : DagNode) (map : Slice Usize) …
+    (h : kernel.node_corr tn d map = true) … :
+    dagNodeVal inp0 tbits vals0 nin0 tn = dagNodeVal inp1 bits vals1 nin1 d
+
+/-- The loop invariant, closed: every mapped term node has its image's value. -/
+theorem check_term_dag_values (t : Slice DagNode) (tbits : Slice Bool) (troots map : Slice Usize)
+    (ns : Slice DagNode) (bits : Slice Bool) (roots : Slice Usize)
+    (h : kernel.check_term_dag t tbits troots map ns bits roots = ok (core.result.Result.Ok ()))
+    (inp0 inp1 : List Bool) (hv : VarsAgree t.val ns.val (map.val.map Usize.val) inp0 inp1) :
+    ∀ i (hi : i < t.val.length), (map.val[i]).val ≠ NONE →
+      (dagSim inp0 tbits.val t.val).getD i dDflt
+        = (dagSim inp1 bits.val ns.val).getD (map.val[i]).val dDflt
+
+/-- Hence the roots agree. -/
+theorem check_term_dag_sound … (h : … = ok (core.result.Result.Ok ())) :
+    ∀ inp0 inp1, VarsAgree t.val ns.val (map.val.map Usize.val) inp0 inp1 →
+      ∀ k (hk : k < troots.val.length),
+        dagBool inp0 tbits.val t.val (troots.val[k]).val
+          = dagBool inp1 bits.val ns.val (roots.val.getD k 0#usize).val
+
+/-- Transport in both directions (Lean functions, not kernel code): lay the term's
+    variable blocks out at their images' offsets, and read them back. Injectivity of the
+    variable map (`seen`) is what makes `pushforward` well-defined. -/
+def pushforward (t ns : List DagNode) (map : List Nat) (inp0 : List Bool) : List Bool
+def pullback    (t ns : List DagNode) (map : List Nat) (inp1 : List Bool) : List Bool
+theorem varsAgree_pushforward … : VarsAgree t ns map inp0 (pushforward t ns map inp0)
+theorem varsAgree_pullback    … : VarsAgree t ns map (pullback t ns map inp1) inp1
+
+/-- THE UNSAT CAPSTONE: the proof refutes the TERM. -/
+theorem check_term_unsat_sound … (cnf) (hints steps)
+    (ht : kernel.check_term_dag t tbits troots map ns bits roots = ok (core.result.Result.Ok ()))
+    (hq : kernel.check_query ns bits roots hints steps = ok (core.result.Result.Ok cnf)) :
+    ∀ inp0 : List Bool, ¬ (∀ k (hk : k < troots.val.length),
+      dagBool inp0 tbits.val t.val (troots.val[k]).val = true)
+
+/-- THE SAT CAPSTONE: the model satisfies the TERM, under the pulled-back inputs. -/
+theorem check_term_model_sound … (inp1 : Slice Bool)
+    (ht : kernel.check_term_dag t tbits troots map ns bits roots = ok (core.result.Result.Ok ()))
+    (hm : kernel.check_query_model ns bits roots inp1 = ok (core.result.Result.Ok ())) :
+    ∀ k (hk : k < troots.val.length),
+      dagBool (pullback t.val ns.val (map.val.map Usize.val) inp1.val) tbits.val t.val
+        (troots.val[k]).val = true
+
+theorem term_verdicts_exclusive … (ht) (hq) (hm) : False
+```
+
+`check_term_unsat_sound` is `check_query_sound` (∀ inp1, ¬ roots D1)
+pulled back through `varsAgree_pushforward`; `check_term_model_sound`
+is `check_query_model_sound` pushed through `varsAgree_pullback`. The
+fold step uses `encode_sound`'s fourth conjunct at the all-false
+assignment, `simulate_spec`/`eval_lit_spec` (phase 6's pieces) and
+`dagSim_closed_indep`; widths come from `dagSim_getD_fst` and the two
+`dag_wf_spec` runs. All existing theorem statements stay as they are;
+the four capstones are pinned in `AxiomCheck.lean`.
+
+**Lean effort:** closedness ~150 lines; `node_corr_spec` ~450 (50 arms,
+`node_wf_spec`'s 170 lines for 37 arms is the reference, plus nine
+commutativity and four mirror arms); the main loop invariant ~400
+(`dag_wf_loop_spec` / `check_query_model_loop_spec` style); transport
+~300; folds ~150; capstones ~150. **~1600 lines, about 1.3× phase 4's
+`QueryCheck.lean`**, and nothing re-proved. Rust: ~300 lines in
+`kernel.rs`; `TermError` data-only like `QueryError`.
+
+**Aeneas risks** (all have precedent in the current kernel): `usize::MAX`
+as a sentinel (`check_query` compares against `core.num.Usize.MAX`);
+`Vec<bool>` tables built by loops; early `return Err` inside `while`
+(`dag_wf`); three parallel `Vec<usize>` for the fold records rather than
+a `Vec` of tuples; `encode` with an empty root `Vec` (not a slice
+literal); no `continue` — `if map[i] != NONE { … }` nesting instead. New
+ground: `node_corr` matches on two enums (nested, as above) and the loop
+carries two tables (`seen`, `closed`) — more loop-spec bookkeeping, not
+a new kind of obligation. The one modelling question to settle in the
+first regen is whether a `match` on a *second* copied scrutinee inside a
+match arm translates cleanly; `node_wf`'s pattern (copy the node to a
+local first) is the fallback.
+
+**Certificate format — additive:** `format: "ordeal-cert/v3"` = the v2
+envelope (same `problem`, `proof`, `query`; on `sat` the same `witness`,
+`query`, `inputs`) plus the `term` block above; `recheck.min_version` the
+shipping version, `cmd` naming `check_term_dag` then `check_query` /
+`check_query_model`. v1 and v2 are untouched: their readers refuse a v3
+bundle by `format`, exactly as v1 readers refuse v2 — a *new tag* rather
+than an optional block because the v2 reader's serde structs do not
+`deny_unknown_fields`, so a v2 reader handed "v2 plus a `term` block"
+would silently ignore the term and report a weaker claim as the
+stronger one. The v3 reader verifies all hashes, then `check_term_dag`,
+then the v2 recheck. Any v2 bundle can be upgraded to v3 by a producer
+that still has the term; no v3 bundle is required anywhere.
+
+**API and CLI:** `Solver::check_with_term()` →
+`TermCheckResult::{Unsat(TermCertificate), Sat(TermSatCertificate),
+Unknown}`, each a wrapper `{ query: QueryCertificate | QuerySatCertificate,
+term: QueryTerm }` (the phase-6 wrapping pattern; `QueryCertificate` and
+`QuerySatCertificate` are not changed, so no struct literal breaks). The
+solver computes D0 by `term::flatten` and `m` by `dag::term_map` (both
+untrusted) and runs the trusted `check_term_dag` **before** returning a
+verdict, symmetric with the two existing gates: a rejection degrades to
+`Unknown` with a `debug_assert`. `ordeal check --format json
+--with-term` emits v3; `--with-query` keeps emitting v2 byte for byte.
+
+**Byte identity:** nothing on the production path changes — `canon.rs`
+and `dag.rs` keep making exactly the decisions they make today, D1 and
+the CNF are the same bytes, `check` / `check_with_witness` /
+`check_with_query` are not touched. The trusted check only *reads* D0,
+D1 and `m`. Acceptance for phase 7 is therefore the same as every phase:
+the 24 fixtures and the four `cnf_gap_digest` digests unchanged.
+
+**`dag::term_map` (untrusted, ~120 lines):** computed after the fact
+from D0 and the builder's own tables, in D0's node order: for a closed
+node, `eval.rs` gives the value and `DagBuilder::consts[(value, w)]` the
+D1 constant (absent → `NONE`, the node was folded into a parent); for a
+`Var`, `var_index[name]`; otherwise the `memo` lookup on `(op, m[a],
+m[b])`, then the swapped key for the commutative ops, then the mirrored
+key for the four comparisons. Canon makes one order canonical for every
+occurrence, so at most one key hits. A wrong map is caught by the
+trusted check and degrades the verdict to `Unknown` — never unsound —
+and `denotation_guard` becomes its positive control: every one of its
+1500 cases must now *also* pass `check_term_dag`.
+
+**Cost:** one extra `encode` + `simulate` of D0 per query that has at
+least one fold, on the opt-in path only. D0 is the unfolded term, so on
+a query like `shl1_eq_add_64` (2234 raw gates that fold to nothing) it
+is the whole circuit once more; on the bench corpus that is 1–2 ms
+against SAT times in seconds. If it ever matters, the follow-up is to
+extract the closed nodes into a sub-DAG first (a renumbering with a
+~200-line transfer lemma); not in scope for 7b.
+
+**What leaves the trust base:** `canon.rs` (all three rewrites, the
+`eval.rs` folding included) and `dag.rs` (hash-consing, interning, the
+variable map). **What stays:** `term::flatten` (1:1 serialization; a
+consumer with the `BoolTerm` recomputes and compares the `term.sha256`);
+the `(name, width, node)` names; the sliver; the front ends. On `sat`
+the model's named values are still tied to the inputs by the untrusted
+`check_consistent` — step 7d below closes that.
+
+**Negative controls to run (each: mutate, regen, the named proof must
+fail, restore):** `node_corr` accepting `Sub` with swapped operands
+(`node_corr_spec`, the `Sub` arm); dropping the `seen` check
+(`varsAgree_pushforward`, hence `check_term_unsat_sound`); dropping
+`closed[i]` from the fold rule (`dagSim_closed_indep` no longer
+applies, `check_term_dag_values`' fold case); comparing
+`tbits[s0..]` against `bits[s0..]` instead of `bits[s1..]` (the `Const`
+case). Bundle-level: a v3 bundle whose term says `ugt` where the DAG
+says `ult(a, b)` un-mirrored, hash recomputed, CNF and proof untouched
+— refused; two term variables mapped to one D1 variable — refused; a
+term `add(2, 3)` mapped to a D1 `const 7` — `FoldMismatch`.
+
+### Comparison
+
+| | (A) trusted builder, canonical term | (B) (A) + canon proven | (C) correspondence check |
+|---|---|---|---|
+| leaves the trust base | `dag.rs` | `dag.rs`, `canon.rs` | `dag.rs`, `canon.rs` |
+| stays trusted | `canon.rs` (incl. `eval.rs` folding), flatten, names, sliver, front ends | flatten, names, sliver, front ends | flatten, names, sliver, front ends |
+| new Lean semantics | `termSim` (ids, environments) | `termSim` + evaluator or evaluation | none (`dagSim` on both sides) |
+| hints from the untrusted side | reuse per node | reuse + swap + fold + order | one index per node |
+| Lean effort | ~900–1300 lines | ~2500+ (evaluator) or ≈ (C) + order permutation | ~1600 lines, no existing proof touched |
+| Aeneas risk | id table, reuse check | + `U128` evaluator or (C)'s | two tables in one loop; nested enum matches |
+| certificate | `ordeal-term/v1` = canonical term (consumer must run canon to compare) | original term | original term + map; `ordeal-cert/v3`, v1/v2 untouched |
+| default bytes | unchanged | unchanged | unchanged |
+| what a consumer certifies | "the canonical term is unsat" | "the term is unsat" | "the term is unsat" |
+
+### Recommendation and plan
+
+**(C).** It removes both untrusted rewrites with the smallest proof,
+adds no semantics and no evaluator, leaves every shipped theorem and
+every production byte alone, and gives the consumer the original term
+to compare against. (A) spends a comparable proof to keep the riskiest
+piece trusted; (B) is (C) in a harder shape.
+
+- **7a (this section):** design; decision requested.
+- **7b (v0.31.0):** `kernel::check_term_dag` + `lean/TermCheck.lean`
+  with the four capstones pinned in `AxiomCheck.lean`; the negative
+  controls above; rivet: one `sw-req` ("the term-to-DAG translation is
+  proven"), its design, verification and the VE record, in the phase
+  4–6 pattern (`TR-062`/`TR-065`'s shape).
+- **7c (same release):** `term::flatten`, `dag::term_map`,
+  `QueryTerm` (canonical text + hash), `Solver::check_with_term`,
+  `ordeal-cert/v3` writer/reader, `--with-term`; `denotation_guard`
+  gains the trusted check as its positive control; the 24-fixture and
+  digest acceptance.
+- **7d (small, can follow):** on `sat`, replace the untrusted bit
+  comparison in `check_consistent` with a proven
+  `kernel::check_input_value(inp, offset, w, value: u128) -> bool`
+  (`check_binding`'s twin at the DAG level, `U128` is already modelled
+  there) plus a proven `var_offset(ns, node)` (`dagNin` of a prefix), so
+  that the only untrusted step left between a named model value and the
+  term is the name itself.
+- **Not in #192:** the sliver and the front ends. After 7b–7d the trusted
+  computing base on the query path is: the flattener (1:1), the names,
+  and the pieces every phase has listed.
