@@ -361,14 +361,13 @@ fn check_with_term_matches_check_with_query() {
     use crate::query::QueryCheckResult;
     let empty = Solver::new();
     assert!(matches!(empty.check_with_term(), TermCheckResult::Sat(_)));
-    for s in [rewrite_heavy_unsat()] {
-        match (s.check_with_query(), s.check_with_term()) {
-            (QueryCheckResult::Unsat(q), TermCheckResult::Unsat(t)) => {
-                assert!(q.query == t.query.query);
-                assert_eq!(q.certificate.cnf, t.query.certificate.cnf);
-            }
-            (q, t) => panic!("verdicts differ: {q:?} vs {t:?}"),
+    let s = rewrite_heavy_unsat();
+    match (s.check_with_query(), s.check_with_term()) {
+        (QueryCheckResult::Unsat(q), TermCheckResult::Unsat(t)) => {
+            assert!(q.query == t.query.query);
+            assert_eq!(q.certificate.cnf, t.query.certificate.cnf);
         }
+        (q, t) => panic!("verdicts differ: {q:?} vs {t:?}"),
     }
     let sat = sat_term_cert();
     assert_eq!(sat.query.witness.model.assignments.len(), 2);
