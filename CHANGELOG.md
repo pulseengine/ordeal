@@ -39,9 +39,12 @@ fields unless `--with-term` is given.
 - **`dag::term_map` resolves the map from the roots** (found by the
   default-path verdict scan): two input constants with equal low bits
   are two DAG constant nodes, and a parent key can exist for both; the
-  greedy first-hit choice refused four queries of
-  `oracle::gen_corpus(0xC0FFEE, 1000)` at the root, which on the new
-  default path would have been an `Unknown` regression. Every term node
+  greedy first-hit choice refused queries at the root. On the new default
+  path that would have been an `Unknown` regression. It also affects
+  v0.31.0's opt-in `--with-term` / `check_with_term`: those return
+  `Unknown`, never a wrong answer, on 6 of the 1000 queries of
+  `oracle::gen_corpus(0xC0FFEE, 1000)` (q140, q150, q169, q216, q419,
+  q620). This release decides all six. Every term node
   now keeps every candidate image with the operand images its key
   used, and the DAG's roots fix the choice top-down. The function takes
   the DAG's roots as a new parameter. The denotation guard and a new
