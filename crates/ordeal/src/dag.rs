@@ -1053,7 +1053,6 @@ mod denotation_guard {
         }
     }
 
-    // rivet: verifies VER-069
     /// The term-to-DAG correspondence of the production translation of
     /// `a` — `canon` + `DagBuilder` against `flatten` + `term_map` — is
     /// accepted by the trusted `check_term_dag`.
@@ -1091,6 +1090,7 @@ mod denotation_guard {
     }
 
     // rivet: verifies VER-068
+    // rivet: verifies VER-069
     #[test]
     fn dag_translation_agrees_with_the_evaluator() {
         let mut rng = Rng(0x0192_DE40_7A71_0001);
