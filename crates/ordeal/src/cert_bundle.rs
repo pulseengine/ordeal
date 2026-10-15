@@ -31,8 +31,9 @@
 
 use crate::query::{
     QUERY_ENCODING, QUERY_ENCODING_V2, QueryCertificate, QueryDag, QueryInputs,
-    QueryModelRecheckError, QueryRecheckError, QuerySatCertificate, bits_from_string, bits_string,
-    encoding_supported, node_from_op, node_op,
+    QueryModelRecheckError, QueryRecheckError, QuerySatCertificate, QueryTerm, TERM_ENCODING,
+    TermCertificate, TermModelRecheckError, TermRecheckError, TermSatCertificate, bits_from_string,
+    bits_string, encoding_supported, node_from_op, node_op,
 };
 use crate::sha256::sha256_hex;
 use crate::solver::{Certificate, Model};
@@ -967,6 +968,427 @@ struct SatWitnessRecheck {
     min_version: String,
     cmd: String,
     problem_sha256: String,
+}
+
+// ── ordeal-cert/v3: the term-carrying bundles (#192 phase 7) ─────────────
+
+/// The `term` block of an `ordeal-cert/v3` bundle (`QueryTerm`): the
+/// caller's assertions flattened as asked, in the `query` block's node
+/// spelling, the variable names, the untrusted map to the `query` block's
+/// nodes, and the block's content hash (`QueryTerm::canonical_text`).
+#[derive(Serialize, Deserialize)]
+struct TermBlock {
+    encoding: String,
+    num_nodes: usize,
+    /// `["op", arg, …]` per node (see `query::node_op`).
+    nodes: Vec<serde_json::Value>,
+    bits: String,
+    roots: Vec<usize>,
+    vars: Vec<InputVarEntry>,
+    /// Term node → `query` node; `usize::MAX` for a node with no image.
+    map: Vec<usize>,
+    sha256: String,
+}
+
+fn term_to_block(t: &QueryTerm) -> TermBlock {
+    TermBlock {
+        encoding: TERM_ENCODING.into(),
+        num_nodes: t.nodes.len(),
+        nodes: t.nodes.iter().map(node_to_json).collect(),
+        bits: bits_string(&t.bits),
+        roots: t.roots.clone(),
+        vars: t
+            .vars
+            .iter()
+            .map(|(name, width, node)| InputVarEntry {
+                name: name.clone(),
+                width: *width,
+                node: *node,
+            })
+            .collect(),
+        map: t.map.clone(),
+        sha256: t.sha256(),
+    }
+}
+
+fn term_from_block(block: TermBlock) -> Result<QueryTerm, BundleError> {
+    if block.encoding != TERM_ENCODING {
+        return Err(BundleError::Unsupported(format!(
+            "term encoding {}",
+            block.encoding
+        )));
+    }
+    let mut nodes = Vec::with_capacity(block.nodes.len());
+    for n in &block.nodes {
+        nodes.push(node_from_json(n)?);
+    }
+    if nodes.len() != block.num_nodes {
+        return Err(BundleError::Malformed(format!(
+            "term.num_nodes {} but {} nodes",
+            block.num_nodes,
+            nodes.len()
+        )));
+    }
+    let bits = bits_from_string(&block.bits).ok_or_else(|| {
+        BundleError::Malformed("term bits contain a character other than '0'/'1'".into())
+    })?;
+    let term = QueryTerm {
+        nodes,
+        bits,
+        roots: block.roots,
+        vars: block
+            .vars
+            .iter()
+            .map(|v| (v.name.clone(), v.width, v.node))
+            .collect(),
+        map: block.map,
+    };
+    if term.sha256() != block.sha256 {
+        return Err(BundleError::HashMismatch("term"));
+    }
+    Ok(term)
+}
+
+/// The v3 UNSAT envelope: v2's fields plus `term` after `query`.
+#[derive(Serialize, Deserialize)]
+struct UnsatEnvelopeV3 {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    proof: ProofBlock,
+    query: QueryBlock,
+    term: TermBlock,
+    recheck: RecheckBlockV2,
+}
+
+/// A parsed, hash-verified `ordeal-cert/v3` UNSAT bundle: the v2 bundle
+/// plus the term the query was lowered from.
+#[derive(Debug)]
+pub struct TermBundle {
+    /// The certificate with its query and term, reconstructed.
+    pub certificate: TermCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl TermBundle {
+    /// Re-run the trusted TERM re-check (`ordeal_lrat::check_term_dag`,
+    /// then `ordeal_lrat::check_query`) over the reconstructed term, map,
+    /// DAG and proof — the operation a v3-aware consumer performs to turn
+    /// this bundle into a verification link about the TERM. The v2 recheck
+    /// stays available as `certificate.query.recheck()`.
+    pub fn recheck(&self) -> Result<(), TermRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+/// The `recheck.cmd` of a v3 bundle.
+const V3_UNSAT_CMD: &str = "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
+     query.nodes, query.bits, query.roots) == Ok(()) && \
+     ordeal_lrat::check_query(query.nodes, query.bits, query.roots, query.hints, proof.body) \
+     == Ok(problem.clauses)";
+
+/// Readers from this version on decode `ordeal-cert/v3`.
+const V3_MIN_VERSION: &str = "0.31.0";
+
+impl TermCertificate {
+    /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v3`
+    /// UNSAT bundle: the v2 envelope (same `problem`, `proof` and `query`
+    /// blocks, same hashes) plus the `term` block, `format:
+    /// "ordeal-cert/v3"`. A v1 or v2 reader rejects it by format (no silent
+    /// downgrade); `to_cert_v2` on `self.query` still produces the v2
+    /// bundle unchanged.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v3(&self, attests: &Attests) -> String {
+        let cert = &self.query.certificate;
+        let problem_text = cnf_text(&cert.cnf);
+        let proof_text = cert.lrat_text().unwrap_or_default().to_string();
+        let env = UnsatEnvelopeV3 {
+            format: "ordeal-cert/v3".into(),
+            verdict: "unsat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: cert.cnf.len(),
+                clauses: cert.cnf.clone(),
+            },
+            proof: ProofBlock {
+                encoding: "lrat".into(),
+                body: proof_text.clone(),
+            },
+            query: query_to_block(&self.query.query),
+            term: term_to_block(&self.term),
+            recheck: RecheckBlockV2 {
+                tool: "ordeal-lrat".into(),
+                min_version: V3_MIN_VERSION.into(),
+                cmd: V3_UNSAT_CMD.into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+                proof_sha256: sha256_hex(proof_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v3` UNSAT bundle, verifying all four content
+    /// hashes (problem, proof, query, term) BEFORE returning. The caller
+    /// then runs [`TermBundle::recheck`]. A v1 or v2 bundle is
+    /// [`BundleError::WrongFormat`]: read it with its own reader.
+    pub fn from_cert_v3(json: &str) -> Result<TermBundle, BundleError> {
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some("ordeal-cert/v3") => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        match head.get("verdict").and_then(|f| f.as_str()) {
+            Some("unsat") => {}
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
+        }
+        let env: UnsatEnvelopeV3 =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.problem.encoding != "dimacs-cnf" {
+            return Err(BundleError::Unsupported(format!(
+                "problem encoding {}",
+                env.problem.encoding
+            )));
+        }
+        if env.proof.encoding != "lrat" {
+            return Err(BundleError::Unsupported(format!(
+                "proof encoding {}",
+                env.proof.encoding
+            )));
+        }
+        if !encoding_supported(&env.query.encoding) {
+            return Err(BundleError::Unsupported(format!(
+                "query encoding {}",
+                env.query.encoding
+            )));
+        }
+        let problem_text = cnf_text(&env.problem.clauses);
+        if sha256_hex(problem_text.as_bytes()) != env.recheck.problem_sha256 {
+            return Err(BundleError::HashMismatch("problem"));
+        }
+        if sha256_hex(env.proof.body.as_bytes()) != env.recheck.proof_sha256 {
+            return Err(BundleError::HashMismatch("proof"));
+        }
+        let query = query_from_block(env.query)?;
+        let term = term_from_block(env.term)?;
+        Ok(TermBundle {
+            certificate: TermCertificate {
+                query: QueryCertificate {
+                    certificate: Certificate {
+                        lrat: env.proof.body.into_bytes(),
+                        cnf: env.problem.clauses,
+                    },
+                    query,
+                },
+                term,
+            },
+            attests: env.attests,
+            produced_by: env.produced_by,
+        })
+    }
+}
+
+/// The v3 SAT envelope: v2's fields plus `term` after `inputs`.
+#[derive(Serialize)]
+struct SatEnvelopeV3 {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    query: QueryBlock,
+    inputs: InputsBlock,
+    term: TermBlock,
+    recheck: SatWitnessRecheck,
+}
+
+#[derive(Deserialize)]
+struct SatEnvelopeV3In {
+    format: String,
+    verdict: String,
+    attests: Attests,
+    produced_by: Tool,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    query: QueryBlock,
+    inputs: InputsBlock,
+    term: TermBlock,
+    recheck: SatWitnessRecheck,
+}
+
+/// A parsed, hash-verified `ordeal-cert/v3` SAT bundle: the v2 SAT bundle
+/// plus the term the query was lowered from.
+#[derive(Debug)]
+pub struct TermSatBundle {
+    /// The witness with its query, inputs and term, reconstructed.
+    pub certificate: TermSatCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl TermSatBundle {
+    /// Re-run the trusted TERM re-check: `check_term_dag`, the v2 model
+    /// recheck, and every model binding through the term's variable map
+    /// (`var_offset` / `check_input_value`).
+    pub fn recheck(&self) -> Result<(), TermModelRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+fn inputs_from_block(block: InputsBlock) -> Result<QueryInputs, BundleError> {
+    if block.encoding != crate::query::INPUTS_ENCODING {
+        return Err(BundleError::Unsupported(format!(
+            "inputs encoding {}",
+            block.encoding
+        )));
+    }
+    let bits = bits_from_string(&block.bits).ok_or_else(|| {
+        BundleError::Malformed("inputs bits contain a character other than '0'/'1'".into())
+    })?;
+    let inputs = QueryInputs {
+        bits,
+        vars: block
+            .vars
+            .iter()
+            .map(|v| (v.name.clone(), v.width, v.node))
+            .collect(),
+    };
+    if inputs.sha256() != block.sha256 {
+        return Err(BundleError::HashMismatch("inputs"));
+    }
+    Ok(inputs)
+}
+
+impl TermSatCertificate {
+    /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v3`
+    /// SAT bundle: the v2 SAT envelope (same blocks, same hashes) plus the
+    /// `term` block, `format: "ordeal-cert/v3"`.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v3(&self, attests: &Attests) -> String {
+        let w = &self.query.witness;
+        let problem_text = cnf_text(&w.cnf);
+        let env = SatEnvelopeV3 {
+            format: "ordeal-cert/v3".into(),
+            verdict: "sat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: w.cnf.len(),
+                clauses: w.cnf.clone(),
+            },
+            model: SatModelBlock {
+                encoding: "assignments".into(),
+                assignments: w.model.assignments.clone(),
+            },
+            witness: w.witness_block(),
+            query: query_to_block(&self.query.query),
+            inputs: InputsBlock {
+                encoding: crate::query::INPUTS_ENCODING.into(),
+                bits: bits_string(&self.query.inputs.bits),
+                vars: self
+                    .query
+                    .inputs
+                    .vars
+                    .iter()
+                    .map(|(name, width, node)| InputVarEntry {
+                        name: name.clone(),
+                        width: *width,
+                        node: *node,
+                    })
+                    .collect(),
+                sha256: self.query.inputs.sha256(),
+            },
+            term: term_to_block(&self.term),
+            recheck: SatWitnessRecheck {
+                tool: "ordeal-lrat".into(),
+                min_version: V3_MIN_VERSION.into(),
+                cmd: "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
+                      query.nodes, query.bits, query.roots) == Ok(()) + \
+                      ordeal_lrat::check_sat(problem, witness.assignment) + \
+                      ordeal_lrat::check_binding per model binding + \
+                      ordeal_lrat::check_query_model(query.nodes, query.bits, query.roots, \
+                      inputs.bits) == Ok(()) + ordeal_lrat::check_input_value(inputs.bits, \
+                      ordeal_lrat::var_offset(query.nodes, term.map[term.vars[name].node]), \
+                      width, value) per model binding"
+                    .into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v3` SAT bundle, verifying all six content
+    /// hashes (problem, witness assignment, bit map, query, inputs, term)
+    /// BEFORE returning. The caller then runs [`TermSatBundle::recheck`].
+    pub fn from_cert_v3(json: &str) -> Result<TermSatBundle, BundleError> {
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some("ordeal-cert/v3") => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        match head.get("verdict").and_then(|f| f.as_str()) {
+            Some("sat") => {}
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
+        }
+        let env: SatEnvelopeV3In =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.format != "ordeal-cert/v3" {
+            return Err(BundleError::WrongFormat(env.format));
+        }
+        if env.verdict != "sat" {
+            return Err(BundleError::WrongVerdict(env.verdict));
+        }
+        let witness = sat_witness_from_blocks(env.problem, env.model, env.witness, &env.recheck)?;
+        let query = query_from_block(env.query)?;
+        let inputs = inputs_from_block(env.inputs)?;
+        let term = term_from_block(env.term)?;
+        Ok(TermSatBundle {
+            certificate: TermSatCertificate {
+                query: QuerySatCertificate {
+                    witness,
+                    query,
+                    inputs,
+                },
+                term,
+            },
+            attests: env.attests,
+            produced_by: env.produced_by,
+        })
+    }
 }
 
 // rivet: verifies VER-027

@@ -55,6 +55,8 @@ pub mod canon;
 /// `cert-bundle` feature: the default build stays dependency-free.
 #[cfg(feature = "cert-bundle")]
 pub mod cert_bundle;
+#[cfg(all(test, feature = "cert-bundle"))]
+mod cert_bundle_v3_tests;
 pub mod cnf;
 /// The term DAG the proven encoder consumes (issue #192 phase 3): the
 /// hash-consed builder from assertions and the structural-hashing hints
@@ -68,6 +70,8 @@ pub mod lrat;
 /// The certificate-carried query (#192 phase 4, `ordeal-cert/v2`) — always
 /// compiled; the JSON envelope is in `cert_bundle`.
 pub mod query;
+#[cfg(test)]
+mod query_term_tests;
 pub mod sat;
 /// In-tree SHA-256 for `ordeal-cert/v1` content hashes (#162 / TR-045):
 /// integrity only, never part of the soundness argument.
@@ -89,7 +93,8 @@ pub mod sat_cadical;
 
 pub use query::{
     QueryCertificate, QueryCheckResult, QueryDag, QueryInputs, QueryModelRecheckError,
-    QueryRecheckError, QuerySatCertificate,
+    QueryRecheckError, QuerySatCertificate, QueryTerm, TermCertificate, TermCheckResult,
+    TermModelRecheckError, TermRecheckError, TermSatCertificate,
 };
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};

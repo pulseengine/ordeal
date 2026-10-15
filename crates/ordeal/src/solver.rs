@@ -931,16 +931,25 @@ impl Solver {
     /// still run first (defence in depth); the answer rests on the trusted
     /// evaluation. A model it rejects degrades to `Unknown`.
     pub fn check_with_query(&self) -> crate::query::QueryCheckResult {
+        self.query_verdict().0
+    }
+
+    /// [`Solver::check_with_query`]'s body, also returning the lowered
+    /// DAG's `(name, width, Var node)` map (for [`Solver::check_with_term`],
+    /// which needs it on both verdicts).
+    pub(crate) fn query_verdict(
+        &self,
+    ) -> (crate::query::QueryCheckResult, Vec<(String, u32, usize)>) {
         use crate::query::{QueryCertificate, QueryCheckResult, QueryInputs, QuerySatCertificate};
         use crate::witness::WitnessCheckResult;
         match self.solve_witness(DerivedOps::Nodes) {
-            (WitnessCheckResult::Unsat(certificate), Some((query, _))) => {
+            (WitnessCheckResult::Unsat(certificate), Some((query, vars))) => {
                 let cert = QueryCertificate { certificate, query };
                 match cert.recheck() {
-                    Ok(()) => QueryCheckResult::Unsat(cert),
+                    Ok(()) => (QueryCheckResult::Unsat(cert), vars),
                     Err(_) => {
                         debug_assert!(false, "trusted crate rejected our query — ordeal bug");
-                        QueryCheckResult::Unknown
+                        (QueryCheckResult::Unknown, vars)
                     }
                 }
             }
@@ -959,14 +968,85 @@ impl Solver {
                     !matches!(verdict, QueryCheckResult::Unknown),
                     "trusted crate rejected our model — ordeal bug"
                 );
-                verdict
+                (verdict, vars)
             }
             // `lower()` always compacts, so a decided verdict always has its
             // query; never reached, but Unknown is the sound answer anyway.
             (WitnessCheckResult::Unsat(_) | WitnessCheckResult::Sat(_), None) => {
-                QueryCheckResult::Unknown
+                (QueryCheckResult::Unknown, Vec::new())
             }
-            (WitnessCheckResult::Unknown, _) => QueryCheckResult::Unknown,
+            (WitnessCheckResult::Unknown, _) => (QueryCheckResult::Unknown, Vec::new()),
+        }
+    }
+
+    /// Decide and return, with the certificate and the lowered query, the
+    /// TERM the query was lowered from (issue #192 phase 7,
+    /// `ordeal-cert/v3`): the assertions flattened as they were asked
+    /// (`dag::flatten`, no canonicalization, no hash-consing) and the
+    /// untrusted map from their nodes to the DAG's (`dag::term_map`). The
+    /// trusted `ordeal_lrat::check_term_dag` verifies — BEFORE a verdict is
+    /// returned, symmetric with the two gates of [`Solver::check_with_query`]
+    /// — that the DAG is a semantics-preserving rewrite of the term along
+    /// the map, so that the proof (`check_term_unsat_sound`) or the model
+    /// (`check_term_model_sound`, plus the proven binding of every model
+    /// value through the term's own variable map) is about the question
+    /// asked and not about the DAG the solver built. Anything the trusted
+    /// crate rejects degrades to `Unknown`.
+    ///
+    /// Opt-in, like `check_with_query`, which it runs first: the default
+    /// paths and the v2 output are untouched.
+    pub fn check_with_term(&self) -> crate::query::TermCheckResult {
+        use crate::query::{
+            QueryCheckResult, QueryTerm, TermCertificate, TermCheckResult, TermSatCertificate,
+        };
+        let (verdict, vars) = self.query_verdict();
+        let result = match verdict {
+            QueryCheckResult::Unsat(query) => {
+                match QueryTerm::flatten(&self.assertions, &query.query, &vars) {
+                    Ok(term) => Self::term_verdict(TermCertificate { query, term }),
+                    Err(_) => TermCheckResult::Unknown,
+                }
+            }
+            QueryCheckResult::Sat(query) => {
+                match QueryTerm::flatten(&self.assertions, &query.query, &vars) {
+                    Ok(term) => Self::term_sat_verdict(TermSatCertificate { query, term }),
+                    Err(_) => TermCheckResult::Unknown,
+                }
+            }
+            QueryCheckResult::Unknown => return TermCheckResult::Unknown,
+        };
+        debug_assert!(
+            !matches!(result, TermCheckResult::Unknown),
+            "trusted crate rejected our term map — ordeal bug"
+        );
+        result
+    }
+
+    /// The UNSAT gate of [`Solver::check_with_term`]: `Unsat` only if the
+    /// trusted crate accepts the term-to-DAG correspondence (and the v2
+    /// recheck); a rejection degrades to `Unknown`. Separate so the
+    /// degradation is testable with a tampered certificate (the caller's
+    /// `debug_assert` is what flags an ordeal bug in the real pipeline).
+    pub(crate) fn term_verdict(
+        cert: crate::query::TermCertificate,
+    ) -> crate::query::TermCheckResult {
+        use crate::query::TermCheckResult;
+        match cert.recheck() {
+            Ok(()) => TermCheckResult::Unsat(cert),
+            Err(_) => TermCheckResult::Unknown,
+        }
+    }
+
+    /// The SAT gate of [`Solver::check_with_term`]: `Sat` only if the
+    /// trusted crate accepts the correspondence, the model and every
+    /// binding; a rejection degrades to `Unknown`.
+    pub(crate) fn term_sat_verdict(
+        cert: crate::query::TermSatCertificate,
+    ) -> crate::query::TermCheckResult {
+        use crate::query::TermCheckResult;
+        match cert.recheck() {
+            Ok(()) => TermCheckResult::Sat(cert),
+            Err(_) => TermCheckResult::Unknown,
         }
     }
 

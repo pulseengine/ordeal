@@ -591,22 +591,27 @@ impl QueryInputs {
         query: &QueryDag,
         model: &crate::solver::Model,
     ) -> Result<(), QueryModelRecheckError> {
-        let offsets = var_offsets(&query.nodes);
         for (name, value) in &model.assignments {
             let Some((_, width, node)) = self.vars.iter().find(|(n, _, _)| n == name) else {
                 return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
             };
-            let Some((_, offset, w)) = offsets.iter().find(|(n, _, _)| n == node) else {
-                return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
-            };
-            if *w != *width as usize || offset.saturating_add(*w) > self.bits.len() {
+            let w = *width as usize;
+            if !matches!(query.nodes.get(*node), Some(k::DagNode::Var(vw)) if *vw == w) {
                 return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
             }
-            for j in 0..*w {
-                let bit = j < 128 && (value >> j) & 1 == 1;
-                if self.bits[offset + j] != bit {
-                    return Err(QueryModelRecheckError::InputMismatch(name.clone()));
-                }
+            // The bit comparison is the trusted crate's since #192 phase
+            // 7d: `var_offset` is proven to compute the node's input offset
+            // (`dagNin` of the prefix) and `check_input_value` to accept
+            // iff the value's bits ARE the inputs there, LSB first
+            // (`kernel.spec.check_input_value_sound`).
+            let Ok(offset) = ordeal_lrat::var_offset(&query.nodes, *node) else {
+                return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
+            };
+            if offset.saturating_add(w) > self.bits.len() {
+                return Err(QueryModelRecheckError::UnmappedVariable(name.clone()));
+            }
+            if !ordeal_lrat::check_input_value(&self.bits, offset, w, *value) {
+                return Err(QueryModelRecheckError::InputMismatch(name.clone()));
             }
         }
         Ok(())
@@ -705,6 +710,285 @@ pub enum QueryCheckResult {
     /// that satisfies it; the trusted `check_query_model` accepted it
     /// before return (`.witness` is the v1 [`SatCertificate`]).
     Sat(QuerySatCertificate),
+    /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
+    Unknown,
+}
+
+// ── #192 phase 7: the term as asked, next to the DAG it was lowered to ──
+
+/// The `term.encoding` value: the caller's assertions flattened as they
+/// were asked (`dag::flatten` — no canonicalization, no hash-consing;
+/// variables shared by name, constants interned), in the
+/// [`QUERY_ENCODING_V2`] node spelling, with the variable names and the
+/// map to the lowered DAG's nodes.
+pub const TERM_ENCODING: &str = "ordeal-term/v1";
+
+/// The term a `v3` certificate is about (#192 phase 7): what the caller
+/// asserted, flattened, plus the untrusted index map from its nodes to the
+/// lowered [`QueryDag`]'s. The trusted `ordeal_lrat::check_term_dag`
+/// verifies, node by node along the map, that the DAG is a
+/// semantics-preserving rewrite of this term — the two rewrites
+/// canonicalization makes (a commutative swap, a comparison mirror), a
+/// constant fold (evaluated by the proven encoder and simulator) and
+/// hash-consing (the map itself) — so a consumer that compares this block
+/// with its own query certifies the QUESTION, not the solver's DAG.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct QueryTerm {
+    /// The term's nodes, operands before operators, left to right.
+    pub nodes: Vec<k::DagNode>,
+    /// The term's constant table (LSB first).
+    pub bits: Vec<bool>,
+    /// The asserted nodes, one per assertion, in assertion order.
+    pub roots: Vec<usize>,
+    /// Per variable: (name, width, its `Var` node in `nodes`).
+    pub vars: Vec<(String, u32, usize)>,
+    /// `map[i]`: the lowered DAG's node term node `i` became, or
+    /// [`crate::dag::NO_IMAGE`] (`usize::MAX`) for a node that has none
+    /// (the inside of a folded constant). Untrusted advice: the trusted
+    /// check rejects a wrong entry.
+    pub map: Vec<usize>,
+}
+
+impl std::fmt::Debug for QueryTerm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("QueryTerm")
+            .field("nodes", &self.nodes.len())
+            .field("bits", &self.bits.len())
+            .field("roots", &self.roots)
+            .field("vars", &self.vars.len())
+            .field("sha256", &self.sha256())
+            .finish()
+    }
+}
+
+impl QueryTerm {
+    /// Flatten `assertions` and map the result onto the lowered `query`
+    /// (`query_vars`: the lowered DAG's `(name, width, Var node)` map).
+    /// Fails only on an ill-sorted term.
+    pub fn flatten(
+        assertions: &[crate::term::BoolTerm],
+        query: &QueryDag,
+        query_vars: &[(String, u32, usize)],
+    ) -> Result<QueryTerm, crate::eval::EvalError> {
+        let term = crate::dag::flatten(assertions)?;
+        let map = crate::dag::term_map(&term, &query.nodes, &query.bits, query_vars);
+        Ok(QueryTerm {
+            nodes: term.nodes,
+            bits: term.bits,
+            roots: term.roots,
+            vars: term.vars,
+            map,
+        })
+    }
+
+    /// The trusted check: is `query` a semantics-preserving rewrite of
+    /// this term along the map (`ordeal_lrat::check_term_dag`,
+    /// `kernel.spec.check_term_dag_sound`)?
+    pub fn check(&self, query: &QueryDag) -> Result<(), ordeal_lrat::TermError> {
+        ordeal_lrat::check_term_dag(
+            &self.nodes,
+            &self.bits,
+            &self.roots,
+            &self.map,
+            &query.nodes,
+            &query.bits,
+            &query.roots,
+        )
+    }
+
+    /// The canonical text the content hash covers: the encoding tag,
+    /// `nodes <n>`, one `<op> <args…>` line per node, `bits <bitstring>`,
+    /// `roots <r…>`, one `var <name> <width> <node>` line per variable,
+    /// then `map <m…>`.
+    pub fn canonical_text(&self) -> String {
+        let mut s = String::new();
+        s.push_str(TERM_ENCODING);
+        s.push('\n');
+        s.push_str("nodes ");
+        s.push_str(&self.nodes.len().to_string());
+        s.push('\n');
+        for n in &self.nodes {
+            let (op, args) = node_op(n);
+            s.push_str(op);
+            push_usizes(&mut s, &args);
+            s.push('\n');
+        }
+        s.push_str("bits ");
+        s.push_str(&bits_string(&self.bits));
+        s.push('\n');
+        s.push_str("roots");
+        push_usizes(&mut s, &self.roots);
+        s.push('\n');
+        for (name, width, node) in &self.vars {
+            s.push_str("var ");
+            s.push_str(name);
+            s.push(' ');
+            s.push_str(&width.to_string());
+            s.push(' ');
+            s.push_str(&node.to_string());
+            s.push('\n');
+        }
+        s.push_str("map");
+        push_usizes(&mut s, &self.map);
+        s.push('\n');
+        s
+    }
+
+    /// `sha256(canonical_text)` — the bundle's `term.sha256`. Integrity
+    /// only: the verdict rests on the recheck.
+    #[must_use]
+    pub fn sha256(&self) -> String {
+        sha256_hex(self.canonical_text().as_bytes())
+    }
+}
+
+/// An UNSAT certificate together with the query it refutes AND the term
+/// that query was lowered from (#192 phase 7, `ordeal-cert/v3`).
+/// [`TermCertificate::recheck`] is the strongest re-check: the trusted
+/// crate relates the term to the DAG (`check_term_dag`) and refutes the
+/// DAG (`check_query`), so an accepted re-check proves the TERM
+/// unsatisfiable — `kernel.spec.check_term_unsat_sound`.
+#[derive(Clone, Debug)]
+pub struct TermCertificate {
+    /// The v2 certificate: the v1 pair plus the lowered query.
+    pub query: QueryCertificate,
+    /// The term and its map onto `query.query`.
+    pub term: QueryTerm,
+}
+
+/// Why a [`TermCertificate::recheck`] could not confirm the proof.
+#[derive(Debug)]
+pub enum TermRecheckError {
+    /// The trusted crate rejected the term-to-DAG correspondence: the DAG
+    /// is not a rewrite of the term along the map.
+    Term(ordeal_lrat::TermError),
+    /// The v2 (query-level) re-check failed.
+    Query(QueryRecheckError),
+}
+
+impl std::fmt::Display for TermRecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TermRecheckError::Term(e) => write!(f, "trusted term re-check rejected: {e:?}"),
+            TermRecheckError::Query(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for TermRecheckError {}
+
+impl TermCertificate {
+    /// Re-establish the verdict at the TERM level, with zero trust in the
+    /// solver: `ordeal_lrat::check_term_dag` over the term, the map and the
+    /// lowered DAG, then the v2 recheck (`ordeal_lrat::check_query`).
+    /// `Ok(())` ⟹ no assignment to the term's variables makes every
+    /// asserted root true (`check_term_unsat_sound`).
+    pub fn recheck(&self) -> Result<(), TermRecheckError> {
+        self.term
+            .check(&self.query.query)
+            .map_err(TermRecheckError::Term)?;
+        self.query.recheck().map_err(TermRecheckError::Query)
+    }
+}
+
+/// A SAT witness together with the query it satisfies AND the term that
+/// query was lowered from (#192 phase 7, `ordeal-cert/v3`).
+/// [`TermSatCertificate::recheck`] relates the term to the DAG
+/// (`check_term_dag`), evaluates the DAG under the inputs
+/// (`check_query_model`) and, new, ties every advertised model value to
+/// the inputs with the proven `var_offset` / `check_input_value` through
+/// the term's own variable map — so an accepted re-check proves the TERM
+/// satisfied by the advertised model (`check_term_model_sound`, and the
+/// only untrusted step left is the variable's name).
+#[derive(Clone, Debug)]
+pub struct TermSatCertificate {
+    /// The v2 SAT certificate: the v1 witness plus the query and inputs.
+    pub query: QuerySatCertificate,
+    /// The term and its map onto `query.query`.
+    pub term: QueryTerm,
+}
+
+/// Why a [`TermSatCertificate::recheck`] could not confirm the model.
+#[derive(Debug)]
+pub enum TermModelRecheckError {
+    /// The trusted crate rejected the term-to-DAG correspondence.
+    Term(ordeal_lrat::TermError),
+    /// The v2 (query-level) re-check failed.
+    Query(QueryModelRecheckError),
+    /// A model binding is not a variable of the term, its variable has no
+    /// image in the DAG, or the value is not the input bits at that
+    /// image's offset (`check_input_value` rejected).
+    Binding(String),
+}
+
+impl std::fmt::Display for TermModelRecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TermModelRecheckError::Term(e) => {
+                write!(f, "trusted term re-check rejected: {e:?}")
+            }
+            TermModelRecheckError::Query(e) => write!(f, "{e}"),
+            TermModelRecheckError::Binding(n) => {
+                write!(
+                    f,
+                    "model binding '{n}' is not the term variable's input bits"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for TermModelRecheckError {}
+
+impl TermSatCertificate {
+    /// The term-level SAT re-check: `check_term_dag`, the v2 recheck
+    /// (witness, consistency, `check_query_model`), then every model
+    /// binding through the TERM's variable map: its `Var` node's image
+    /// under the map, that image's input offset (`var_offset`, proven),
+    /// and the value's bits at that offset (`check_input_value`, proven).
+    pub fn recheck(&self) -> Result<(), TermModelRecheckError> {
+        self.term
+            .check(&self.query.query)
+            .map_err(TermModelRecheckError::Term)?;
+        self.query.recheck().map_err(TermModelRecheckError::Query)?;
+        let dag = &self.query.query;
+        let inputs = &self.query.inputs.bits;
+        for (name, value) in &self.query.witness.model.assignments {
+            let bad = || TermModelRecheckError::Binding(name.clone());
+            let Some((_, width, node)) = self.term.vars.iter().find(|(n, _, _)| n == name) else {
+                return Err(bad());
+            };
+            let w = *width as usize;
+            if !matches!(self.term.nodes.get(*node), Some(k::DagNode::Var(vw)) if *vw == w) {
+                return Err(bad());
+            }
+            let image = *self.term.map.get(*node).ok_or_else(bad)?;
+            if image == crate::dag::NO_IMAGE {
+                return Err(bad());
+            }
+            let offset = ordeal_lrat::var_offset(&dag.nodes, image).map_err(|_| bad())?;
+            if !ordeal_lrat::check_input_value(inputs, offset, w, *value) {
+                return Err(bad());
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The result of [`crate::Solver::check_with_term`]: like
+/// [`QueryCheckResult`] but both decided verdicts also carry the term the
+/// query was lowered from — `Unsat` a [`TermCertificate`], `Sat` a
+/// [`TermSatCertificate`] — whose trusted re-check (term-to-DAG
+/// correspondence included) passed before it was returned.
+#[derive(Clone, Debug)]
+pub enum TermCheckResult {
+    /// Unsatisfiable: the certificate, the query it refutes and the term;
+    /// `check_term_dag` and `check_query` accepted before return.
+    Unsat(TermCertificate),
+    /// Satisfiable: the witness, the query, the inputs and the term;
+    /// `check_term_dag`, `check_query_model` and the binding checks
+    /// accepted before return.
+    Sat(TermSatCertificate),
     /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
     Unknown,
 }

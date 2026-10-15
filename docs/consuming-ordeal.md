@@ -351,7 +351,67 @@ confirms the printed model agrees with the carried inputs.
 What a v2 recheck does *not* cover (still the solver's word): the
 untrusted DAG builder's choice of DAG for your assertions (now visible in
 the bundle), canonicalization, the sliver and the SMT-LIB front end —
-`docs/formal-verification.md` has the list.
+`docs/formal-verification.md` has the list. The first two are what
+`ordeal-cert/v3` closes.
+
+## Verdicts as evidence about the TERM: `ordeal-cert/v3`
+
+Since v0.31.0 (#192 phase 7, TR-069) a certificate can carry the **term
+you asked** next to the DAG the solver built from it, and the trusted
+crate verifies — before a verdict is returned — that the DAG is a
+semantics-preserving rewrite of the term (`ordeal_lrat::check_term_dag`,
+`kernel.spec.check_term_unsat_sound` / `check_term_model_sound`). The
+term block (`ordeal-term/v1`) is your assertions flattened with no
+canonicalization and no hash-consing — variables shared by name,
+constants interned, every other subterm its own node, in the `query`
+block's node spelling — plus the variable names and an index map
+`term node → query node` (`18446744073709551615` = no image: the inside
+of a folded constant). Opt in:
+
+```rust
+use ordeal::{Solver, TermCheckResult};
+
+match solver.check_with_term() {
+    TermCheckResult::Unsat(cert) => {
+        // cert.query: the v2 certificate (cnf + lrat + the lowered DAG), still recheck()-able.
+        // cert.term:  the term as asked (nodes, bits, roots, vars) and the map onto the DAG.
+        cert.recheck().expect("the trusted crate relates the term to the DAG and refutes the DAG");
+        #[cfg(feature = "cert-bundle")]
+        let json = cert.to_cert_v3(&attests);          // "format": "ordeal-cert/v3"
+    }
+    TermCheckResult::Sat(cert) => {
+        // cert.query: the v2 SAT certificate (witness, DAG, inputs);  cert.term: as above.
+        cert.recheck().expect("term-to-DAG, the model, and every binding through the term's variables");
+        #[cfg(feature = "cert-bundle")]
+        let json = cert.to_cert_v3(&attests);          // "format": "ordeal-cert/v3", "verdict": "sat"
+    }
+    TermCheckResult::Unknown => { /* no claim */ }
+}
+```
+
+To verify a received v3 bundle: `TermCertificate::from_cert_v3(json)` /
+`TermSatCertificate::from_cert_v3(json)` (every content hash verified
+before it returns — four on `unsat`, six on `sat`) then
+`bundle.recheck()`. Without the feature, decode `term` and `query` and
+call `ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots,
+term.map, query.nodes, query.bits, query.roots)` before the v2 calls;
+on `sat`, bind each printed model value with
+`ordeal_lrat::check_input_value(inputs.bits, ordeal_lrat::var_offset(query.nodes,
+term.map[term.vars[name].node]), width, value)` (both proven, 7d). At
+the command line, `ordeal check foo.smt2 --format json --with-term`
+prints the `--with-query` output plus the `term` block inside
+`certificate` (JSON only); `--with-query` and the default output are
+byte-identical to v0.30.0.
+
+**What to compare it against.** Flatten your own assertions with
+`ordeal::dag::flatten` (or by hand: it is a post-order, left-to-right
+walk with variables shared by name) and compare `term.sha256` with
+`QueryTerm::canonical_text` of the result, or compare the `nodes` /
+`vars` / `roots` lists; the `map` is the solver's and does not need to
+be reproduced. What a v3 recheck does *not* cover: that flattening
+(1:1, no semantic decision), the variable names, the sliver and the
+front ends. A v1 or v2 reader refuses a v3 bundle by its `format`, and
+the v3 readers refuse v1 and v2, so nobody silently downgrades.
 
 ## Supply chain: SBOM and VEX
 

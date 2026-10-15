@@ -293,6 +293,90 @@ depth; the answer rests on `check_query_model`. The default `check` /
 trusted sat gate is where the trusted unsat gate is, `check_with_query`
 and `ordeal check --with-query`.
 
+## The term direction: the certificate-carried term (#192 phase 7 / TR-069)
+
+Phases 4–6 prove both verdicts about the **lowered DAG** a bundle
+carries — the solver's DAG, after canonicalization (`canon.rs`:
+commutative operands reordered, comparisons mirrored, constant-valued
+subterms folded) and hash-consing (`dag.rs`). Phase 7 closes that step:
+`kernel::check_term_dag` takes the TERM too — the caller's assertions
+flattened as they were asked (`dag::flatten`: variables shared by name
+and nothing else), in the same `DagNode` spelling, with the untrusted
+index map `term node → DAG node` — and verifies, node by node, that the
+DAG is a semantics-preserving rewrite of the term:
+
+```rust
+pub fn check_term_dag(t: &[DagNode], tbits: &[bool], troots: &[usize], map: &[usize],
+                      ns: &[DagNode], bits: &[bool], roots: &[usize]) -> Result<(), TermError>
+```
+
+A mapped variable must map to an unused variable of its width (the map
+is injective on variables — the one check whose omission would be
+unsound, since aliasing two term variables makes the DAG *more*
+constrained); a constant to the same constant; an operator to the same
+operator over its operands' images, up to a commutative swap or a
+comparison mirror, or — when its value does not depend on the inputs:
+its cone reads no variable, or only in a branch of an `ite` that a
+known constant condition does not select, or only in an operand of a
+boolean `and` / `or` that a known constant operand decides — to a
+constant of its width and of its value, as the proven `encode` and
+`simulate` compute it at the all-false assignment; the roots correspond
+one for one. `lean/TermCheck.lean` (namespace `kernel.spec`) proves,
+`sorry`-free and axiom-clean (pinned in `lean/AxiomCheck.lean`):
+
+```lean
+theorem check_term_dag_sound (t : Slice DagNode) (tbits : Slice Bool) (troots map : Slice Usize)
+    (ns : Slice DagNode) (bits : Slice Bool) (roots : Slice Usize)
+    (h : kernel.check_term_dag t tbits troots map ns bits roots = ok (core.result.Result.Ok ())) :
+    ∀ inp0 inp1 : List Bool, VarsAgree t.val ns.val map.val inp0 inp1 →
+      ∀ k (hk : k < troots.val.length),
+        dagBool inp0 tbits.val t.val (troots.val[k]).val
+          = dagBool inp1 bits.val ns.val (roots.val.getD k 0#usize).val
+
+theorem check_term_unsat_sound … (ht : kernel.check_term_dag … = ok (Ok ()))
+    (hq : kernel.check_query ns bits roots hints steps = ok (Ok cnf)) :
+    ∀ inp0 : List Bool, ¬ (∀ k (hk : k < troots.val.length),
+      dagBool inp0 tbits.val t.val (troots.val[k]).val = true)
+
+theorem check_term_model_sound … (ht : …) (hm : kernel.check_query_model ns bits roots inp1 = ok (Ok ())) :
+    ∃ inp0 : List Bool, VarsAgree t.val ns.val map.val inp0 inp1.val ∧
+      ∀ k (hk : k < troots.val.length), dagBool inp0 tbits.val t.val (troots.val[k]).val = true
+
+theorem term_verdicts_exclusive … (ht) (hq) (hm) : False
+
+theorem check_input_value_sound (inp : Slice Bool) (offset w : Usize) (value : U128)
+    (h : kernel.check_input_value inp offset w value = ok true) :
+    ∀ k < w.val, inp.val.getD (offset.val + k) false = value.val.testBit k
+```
+
+`VarsAgree t ns map inp0 inp1` says the two input assignments agree on
+the variables through the map (a mapped term variable, at its offset
+`dagNin` of the prefix before it, reads the same bits as its image at
+its own offset); `check_term_unsat_sound` is `check_query_sound` pulled
+back through the pushforward of a term assignment,
+`check_term_model_sound` is `check_query_model_sound` pushed through the
+pullback of a DAG assignment, both over `corr_values` (every mapped term
+node has the value of its image — the induction over the term, with
+`const_indep`: a constant-valued node's value does not depend on the
+inputs). `check_input_value_sound` (7d) is `check_binding_sound`'s twin
+at the DAG level and, with `var_offset` (proven to compute `dagNin` of a
+prefix), ties an advertised model value to the term variable's input
+bits.
+
+What a v3 recheck therefore proves: **the term the bundle carries — the
+question as asked, in the `dagSim` semantics — is unsatisfiable, or is
+satisfied by the advertised model.** What it does NOT prove, the
+remaining trust on the query path, stated plainly: that the term block
+is the caller's assertions (`dag::flatten`, a 1:1 serialization with no
+semantic decision, which a consumer holding the assertions re-runs and
+compares by hash), the variable names, the sliver and the front ends.
+`canon.rs`, `dag.rs`, `dag::term_map` and `QueryInputs::from_model` are
+no longer trusted: a wrong decision in any of them is rejected by the
+trusted check, and the solver degrades the verdict to `Unknown`
+(`Solver::term_verdict`, `term_sat_verdict`). The default paths and
+`--with-query` are unchanged; the trusted term gate is
+`Solver::check_with_term` and `ordeal check --with-term`.
+
 ## Out of scope (explicitly NOT proven)
 
 - **Certificate text parsing.** The public entry point
@@ -383,7 +467,14 @@ and `ordeal check --with-query`.
   the model is evaluated against the DAG by the proven
   `check_query_model`, above — on the `check_with_query` path), plus the
   builder's variable map: that the `Var` node the model value is written
-  into is the one made for that name.
+  into is the one made for that name. **Since #192 phase 7 / TR-069**
+  (the section above) the DAG builder and canonicalization leave this
+  list on the `check_with_term` / `--with-term` path: the trusted
+  `check_term_dag` relates the term a v3 bundle carries to the DAG, and
+  the proven `var_offset` / `check_input_value` bind the model values
+  through the term's own variable map. What stays: the 1:1 flattening of
+  the assertions into the term block, the variable names, the sliver and
+  the front ends.
   `dag::strash_hints` is untrusted by design: it only reproduces the
   sharing decisions of the old `Aig::and` strash so the shipped CNF stays
   byte-identical, and `compact_sound` holds for any hints. The shipped
@@ -451,7 +542,10 @@ import QueryCheck
 #print axioms kernel.spec.check_sat_sound
 #print axioms kernel.spec.check_query_sound
 #print axioms kernel.spec.check_query_model_sound
-#print axioms kernel.spec.query_verdicts_exclusive' > /tmp/ax.lean
+#print axioms kernel.spec.query_verdicts_exclusive
+#print axioms kernel.spec.check_term_unsat_sound
+#print axioms kernel.spec.check_term_model_sound
+#print axioms kernel.spec.check_input_value_sound' > /tmp/ax.lean
 lake env lean /tmp/ax.lean          # inspect the axiom lists (three standard axioms each)
 lake build AxiomCheck               # the pinned lists, as a gate
 grep -c '^axiom' Kernel.lean        # expect 0 (CI-gated)

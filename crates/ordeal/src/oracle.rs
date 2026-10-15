@@ -1252,6 +1252,59 @@ mod tests {
         }
     }
 
+    /// `Solver::check_with_term` as an engine (#192 phase 7): every decided
+    /// verdict passed the trusted term-to-DAG check and its recheck.
+    fn ordeal_engine_with_term(assertions: &[BoolTerm]) -> EngineVerdict {
+        let mut solver = crate::solver::Solver::new();
+        for a in assertions {
+            solver.assert(a.clone());
+        }
+        match solver.check_with_term() {
+            crate::query::TermCheckResult::Sat(c) => {
+                c.recheck()
+                    .expect("a returned Sat term certificate re-checks");
+                EngineVerdict::Sat(Env::from_iter(
+                    c.query.witness.model.assignments.iter().cloned(),
+                ))
+            }
+            crate::query::TermCheckResult::Unsat(c) => {
+                c.recheck()
+                    .expect("a returned Unsat term certificate re-checks");
+                EngineVerdict::Unsat
+            }
+            crate::query::TermCheckResult::Unknown => EngineVerdict::Unknown,
+        }
+    }
+
+    // rivet: verifies VER-069
+    /// #192 phase 7: the seeded corpus through `check_with_term` against Z3
+    /// — every decided verdict agrees, every one passed the trusted
+    /// term-to-DAG correspondence check before it was returned, and none
+    /// degraded to `Unknown` on a query `check_with_query` decides.
+    #[test]
+    fn term_differential_through_check_with_term() {
+        let corpus = gen_corpus(0x0D1F_FCEC, 100);
+        let (mut sats, mut unsats) = (0usize, 0usize);
+        for (i, query) in corpus.iter().enumerate() {
+            let with_query = ordeal_engine_with_query(query);
+            match ordeal_engine_with_term(query) {
+                EngineVerdict::Sat(_) => sats += 1,
+                EngineVerdict::Unsat => unsats += 1,
+                EngineVerdict::Unknown => assert!(
+                    matches!(with_query, EngineVerdict::Unknown),
+                    "query {i}: check_with_term degraded a decided query to Unknown"
+                ),
+            }
+            if let Some(d) = differential_check(query, ordeal_engine_with_term) {
+                panic!("query {i}: ordeal(check_with_term)-vs-Z3 disagreement — {d:?}");
+            }
+        }
+        assert!(
+            sats >= 20 && unsats >= 20,
+            "both verdicts must be exercised: sat {sats}, unsat {unsats}"
+        );
+    }
+
     // rivet: verifies VER-065
     /// #192 phase 6: the SAT direction through `check_with_query` against
     /// Z3 over the seeded corpus — every `Sat` here was evaluated to true

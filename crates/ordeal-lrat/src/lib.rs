@@ -399,6 +399,17 @@ pub use kernel::{QueryError, check_query as check_query_steps, dag_wf};
 /// the assignment must cover. See [`kernel::check_query_model`].
 pub use kernel::{ModelError, check_query_model, dag_nin};
 
+/// The term-to-DAG correspondence check (issue #192 phase 7,
+/// `ordeal-cert/v3`): is the lowered DAG a semantics-preserving rewrite of
+/// the TERM — the caller's assertions flattened as they were asked —
+/// along an untrusted index map? Composed with [`check_query`] /
+/// [`check_query_model`], an accepted bundle then proves the term, not
+/// only the DAG the solver built from it: `kernel.spec.check_term_unsat_sound`,
+/// `check_term_model_sound` (`lean/TermCheck.lean`). [`var_offset`] and
+/// [`check_input_value`] are the proven model binding at the DAG level
+/// (phase 7d). See [`kernel::check_term_dag`].
+pub use kernel::{TermError, check_input_value, check_term_dag, var_offset};
+
 /// Why a query re-check ([`check_query`]) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryCheckError {

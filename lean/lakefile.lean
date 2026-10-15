@@ -119,6 +119,8 @@ lean_lib «Sound» {}
 -- AxiomCheck.lean).
 @[default_target] lean_lib «QueryCheck» {}
 
+@[default_target] lean_lib «TermCheck» {}
+
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —
 -- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),

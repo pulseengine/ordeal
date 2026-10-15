@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!(
-                "Usage: ordeal check [FILE | -] [--format json] [--with-query]   (reads stdin if FILE is '-' or omitted)"
+                "Usage: ordeal check [FILE | -] [--format json] [--with-query | --with-term]   (reads stdin if FILE is '-' or omitted)"
             );
             eprintln!(
                 "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]"
@@ -104,9 +104,21 @@ fn run_check(args: &[String]) -> ExitCode {
     // trusted crate before `unsat` is printed. Opt-in: without the flag the
     // output is byte-identical to earlier releases.
     let with_query = rest.contains(&"--with-query");
-    let rest: Vec<&str> = rest.into_iter().filter(|a| *a != "--with-query").collect();
+    // `--with-term` (#192 phase 7): the certificate also carries the term
+    // the query was lowered from (the `ordeal-cert/v3` `term` block),
+    // re-checked against the query by the trusted crate before a verdict
+    // is printed. Opt-in, JSON only, a superset of `--with-query`.
+    let with_term = rest.contains(&"--with-term");
+    let rest: Vec<&str> = rest
+        .into_iter()
+        .filter(|a| *a != "--with-query" && *a != "--with-term")
+        .collect();
     if with_query && format != Format::Json {
         eprintln!("ordeal: --with-query requires --format json");
+        return ExitCode::from(2);
+    }
+    if with_term && format != Format::Json {
+        eprintln!("ordeal: --with-term requires --format json");
         return ExitCode::from(2);
     }
     let path = rest.first().copied();
@@ -128,6 +140,18 @@ fn run_check(args: &[String]) -> ExitCode {
         },
     };
 
+    if with_term {
+        // The term-carrying solve (#192 phase 7): a verdict is only ever
+        // printed after the trusted crate related the term to the query
+        // (`check_term_dag`) and re-checked the proof or the model.
+        return match smtlib::solve_str_with_term(&input) {
+            Ok((result, declared)) => print_term_outcome_json(result.as_ref(), &declared),
+            Err(e) => {
+                eprintln!("{e}");
+                ExitCode::from(2)
+            }
+        };
+    }
     if with_query {
         // The query-carrying solve (#192 phase 4): an `unsat` is only ever
         // printed after the trusted crate re-encoded the query and
@@ -225,6 +249,94 @@ fn print_query_outcome_json(
             ExitCode::SUCCESS
         }
         Some(QueryCheckResult::Unknown) => {
+            print_outcome_json(Some(&WitnessCheckResult::Unknown), declared)
+        }
+        None => print_outcome_json(None, declared),
+    }
+}
+
+/// The `term` block (#192 phase 7) as a JSON object body — the same
+/// fields, spelling and hash as the `ordeal-cert/v3` bundle's `term`
+/// block (`QueryTerm::canonical_text` / `sha256`).
+fn term_json(t: &ordeal::QueryTerm) -> String {
+    let nodes: Vec<String> = t
+        .nodes
+        .iter()
+        .map(|n| {
+            let (op, args) = ordeal::query::node_op(n);
+            let mut items = vec![format!("\"{op}\"")];
+            items.extend(args.iter().map(ToString::to_string));
+            format!("[{}]", items.join(","))
+        })
+        .collect();
+    let list = |xs: &[usize]| {
+        xs.iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let vars: Vec<String> = t
+        .vars
+        .iter()
+        .map(|(name, width, node)| {
+            format!(
+                "{{\"name\":\"{}\",\"width\":{},\"node\":{}}}",
+                json_escape(name),
+                width,
+                node
+            )
+        })
+        .collect();
+    format!(
+        "{{\"encoding\":\"{}\",\"num_nodes\":{},\"nodes\":[{}],\"bits\":\"{}\",\"roots\":[{}],\"vars\":[{}],\"map\":[{}],\"sha256\":\"{}\"}}",
+        ordeal::query::TERM_ENCODING,
+        t.nodes.len(),
+        nodes.join(","),
+        ordeal::query::bits_string(&t.bits),
+        list(&t.roots),
+        vars.join(","),
+        list(&t.map),
+        t.sha256()
+    )
+}
+
+/// `--format json --with-term`: [`print_query_outcome_json`]'s shape with
+/// the `term` block appended inside `certificate` — after `query` on
+/// `unsat`, after `inputs` on `sat`. `unknown` prints exactly as without
+/// the flag.
+fn print_term_outcome_json(
+    result: Option<&ordeal::TermCheckResult>,
+    declared: &[(String, u32)],
+) -> ExitCode {
+    use ordeal::TermCheckResult;
+    match result {
+        Some(TermCheckResult::Unsat(cert)) => {
+            let lrat = cert.query.certificate.lrat_text().unwrap_or_default();
+            println!(
+                "{{\"tool\":\"ordeal\",\"version\":\"{}\",\"verdict\":\"unsat\",\"certificate\":{{\"clauses\":[{}],\"lrat\":\"{}\",\"query\":{},\"term\":{}}}}}",
+                env!("CARGO_PKG_VERSION"),
+                clauses_json(&cert.query.certificate.cnf),
+                json_escape(lrat),
+                query_json(&cert.query.query),
+                term_json(&cert.term)
+            );
+            ExitCode::SUCCESS
+        }
+        Some(TermCheckResult::Sat(cert)) => {
+            let head = format!(
+                "{{\"tool\":\"ordeal\",\"version\":\"{}\"",
+                env!("CARGO_PKG_VERSION")
+            );
+            let extra = format!(
+                ",\"query\":{},\"inputs\":{},\"term\":{}",
+                query_json(&cert.query.query),
+                inputs_json(&cert.query.inputs),
+                term_json(&cert.term)
+            );
+            println!("{}", sat_json(&head, &cert.query.witness, declared, &extra));
+            ExitCode::SUCCESS
+        }
+        Some(TermCheckResult::Unknown) => {
             print_outcome_json(Some(&WitnessCheckResult::Unknown), declared)
         }
         None => print_outcome_json(None, declared),
@@ -469,6 +581,10 @@ fn banner() {
     println!("                             query, re-checked by the trusted crate;");
     println!("                             the sat certificate carries the query");
     println!("                             and the input assignment it satisfies");
+    println!("  --with-term                (check, with --format json) as --with-query,");
+    println!("                             plus the term the query was lowered from,");
+    println!("                             re-checked against the query by the");
+    println!("                             trusted crate (ordeal-cert/v3)");
     println!();
     println!("engine: certificate-checked pipeline (bit-blast -> AIG -> Tseitin ->");
     println!("own CDCL core -> LRAT). SAT verdicts carry self-checked models;");
