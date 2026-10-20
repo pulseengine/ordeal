@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-10-20
+
+**Patch: a sliver soundness fix** (#247). A query variable named like one
+of the sliver's fresh variables (`$sel:…` / `$uf:…`) could be identified
+with a read or call. The result was a certified `Unsat` for a satisfiable
+extended query. Also fixed: `eval_const` constancy (#248). The toolchain
+pin moves to varve layer `2026.10.23`.
+
 ### Fixed
 - **Soundness: a sliver fresh variable could capture a query variable**
   (#247, TR-071). `sliver::lower` named its fresh read and call variables
@@ -1756,7 +1764,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.32.1...HEAD
+[0.32.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.1
 [0.32.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.0
 [0.31.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.31.0
 [0.30.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.30.0

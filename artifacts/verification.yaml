@@ -1571,7 +1571,7 @@ artifacts:
   - id: VER-071
     type: sw-verification
     title: Fresh sliver names never capture a query variable; eval_const is structural (TR-071)
-    status: implemented
+    status: verified
     release: v0.32.1
     description: "sliver::lowering::reserved_looking_query_names_stay_distinct_from_fresh_variables: 400 random queries pairing a select, a pure_call or a random term with a core variable named $sel:a:k, $sel:b:k, $uf:f:k or $sel:a:#k; on a random model the extended query and the lowered core agree; the reported query's fresh read is renamed $sel:a:5'. solver::tests::a_query_variable_named_like_a_fresh_read_is_not_captured: select(a, 5) != $sel:a:5 and f(x) != $uf:f:0 are Sat through check_sliver. oracle::sliver_oracle_tests::sliver_diff_reserved_looking_names: 12 such queries are Sat and agree with Z3's array/UF theories. sliver::array::eval_const_refuses_a_base_dependent_term_two_fills_agree_on: (a[7] + 1) & 0xFE is None; the store-hit twin is Some(2); a read through a store-hit index resolves. Mutation controls: disabling Lowering::fresh's collision loop fails the two #247 tests; disabling eval_const's base check fails the two base-read tests."
     tags: [sliver, soundness, negative-control]

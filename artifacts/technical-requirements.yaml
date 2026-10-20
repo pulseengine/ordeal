@@ -1905,7 +1905,7 @@ artifacts:
   - id: TR-071
     type: sw-req
     title: "The sliver lowering never identifies a query variable with a fresh read or call variable, and eval_const decides constancy soundly (#247, #248)"
-    status: implemented
+    status: verified
     release: v0.32.1
     description: "Issue #247: sliver::lower named its fresh variables $sel:<array>:<index>, $sel:<array>:#<n> and $uf:<fn>:<n> without checking them against the variables of the query. A query variable with such a name was silently identified with the read or call, so select(a, 5) != $sel:a:5 (satisfiable) lowered to $sel:a:5 != $sel:a:5 and check_sliver returned a certified Unsat. The checker was correct about the lowered core; the trusted lowering changed the meaning of the query. Ordeal shall generate fresh names distinct from every variable of the query and from each other (deterministically: a query with no such names keeps the names it always had). Issue #248: sliver::eval_const decided constancy by evaluating under two base fills, which two-point agreement does not decide ((a[7] + 1) & 0xFE agrees at 0x00 and 0xFF but is 2 at 0x01). Ordeal shall report a term constant only when it is ground and no select falls through its store chain to the base array."
     tags: [sliver, soundness, regression, loom]
