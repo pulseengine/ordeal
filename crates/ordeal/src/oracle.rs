@@ -1512,6 +1512,47 @@ mod sliver_oracle_tests {
         assert!(unsats > 0, "corpus produced no UNSAT verdicts");
     }
 
+    /// #247: query variables named like the sliver's fresh variables
+    /// (`$sel:…`, `$uf:…`) stay distinct from the reads and calls they look
+    /// like — ordeal's verdict on the lowered core matches Z3's array/UF
+    /// theories, which keep the names apart. Each query is satisfiable, so a
+    /// captured name shows up as an `Unsat` disagreement.
+    // rivet: verifies VER-071
+    #[test]
+    fn sliver_diff_reserved_looking_names() {
+        let sel = |a: &str, k: u128| ExtBvTerm::Select {
+            array: Box::new(ArrayTerm::Var { name: a.into() }),
+            index: Box::new(ExtBvTerm::Core(BvTerm::Const {
+                value: k,
+                sort: Sort::new(32),
+            })),
+        };
+        let mut queries = Vec::new();
+        for k in 0..4u128 {
+            queries.push(vec![ExtBoolTerm::Ne(
+                sel("a", k),
+                v8(&format!("$sel:a:{k}")),
+            )]);
+            queries.push(vec![ExtBoolTerm::Ne(
+                call("f", vec![v8("x")]),
+                v8(&format!("$uf:f:{k}")),
+            )]);
+            queries.push(vec![ExtBoolTerm::Ne(
+                sel("a", k),
+                v8(&format!("$sel:a:{k}'")),
+            )]);
+        }
+        for (i, q) in queries.iter().enumerate() {
+            match ordeal_engine(&crate::sliver::lower(q).expect("in-sliver")) {
+                EngineVerdict::Sat(_) => {}
+                other => panic!("query {i} is satisfiable; ordeal said {other:?}: {q:?}"),
+            }
+            if let Some(d) = sliver_differential(q) {
+                panic!("query {i}: ordeal-vs-Z3 disagreement — {d:?}");
+            }
+        }
+    }
+
     /// UV-014: bad sorts are rejected out of the sliver.
     ///
     /// A symbolic BV32 index is no longer rejected — that is TR-028, and it

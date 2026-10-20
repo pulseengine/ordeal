@@ -29,7 +29,7 @@
 
 use crate::eval::{self, Env, EvalError};
 use crate::term::{BoolTerm, BvTerm, Sort};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// An array-sorted term: `Array(BV32 → BV8)`, non-extensional.
 #[derive(Clone, Debug)]
@@ -209,6 +209,9 @@ pub struct Lowered {
 /// [`Lowered`]. See [`Lowered`] for why a caller might want it.
 pub fn lower_traced(assertions: &[ExtBoolTerm]) -> Result<Lowered, SliverError> {
     let mut low = Lowering::default();
+    for a in assertions {
+        names_bool(a, &mut low.taken);
+    }
     let mut out = Vec::with_capacity(assertions.len());
     for a in assertions {
         out.push(low.lower_bool(a)?);
@@ -252,6 +255,11 @@ struct ArrayRead {
 struct Lowering {
     /// Counter for unique fresh call-result variable names.
     next_id: usize,
+    /// Every name a fresh variable must not take (#247): the core
+    /// variables of the query, then each fresh name as it is issued. A
+    /// fresh name that collided with a query variable would silently
+    /// identify the read or call with it — a certified wrong `Unsat`.
+    taken: BTreeSet<String>,
     /// Memo: `(base_array, structural key of the lowered index)` → its fresh
     /// BV8 read variable. Keyed by the index *term*, not a `u32`, so a
     /// symbolic index memoizes exactly like a concrete one: the same index
@@ -279,6 +287,20 @@ struct Lowering {
 }
 
 impl Lowering {
+    /// A fresh variable name based on `base`, distinct from every query
+    /// variable and every name issued so far (#247): `'` is appended until
+    /// the name is unused. Deterministic — the same query always gets the
+    /// same names, and a query that uses no `$`-prefixed names keeps the
+    /// names it always had.
+    fn fresh(&mut self, base: String) -> String {
+        let mut name = base;
+        while self.taken.contains(&name) {
+            name.push('\'');
+        }
+        self.taken.insert(name.clone());
+        name
+    }
+
     /// Lower an extended boolean term to a pure-core [`BoolTerm`].
     fn lower_bool(&mut self, t: &ExtBoolTerm) -> Result<BoolTerm, SliverError> {
         let cmp = |this: &mut Self, a: &ExtBvTerm, b: &ExtBvTerm| {
@@ -515,9 +537,9 @@ impl Lowering {
         // their `Lowered::reads` provenance; a symbolic index has no `u32` to
         // report, so it gets a counter-named variable instead.
         let name = match as_const(index) {
-            Some(c) => format!("$sel:{array}:{c}"),
+            Some(c) => self.fresh(format!("$sel:{array}:{c}")),
             None => {
-                let n = format!("$sel:{array}:#{}", self.next_id);
+                let n = self.fresh(format!("$sel:{array}:#{}", self.next_id));
                 self.next_id += 1;
                 n
             }
@@ -589,7 +611,7 @@ impl Lowering {
         if let Some(v) = self.call_memo.get(&key) {
             return Ok(v.clone());
         }
-        let var_name = format!("$uf:{name}:{}", self.next_id);
+        let var_name = self.fresh(format!("$uf:{name}:{}", self.next_id));
         self.next_id += 1;
         let result = BvTerm::Var {
             name: var_name.clone(),
@@ -1060,17 +1082,96 @@ pub fn eval_const(t: &ExtBvTerm) -> Option<u128> {
     if !ground_bv(t) {
         return None;
     }
-    // Dual-fill check: evaluate under two different total base fills; a read
-    // that misses every store (i.e. actually consults the base array) will
-    // disagree between them, and the term is not constant.
-    let zero = SliverModel::default();
-    let ones = SliverModel {
-        base_fill: 0xFF,
-        ..Default::default()
-    };
-    let v0 = eval_ext_bv(t, &zero).ok()?;
-    let v1 = eval_ext_bv(t, &ones).ok()?;
-    if v0 == v1 { Some(v0) } else { None }
+    // Constancy is decided structurally (#248), not by sampling: a ground
+    // term is constant iff no `select` in it falls through its store chain
+    // to the base array (whose contents are free). Index and store-index
+    // values are computable here because the term is ground and every read
+    // they make is checked the same way first. Conservative: every branch of
+    // an `ite` is checked, so a term may be refused although its taken
+    // branch is constant — never the other way round.
+    fn reaches_base(t: &ExtBvTerm) -> bool {
+        match t {
+            ExtBvTerm::Core(_) => false,
+            ExtBvTerm::Op(op) => match op.as_ref() {
+                ExtOp::Add(a, b)
+                | ExtOp::Sub(a, b)
+                | ExtOp::Mul(a, b)
+                | ExtOp::Udiv(a, b)
+                | ExtOp::Urem(a, b)
+                | ExtOp::Sdiv(a, b)
+                | ExtOp::Srem(a, b)
+                | ExtOp::And(a, b)
+                | ExtOp::Or(a, b)
+                | ExtOp::Xor(a, b)
+                | ExtOp::Shl(a, b)
+                | ExtOp::Lshr(a, b)
+                | ExtOp::Ashr(a, b)
+                | ExtOp::Rotr(a, b)
+                | ExtOp::Rotl(a, b)
+                | ExtOp::Concat(a, b) => reaches_base(a) || reaches_base(b),
+                ExtOp::Not(a)
+                | ExtOp::Neg(a)
+                | ExtOp::Extract { arg: a, .. }
+                | ExtOp::ZeroExt { arg: a, .. }
+                | ExtOp::SignExt { arg: a, .. } => reaches_base(a),
+                ExtOp::Ite { cond, then_, else_ } => {
+                    reaches_base_bool(cond) || reaches_base(then_) || reaches_base(else_)
+                }
+            },
+            ExtBvTerm::Select { array, index } => {
+                if reaches_base(index) {
+                    return true;
+                }
+                match eval_ext_bv(index, &SliverModel::default()) {
+                    Ok(idx) => chain_reaches_base(array, idx as u32),
+                    Err(_) => true,
+                }
+            }
+            ExtBvTerm::PureCall { .. } => true,
+        }
+    }
+    fn reaches_base_bool(t: &ExtBoolTerm) -> bool {
+        match t {
+            ExtBoolTerm::Eq(a, b)
+            | ExtBoolTerm::Ne(a, b)
+            | ExtBoolTerm::Ult(a, b)
+            | ExtBoolTerm::Ule(a, b)
+            | ExtBoolTerm::Ugt(a, b)
+            | ExtBoolTerm::Uge(a, b)
+            | ExtBoolTerm::Slt(a, b)
+            | ExtBoolTerm::Sle(a, b)
+            | ExtBoolTerm::Sgt(a, b)
+            | ExtBoolTerm::Sge(a, b) => reaches_base(a) || reaches_base(b),
+            ExtBoolTerm::Not(x) => reaches_base_bool(x),
+            ExtBoolTerm::And(a, b) | ExtBoolTerm::Or(a, b) => {
+                reaches_base_bool(a) || reaches_base_bool(b)
+            }
+        }
+    }
+    /// Does reading `array[idx]` fall through every store to the base?
+    fn chain_reaches_base(array: &ArrayTerm, idx: u32) -> bool {
+        match array {
+            ArrayTerm::Var { .. } => true,
+            ArrayTerm::Store {
+                array,
+                index,
+                value,
+            } => {
+                if reaches_base(index) {
+                    return true;
+                }
+                match eval_ext_bv(index, &SliverModel::default()) {
+                    Ok(i) if i as u32 == idx => reaches_base(value),
+                    Ok(_) => chain_reaches_base(array, idx),
+                    Err(_) => true,
+                }
+            }
+        }
+    }
+    if reaches_base(t) {
+        return None;
+    }
+    eval_ext_bv(t, &SliverModel::default()).ok()
 }
 
 pub fn eval_ext_bv(t: &ExtBvTerm, model: &SliverModel) -> Result<u128, EvalError> {
@@ -1078,6 +1179,150 @@ pub fn eval_ext_bv(t: &ExtBvTerm, model: &SliverModel) -> Result<u128, EvalError
 }
 
 // ─── Shared test builders ────────────────────────────────────────────────────
+
+/// Collect the core variable names of an extended boolean term (#247).
+fn names_bool(t: &ExtBoolTerm, out: &mut BTreeSet<String>) {
+    match t {
+        ExtBoolTerm::Eq(a, b)
+        | ExtBoolTerm::Ne(a, b)
+        | ExtBoolTerm::Ult(a, b)
+        | ExtBoolTerm::Ule(a, b)
+        | ExtBoolTerm::Ugt(a, b)
+        | ExtBoolTerm::Uge(a, b)
+        | ExtBoolTerm::Slt(a, b)
+        | ExtBoolTerm::Sle(a, b)
+        | ExtBoolTerm::Sgt(a, b)
+        | ExtBoolTerm::Sge(a, b) => {
+            names_bv(a, out);
+            names_bv(b, out);
+        }
+        ExtBoolTerm::Not(x) => names_bool(x, out),
+        ExtBoolTerm::And(a, b) | ExtBoolTerm::Or(a, b) => {
+            names_bool(a, out);
+            names_bool(b, out);
+        }
+    }
+}
+
+fn names_bv(t: &ExtBvTerm, out: &mut BTreeSet<String>) {
+    match t {
+        ExtBvTerm::Core(bv) => names_core_bv(bv, out),
+        ExtBvTerm::Op(op) => match op.as_ref() {
+            ExtOp::Add(a, b)
+            | ExtOp::Sub(a, b)
+            | ExtOp::Mul(a, b)
+            | ExtOp::Udiv(a, b)
+            | ExtOp::Urem(a, b)
+            | ExtOp::Sdiv(a, b)
+            | ExtOp::Srem(a, b)
+            | ExtOp::And(a, b)
+            | ExtOp::Or(a, b)
+            | ExtOp::Xor(a, b)
+            | ExtOp::Shl(a, b)
+            | ExtOp::Lshr(a, b)
+            | ExtOp::Ashr(a, b)
+            | ExtOp::Rotr(a, b)
+            | ExtOp::Rotl(a, b)
+            | ExtOp::Concat(a, b) => {
+                names_bv(a, out);
+                names_bv(b, out);
+            }
+            ExtOp::Not(a)
+            | ExtOp::Neg(a)
+            | ExtOp::Extract { arg: a, .. }
+            | ExtOp::ZeroExt { arg: a, .. }
+            | ExtOp::SignExt { arg: a, .. } => names_bv(a, out),
+            ExtOp::Ite { cond, then_, else_ } => {
+                names_bool(cond, out);
+                names_bv(then_, out);
+                names_bv(else_, out);
+            }
+        },
+        ExtBvTerm::Select { array, index } => {
+            names_array(array, out);
+            names_bv(index, out);
+        }
+        ExtBvTerm::PureCall { args, .. } => args.iter().for_each(|a| names_bv(a, out)),
+    }
+}
+
+fn names_array(a: &ArrayTerm, out: &mut BTreeSet<String>) {
+    match a {
+        ArrayTerm::Var { .. } => {}
+        ArrayTerm::Store {
+            array,
+            index,
+            value,
+        } => {
+            names_array(array, out);
+            names_bv(index, out);
+            names_bv(value, out);
+        }
+    }
+}
+
+fn names_core_bv(t: &BvTerm, out: &mut BTreeSet<String>) {
+    use BvTerm as B;
+    match t {
+        B::Const { .. } => {}
+        B::Var { name, .. } => {
+            out.insert(name.clone());
+        }
+        B::Add(a, b)
+        | B::Sub(a, b)
+        | B::Mul(a, b)
+        | B::Udiv(a, b)
+        | B::Urem(a, b)
+        | B::Sdiv(a, b)
+        | B::Srem(a, b)
+        | B::And(a, b)
+        | B::Or(a, b)
+        | B::Xor(a, b)
+        | B::Shl(a, b)
+        | B::Lshr(a, b)
+        | B::Ashr(a, b)
+        | B::Rotr(a, b)
+        | B::Rotl(a, b)
+        | B::Concat(a, b) => {
+            names_core_bv(a, out);
+            names_core_bv(b, out);
+        }
+        B::Not(a)
+        | B::Neg(a)
+        | B::Extract { arg: a, .. }
+        | B::ZeroExt { arg: a, .. }
+        | B::SignExt { arg: a, .. } => names_core_bv(a, out),
+        B::Ite { cond, then_, else_ } => {
+            names_core_bool(cond, out);
+            names_core_bv(then_, out);
+            names_core_bv(else_, out);
+        }
+    }
+}
+
+fn names_core_bool(t: &BoolTerm, out: &mut BTreeSet<String>) {
+    use BoolTerm as T;
+    match t {
+        T::Eq(a, b)
+        | T::Ne(a, b)
+        | T::Ult(a, b)
+        | T::Ule(a, b)
+        | T::Ugt(a, b)
+        | T::Uge(a, b)
+        | T::Slt(a, b)
+        | T::Sle(a, b)
+        | T::Sgt(a, b)
+        | T::Sge(a, b) => {
+            names_core_bv(a, out);
+            names_core_bv(b, out);
+        }
+        T::Not(x) => names_core_bool(x, out),
+        T::And(a, b) | T::Or(a, b) => {
+            names_core_bool(a, out);
+            names_core_bool(b, out);
+        }
+    }
+}
 
 #[cfg(test)]
 mod build {
@@ -1227,9 +1472,42 @@ mod array {
         assert_eq!(eval_const(&t), Some(0x5A));
     }
 
+    /// #248: a term whose value depends on a base cell is not constant even
+    /// when two sample fills happen to agree. `(a[7] + 1) & 0xFE` is 0 under
+    /// the fills 0x00 and 0xFF but 2 when `a[7] = 1`; the old two-fill probe
+    /// reported `Some(0)`.
+    // rivet: verifies VER-071
+    #[test]
+    fn eval_const_refuses_a_base_dependent_term_two_fills_agree_on() {
+        let t = ExtBvTerm::Op(Box::new(ExtOp::And(
+            ExtBvTerm::Op(Box::new(ExtOp::Add(select(arr("a"), i32c(7)), c8(1)))),
+            c8(0xFE),
+        )));
+        assert_eq!(eval_const(&t), None);
+        // The same shape over a read that hits a store IS constant.
+        let hit = ExtBvTerm::Op(Box::new(ExtOp::And(
+            ExtBvTerm::Op(Box::new(ExtOp::Add(
+                select(store(arr("a"), i32c(7), c8(1)), i32c(7)),
+                c8(1),
+            ))),
+            c8(0xFE),
+        )));
+        assert_eq!(eval_const(&hit), Some(2));
+        // A read whose index is itself a store-hit read resolves too.
+        let m = store(store(arr("a"), i32c(3), c8(9)), i32c(9), c8(0x77));
+        let nested = select(
+            m.clone(),
+            ExtBvTerm::Op(Box::new(ExtOp::ZeroExt {
+                by: 24,
+                arg: select(m, i32c(3)),
+            })),
+        );
+        assert_eq!(eval_const(&nested), Some(0x77));
+    }
+
     /// A read that MISSES every store consults the base array — not constant.
     /// This is the case a naive total-model evaluation would silently get
-    /// wrong (returning the arbitrary fill); the dual-fill check refuses.
+    /// wrong (returning the arbitrary fill); the structural check refuses.
     #[test]
     fn eval_const_base_read_is_not_constant() {
         let a = store(arr("m"), i32c(4), c8(1));
@@ -1613,6 +1891,93 @@ mod lowering {
         assert!(
             checked > 300,
             "generator produced too few in-sliver queries"
+        );
+    }
+
+    /// #247: a query variable named like a fresh read or call variable
+    /// (`$sel:a:5`, `$uf:f:0`, …) must stay distinct from the read or call.
+    /// Before the fix `select(a, 5) != $sel:a:5` lowered to
+    /// `$sel:a:5 != $sel:a:5` — a certified wrong `Unsat`. Checked here the
+    /// strong way: on random models the lowered core and the extended query
+    /// agree, with the colliding names in play.
+    // rivet: verifies VER-071
+    #[test]
+    fn reserved_looking_query_names_stay_distinct_from_fresh_variables() {
+        let mut rng = Rng(0x0247_5E1E_C7ED_0001);
+        let reserved = |rng: &mut Rng| -> ExtBvTerm {
+            match rng.below(4) {
+                0 => v8(&format!("$sel:a:{}", rng.below(4))),
+                1 => v8(&format!("$sel:b:{}", rng.below(4))),
+                2 => v8(&format!("$uf:f:{}", rng.below(4))),
+                _ => v8(&format!("$sel:a:#{}", rng.below(4))),
+            }
+        };
+        let mut checked = 0usize;
+        for _ in 0..400 {
+            let other = match rng.below(3) {
+                0 => select(
+                    arr(if rng.below(2) == 0 { "a" } else { "b" }),
+                    i32c(rng.below(4) as u128),
+                ),
+                1 => call("f", vec![gen_bv(&mut rng, 1)]),
+                _ => gen_bv(&mut rng, 2),
+            };
+            let r = reserved(&mut rng);
+            let query = vec![match rng.below(3) {
+                0 => ExtBoolTerm::Ne(other, r),
+                1 => ExtBoolTerm::Eq(other, r),
+                _ => ExtBoolTerm::Ult(r, other),
+            }];
+            let lowered = lower_traced(&query).expect("in the sliver");
+            let mut model = SliverModel::default();
+            model.env.insert("x".into(), rng.below(256) as u128);
+            model.env.insert("y".into(), rng.below(256) as u128);
+            for name in [
+                "$sel:a:0",
+                "$sel:a:1",
+                "$sel:a:2",
+                "$sel:a:3",
+                "$sel:b:0",
+                "$sel:b:1",
+                "$sel:b:2",
+                "$sel:b:3",
+                "$uf:f:0",
+                "$uf:f:1",
+                "$uf:f:2",
+                "$uf:f:3",
+                "$sel:a:#0",
+                "$sel:a:#1",
+                "$sel:a:#2",
+                "$sel:a:#3",
+            ] {
+                model.env.insert(name.into(), rng.below(256) as u128);
+            }
+            for name in ["a", "b"] {
+                let mut cells = BTreeMap::new();
+                for idx in 0..4u32 {
+                    cells.insert(idx, rng.below(256) as u8);
+                }
+                model.arrays.insert(name.into(), cells);
+            }
+            let env = core_env(&mut model, &lowered);
+            let ext_sat = query.iter().all(|a| eval_ext_bool(a, &model).unwrap());
+            let core_sat = lowered
+                .assertions
+                .iter()
+                .all(|a| eval::eval_bool(a, &env).unwrap());
+            assert_eq!(
+                ext_sat, core_sat,
+                "lowering changed the truth of a model\nquery: {query:?}"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 400);
+        // The reported query: the fresh read must get another name.
+        let q = [ExtBoolTerm::Ne(select(arr("a"), i32c(5)), v8("$sel:a:5"))];
+        let low = lower_traced(&q).unwrap();
+        assert_eq!(
+            low.reads,
+            vec![("$sel:a:5'".to_string(), "a".to_string(), 5)]
         );
     }
 

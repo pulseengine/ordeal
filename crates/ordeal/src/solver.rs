@@ -2707,6 +2707,40 @@ mod tests {
         }
     }
 
+    // ── #247: fresh names never capture a query variable ────────────────
+
+    /// `select(a, 5) != $sel:a:5` is satisfiable (the cell and the variable
+    /// are independent). Before #247 it was a certified `Unsat`.
+    // rivet: verifies VER-071
+    #[test]
+    fn a_query_variable_named_like_a_fresh_read_is_not_captured() {
+        use crate::sliver::{ExtBoolTerm, ExtBvTerm};
+        let q = [ExtBoolTerm::Ne(
+            sel(
+                base("a"),
+                crate::sliver::ExtBvTerm::Core(BvTerm::Const {
+                    value: 5,
+                    sort: Sort::new(32),
+                }),
+            ),
+            sym_bv8("$sel:a:5"),
+        )];
+        assert!(
+            matches!(Solver::check_sliver(&q), CheckResult::Sat(_)),
+            "#247 regression"
+        );
+        let call = ExtBvTerm::PureCall {
+            name: "f".into(),
+            args: vec![sym_bv8("x")],
+            sort: Sort::new(8),
+        };
+        let q = [ExtBoolTerm::Ne(call, sym_bv8("$uf:f:0"))];
+        assert!(
+            matches!(Solver::check_sliver(&q), CheckResult::Sat(_)),
+            "#247 regression"
+        );
+    }
+
     // ── TR-028 semantics: symbolic read-over-write, end-to-end ───────────
     //
     // These check the ENCODING IS RIGHT, not merely that it lowers. Each

@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Soundness: a sliver fresh variable could capture a query variable**
+  (#247, TR-071). `sliver::lower` named its fresh read and call variables
+  `$sel:<array>:<index>`, `$sel:<array>:#<n>` and `$uf:<fn>:<n>` without
+  checking the query's own variables. A query variable with such a name
+  was silently identified with the read or call. So the satisfiable
+  `select(a, 5) != $sel:a:5` lowered to `$sel:a:5 != $sel:a:5`, and
+  `check_sliver` returned a certified `Unsat`. The checker was right
+  about the lowered core; the trusted lowering changed the query. Fresh
+  names now avoid every query variable: a `'` is appended until the name
+  is unused. A query without such names keeps its names. The proven
+  sliver (next) takes this step off the trust base.
+- **`sliver::eval_const` reported a non-constant term as constant**
+  (#248, TR-071). It compared the term's value under two base fills.
+  `(a[7] + 1) & 0xFE` is 0 under both 0x00 and 0xFF, but 2 when
+  `a[7] = 1`. Constancy is now decided structurally: a ground term is
+  constant only if no `select` falls through its store chain to the
+  base array.
+
 ### Changed
 - **Toolchain pin: varve layer `2026.10.23`** (rivet 0.41.0). The previous
   layer, `2026.09.16`, was supported only until 2026-10-25. `2026.10.9` and
