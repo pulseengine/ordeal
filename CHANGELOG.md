@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Toolchain pin: varve layer `2026.10.23`** (rivet 0.41.0). The previous
+  layer, `2026.09.16`, was supported only until 2026-10-25. `2026.10.9` and
+  `2026.10.17` are behind the line's anti-rollback high-water mark;
+  `2026.10.23` is the newest layer. The new rivet's schema allows
+  `part-of-execution` only from verdicts, so the nine redundant
+  measure-to-execution links (VER-061..070) are removed; the verdicts
+  still link each execution.
+
 ## [0.32.0] - 2026-10-15
 
 **Every answer rests on the term check** (#192, TR-070). The proven

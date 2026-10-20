@@ -14,6 +14,6 @@ manifest-version = 1
 [toolchain]
 realm   = "pulseengine"
 channel = "rolling"
-layer   = "2026.09.16"
-# The digest `varve install` verified against the realm root on 2026-09-29.
-digest  = "sha256:800dd32958e498d4217f302da3cb9db2ced36902c0e0b81993ff8f4798d3519d"
+layer   = "2026.10.23"
+# The digest `varve install` verified against the realm root on 2026-10-20.
+digest  = "sha256:af711b5d81e55df7068297bd422d24b527d9d6019baddb9c63cbce0d6d92c285"
