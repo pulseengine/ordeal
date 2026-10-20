@@ -110,6 +110,17 @@ required-features = ["cert-bundle"]
 name = "cert_bundle_smt2"
 required-features = ["cert-bundle"]
 
+# TR-072: the old-vs-new sliver verdict scan (the seeded corpora need the
+# oracle feature's generators; Z3 is linked, not called).
+[[example]]
+name = "sliver_scan"
+required-features = ["oracle"]
+
+# TR-072: the ordeal-cert/v4 size and check-latency table on loom's shape.
+[[example]]
+name = "sliver_size"
+required-features = ["cert-bundle"]
+
 [[bench]]
 name = "latency"
 harness = false

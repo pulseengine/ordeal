@@ -1489,6 +1489,42 @@ mod sliver_oracle_tests {
         assert!(unsats > 0, "corpus produced no UNSAT verdicts");
     }
 
+    /// TR-072: the same two corpora through the GATED sliver entry
+    /// (`Solver::from_sliver`, whose verdict rests on the trusted
+    /// `check_sliver_lowering` as well as the term and query checks): the
+    /// verdict must match Z3's array/UF theories on the extended query,
+    /// and never degrade to `Unknown` — the trusted check accepts every
+    /// lowering the Rust produces on these corpora.
+    // rivet: verifies VER-072
+    #[test]
+    fn sliver_diff_through_from_sliver() {
+        let corpora = [
+            gen_sliver_corpus(0x5111_5EED_A55A_0001, 300),
+            gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300),
+        ];
+        let (mut sats, mut unsats) = (0u32, 0u32);
+        for (c, corpus) in corpora.iter().enumerate() {
+            for (i, query) in corpus.iter().enumerate() {
+                let gated = match crate::solver::Solver::from_sliver(query) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let verdict = gated.check_raw();
+                let oracle = sliver_z3_check(query);
+                match (&verdict, &oracle) {
+                    (crate::solver::RawVerdict::Sat(_), OracleVerdict::Sat(_)) => sats += 1,
+                    (crate::solver::RawVerdict::Unsat, OracleVerdict::Unsat) => unsats += 1,
+                    (crate::solver::RawVerdict::Unknown, _) => {
+                        panic!("corpus {c} query {i}: the gated sliver entry degraded to Unknown")
+                    }
+                    (_, OracleVerdict::Unknown) => {}
+                    (v, o) => panic!("corpus {c} query {i}: gated {v:?} vs Z3 {o:?}"),
+                }
+            }
+        }
+        assert!(sats > 0 && unsats > 0, "corpora produced both verdicts");
+    }
+
     /// #231: every operator lifted over sliver children — `ite`, `urem`,
     /// `sdiv`, `srem`, `rotl`, `not`, `neg` above a `select`/`pure_call` —
     /// lowers to a core query whose ordeal verdict matches Z3's array/UF

@@ -29,6 +29,8 @@
 
 use crate::eval::{self, Env, EvalError};
 use crate::term::{BoolTerm, BvTerm, Sort};
+use ordeal_lrat::ExtNode;
+use ordeal_lrat::blast_kernel::DagNode;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// An array-sorted term: `Array(BV32 → BV8)`, non-extensional.
@@ -196,33 +198,208 @@ pub fn lower(assertions: &[ExtBoolTerm]) -> Result<Vec<BoolTerm>, SliverError> {
 /// returns.
 #[derive(Clone, Debug, Default)]
 pub struct Lowered {
-    /// The lowered pure-core assertions (originals, then congruence).
+    /// The lowered pure-core assertions (originals, then the array
+    /// congruence roots, then the call congruence roots — each set in the
+    /// table order of [`Lowered::read_sites`] / [`Lowered::calls`]: pairs
+    /// `p < q` of one array / one function).
     pub assertions: Vec<BoolTerm>,
     /// Fresh per-index read variables: `(core_var_name, base_array, index)`.
+    /// Concrete reads only; [`Lowered::read_sites`] has every read.
     pub reads: Vec<(String, String, u32)>,
     /// Fresh call-site result variables, in dependency order:
     /// `(core_var_name, function_name, lowered_args, result_sort)`.
     pub calls: Vec<(String, String, Vec<BvTerm>, Sort)>,
+    /// Every base-array read, in creation order — the read table of the
+    /// trusted check (TR-072): `(core_var_name, base_array, lowered
+    /// index)`. The lowered index is what the read was memoized on, so two
+    /// entries never share `(base_array, index)`.
+    pub read_sites: Vec<(String, String, BvTerm)>,
+}
+
+/// The extended query flattened as it was asked (`ordeal-ext/v1`, TR-072):
+/// a node list over [`ExtNode`] — 1:1 with the [`ExtBoolTerm`] tree
+/// (operands before operators, left to right; a `select`'s index, then
+/// its chain outermost store first, each level's index then value; a
+/// call's arguments in order), variables shared by name, constants
+/// interned by value and width, arrays and functions numbered by first
+/// appearance. No canonicalization and no hash-consing: a consumer holding
+/// the `ExtBoolTerm`s re-runs [`flatten_ext`] and compares the hash.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct ExtQuery {
+    /// The nodes.
+    pub nodes: Vec<ExtNode>,
+    /// The constant table (LSB first).
+    pub bits: Vec<bool>,
+    /// The side table: store chains (index, value pairs) and call arguments.
+    pub side: Vec<usize>,
+    /// The asserted nodes, one per assertion, in assertion order.
+    pub roots: Vec<usize>,
+    /// Per query variable: `(name, width, its `Var` node)`.
+    pub vars: Vec<(String, u32, usize)>,
+    /// Array names by id.
+    pub arrays: Vec<String>,
+    /// Function names and result widths by id.
+    pub funcs: Vec<(String, u32)>,
+}
+
+impl std::fmt::Debug for ExtQuery {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ExtQuery")
+            .field("nodes", &self.nodes.len())
+            .field("bits", &self.bits.len())
+            .field("side", &self.side.len())
+            .field("roots", &self.roots)
+            .field("vars", &self.vars.len())
+            .field("arrays", &self.arrays)
+            .field("funcs", &self.funcs)
+            .finish()
+    }
+}
+
+/// What [`lower_ext`] produces: the extended query flattened, its lowered
+/// core with the fresh-variable tables, and per extended node the lowered
+/// image of a `select` or a call (what the untrusted mapper interns to find
+/// the node's core image; a closed node's image is its operator over its
+/// operands' images).
+#[derive(Clone, Debug, Default)]
+pub struct SliverTrace {
+    /// The extended query as asked.
+    pub ext: ExtQuery,
+    /// The lowered core and the read / call tables.
+    pub lowered: Lowered,
+    /// Per extended node: the lowered term of a `select` or a call, `None`
+    /// for a closed node.
+    pub images: Vec<Option<BvTerm>>,
+}
+
+/// A closed core assertion as an extended one (every leaf an
+/// [`ExtBvTerm::Core`]): how a [`crate::Solver`] built by
+/// [`crate::Solver::from_sliver`] keeps a later `assert` in its extended
+/// query, so the lowering it re-runs for the trusted check is the whole
+/// query.
+pub fn ext_of_core(t: &BoolTerm) -> ExtBoolTerm {
+    let c = |x: &BvTerm| ExtBvTerm::Core(x.clone());
+    match t {
+        BoolTerm::Eq(a, b) => ExtBoolTerm::Eq(c(a), c(b)),
+        BoolTerm::Ne(a, b) => ExtBoolTerm::Ne(c(a), c(b)),
+        BoolTerm::Ult(a, b) => ExtBoolTerm::Ult(c(a), c(b)),
+        BoolTerm::Ule(a, b) => ExtBoolTerm::Ule(c(a), c(b)),
+        BoolTerm::Ugt(a, b) => ExtBoolTerm::Ugt(c(a), c(b)),
+        BoolTerm::Uge(a, b) => ExtBoolTerm::Uge(c(a), c(b)),
+        BoolTerm::Slt(a, b) => ExtBoolTerm::Slt(c(a), c(b)),
+        BoolTerm::Sle(a, b) => ExtBoolTerm::Sle(c(a), c(b)),
+        BoolTerm::Sgt(a, b) => ExtBoolTerm::Sgt(c(a), c(b)),
+        BoolTerm::Sge(a, b) => ExtBoolTerm::Sge(c(a), c(b)),
+        BoolTerm::Not(x) => ExtBoolTerm::Not(Box::new(ext_of_core(x))),
+        BoolTerm::And(a, b) => ExtBoolTerm::And(Box::new(ext_of_core(a)), Box::new(ext_of_core(b))),
+        BoolTerm::Or(a, b) => ExtBoolTerm::Or(Box::new(ext_of_core(a)), Box::new(ext_of_core(b))),
+    }
 }
 
 /// Like [`lower`], but also returns the fresh-variable provenance in a
 /// [`Lowered`]. See [`Lowered`] for why a caller might want it.
 pub fn lower_traced(assertions: &[ExtBoolTerm]) -> Result<Lowered, SliverError> {
+    lower_ext(assertions).map(|t| t.lowered)
+}
+
+/// Flatten the extended query as asked (`ordeal-ext/v1`): the consumer's
+/// side of the trusted sliver check — what an `ordeal-cert/v4` bundle's
+/// `ext` block carries, re-runnable from the `ExtBoolTerm`s alone. Fails
+/// only on an out-of-sliver query (it is one walk with the lowering).
+pub fn flatten_ext(assertions: &[ExtBoolTerm]) -> Result<ExtQuery, SliverError> {
+    lower_ext(assertions).map(|t| t.ext)
+}
+
+/// Lower AND flatten in one walk (TR-072): the lowered core with its
+/// tables, the extended query as asked, and per extended node the lowered
+/// image of every `select` and call. One traversal assigns the extended
+/// node ids and lowers, so the two never disagree on which node is which.
+pub fn lower_ext(assertions: &[ExtBoolTerm]) -> Result<SliverTrace, SliverError> {
     let mut low = Lowering::default();
     for a in assertions {
         names_bool(a, &mut low.taken);
     }
     let mut out = Vec::with_capacity(assertions.len());
     for a in assertions {
-        out.push(low.lower_bool(a)?);
+        let (core, id) = low.lower_bool(a)?;
+        out.push(core);
+        low.ext.roots.push(id);
     }
     out.extend(low.array_congruence());
     out.extend(low.congruence());
-    Ok(Lowered {
-        assertions: out,
-        reads: low.read_trace,
-        calls: low.call_trace,
+    #[cfg(test)]
+    if hooks::dropping_last_congruence() && out.len() > assertions.len() {
+        // The negative control of TR-072: a lowering that forgets one
+        // congruence clause — the core, the DAG and the CNF all agree on
+        // the forgetful lowering, so only the trusted sliver check can
+        // catch it (by the root count it expects).
+        out.pop();
+    }
+    let read_sites = low
+        .reads
+        .iter()
+        .map(|r| (r.var_name.clone(), r.array.clone(), r.index.clone()))
+        .collect();
+    let ExtFlat {
+        nodes,
+        bits,
+        side,
+        roots,
+        vars,
+        arrays,
+        funcs,
+        lowered,
+        ..
+    } = low.ext;
+    Ok(SliverTrace {
+        ext: ExtQuery {
+            nodes,
+            bits,
+            side,
+            roots,
+            vars,
+            arrays,
+            funcs,
+        },
+        lowered: Lowered {
+            assertions: out,
+            reads: low.read_trace,
+            calls: low.call_trace,
+            read_sites,
+        },
+        images: lowered,
     })
+}
+
+/// The test-only hook of the TR-072 negative control: a lowering that
+/// omits its last congruence clause. Armed per thread by a unit test
+/// around a real entry point; compiled out of every non-test build.
+#[cfg(test)]
+pub(crate) mod hooks {
+    use std::cell::Cell;
+
+    thread_local! {
+        static DROP_LAST: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Arm the hook for the calling thread; the guard disarms it on drop.
+    pub(crate) fn drop_last_congruence() -> Armed {
+        DROP_LAST.with(|c| c.set(true));
+        Armed
+    }
+
+    pub(crate) fn dropping_last_congruence() -> bool {
+        DROP_LAST.with(|c| c.get())
+    }
+
+    /// Disarms the hook when dropped.
+    pub(crate) struct Armed;
+
+    impl Drop for Armed {
+        fn drop(&mut self) {
+            DROP_LAST.with(|c| c.set(false));
+        }
+    }
 }
 
 /// The constant value of a lowered term, if it is one. Used to keep the
@@ -235,18 +412,185 @@ fn as_const(t: &BvTerm) -> Option<u128> {
     }
 }
 
-/// A distinct uninterpreted-call site kept for congruence: its lowered
-/// argument terms and the fresh core variable standing for its result.
+/// A distinct uninterpreted-call site kept for congruence: its function,
+/// its lowered argument terms and the fresh core variable standing for
+/// its result.
 struct CallSite {
+    name: String,
     args: Vec<BvTerm>,
     result: BvTerm,
 }
 
-/// A distinct base-array read kept for congruence: the lowered BV32 index
-/// and the fresh BV8 variable standing for the byte at that index.
+/// A distinct base-array read kept for congruence: its array, the lowered
+/// BV32 index and the fresh BV8 variable standing for the byte at that
+/// index.
 struct ArrayRead {
+    array: String,
+    var_name: String,
     index: BvTerm,
     value: BvTerm,
+}
+
+/// The extended query being flattened alongside the lowering (TR-072):
+/// one node per extended subterm, in the walk's post-order.
+#[derive(Default)]
+struct ExtFlat {
+    nodes: Vec<ExtNode>,
+    bits: Vec<bool>,
+    consts: BTreeMap<(u128, u32), usize>,
+    side: Vec<usize>,
+    roots: Vec<usize>,
+    vars: Vec<(String, u32, usize)>,
+    var_index: BTreeMap<String, usize>,
+    arrays: Vec<String>,
+    array_index: BTreeMap<String, usize>,
+    funcs: Vec<(String, u32)>,
+    func_index: BTreeMap<String, usize>,
+    /// Per node: the lowered term of a `select` or a call.
+    lowered: Vec<Option<BvTerm>>,
+}
+
+impl ExtFlat {
+    fn push(&mut self, node: ExtNode, image: Option<BvTerm>) -> usize {
+        let i = self.nodes.len();
+        self.nodes.push(node);
+        self.lowered.push(image);
+        i
+    }
+
+    fn var(&mut self, name: &str, width: u32) -> usize {
+        if let Some(&i) = self.var_index.get(name) {
+            return i;
+        }
+        let i = self.push(ExtNode::Core(DagNode::Var(width as usize)), None);
+        self.var_index.insert(name.to_string(), i);
+        self.vars.push((name.to_string(), width, i));
+        i
+    }
+
+    fn konst(&mut self, value: u128, width: u32) -> usize {
+        if let Some(&i) = self.consts.get(&(value, width)) {
+            return i;
+        }
+        let s = self.bits.len();
+        for j in 0..width {
+            self.bits.push((value >> j) & 1 == 1);
+        }
+        let i = self.push(ExtNode::Core(DagNode::Const(s, width as usize)), None);
+        self.consts.insert((value, width), i);
+        i
+    }
+
+    fn array_id(&mut self, name: &str) -> usize {
+        if let Some(&i) = self.array_index.get(name) {
+            return i;
+        }
+        let i = self.arrays.len();
+        self.arrays.push(name.to_string());
+        self.array_index.insert(name.to_string(), i);
+        i
+    }
+
+    fn func_id(&mut self, name: &str, width: u32) -> usize {
+        if let Some(&i) = self.func_index.get(name) {
+            return i;
+        }
+        let i = self.funcs.len();
+        self.funcs.push((name.to_string(), width));
+        self.func_index.insert(name.to_string(), i);
+        i
+    }
+
+    /// A closed bitvector subterm (an [`ExtBvTerm::Core`] leaf), node for
+    /// node — exactly as `dag::flatten` spells it.
+    fn core_bv(&mut self, t: &BvTerm) -> usize {
+        use BvTerm as B;
+        let bin = |this: &mut Self, a: &BvTerm, b: &BvTerm, mk: fn(usize, usize) -> DagNode| {
+            let (x, y) = (this.core_bv(a), this.core_bv(b));
+            this.push(ExtNode::Core(mk(x, y)), None)
+        };
+        match t {
+            B::Const { value, sort } => self.konst(*value, sort.width),
+            B::Var { name, sort } => self.var(name, sort.width),
+            B::Add(a, b) => bin(self, a, b, DagNode::Add),
+            B::Sub(a, b) => bin(self, a, b, DagNode::Sub),
+            B::Mul(a, b) => bin(self, a, b, DagNode::Mul),
+            B::Udiv(a, b) => bin(self, a, b, DagNode::Udiv),
+            B::Urem(a, b) => bin(self, a, b, DagNode::Urem),
+            B::And(a, b) => bin(self, a, b, DagNode::And),
+            B::Or(a, b) => bin(self, a, b, DagNode::Or),
+            B::Xor(a, b) => bin(self, a, b, DagNode::Xor),
+            B::Shl(a, b) => bin(self, a, b, DagNode::Shl),
+            B::Lshr(a, b) => bin(self, a, b, DagNode::Lshr),
+            B::Ashr(a, b) => bin(self, a, b, DagNode::Ashr),
+            B::Rotr(a, b) => bin(self, a, b, DagNode::Rotr),
+            B::Rotl(a, b) => bin(self, a, b, DagNode::Rotl),
+            B::Sdiv(a, b) => bin(self, a, b, DagNode::Sdiv),
+            B::Srem(a, b) => bin(self, a, b, DagNode::Srem),
+            B::Concat(a, b) => bin(self, a, b, DagNode::Concat),
+            B::Not(a) => {
+                let x = self.core_bv(a);
+                self.push(ExtNode::Core(DagNode::BvNot(x)), None)
+            }
+            B::Neg(a) => {
+                let x = self.core_bv(a);
+                self.push(ExtNode::Core(DagNode::Neg(x)), None)
+            }
+            B::Extract { hi, lo, arg } => {
+                let x = self.core_bv(arg);
+                self.push(
+                    ExtNode::Core(DagNode::Extract(*hi as usize, *lo as usize, x)),
+                    None,
+                )
+            }
+            B::ZeroExt { by, arg } => {
+                let x = self.core_bv(arg);
+                self.push(ExtNode::Core(DagNode::ZeroExt(x, *by as usize)), None)
+            }
+            B::SignExt { by, arg } => {
+                let x = self.core_bv(arg);
+                self.push(ExtNode::Core(DagNode::SignExt(x, *by as usize)), None)
+            }
+            B::Ite { cond, then_, else_ } => {
+                let c = self.core_bool(cond);
+                let (x, y) = (self.core_bv(then_), self.core_bv(else_));
+                self.push(ExtNode::Core(DagNode::Ite(c, x, y)), None)
+            }
+        }
+    }
+
+    /// A closed boolean subterm, node for node.
+    fn core_bool(&mut self, t: &BoolTerm) -> usize {
+        use BoolTerm as T;
+        let cmp = |this: &mut Self, a: &BvTerm, b: &BvTerm, mk: fn(usize, usize) -> DagNode| {
+            let (x, y) = (this.core_bv(a), this.core_bv(b));
+            this.push(ExtNode::Core(mk(x, y)), None)
+        };
+        match t {
+            T::Eq(a, b) => cmp(self, a, b, DagNode::Eq),
+            T::Ne(a, b) => cmp(self, a, b, DagNode::Ne),
+            T::Ult(a, b) => cmp(self, a, b, DagNode::Ult),
+            T::Ule(a, b) => cmp(self, a, b, DagNode::Ule),
+            T::Ugt(a, b) => cmp(self, a, b, DagNode::Ugt),
+            T::Uge(a, b) => cmp(self, a, b, DagNode::Uge),
+            T::Slt(a, b) => cmp(self, a, b, DagNode::Slt),
+            T::Sle(a, b) => cmp(self, a, b, DagNode::Sle),
+            T::Sgt(a, b) => cmp(self, a, b, DagNode::Sgt),
+            T::Sge(a, b) => cmp(self, a, b, DagNode::Sge),
+            T::Not(x) => {
+                let a = self.core_bool(x);
+                self.push(ExtNode::Core(DagNode::Not(a)), None)
+            }
+            T::And(a, b) => {
+                let (x, y) = (self.core_bool(a), self.core_bool(b));
+                self.push(ExtNode::Core(DagNode::BoolAnd(x, y)), None)
+            }
+            T::Or(a, b) => {
+                let (x, y) = (self.core_bool(a), self.core_bool(b));
+                self.push(ExtNode::Core(DagNode::BoolOr(x, y)), None)
+            }
+        }
+    }
 }
 
 /// The per-`lower` elimination state: fresh-variable memo tables plus the
@@ -268,17 +612,22 @@ struct Lowering {
     /// Read provenance in creation order (for [`Lowered::reads`]).
     /// Concrete reads only — a symbolic index has no `u32` to report.
     read_trace: Vec<(String, String, u32)>,
-    /// Per base array, the access set: `(lowered index, its read variable)`,
-    /// in creation order. This is what array congruence is generated from
-    /// (TR-028): a base-array read is a unary uninterpreted function of its
-    /// index, so two reads of one array must agree wherever their indices do.
-    array_reads: BTreeMap<String, Vec<ArrayRead>>,
+    /// The access set — every base-array read `(array, lowered index, its
+    /// read variable)` — in creation order. This is what array congruence
+    /// is generated from (TR-028): a base-array read is a unary
+    /// uninterpreted function of its index, so two reads of one array must
+    /// agree wherever their indices do. Creation order is the table order
+    /// the trusted check enumerates the congruence roots in (TR-072).
+    reads: Vec<ArrayRead>,
     /// Memo: `(fn_name, structural key of lowered args)` → result variable.
     /// Structural equality of the arguments is captured via their `Debug`
     /// form, so an identical call site reuses the same variable.
     call_memo: BTreeMap<(String, String), BvTerm>,
-    /// Distinct call sites per function name, for pairwise congruence.
-    calls_by_name: BTreeMap<String, Vec<CallSite>>,
+    /// Distinct call sites, in creation order, for pairwise congruence
+    /// (again the trusted check's table order).
+    sites: Vec<CallSite>,
+    /// The extended query, flattened alongside (TR-072).
+    ext: ExtFlat,
     /// Signature `(arg widths, result width)` first seen for each name;
     /// a later site that disagrees is an inconsistent call.
     call_sigs: BTreeMap<String, (Vec<u32>, u32)>,
@@ -301,172 +650,276 @@ impl Lowering {
         name
     }
 
-    /// Lower an extended boolean term to a pure-core [`BoolTerm`].
-    fn lower_bool(&mut self, t: &ExtBoolTerm) -> Result<BoolTerm, SliverError> {
-        let cmp = |this: &mut Self, a: &ExtBvTerm, b: &ExtBvTerm| {
-            Ok((Box::new(this.lower_bv(a)?), Box::new(this.lower_bv(b)?)))
+    /// Lower an extended boolean term to a pure-core [`BoolTerm`] and
+    /// flatten it: the lowered term and its extended node (TR-072 — one
+    /// walk does both, so the ids and the lowering never disagree).
+    fn lower_bool(&mut self, t: &ExtBoolTerm) -> Result<(BoolTerm, usize), SliverError> {
+        type Pair = (Box<BvTerm>, Box<BvTerm>);
+        let cmp = |this: &mut Self,
+                   a: &ExtBvTerm,
+                   b: &ExtBvTerm,
+                   mk: fn(usize, usize) -> DagNode|
+         -> Result<(Pair, usize), SliverError> {
+            let (la, ia) = this.lower_bv(a)?;
+            let (lb, ib) = this.lower_bv(b)?;
+            let id = this.ext.push(ExtNode::Core(mk(ia, ib)), None);
+            Ok(((Box::new(la), Box::new(lb)), id))
         };
         Ok(match t {
             ExtBoolTerm::Eq(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Eq(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Eq)?;
+                (BoolTerm::Eq(a, b), id)
             }
             ExtBoolTerm::Ne(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Ne(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Ne)?;
+                (BoolTerm::Ne(a, b), id)
             }
             ExtBoolTerm::Ult(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Ult(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Ult)?;
+                (BoolTerm::Ult(a, b), id)
             }
             ExtBoolTerm::Ule(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Ule(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Ule)?;
+                (BoolTerm::Ule(a, b), id)
             }
             ExtBoolTerm::Ugt(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Ugt(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Ugt)?;
+                (BoolTerm::Ugt(a, b), id)
             }
             ExtBoolTerm::Uge(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Uge(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Uge)?;
+                (BoolTerm::Uge(a, b), id)
             }
             ExtBoolTerm::Slt(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Slt(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Slt)?;
+                (BoolTerm::Slt(a, b), id)
             }
             ExtBoolTerm::Sle(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Sle(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Sle)?;
+                (BoolTerm::Sle(a, b), id)
             }
             ExtBoolTerm::Sgt(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Sgt(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Sgt)?;
+                (BoolTerm::Sgt(a, b), id)
             }
             ExtBoolTerm::Sge(a, b) => {
-                let (a, b) = cmp(self, a, b)?;
-                BoolTerm::Sge(a, b)
+                let ((a, b), id) = cmp(self, a, b, DagNode::Sge)?;
+                (BoolTerm::Sge(a, b), id)
             }
-            ExtBoolTerm::Not(x) => BoolTerm::Not(Box::new(self.lower_bool(x)?)),
+            ExtBoolTerm::Not(x) => {
+                let (lx, ix) = self.lower_bool(x)?;
+                let id = self.ext.push(ExtNode::Core(DagNode::Not(ix)), None);
+                (BoolTerm::Not(Box::new(lx)), id)
+            }
             ExtBoolTerm::And(a, b) => {
-                BoolTerm::And(Box::new(self.lower_bool(a)?), Box::new(self.lower_bool(b)?))
+                let (la, ia) = self.lower_bool(a)?;
+                let (lb, ib) = self.lower_bool(b)?;
+                let id = self.ext.push(ExtNode::Core(DagNode::BoolAnd(ia, ib)), None);
+                (BoolTerm::And(Box::new(la), Box::new(lb)), id)
             }
             ExtBoolTerm::Or(a, b) => {
-                BoolTerm::Or(Box::new(self.lower_bool(a)?), Box::new(self.lower_bool(b)?))
+                let (la, ia) = self.lower_bool(a)?;
+                let (lb, ib) = self.lower_bool(b)?;
+                let id = self.ext.push(ExtNode::Core(DagNode::BoolOr(ia, ib)), None);
+                (BoolTerm::Or(Box::new(la), Box::new(lb)), id)
             }
         })
     }
 
     /// Lower an extended bitvector term to a pure-core [`BvTerm`],
-    /// eliminating any `select`/`pure_call` beneath it.
-    fn lower_bv(&mut self, t: &ExtBvTerm) -> Result<BvTerm, SliverError> {
+    /// eliminating any `select`/`pure_call` beneath it, and flatten it:
+    /// the lowered term and its extended node.
+    fn lower_bv(&mut self, t: &ExtBvTerm) -> Result<(BvTerm, usize), SliverError> {
         Ok(match t {
-            ExtBvTerm::Core(bv) => bv.clone(),
+            ExtBvTerm::Core(bv) => {
+                let id = self.ext.core_bv(bv);
+                (bv.clone(), id)
+            }
             ExtBvTerm::Op(op) => self.lower_op(op)?,
             ExtBvTerm::Select { array, index } => {
-                let j = self.lower_index(index)?;
-                self.resolve_select(array, &j)?
+                let (j, ij) = self.lower_index(index)?;
+                let mut levels: Vec<(usize, usize)> = Vec::new();
+                let (lowered, aid) = self.resolve_select(array, &j, &mut levels, true)?;
+                // `needed` was true at the top, so the term is there.
+                let lowered = lowered.unwrap_or_else(|| BvTerm::Const {
+                    value: 0,
+                    sort: Sort::new(8),
+                });
+                let s = self.ext.side.len();
+                for (x, v) in &levels {
+                    self.ext.side.push(*x);
+                    self.ext.side.push(*v);
+                }
+                let id = self.ext.push(
+                    ExtNode::Select(aid, ij, s, levels.len()),
+                    Some(lowered.clone()),
+                );
+                (lowered, id)
             }
             ExtBvTerm::PureCall { name, args, sort } => {
-                let largs = args
-                    .iter()
-                    .map(|a| self.lower_bv(a))
-                    .collect::<Result<Vec<_>, _>>()?;
-                self.ackermann(name, largs, *sort)?
+                let mut largs = Vec::with_capacity(args.len());
+                let mut ids = Vec::with_capacity(args.len());
+                for a in args {
+                    let (l, i) = self.lower_bv(a)?;
+                    largs.push(l);
+                    ids.push(i);
+                }
+                let result = self.ackermann(name, largs, *sort)?;
+                let fid = self.ext.func_id(name, sort.width);
+                let s = self.ext.side.len();
+                self.ext.side.extend(ids.iter().copied());
+                let id = self.ext.push(
+                    ExtNode::Call(fid, sort.width as usize, s, ids.len()),
+                    Some(result.clone()),
+                );
+                (result, id)
             }
         })
     }
 
     /// Lower a lifted core operation, recursing into extended children.
-    fn lower_op(&mut self, op: &ExtOp) -> Result<BvTerm, SliverError> {
-        let bin = |this: &mut Self, a: &ExtBvTerm, b: &ExtBvTerm| {
-            Ok((Box::new(this.lower_bv(a)?), Box::new(this.lower_bv(b)?)))
+    fn lower_op(&mut self, op: &ExtOp) -> Result<(BvTerm, usize), SliverError> {
+        type Pair = (Box<BvTerm>, Box<BvTerm>);
+        let bin = |this: &mut Self,
+                   a: &ExtBvTerm,
+                   b: &ExtBvTerm,
+                   mk: fn(usize, usize) -> DagNode|
+         -> Result<(Pair, usize), SliverError> {
+            let (la, ia) = this.lower_bv(a)?;
+            let (lb, ib) = this.lower_bv(b)?;
+            let id = this.ext.push(ExtNode::Core(mk(ia, ib)), None);
+            Ok(((Box::new(la), Box::new(lb)), id))
         };
         Ok(match op {
             ExtOp::Add(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Add(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Add)?;
+                (BvTerm::Add(a, b), id)
             }
             ExtOp::Sub(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Sub(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Sub)?;
+                (BvTerm::Sub(a, b), id)
             }
             ExtOp::Mul(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Mul(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Mul)?;
+                (BvTerm::Mul(a, b), id)
             }
             ExtOp::Udiv(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Udiv(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Udiv)?;
+                (BvTerm::Udiv(a, b), id)
             }
             ExtOp::And(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::And(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::And)?;
+                (BvTerm::And(a, b), id)
             }
             ExtOp::Or(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Or(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Or)?;
+                (BvTerm::Or(a, b), id)
             }
             ExtOp::Xor(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Xor(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Xor)?;
+                (BvTerm::Xor(a, b), id)
             }
             ExtOp::Shl(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Shl(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Shl)?;
+                (BvTerm::Shl(a, b), id)
             }
             ExtOp::Lshr(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Lshr(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Lshr)?;
+                (BvTerm::Lshr(a, b), id)
             }
             ExtOp::Ashr(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Ashr(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Ashr)?;
+                (BvTerm::Ashr(a, b), id)
             }
             ExtOp::Rotr(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Rotr(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Rotr)?;
+                (BvTerm::Rotr(a, b), id)
             }
             ExtOp::Urem(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Urem(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Urem)?;
+                (BvTerm::Urem(a, b), id)
             }
             ExtOp::Sdiv(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Sdiv(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Sdiv)?;
+                (BvTerm::Sdiv(a, b), id)
             }
             ExtOp::Srem(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Srem(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Srem)?;
+                (BvTerm::Srem(a, b), id)
             }
             ExtOp::Rotl(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Rotl(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Rotl)?;
+                (BvTerm::Rotl(a, b), id)
             }
-            ExtOp::Not(x) => BvTerm::Not(Box::new(self.lower_bv(x)?)),
-            ExtOp::Neg(x) => BvTerm::Neg(Box::new(self.lower_bv(x)?)),
-            ExtOp::Ite { cond, then_, else_ } => BvTerm::Ite {
-                cond: Box::new(self.lower_bool(cond)?),
-                then_: Box::new(self.lower_bv(then_)?),
-                else_: Box::new(self.lower_bv(else_)?),
-            },
-            ExtOp::Extract { hi, lo, arg } => BvTerm::Extract {
-                hi: *hi,
-                lo: *lo,
-                arg: Box::new(self.lower_bv(arg)?),
-            },
+            ExtOp::Not(x) => {
+                let (l, i) = self.lower_bv(x)?;
+                let id = self.ext.push(ExtNode::Core(DagNode::BvNot(i)), None);
+                (BvTerm::Not(Box::new(l)), id)
+            }
+            ExtOp::Neg(x) => {
+                let (l, i) = self.lower_bv(x)?;
+                let id = self.ext.push(ExtNode::Core(DagNode::Neg(i)), None);
+                (BvTerm::Neg(Box::new(l)), id)
+            }
+            ExtOp::Ite { cond, then_, else_ } => {
+                let (c, ic) = self.lower_bool(cond)?;
+                let (x, ix) = self.lower_bv(then_)?;
+                let (y, iy) = self.lower_bv(else_)?;
+                let id = self.ext.push(ExtNode::Core(DagNode::Ite(ic, ix, iy)), None);
+                (
+                    BvTerm::Ite {
+                        cond: Box::new(c),
+                        then_: Box::new(x),
+                        else_: Box::new(y),
+                    },
+                    id,
+                )
+            }
+            ExtOp::Extract { hi, lo, arg } => {
+                let (l, i) = self.lower_bv(arg)?;
+                let id = self.ext.push(
+                    ExtNode::Core(DagNode::Extract(*hi as usize, *lo as usize, i)),
+                    None,
+                );
+                (
+                    BvTerm::Extract {
+                        hi: *hi,
+                        lo: *lo,
+                        arg: Box::new(l),
+                    },
+                    id,
+                )
+            }
             ExtOp::Concat(a, b) => {
-                let (a, b) = bin(self, a, b)?;
-                BvTerm::Concat(a, b)
+                let ((a, b), id) = bin(self, a, b, DagNode::Concat)?;
+                (BvTerm::Concat(a, b), id)
             }
-            ExtOp::ZeroExt { by, arg } => BvTerm::ZeroExt {
-                by: *by,
-                arg: Box::new(self.lower_bv(arg)?),
-            },
-            ExtOp::SignExt { by, arg } => BvTerm::SignExt {
-                by: *by,
-                arg: Box::new(self.lower_bv(arg)?),
-            },
+            ExtOp::ZeroExt { by, arg } => {
+                let (l, i) = self.lower_bv(arg)?;
+                let id = self
+                    .ext
+                    .push(ExtNode::Core(DagNode::ZeroExt(i, *by as usize)), None);
+                (
+                    BvTerm::ZeroExt {
+                        by: *by,
+                        arg: Box::new(l),
+                    },
+                    id,
+                )
+            }
+            ExtOp::SignExt { by, arg } => {
+                let (l, i) = self.lower_bv(arg)?;
+                let id = self
+                    .ext
+                    .push(ExtNode::Core(DagNode::SignExt(i, *by as usize)), None);
+                (
+                    BvTerm::SignExt {
+                        by: *by,
+                        arg: Box::new(l),
+                    },
+                    id,
+                )
+            }
         })
     }
 
@@ -484,17 +937,39 @@ impl Lowering {
     /// **no new solver theory and no new trusted operation**.
     ///
     /// The full chain is always walked, so every node is sort-checked even
-    /// when its value is not selected.
-    fn resolve_select(&mut self, array: &ArrayTerm, j: &BvTerm) -> Result<BvTerm, SliverError> {
+    /// when its value is not selected. `levels` collects each store's
+    /// extended `(index, value)` nodes, outermost first (the `select`'s
+    /// chain in the flattening); the array's id comes back with the term.
+    /// `needed` says whether the read below this level can still be
+    /// selected: past a concrete hit it cannot, and then the base array is
+    /// walked but NOT read — a read variable nothing selects would be a
+    /// dead table entry the trusted check refuses (TR-072), and it is
+    /// otherwise unconstrained, so leaving it out changes no verdict. The
+    /// term is `None` exactly when `needed` is false.
+    fn resolve_select(
+        &mut self,
+        array: &ArrayTerm,
+        j: &BvTerm,
+        levels: &mut Vec<(usize, usize)>,
+        needed: bool,
+    ) -> Result<(Option<BvTerm>, usize), SliverError> {
         match array {
-            ArrayTerm::Var { name } => Ok(self.read_at(name, j)),
+            ArrayTerm::Var { name } => {
+                let aid = self.ext.array_id(name);
+                let read = if needed {
+                    Some(self.read_at(name, j))
+                } else {
+                    None
+                };
+                Ok((read, aid))
+            }
             ArrayTerm::Store {
                 array,
                 index,
                 value,
             } => {
-                let i = self.lower_index(index)?;
-                let v = self.lower_bv(value)?;
+                let (i, ii) = self.lower_index(index)?;
+                let (v, iv) = self.lower_bv(value)?;
                 if eval::bv_sort(&v)
                     .map_err(|_| SliverError::BadArraySort)?
                     .width
@@ -502,24 +977,27 @@ impl Lowering {
                 {
                     return Err(SliverError::BadArraySort);
                 }
-                let rest = self.resolve_select(array, j)?;
-                Ok(match (as_const(&i), as_const(j)) {
+                levels.push((ii, iv));
+                let hit = matches!((as_const(&i), as_const(j)), (Some(a), Some(b)) if a == b);
+                let (rest, aid) = self.resolve_select(array, j, levels, needed && !hit)?;
+                let lowered = match (as_const(&i), as_const(j)) {
                     // Both concrete: the most recent write to `j` wins,
                     // decided here rather than handed to the SAT core.
                     (Some(a), Some(b)) => {
                         if a == b {
-                            v
+                            Some(v)
                         } else {
                             rest
                         }
                     }
                     // Otherwise the aliasing is a real query.
-                    _ => BvTerm::Ite {
+                    _ => rest.map(|rest| BvTerm::Ite {
                         cond: Box::new(BoolTerm::Eq(Box::new(i), Box::new(j.clone()))),
                         then_: Box::new(v),
                         else_: Box::new(rest),
-                    },
-                })
+                    }),
+                };
+                Ok((lowered, aid))
             }
         }
     }
@@ -551,30 +1029,30 @@ impl Lowering {
         self.read_memo.insert(key, v.clone());
         if let Some(c) = as_const(index) {
             // The index is BV32 (checked in `lower_index`), so it fits.
-            self.read_trace.push((name, array.to_string(), c as u32));
+            self.read_trace
+                .push((name.clone(), array.to_string(), c as u32));
         }
-        self.array_reads
-            .entry(array.to_string())
-            .or_default()
-            .push(ArrayRead {
-                index: index.clone(),
-                value: v.clone(),
-            });
+        self.reads.push(ArrayRead {
+            array: array.to_string(),
+            var_name: name,
+            index: index.clone(),
+            value: v.clone(),
+        });
         v
     }
 
     /// Lower an array index and require it to be BV32. The value may be
     /// symbolic: a non-constant index is no longer an error (TR-028).
     /// A non-BV32 index is [`SliverError::BadArraySort`].
-    fn lower_index(&mut self, index: &ExtBvTerm) -> Result<BvTerm, SliverError> {
-        let lowered = self.lower_bv(index)?;
+    fn lower_index(&mut self, index: &ExtBvTerm) -> Result<(BvTerm, usize), SliverError> {
+        let (lowered, id) = self.lower_bv(index)?;
         let w = eval::bv_sort(&lowered)
             .map_err(|_| SliverError::BadArraySort)?
             .width;
         if w != 32 {
             return Err(SliverError::BadArraySort);
         }
-        Ok(lowered)
+        Ok((lowered, id))
     }
 
     /// Ackermannization (DES-016): replace this call site with a fresh
@@ -618,13 +1096,11 @@ impl Lowering {
             sort,
         };
         self.call_memo.insert(key, result.clone());
-        self.calls_by_name
-            .entry(name.to_string())
-            .or_default()
-            .push(CallSite {
-                args: args.clone(),
-                result: result.clone(),
-            });
+        self.sites.push(CallSite {
+            name: name.to_string(),
+            args: args.clone(),
+            result: result.clone(),
+        });
         self.call_trace
             .push((var_name, name.to_string(), args, sort));
         Ok(result)
@@ -646,23 +1122,30 @@ impl Lowering {
     /// Two *distinct constant* indices are statically unequal, so their
     /// implication is vacuous and is skipped rather than handed to the SAT
     /// core — which is why a fully concrete query pays nothing for this.
+    ///
+    /// The pairs come in the access set's creation order (`p < q`, one
+    /// array), which is the order the trusted check enumerates them in
+    /// (TR-072, `kernel::sliver_kernel::array_cong`): the check computes
+    /// the expected roots, it is not told them.
     fn array_congruence(&self) -> Vec<BoolTerm> {
         let mut out = Vec::new();
-        for reads in self.array_reads.values() {
-            for i in 0..reads.len() {
-                for j in (i + 1)..reads.len() {
-                    let (a, b) = (&reads[i], &reads[j]);
-                    if let (Some(x), Some(y)) = (as_const(&a.index), as_const(&b.index)) {
-                        debug_assert_ne!(x, y, "identical indices must share a read variable");
-                        continue; // distinct constants never alias
-                    }
-                    let ante = BoolTerm::Eq(Box::new(a.index.clone()), Box::new(b.index.clone()));
-                    let concl = BoolTerm::Eq(Box::new(a.value.clone()), Box::new(b.value.clone()));
-                    out.push(BoolTerm::Or(
-                        Box::new(BoolTerm::Not(Box::new(ante))),
-                        Box::new(concl),
-                    ));
+        let reads = &self.reads;
+        for i in 0..reads.len() {
+            for j in (i + 1)..reads.len() {
+                let (a, b) = (&reads[i], &reads[j]);
+                if a.array != b.array {
+                    continue;
                 }
+                if let (Some(x), Some(y)) = (as_const(&a.index), as_const(&b.index)) {
+                    debug_assert_ne!(x, y, "identical indices must share a read variable");
+                    continue; // distinct constants never alias
+                }
+                let ante = BoolTerm::Eq(Box::new(a.index.clone()), Box::new(b.index.clone()));
+                let concl = BoolTerm::Eq(Box::new(a.value.clone()), Box::new(b.value.clone()));
+                out.push(BoolTerm::Or(
+                    Box::new(BoolTerm::Not(Box::new(ante))),
+                    Box::new(concl),
+                ));
             }
         }
         out
@@ -672,33 +1155,30 @@ impl Lowering {
     /// call sites of one function, `args_i = args_j → result_i = result_j`.
     /// Identical sites already share a result variable (so no pair exists,
     /// and arity-0 collapses to a single variable), which is why an empty
-    /// antecedent never arises here.
+    /// antecedent never arises here. Pairs in creation order (`p < q`, one
+    /// function), the trusted check's table order (TR-072).
     fn congruence(&self) -> Vec<BoolTerm> {
         let mut out = Vec::new();
-        for sites in self.calls_by_name.values() {
-            for i in 0..sites.len() {
-                for j in (i + 1)..sites.len() {
-                    let (a, b) = (&sites[i], &sites[j]);
-                    if a.args.len() != b.args.len() {
-                        continue; // arity mismatch is rejected earlier
-                    }
-                    let mut ante: Option<BoolTerm> = None;
-                    for (x, y) in a.args.iter().zip(&b.args) {
-                        let eq = BoolTerm::Eq(Box::new(x.clone()), Box::new(y.clone()));
-                        ante = Some(match ante {
-                            None => eq,
-                            Some(p) => BoolTerm::And(Box::new(p), Box::new(eq)),
-                        });
-                    }
-                    let concl =
-                        BoolTerm::Eq(Box::new(a.result.clone()), Box::new(b.result.clone()));
-                    out.push(match ante {
-                        Some(p) => {
-                            BoolTerm::Or(Box::new(BoolTerm::Not(Box::new(p))), Box::new(concl))
-                        }
-                        None => concl,
+        let sites = &self.sites;
+        for i in 0..sites.len() {
+            for j in (i + 1)..sites.len() {
+                let (a, b) = (&sites[i], &sites[j]);
+                if a.name != b.name || a.args.len() != b.args.len() {
+                    continue; // another function, or an arity mismatch (rejected earlier)
+                }
+                let mut ante: Option<BoolTerm> = None;
+                for (x, y) in a.args.iter().zip(&b.args) {
+                    let eq = BoolTerm::Eq(Box::new(x.clone()), Box::new(y.clone()));
+                    ante = Some(match ante {
+                        None => eq,
+                        Some(p) => BoolTerm::And(Box::new(p), Box::new(eq)),
                     });
                 }
+                let concl = BoolTerm::Eq(Box::new(a.result.clone()), Box::new(b.result.clone()));
+                out.push(match ante {
+                    Some(p) => BoolTerm::Or(Box::new(BoolTerm::Not(Box::new(p))), Box::new(concl)),
+                    None => concl,
+                });
             }
         }
         out

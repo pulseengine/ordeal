@@ -410,6 +410,18 @@ pub use kernel::{ModelError, check_query_model, dag_nin};
 /// (phase 7d). See [`kernel::check_term_dag`].
 pub use kernel::{TermError, check_input_value, check_term_dag, var_offset};
 
+/// The sliver correspondence check (TR-072, `ordeal-cert/v4`): is the
+/// lowered core the read-over-write + Ackermann + congruence elimination
+/// of the EXTENDED query — arrays and uninterpreted functions, as loom
+/// asks it — along untrusted map and tables? Composed with
+/// [`check_term_dag`] and [`check_query`] / [`check_query_model`], an
+/// accepted bundle then proves the extended query unsatisfiable under
+/// every array and UF interpretation, or satisfied by an interpretation
+/// built from the model: `kernel.spec.check_sliver_unsat_sound`,
+/// `check_sliver_model_sound` (`lean/SliverCheck.lean`). See
+/// [`kernel::sliver_kernel::check_sliver_lowering`].
+pub use kernel::sliver_kernel::{ExtNode, SliverCheckError, check_sliver_lowering, ext_wf};
+
 /// Why a query re-check ([`check_query`]) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryCheckError {

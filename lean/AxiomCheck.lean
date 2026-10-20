@@ -31,6 +31,7 @@ import BlasterDag
 import BlasterCapstone
 import QueryCheck
 import TermCheck
+import SliverCheck
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -220,3 +221,29 @@ import TermCheck
 /-- info: 'kernel.spec.check_input_value_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms kernel.spec.check_input_value_sound
+
+-- The sliver correspondence check (SliverCheck.lean, TR-072): an accepted
+-- `check_sliver_lowering` relates the EXTENDED query a v4 bundle carries
+-- (arrays and uninterpreted functions) to the closed core `check_term_dag`
+-- takes, so the term-level capstones compose up to the extended query —
+-- the proof refutes it under every array / UF interpretation
+-- (`check_sliver_unsat_sound`), the model satisfies it under an
+-- interpretation built from the model (`check_sliver_model_sound`) — and
+-- the two verdicts exclude each other. The pullback direction uses
+-- classical choice (the first entry with a given index value), which is
+-- why these pins list Classical.choice like every other capstone.
+/-- info: 'kernel.spec.check_sliver_lowering_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_sliver_lowering_sound
+
+/-- info: 'kernel.spec.check_sliver_unsat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_sliver_unsat_sound
+
+/-- info: 'kernel.spec.check_sliver_model_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.check_sliver_model_sound
+
+/-- info: 'kernel.spec.sliver_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.sliver_verdicts_exclusive

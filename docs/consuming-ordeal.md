@@ -54,6 +54,16 @@ match Solver::from_sliver(&query) {
 }
 ```
 
+**Build the solver with `Solver::from_sliver`, not by calling
+`ordeal::sliver::lower` and asserting the core yourself.** Since TR-072
+a solver built from the extended query runs the trusted
+`check_sliver_lowering` — that the lowered core IS the elimination of
+your `select`/`store`/`pure_call` query — before the term and query
+checks, on every entry point; a solver you fill with the lowered core is
+a core solver, and its verdict is about the core only. The extended
+certificate is `solver.check_sliver_with_term()` (the `ordeal-cert/v4`
+section below).
+
 The fragment is the closed loom #246 op set (bit-widths 1 to 128) plus the sliver
 (`Array(BV32→BV8)` select/store over concrete **and symbolic** BV32 indices
 — symbolic decided since v0.11.0 — plus uninterpreted `pure_call`).
@@ -433,6 +443,72 @@ be reproduced. What a v3 recheck does *not* cover: that flattening
 (1:1, no semantic decision), the variable names, the sliver and the
 front ends. A v1 or v2 reader refuses a v3 bundle by its `format`, and
 the v3 readers refuse v1 and v2, so nobody silently downgrades.
+
+## Verdicts as evidence about the EXTENDED query: `ordeal-cert/v4`
+
+Since v0.33.0 (TR-072) a certificate about an array/UF query — loom's
+memory and `pure_call` obligations — carries the **extended query as
+asked** next to the lowered core, and the trusted crate verifies, before
+a verdict is returned, that the core is the read-over-write + Ackermann +
+congruence elimination of it (`ordeal_lrat::check_sliver_lowering`,
+`kernel.spec.check_sliver_unsat_sound` / `check_sliver_model_sound`). So
+an `Unsat` means: unsatisfiable under **every** array and UF
+interpretation; a `Sat` comes with the interpretation built from the
+model. The `ext` block (`ordeal-ext/v1`) is your `ExtBoolTerm`s
+flattened 1:1 — the `term` block's node spelling plus `["select", aid,
+idx, s, n]` (the store chain in `side`, outermost store first, index
+then value per level) and `["call", fid, w, s, n]` (arguments in `side`),
+variables shared by name, constants interned, arrays and functions
+numbered by first appearance with their names in `arrays` / `funcs` —
+plus the untrusted `map` (extended node → `term` node), `reads` (3 per
+entry: read variable node, array id, index node) and `calls` (4 per
+entry: result variable node, function id, first argument in `cargs`,
+arity). The `term` block of a v4 bundle is `ordeal-term/v2`: the lowered
+core hash-consed, with the reads' indices and the calls' arguments
+appended as non-root nodes, so the tables can always point at them.
+
+```rust
+use ordeal::{Solver, SliverCheckResult};
+
+let solver = Solver::from_sliver(&query)?;          // Err: out of the sliver
+match solver.check_sliver_with_term() {
+    SliverCheckResult::Unsat(cert) => {
+        // cert.term:   the v3 term certificate about the lowered core (still recheck()-able);
+        // cert.sliver: the ext block — your query as asked, the map and the tables.
+        cert.recheck().expect("check_sliver_lowering + check_term_dag + check_query");
+        #[cfg(feature = "cert-bundle")]
+        let json = cert.to_cert_v4(&attests);          // "format": "ordeal-cert/v4"
+    }
+    SliverCheckResult::Sat(cert) => {
+        // cert.model: the extended model — arrays at every read's index value,
+        // functions at every call's argument values, the query variables' bindings.
+        cert.recheck().expect("the model is the pullback the SAT capstone builds");
+        #[cfg(feature = "cert-bundle")]
+        let json = cert.to_cert_v4(&attests);          // "verdict": "sat", with ext_model
+    }
+    SliverCheckResult::Unknown => { /* no claim; also what a core solver returns here */ }
+}
+```
+
+To verify a received v4 bundle: `SliverCertificate::from_cert_v4(json)` /
+`SliverSatCertificate::from_cert_v4(json)` (every content hash verified
+before it returns — five on `unsat`, seven on `sat`) then
+`bundle.recheck()`. Without the feature, decode `ext`, `term` and
+`query` and call `ordeal_lrat::check_sliver_lowering(ext.nodes, ext.bits,
+ext.side, ext.roots, ext.map, ext.reads, ext.calls, ext.cargs, term.nodes,
+term.bits, term.roots)` before the v3 calls. `recheck.min_version` is
+`0.33.0`; a v1, v2 or v3 reader refuses a v4 bundle by its `format`, and
+the v4 readers refuse them.
+
+**What to compare it against.** Flatten your own `ExtBoolTerm`s with
+`ordeal::sliver::flatten_ext` and compare it with `ext` (`nodes`, `bits`,
+`side`, `roots`, `vars`, `arrays`, `funcs` — or the hash after putting
+your flattening into the block's `canonical_text`); the `map` and the
+tables are the solver's and do not need to be reproduced. What a v4
+recheck does *not* cover: that flattening (1:1, one walk with the
+lowering, no semantic decision), the variable, array and function names,
+and the front ends. Core queries are untouched: they keep producing v3
+bundles, byte for byte.
 
 ## Supply chain: SBOM and VEX
 

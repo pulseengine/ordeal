@@ -2994,3 +2994,70 @@ artifacts:
         target: VER-071
       - type: part-of-execution
         target: VE-061
+
+  - id: VE-062
+    type: verification-execution
+    title: "The proven sliver verified (VER-072)"
+    status: implemented
+    description: "Model regenerated (lean/regen.sh all, Kernel.lean deleted first): 0 axiom lines before (the phase-7 model, 8840 lines, as recorded for phase 7) and after (11153 lines; sha256 64cb8062…); the sliver kernel translated at the first attempt (no opaque externals; one translation-driven reshape during the proof — the `||` class tests moved into read_class / call_class / dead_class because a bare `let live = c == 2 || c == 4` translated to a Prop-typed bind). lake build: Build completed successfully (1730 jobs); SliverCheck forced to elaborate from scratch (its build products removed): Built SliverCheck (29s); 0 'declaration uses sorry' outside the Aeneas library; scripts/axiom_check.sh passes with check_sliver_lowering_sound, check_sliver_unsat_sound, check_sliver_model_sound and sliver_verdicts_exclusive pinned to propext / Classical.choice / Quot.sound next to every earlier capstone (statements unchanged; TermCheck.lean, QueryCheck.lean and BlasterDag.lean untouched); #print axioms of sliver_corr_values, pushforward_sat, pullback_tables_agree and the four capstones: [propext, Classical.choice, Quot.sound]. lean/SliverCheck.lean 6625 lines, 155 theorems, 0 sorry, 0 native_decide. The proof found a soundness hole in the kernel as first written: a DEAD read entry (one no select maps onto) whose index mentions its own variable — ($d, a, zext($d)) with the congruence root ¬(idx_p = zext($d)) ∨ $p = $d against 256 live constant reads a[c] = c + 1 — makes the core unsat ($d = $d + 1) while the extended query is satisfiable; the unmodified kernel accepted it (Ok(())). Fixed by liveness: a read or call variable a chain walk or call reaches moves to class 4 / 5, and dead_entry refuses any variable still in class 2 / 3 (SliverCheckError::DeadEntry); the kernel test rejects_a_dead_read_entry pins it. The lowering then produced dead entries of its own — a select settled by a concrete hit registered the base read it discarded — and the first old-vs-new scan degraded 126 engine-SAT queries to Unknown (DeadEntry); resolve_select now walks such a chain without registering the read (the variable was unconstrained: no verdict changes), after which the scan is identical (below). Four Lean negative controls, each a one-line kernel mutation (pristine sliver_kernel.rs sha256 cc07099d…, regenerated, proof must fail, restored byte for byte, regenerated, Kernel.lean back to 64cb8062…, 0 axioms), run by the proof agent in this session and (c) re-run independently: (a) array_cong_for skips every pair (a shape-preserving always-false guard; with `&& false` Aeneas dropped the loop's dead parameters and the failure was a signature mismatch at array_cong_for_loop_spec) — lake build SliverCheck exit 1, SliverCheck.lean:4070:14 array_cong_for_loop_spec, the completeness half that feeds ArrCong → reads_consistent → pullback_tables_agree; (b) read_dup dropped from read_entries — exit 1, SliverCheck.lean:3420:18 read_entries_loop_spec; (c) `|| cls[mi] != 0` dropped from core_corr (the #247 shape) — exit 1, SliverCheck.lean:2624:8 core_corr_spec (Tactic split failed); re-run by hand: mutated sha256 07e8e890…, model 11147 lines / 0 axioms, the same error at 2624:8, restored cc07099d…, model 64cb8062…, full build green; (d) the constant-hit level resolving to map_at(map, x) instead of map_at(map, v) — exit 1, SliverCheck.lean:2296:58 chain_walk_loop_spec (cur1 = img map x). Rust potency control (sliver_kernel.rs cc07099d… before and after): check_sliver_lowering made to return Ok(()) first — kernel tests 0 passed / 4 failed (accepts_a_symbolic_read_over_write_and_rejects_each_corruption, requires_every_congruence_root_and_honours_the_concrete_fast_path, checks_call_sites_and_their_congruence, rejects_a_dead_read_entry); API + bundle 8 passed / 5 failed (a_tampered_ext_block_degrades_every_entry_point_to_unknown, a_wrong_read_share_degrades_to_unknown, the_capture_shape_is_rejected_by_the_class_partition, a_forgotten_congruence_clause_degrades_to_unknown, cert_bundle_v4_tests::a_tampered_ext_block_fails_the_recheck); restored, hash identical, 4 passed. cargo test --workspace (sources touched first, rustc 1.99.1 stable): debug 256 + 14 + 3 + 2 + 38 passed / 0 failed / 3 ignored; release 256 + 14 + 3 + 2 + 38 passed / 0 failed / 3 ignored; --features ordeal/cert-bundle 284 + 14 + 3 + 2 + 38 passed / 0 failed / 3 ignored. cargo +stable clippy -D warnings clean on default (workspace, all targets), oracle+cert-bundle and cadical; cargo fmt --check clean; scripts/check_verification_citations.sh exit 0 (316-name inventory; the measure's default-feature legs resolve, its oracle leg listed in junit_to_rivet.skip). Z3 oracle suite (LIBRARY_PATH=/opt/homebrew/lib, --features oracle --release --lib -- oracle::): 18 passed / 0 failed in 30.4 s, incl. the new sliver_diff_through_from_sliver (both seeded corpora, 600 queries, through the gated Solver::from_sliver: 0 disagreements, nothing degraded) and the existing sliver_diff, sliver_diff_lifted_ops, sliver_diff_reserved_looking_names, sliver_diff_symbolic_index. Verdict scan (examples/sliver_scan.rs, release, built against the v0.32.0 sources — git archive v0.32.0 — and against this tree; Solver::from_sliver + check_with_deadline(10 s) per query; verdicts streamed line by line): 1050 queries — gen_sliver_corpus(0x5111_5EED_A55A_0001, 300), gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300), gen_sliver_corpus(0x5111_0DFF_1CE0_0002, 250), the loom-shaped chains for 1..6 i32 store/load pairs over a symbolic base (every byte read back: unsat; against a fresh variable: sat; the whole Or: unsat; the whole And: sat; an aliasing pair: sat), the #231 trap-guard shapes (ite / urem / sdiv / neg over a select or call), the bounded-entry queries and the concrete/symbolic mixes — verdict-identical on all 1050 (928 sat, 122 unsat, 0 Unknown and 0 refused on both sides); total 4778 ms new against 4897 ms old; the loom all-unsat rows (old → new ms): 1 pair 0 → 0, 2: 6 → 5, 3: 17 → 15, 4: 36 → 33, 5: 66 → 66, 6: 117 → 106. Size and latency (examples/sliver_size.rs, release, the loom all-unsat shape; pairs / reads / core roots / ext nodes / v3 bytes / v4 bytes / ext block bytes / check ms / solve ms): 1 / 4 / 7 / 40 / 224876 / 228952 / 1287 / 0.002 / 1; 2 / 8 / 29 / 112 / 891276 / 901563 / 3074 / 0.004 / 5; 4 / 16 / 121 / 352 / 3546265 / 3577292 / 9014 / 0.013 / 39; 6 / 24 / 277 / 720 / 8040314 / 8102972 / 17909 / 0.026 / 116 — the ext block is 0.2–0.6 % of the bundle and the check three orders of magnitude below the solve. Byte identity: the published v0.32.0 aarch64-apple-darwin binary (gh release download, tarball 310454 bytes, --version = ordeal 0.32.0) against this branch's release build over 27 query files (crates/ordeal/tests/fixtures incl. differential/, evidence/certs, fuzz/seeds/smtlib, .rivet/repos/gale/proofs/ordeal-bv) in text, --format json, --with-query and --with-term mode, sha256 of stdout + stderr + exit code: 108 same / 0 differ. rivet validate: 0 errors once the verdicts below are linked, 0 warnings, 0 broken cross-refs. loom (origin/main, 2026-10-20) still lowers through ordeal::sliver::lower in rule_solver::lower_goal_ne and asserts the core itself: it gets the term and query checks about the core until it builds its solver with Solver::from_sliver (docs/consuming-ordeal.md)."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2, rustc 1.99.1 stable; branch proof/sliver-design rebased on fix/247-248-sliver-names-eval-const (74f618f, v0.32.1 in CI); the Lean proof produced by a fable subagent in this worktree, its verifier re-run from a fresh regen here"
+      executor: local
+      timestamp: 2026-10-20T23:50:07Z
+      version: 74f618f+sliver-proof
+
+  - id: VV-128
+    type: verification-verdict
+    title: VER-072 pass — check_sliver_lowering proven (SliverCheck.lean 6625 lines, 155 theorems, 0 sorry), the four capstones axiom-pinned, Kernel.lean 0 axioms before and after, no earlier statement changed; the four Lean negative controls each fail a named proof and the source restores byte for byte
+    status: implemented
+    description: Executed pass as recorded in the linked execution (the proof and its gate potency, incl. the dead-entry hole the proof surfaced and the kernel's liveness fix).
+    fields:
+      evidence: see VE-062
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-072
+      - type: part-of-execution
+        target: VE-062
+
+  - id: VV-129
+    type: verification-verdict
+    title: VER-072 pass — a tampered ext block, a wrong read share, the #247 capture shape and a forgotten congruence clause each degrade every sliver entry point to Unknown and fail the bundle recheck with the v3 blocks untouched; the vacuous check fails 4 kernel and 5 API/bundle tests; workspace tests debug, release and cert-bundle green
+    status: implemented
+    description: Executed pass as recorded in the linked execution (Rust negative controls and potency).
+    fields:
+      evidence: see VE-062
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-072
+      - type: part-of-execution
+        target: VE-062
+
+  - id: VV-130
+    type: verification-verdict
+    title: VER-072 pass — the old-vs-new verdict scan is identical on all 1050 queries (0 Unknown), the Z3 differential through Solver::from_sliver has 0 disagreements and nothing degraded, and the ext block is 0.2–0.6 % of the bundle with the check three orders of magnitude below the solve on loom's 6-pair shape
+    status: implemented
+    description: Executed pass as recorded in the linked execution (non-regression of verdicts, size and latency; the first scan's 126 DeadEntry degradations were fixed in the lowering before this result).
+    fields:
+      evidence: see VE-062
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-072
+      - type: part-of-execution
+        target: VE-062
+
+  - id: VV-131
+    type: verification-verdict
+    title: VER-072 pass — core queries byte-identical to the published v0.32.0 binary (108 same / 0 differ over 27 files in four modes); v1, v2 and v3 readers refuse v4 and vice versa; clippy on three feature sets, fmt and the citation check clean
+    status: implemented
+    description: Executed pass as recorded in the linked execution (byte identity and format isolation).
+    fields:
+      evidence: see VE-062
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-072
+      - type: part-of-execution
+        target: VE-062

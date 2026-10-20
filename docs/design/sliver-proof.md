@@ -1,11 +1,12 @@
 # Design: the proven sliver — array/UF elimination under the trusted check
 
-**Status:** design and feasibility, 2026-10-20; nothing below is
-implemented. **Scope:** the last trusted step between loom's question and
-ordeal's answer — `sliver::lower` — and how to put it under the proven
-chain of #192. **Decision requested:** option (A′) below (the phase-7
-correspondence check, in the shape the code forces). **Not in this
-document:** rivet artifacts, the implementation, the proofs.
+**Status:** design and feasibility, 2026-10-20; **option (A′) approved by
+the maintainer the same day** (with `ordeal-cert/v4`, the hash-consed
+lowered core, first-appearance ordering and the witness nodes) and
+**delivered** (TR-072, v0.33.0 — the last section records what shipped
+and where it departs from the design). **Scope:** the last trusted step
+between loom's question and ordeal's answer — `sliver::lower` — and how
+to put it under the proven chain of #192.
 
 ## The claim being protected
 
@@ -718,3 +719,91 @@ if the check turns out to refuse real lowerings.
   into `DagNode`) is known but touches the proven encoder's match
   exhaustiveness, so it is a last resort, to be tried in 8b's first
   week on a stub.
+
+## What was delivered (TR-072, v0.33.0)
+
+Option (A′) as designed, with the following departures, each forced by
+the code or by the proof:
+
+- **No `sigs` table.** A call node carries its result width
+  (`ExtNode::Call(fid, w, s, n)`); the Lean `Ufs := Nat → List DVal → DVal`
+  is coerced to the declared width at the call node, so every `ufs` is an
+  interpretation of every signature — unsat under every coerced `ufs`
+  implies unsat under every properly typed UF, and the sat direction
+  constructs one. Signature consistency (S7) stays a Rust refusal; the
+  check does not need it.
+- **Every table entry must be live.** The proof found that the check as
+  first written was unsound without it: a dead read entry whose index
+  mentions its own variable — `($d, a, zext($d))` with the congruence root
+  `¬(idx_p = zext($d)) ∨ $p = $d` against live constant reads `a[c] = c+1`
+  — makes the core unsat (`$d = $d + 1`) while the extended query is
+  satisfiable, and the kernel accepted it. The transport needs every read
+  and call variable to be resolved by some mapped `select` or call (its
+  value is then defined on the extended side, from the first such node),
+  so the kernel refuses a dead entry (`DeadEntry`). This is the design's
+  "pullback well-definedness" risk showing up in the *other* direction,
+  and it is a point the Rust never had to think about. The lowering had one
+  source of them: a `select` settled by a concrete hit still registered
+  the base read it discarded. `resolve_select` now walks the rest of such
+  a chain (sort checks, flattening, the calls inside the dropped values)
+  but registers no read for it — that variable was unconstrained, so no
+  verdict changes (the old-vs-new scan below is the evidence), and the
+  design's S6 case ("dropped values may register entries nobody uses")
+  no longer arises for reads.
+- **The congruence order is the table's**, as designed (S10): pairs
+  `p < q` of the access set in creation order, then of the call sites;
+  `sliver.rs` lost its two `BTreeMap`s. The check computes the expected
+  roots; there is no `cong` hint.
+- **One walk.** `sliver::lower_ext` flattens and lowers in the same
+  traversal, so the extended node ids and the lowered images of every
+  `select` and call come from one place; `flatten_ext` is the consumer's
+  half of it. The mapper (`QueryTerm::flatten_sliver`) interns rather
+  than searches: a variable by name, a constant by value, a closed
+  operator as the operator over its operands' images
+  (`DagBuilder::intern_node`), a `select` or call by its lowered term —
+  the hash-consed D0 makes each of those a lookup.
+- **The SAT certificate carries the extended model** and the recheck
+  re-derives it from the certificate alone (`SliverBlock::pullback_model`:
+  the lowered core evaluated under the model with the proven encoder and
+  simulator, the arrays read at every read's index value, the functions
+  at every call's argument values) — S13 closed without the trace.
+
+Files: `crates/ordeal-lrat/src/sliver_kernel.rs` (the check;
+`kernel.sliver_kernel.*` in the generated model), `lean/SliverCheck.lean`
+(the proof; the capstones pinned in `AxiomCheck.lean`),
+`crates/ordeal/src/sliver.rs` (`lower_ext`, `flatten_ext`, `ExtQuery`,
+`SliverTrace`, the table-order congruence, the liveness fix),
+`crates/ordeal/src/query.rs` (`SliverBlock`, `QueryTerm::flatten_sliver`,
+`SliverCertificate`, `SliverSatCertificate`, `SliverCheckResult`),
+`crates/ordeal/src/solver.rs` (`Solver::from_sliver` keeps the extended
+query; the gates run the check first; `check_sliver_with_term`),
+`crates/ordeal/src/cert_bundle.rs` (`ordeal-cert/v4`),
+`crates/ordeal/examples/sliver_scan.rs` and `sliver_size.rs` (the
+evidence harnesses). The verification record is VE-062.
+
+**Measured** (release, Apple M4; `examples/sliver_size.rs`, the loom
+`all-unsat` shape with `4n` byte stores over a symbolic base and `4n`
+reads of one array):
+
+| pairs | reads | core roots | ext nodes | v3 bundle | v4 bundle | `ext` block | check | solve |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 4 | 7 | 40 | 224 876 B | 228 952 B | 1 287 B | 0.002 ms | 1 ms |
+| 2 | 8 | 29 | 112 | 891 276 B | 901 563 B | 3 074 B | 0.004 ms | 5 ms |
+| 4 | 16 | 121 | 352 | 3 546 265 B | 3 577 292 B | 9 014 B | 0.013 ms | 39 ms |
+| 6 | 24 | 277 | 720 | 8 040 314 B | 8 102 972 B | 17 909 B | 0.026 ms | 116 ms |
+
+The `ext` block is 0.2–0.6 % of the bundle (the rest is the CNF and the
+proof, there since v1), and the check is three orders of magnitude below
+the solve — as the design's performance section predicted. The
+old-vs-new verdict scan (`examples/sliver_scan.rs`, v0.32.0 against this
+tree, `check_with_deadline(10 s)` per query, verdicts streamed line by
+line): 1 050 queries — the three seeded corpora (`0x5111_5EED…`/300,
+the lifted `0x5111_0231…`/300, `0x5111_0DFF…`/250), the loom-shaped
+chains for 1–6 store/load pairs (every byte read back, against a fresh
+variable, the whole `Or` and `And`, an aliasing pair), the #231
+trap-guard shapes, the bounded-entry queries — verdict-identical on all
+1 050 (928 sat, 122 unsat, 0 Unknown on either side), 4 778 ms in total
+against 4 897 ms on v0.32.0. The first scan, before the liveness fix,
+degraded 126 engine-SAT queries to `Unknown` (`DeadEntry`): that is the
+completeness risk the design named, and it was caught by the scan, not
+by a proof — the kind of finding the scan exists for.
