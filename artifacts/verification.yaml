@@ -1436,8 +1436,6 @@ artifacts:
     links:
       - type: verifies
         target: TR-061
-      - type: part-of-execution
-        target: VE-051
 
   - id: VER-062
     type: sw-verification
@@ -1453,8 +1451,6 @@ artifacts:
     links:
       - type: verifies
         target: TR-062
-      - type: part-of-execution
-        target: VE-052
 
   - id: VER-063
     type: sw-verification
@@ -1485,8 +1481,6 @@ artifacts:
     links:
       - type: verifies
         target: TR-064
-      - type: part-of-execution
-        target: VE-054
 
   - id: VER-066
     type: sw-verification
@@ -1501,8 +1495,6 @@ artifacts:
     links:
       - type: verifies
         target: TR-066
-      - type: part-of-execution
-        target: VE-056
   - id: VER-065
     type: sw-verification
     title: The sat answer is checked against the query — check_query_model proven, the SAT v2 bundle and --with-query on sat, tamper controls, output unchanged (TR-065)
@@ -1517,8 +1509,6 @@ artifacts:
     links:
       - type: verifies
         target: TR-065
-      - type: part-of-execution
-        target: VE-055
 
   - id: VER-067
     type: sw-verification
@@ -1533,8 +1523,6 @@ artifacts:
     links:
       - type: verifies
         target: TR-067
-      - type: part-of-execution
-        target: VE-057
 
   - id: VER-068
     type: sw-verification
@@ -1549,15 +1537,13 @@ artifacts:
     links:
       - type: verifies
         target: TR-068
-      - type: part-of-execution
-        target: VE-058
 
   - id: VER-069
     type: sw-verification
     title: The term-to-DAG translation is proven — check_term_dag and its capstones, the v3 bundle and --with-term, the Lean and Rust negative controls, byte identity (TR-069)
     status: verified
     release: v0.31.0
-    description: "lean/TermCheck.lean proves node_eq_sound (the 37 x 37 structural split), node_corr_sound, pMapNode_val / pSwap_val / pMirror_val, const_indep, corr_values, corr_roots, the loop specs (dag_const_loop_spec, bits_eq_loop_spec, fold_bits_ok_loop_spec, roots_corr_loop_spec, check_term_dag_loop2_spec with LoopFacts and VarInj), term_node_corr_spec, term_step_spec, check_term_dag_accepted, check_term_dag_sound, check_term_unsat_sound, check_term_model_sound, term_verdicts_exclusive, var_offset_spec and check_input_value_sound; AxiomCheck.lean pins the five capstones. Rust tests (// rivet: verifies VER-069): kernel check_term_dag_accepts_swap_mirror_fold_and_shared_vars, check_term_dag_rejects_each_unsound_rewrite (aliasing, a wrong fold, a fold of an open node, the constant-condition ite in both directions, a non-commutative swap, a wrong mirror, a tampered map, a root without image, a wrong map length, an image past the end, a constant with other bits), var_offset_and_check_input_value_read_the_inputs_lsb_first; API term_certificate_rechecks_through_the_trusted_crate, term_sat_certificate_rechecks_and_binds_the_model, tampering_the_map_the_var_map_or_a_fold_fails_the_term_recheck (a tampered map entry, two variables aliased, a wrong fold, a term asking a different question, the term's variable map swapped on sat — the v2 certificate untouched throughout), a_rejected_term_map_degrades_to_unknown_not_a_verdict, check_with_term_matches_check_with_query; bundle v3_bundle_round_trips_and_rechecks_the_term, v3_sat_bundle_round_trips_and_rechecks_the_model_and_term, v2_and_v3_readers_refuse_each_other, v3_tampered_term_fails_recheck_with_query_and_proof_untouched; CLI format_json_with_term_carries_a_recheckable_term, format_json_with_term_carries_a_recheckable_model, with_term_is_opt_in_and_a_superset_of_with_query; the denotation guard's term_is_mapped_and_accepted on every case; under the oracle feature term_differential_through_check_with_term. Gate potency: four Lean negative controls (one-line kernel mutations, regenerated, each fails a named proof) and the Rust control (the injectivity check made vacuous) — recorded in VE-059 with the failing theorems and tests; restored byte-for-byte and rebuilt clean."
+    description: "lean/TermCheck.lean proves node_eq_sound (the 37 x 37 structural split), node_corr_sound, pMapNode_val / pSwap_val / pMirror_val, const_indep, corr_values, corr_roots, the loop specs (dag_const_loop_spec, bits_eq_loop_spec, fold_bits_ok_loop_spec, roots_corr_loop_spec, check_term_dag_loop2_spec with LoopFacts and VarInj), term_node_corr_spec, term_step_spec, check_term_dag_accepted, check_term_dag_sound, check_term_unsat_sound, check_term_model_sound, term_verdicts_exclusive, var_offset_spec and check_input_value_sound; AxiomCheck.lean pins the five capstones. Rust tests (// rivet: verifies VER-069): kernel check_term_dag_accepts_swap_mirror_fold_and_shared_vars, check_term_dag_rejects_each_unsound_rewrite (aliasing, a wrong fold, a fold of an open node, the constant-condition ite in both directions, a non-commutative swap, a wrong mirror, a tampered map, a root without image, a wrong map length, an image past the end, a constant with other bits), var_offset_and_check_input_value_read_the_inputs_lsb_first; API term_certificate_rechecks_through_the_trusted_crate, term_sat_certificate_rechecks_and_binds_the_model, tampering_the_map_the_var_map_or_a_fold_fails_the_term_recheck (a tampered map entry, two variables aliased, a wrong fold, a term asking a different question, the term's variable map swapped on sat — the v2 certificate untouched throughout), a_rejected_term_map_degrades_to_unknown_not_a_verdict, check_with_term_matches_check_with_query; bundle v3_bundle_round_trips_and_rechecks_the_term, v3_sat_bundle_round_trips_and_rechecks_the_model_and_term, v2_and_v3_readers_refuse_each_other, v3_tampered_term_fails_recheck_with_query_and_proof_untouched; CLI format_json_with_term_carries_a_recheckable_term, format_json_with_term_carries_a_recheckable_model, with_term_is_opt_in_and_a_superset_of_with_query; the denotation guard's term_is_mapped_and_accepted on every case; under the oracle feature term_differential_through_check_with_term. Gate potency: four Lean negative controls (one-line kernel mutations, regenerated, each fails a named proof) and the Rust control (the injectivity check made vacuous) — recorded in its execution record with the failing theorems and tests; restored byte-for-byte and rebuilt clean."
     tags: [lean, checker, cert-bundle, negative-control, regression, canon, dag]
     fields:
       coverage: 5 new capstones axiom-pinned plus every earlier one, 0 sorry, Kernel.lean 0 axioms before and after; four Lean + one Rust negative controls; positive and negative controls at the kernel, API, solver, bundle and CLI level with the v2 blocks untouched; the denotation guard and the Z3 differential as the map's positive controls; 24 fixtures byte-identical in JSON and text mode; the four cnf_gap digests unchanged
@@ -1566,15 +1552,13 @@ artifacts:
     links:
       - type: verifies
         target: TR-069
-      - type: part-of-execution
-        target: VE-059
 
   - id: VER-070
     type: sw-verification
     title: The default path rests on the trusted term check — the tamper-hook negative control on every entry point, the term_map root resolution, the verdict scan, byte identity against the published v0.31.0, the cost table (TR-070)
     status: verified
     release: v0.32.0
-    description: "Rust tests (// rivet: verifies VER-070): query_term_tests::default_check_rests_on_the_trusted_term_check (the tamper hook corrupts one term-map entry: check, check_with_limit, check_with_deadline, check_with_witness, check_with_query and check_with_term return Unknown on the rewrite-heavy UNSAT query and on the SAT query a + b = 9, b > a, a * 2 = b; disarmed, Unsat re-checks and Sat is a = 3, b = 6), default_sat_rests_on_the_trusted_binding (the term's two variables swapped: every entry point Unknown on SAT — the proven var_offset / check_input_value reject the model read at the other variable's inputs — while UNSAT is unaffected, since the refutation does not read the variable map), sliver_one_shots_rest_on_the_trusted_term_check (check_sliver, check_sliver_with_deadline, check_sliver_with_limit and from_sliver().check() on a store/select hit and a miss), every_entry_point_returns_the_gated_certificate (check, check_with_limit, check_with_witness, check_with_query and check_with_term carry byte-identical cnf + lrat, re-encoded by ordeal_lrat::check_query to the carried CNF and related to the term by check_term_dag; the three SAT entries carry one model, re-checkable at the term level); dag::denotation_guard::term_map_resolves_equal_bits_constants_from_the_roots (the TR-070 regression: constants 5 and 2^64 + 5 at width 3, mul(c, v) over both, in both assertion orders, and the same ambiguity on two roots — accepted; the old term_map failed it with RootMismatch); under the oracle feature differential_ordeal_vs_z3_on_corpus, now the gated default path against Z3 over 300 seeded queries with 0 disagreements and 0 Unknown. Gate potency: the term check skipped in gate_unsat / gate_sat (the TermCertificate / TermSatCertificate recheck replaced by the LRAT / witness check alone) fails the three negative-control tests, recorded in VE-060, restored. Non-regression: the scratchpad harness records every decided query's verdict and certificate / model digest through check on v0.31.0's sources and on this branch over the latency corpus, the bmc corpus, gen_corpus 0x192/200, 0xC0FFEE/1000, 0x0D1FFCEC/100, hard_mul_16, the eight sliver one-shots and the width sweep (every operator at widths 1..=128, a SAT and an UNSAT shape each, the ite fold short-circuit, extension and concat/extract) and diffs them; the CLI is compared byte for byte (stdout + stderr + exit code) with the published v0.31.0 aarch64-apple-darwin binary over every query file in crates/ordeal/tests/fixtures, evidence/certs, fuzz/seeds/smtlib and .rivet/repos/gale/proofs/ordeal-bv in text, JSON and --with-query mode; the four cnf_gap_digest digests are re-run; the latency corpus is timed best of three against v0.31.0's check with the cost broken down."
+    description: "Rust tests (// rivet: verifies VER-070): query_term_tests::default_check_rests_on_the_trusted_term_check (the tamper hook corrupts one term-map entry: check, check_with_limit, check_with_deadline, check_with_witness, check_with_query and check_with_term return Unknown on the rewrite-heavy UNSAT query and on the SAT query a + b = 9, b > a, a * 2 = b; disarmed, Unsat re-checks and Sat is a = 3, b = 6), default_sat_rests_on_the_trusted_binding (the term's two variables swapped: every entry point Unknown on SAT — the proven var_offset / check_input_value reject the model read at the other variable's inputs — while UNSAT is unaffected, since the refutation does not read the variable map), sliver_one_shots_rest_on_the_trusted_term_check (check_sliver, check_sliver_with_deadline, check_sliver_with_limit and from_sliver().check() on a store/select hit and a miss), every_entry_point_returns_the_gated_certificate (check, check_with_limit, check_with_witness, check_with_query and check_with_term carry byte-identical cnf + lrat, re-encoded by ordeal_lrat::check_query to the carried CNF and related to the term by check_term_dag; the three SAT entries carry one model, re-checkable at the term level); dag::denotation_guard::term_map_resolves_equal_bits_constants_from_the_roots (the TR-070 regression: constants 5 and 2^64 + 5 at width 3, mul(c, v) over both, in both assertion orders, and the same ambiguity on two roots — accepted; the old term_map failed it with RootMismatch); under the oracle feature differential_ordeal_vs_z3_on_corpus, now the gated default path against Z3 over 300 seeded queries with 0 disagreements and 0 Unknown. Gate potency: the term check skipped in gate_unsat / gate_sat (the TermCertificate / TermSatCertificate recheck replaced by the LRAT / witness check alone) fails the three negative-control tests, recorded in its execution record, restored. Non-regression: the scratchpad harness records every decided query's verdict and certificate / model digest through check on v0.31.0's sources and on this branch over the latency corpus, the bmc corpus, gen_corpus 0x192/200, 0xC0FFEE/1000, 0x0D1FFCEC/100, hard_mul_16, the eight sliver one-shots and the width sweep (every operator at widths 1..=128, a SAT and an UNSAT shape each, the ite fold short-circuit, extension and concat/extract) and diffs them; the CLI is compared byte for byte (stdout + stderr + exit code) with the published v0.31.0 aarch64-apple-darwin binary over every query file in crates/ordeal/tests/fixtures, evidence/certs, fuzz/seeds/smtlib and .rivet/repos/gale/proofs/ordeal-bv in text, JSON and --with-query mode; the four cnf_gap_digest digests are re-run; the latency corpus is timed best of three against v0.31.0's check with the cost broken down."
     tags: [checker, negative-control, regression, canon, dag, eval, default-path, byte-identity, performance]
     fields:
       coverage: "negative controls on every entry point (UNSAT and SAT, map and binding) plus the sliver one-shots; potency shown; the term_map regression; the denotation guard's 1500 cases; the Z3 differential on the gated path; the verdict scan over every corpus with identical digests; CLI byte identity against the published v0.31.0 over 29 query files x 3 modes; the four cnf_gap digests; the cost table"
@@ -1583,5 +1567,3 @@ artifacts:
     links:
       - type: verifies
         target: TR-070
-      - type: part-of-execution
-        target: VE-060
