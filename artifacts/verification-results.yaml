@@ -2969,3 +2969,28 @@ artifacts:
         target: VER-070
       - type: part-of-execution
         target: VE-060
+
+  - id: VE-061
+    type: verification-execution
+    title: "#247 / #248 sliver fresh names and eval_const verified (VER-071)"
+    status: implemented
+    description: "cargo test --workspace (sources touched first): 248 + 14 + 3 + 2 + 34 passed / 0 failed / 3 ignored in debug and in release; --features ordeal/cert-bundle: 271 passed. The four new tests pass: reserved_looking_query_names_stay_distinct_from_fresh_variables (400 random queries, extended and lowered truth agree), a_query_variable_named_like_a_fresh_read_is_not_captured, eval_const_refuses_a_base_dependent_term_two_fills_agree_on, and under the oracle feature sliver_diff_reserved_looking_names (12 queries Sat, 0 disagreements with Z3); oracle:: 17 passed (release, LIBRARY_PATH=/opt/homebrew/lib). Mutation controls, each restored: Lowering::fresh's collision loop disabled -> the two #247 tests fail; eval_const's base check disabled -> eval_const_base_read_is_not_constant and the new #248 test fail. Before the fix the probe select(a, 5) != $sel:a:5 lowered to Ne($sel:a:5, $sel:a:5) and check_sliver returned Unsat; eval_const((a[7] + 1) & 0xFE) returned Some(0). cargo +stable (rustc 1.99) clippy -D warnings clean for the default build, --features oracle,cert-bundle and --features cadical; cargo fmt --check clean. Default CLI output byte-identical to the published v0.32.0 binary on 117/117 runs (39 query files x json/text/--with-query)."
+    fields:
+      environment: "note: macOS arm64, local, Z3 via Homebrew; branch fix/247-248-sliver-names-eval-const on ff4e489 (v0.32.0)"
+      executor: local
+      timestamp: 2026-10-20T20:52:10Z
+      version: ff4e489+247
+
+  - id: VV-127
+    type: verification-verdict
+    title: VER-071 pass — fresh sliver names never capture a query variable; eval_const is structural
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-061
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-071
+      - type: part-of-execution
+        target: VE-061
