@@ -1168,7 +1168,7 @@ artifacts:
     fields:
       coverage: blast_ite_bitvec at unbounded width (required Lean context); Kani ite_8 in the scheduled fast tier; Z3 differential over a corpus that includes Ite
       method: formal-verification
-      steps: "run: cd lean && lake build BlasterCmp (blast_ite_bitvec); cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus (the random generator emits BvTerm::Ite)"
+      steps: "run: cd lean && lake build BlasterCmp; cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus"
     links:
       - type: verifies
         target: TR-014

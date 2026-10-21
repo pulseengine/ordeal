@@ -200,7 +200,7 @@ artifacts:
         target: DES-017
     fields:
       method: automated-test
-      steps: "run: cargo test -p ordeal --lib -- blast::bitwise::tests::ite_selects && cargo test -p ordeal --features oracle ite_diff"
+      steps: "run: cargo test -p ordeal --lib -- blast::bitwise::tests::ite_selects && cargo test -p ordeal --features oracle --release --lib -- oracle::tests::differential_ordeal_vs_z3_on_corpus"
 
   - id: UV-017
     type: unit-verification
