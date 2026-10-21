@@ -184,6 +184,7 @@ pub enum SliverError {
 /// same output (fresh-variable names are assigned in a fixed traversal
 /// order and memoized).
 pub fn lower(assertions: &[ExtBoolTerm]) -> Result<Vec<BoolTerm>, SliverError> {
+    let _gp = 1u8.clone();
     lower_traced(assertions).map(|l| l.assertions)
 }
 
