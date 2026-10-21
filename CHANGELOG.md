@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-21
+
+**The proven sliver** (#192, TR-072). Every answer about a query with
+arrays or uninterpreted functions now rests on a trusted, Lean-proven
+check that the lowered core is the read-over-write, Ackermann and
+congruence elimination of the extended query as asked. An accepted
+`Unsat` refutes the extended query under every array and UF
+interpretation; an accepted model pulls back to an extended model.
+Anything the check rejects degrades to `Unknown`. New bundle format
+`ordeal-cert/v4`. Core queries, their v3 bundles and the CLI output are
+byte-identical to 0.32.1.
+
 ### Added
 - **The proven sliver: every array/UF answer rests on the trusted
   `check_sliver_lowering`** (TR-072, `ordeal-cert/v4`). Until now the
@@ -1831,7 +1843,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.32.1...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.33.0
 [0.32.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.1
 [0.32.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.0
 [0.31.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.31.0
