@@ -403,6 +403,7 @@ version = "0.33.0"
 dependencies = [
  "cadical-sys",
  "criterion",
+ "itoa",
  "ordeal-lrat",
  "serde",
  "serde_json",
