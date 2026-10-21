@@ -738,6 +738,24 @@ pub const TERM_ENCODING_V2: &str = "ordeal-term/v2";
 /// and tables the trusted `check_sliver_lowering` verifies.
 pub const EXT_ENCODING: &str = "ordeal-ext/v1";
 
+/// Why [`QueryTerm::flatten_sliver`] could not build the blocks.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SliverFlattenError {
+    /// The trusted flattener refused the extended trees.
+    Flat(ordeal_lrat::FlatError),
+    /// A kernel name is not UTF-8 (impossible for a name that came from a
+    /// `String`).
+    Names,
+    /// The lowered core is ill-sorted.
+    Core(crate::eval::EvalError),
+}
+
+impl From<crate::eval::EvalError> for SliverFlattenError {
+    fn from(e: crate::eval::EvalError) -> Self {
+        SliverFlattenError::Core(e)
+    }
+}
+
 /// The term a `v3` certificate is about (#192 phase 7): what the caller
 /// asserted, flattened, plus the untrusted index map from its nodes to the
 /// lowered [`QueryDag`]'s. The trusted `ordeal_lrat::check_term_dag`
@@ -803,13 +821,27 @@ impl QueryTerm {
     /// query. Every map and table is untrusted advice the trusted checks
     /// verify. Fails only on an ill-sorted term.
     pub fn flatten_sliver(
+        assertions: &[crate::sliver::ExtBoolTerm],
         trace: &crate::sliver::SliverTrace,
         query: &QueryDag,
         query_vars: &[(String, u32, usize)],
-    ) -> Result<(QueryTerm, SliverBlock), crate::eval::EvalError> {
+    ) -> Result<(QueryTerm, SliverBlock), SliverFlattenError> {
         use crate::dag::{DagBuilder, NO_IMAGE};
         use crate::term::{BvTerm, Sort};
-        let ext = &trace.ext;
+        // TR-073: the extended query is the TRUSTED flattener's output over
+        // the kernel's copy of the trees; the lowering's own walk
+        // (`trace.ext`, the differential twin) only supplies the lowered
+        // images, indexed by node — a disagreement between the two walks
+        // is a `check_sliver_lowering` rejection, never a wrong verdict.
+        let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_ext_bools(assertions))
+            .map_err(SliverFlattenError::Flat)?;
+        let kernel_ext = crate::mirror::ext_query(&flat).ok_or(SliverFlattenError::Names)?;
+        debug_assert!(
+            kernel_ext == trace.ext,
+            "the kernel's flattening and the lowering's walk disagree — ordeal bug"
+        );
+        let consts = crate::mirror::const_table(&flat);
+        let ext = &kernel_ext;
         let lowered = &trace.lowered;
         let mut builder = DagBuilder::new(true);
         for a in &lowered.assertions {
@@ -857,23 +889,17 @@ impl QueryTerm {
                     Some((name, width)) => builder.bv(&var(name, *width))?,
                     None => NO_IMAGE,
                 },
-                ExtNode::Core(k::DagNode::Const(s, w)) => {
-                    let (s, w) = (*s, *w);
-                    if s + w > ext.bits.len() || w > 128 {
-                        NO_IMAGE
-                    } else {
-                        let mut value = 0u128;
-                        for j in 0..w {
-                            if ext.bits[s + j] {
-                                value |= 1u128 << j;
-                            }
-                        }
-                        builder.bv(&BvTerm::Const {
-                            value,
-                            sort: Sort::new(w as u32),
-                        })?
-                    }
-                }
+                // #262: the kernel's constant for this node, MASKED — the
+                // value the lowered core carries (`sliver::masked_bv`), so
+                // the lookup hits the core's node; the raw value's bits
+                // above the width mean nothing to the core.
+                ExtNode::Core(k::DagNode::Const(_, _)) => match consts.get(&i) {
+                    Some(&(value, w)) => builder.bv(&BvTerm::Const {
+                        value: crate::eval::mask_to(value, w),
+                        sort: Sort::new(w),
+                    })?,
+                    None => NO_IMAGE,
+                },
                 ExtNode::Core(nd) => {
                     let at = |a: usize| map.get(a).copied().filter(|&m| m != NO_IMAGE);
                     match crate::dag::map_operands(nd, at) {
@@ -900,7 +926,7 @@ impl QueryTerm {
             shared: true,
         };
         let block = SliverBlock {
-            ext: ext.clone(),
+            ext: kernel_ext,
             map,
             reads,
             calls,
@@ -908,15 +934,28 @@ impl QueryTerm {
         };
         Ok((term, block))
     }
-    /// Flatten `assertions` and map the result onto the lowered `query`
+    /// Flatten `assertions` with the TRUSTED flattener (TR-073:
+    /// `ordeal_lrat::flatten_tree` over the kernel's copy of the trees,
+    /// `crate::mirror`; the `nodes` / `bits` / `roots` / `vars` of the
+    /// term are the kernel's output, verbatim — `dag::flatten` is its
+    /// differential twin) and map the result onto the lowered `query`
     /// (`query_vars`: the lowered DAG's `(name, width, Var node)` map).
-    /// Fails only on an ill-sorted term.
+    /// Fails only on a term the kernel refuses (ill-sorted, or one name at
+    /// two widths).
     pub fn flatten(
         assertions: &[crate::term::BoolTerm],
         query: &QueryDag,
         query_vars: &[(String, u32, usize)],
-    ) -> Result<QueryTerm, crate::eval::EvalError> {
-        let term = crate::dag::flatten(assertions)?;
+    ) -> Result<QueryTerm, ordeal_lrat::FlatError> {
+        let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_bools(assertions))?;
+        let nodes = ordeal_lrat::project_core(&flat.nodes)?;
+        let vars = crate::mirror::var_table(&flat).ok_or(ordeal_lrat::FlatError::NameWidth)?;
+        let term = crate::dag::Dag {
+            nodes,
+            bits: flat.bits,
+            roots: flat.roots,
+            vars,
+        };
         let map = crate::dag::term_map(&term, &query.nodes, &query.bits, &query.roots, query_vars);
         Ok(QueryTerm {
             nodes: term.nodes,
@@ -1118,8 +1157,54 @@ impl TermSatCertificate {
                 return Err(bad());
             }
         }
+        // TR-073: the binding BY NAME through the kernel's variable table
+        // (`term.vars` is the table verbatim): every mapped table entry
+        // reads the value advertised under its name
+        // (`ordeal_lrat::check_tree_model`, `kernel.spec.tree_model_sound`).
+        let (var_node, var_width, values) =
+            table_values(&self.term.vars, &self.term.map, &self.query.witness.model)
+                .map_err(TermModelRecheckError::Binding)?;
+        if !ordeal_lrat::check_tree_model(
+            &var_node,
+            &var_width,
+            &self.term.map,
+            &dag.nodes,
+            inputs,
+            &values,
+        ) {
+            return Err(TermModelRecheckError::Binding("<table>".into()));
+        }
         Ok(())
     }
+}
+
+/// The kernel's model-binding arguments: `(var_node, var_width, values)`.
+type ModelBinding = (Vec<usize>, Vec<usize>, Vec<u128>);
+
+/// The kernel's model-binding arguments from a variable table: the nodes,
+/// the widths, and per entry the value the model advertises under its
+/// name (`0` for an entry the DAG dropped — `map` says `NO_IMAGE` — which
+/// the kernel skips; an entry with an image but no advertised value is an
+/// error, named).
+fn table_values(
+    vars: &[(String, u32, usize)],
+    map: &[usize],
+    model: &crate::solver::Model,
+) -> Result<ModelBinding, String> {
+    let mut var_node = Vec::with_capacity(vars.len());
+    let mut var_width = Vec::with_capacity(vars.len());
+    let mut values = Vec::with_capacity(vars.len());
+    for (name, width, node) in vars {
+        var_node.push(*node);
+        var_width.push(*width as usize);
+        let mapped = map.get(*node).is_some_and(|&m| m != crate::dag::NO_IMAGE);
+        match model.assignments.iter().find(|(n, _)| n == name) {
+            Some((_, v)) => values.push(*v),
+            None if !mapped => values.push(0),
+            None => return Err(name.clone()),
+        }
+    }
+    Ok((var_node, var_width, values))
 }
 
 /// The result of [`crate::Solver::check_with_term`]: like
@@ -1454,6 +1539,42 @@ impl SliverSatCertificate {
             || expected.arrays != self.model.arrays
             || expected.calls != self.model.calls
         {
+            return Err(SliverModelRecheckError::Model);
+        }
+        // TR-073: the extended model's variables BY NAME through the
+        // kernel's variable table of the extended query, the extended map
+        // and the term map (`check_tree_model_ext`,
+        // `kernel.spec.ext_tree_model_sound`).
+        let ext = &self.sliver.ext;
+        let mut var_node = Vec::with_capacity(ext.vars.len());
+        let mut var_width = Vec::with_capacity(ext.vars.len());
+        let mut values = Vec::with_capacity(ext.vars.len());
+        for (name, width, node) in &ext.vars {
+            var_node.push(*node);
+            var_width.push(*width as usize);
+            let mapped = self
+                .sliver
+                .map
+                .get(*node)
+                .and_then(|&m| (m != crate::dag::NO_IMAGE).then(|| self.term.term.map.get(m)))
+                .flatten()
+                .is_some_and(|&m| m != crate::dag::NO_IMAGE);
+            match self.model.env.get(name) {
+                Some(v) => values.push(*v),
+                None if !mapped => values.push(0),
+                None => return Err(SliverModelRecheckError::Model),
+            }
+        }
+        if !ordeal_lrat::check_tree_model_ext(
+            &var_node,
+            &var_width,
+            &self.sliver.map,
+            &self.term.term.nodes,
+            &self.term.term.map,
+            &self.term.query.query.nodes,
+            &self.term.query.inputs.bits,
+            &values,
+        ) {
             return Err(SliverModelRecheckError::Model);
         }
         Ok(())

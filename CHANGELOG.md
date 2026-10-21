@@ -7,6 +7,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The proven flattener** (#192, TR-073). Every answer now rests on the
+query AS THE CALLER BUILT IT: the step from the assertion trees —
+variables, arrays and functions by name — to the node lists the
+trusted checks are stated over is performed by the trusted crate
+itself and proven in Lean. What stays trusted: the one-`match`-arm-per-
+constructor copy of the trees into the kernel's mirror type and the
+SMT-LIB / Verus front ends. Every term and `ext` block, every bundle
+and the CLI output are byte-identical to 0.33.0.
+
+### Added
+- **`ordeal_lrat::flatten_tree`, the proven flattener** (TR-073;
+  `crates/ordeal-lrat/src/term_kernel.rs`, a `#[path]` submodule of
+  `kernel.rs`, one Aeneas translation unit with the checker, the
+  lowering and the sliver check). The kernel's own tree type `TBv` /
+  `TArray` / `TArgs` / `TBool` (the closed fragment plus `select` over a
+  store chain and `call`; names as byte strings), `flatten_tree` (the
+  post-order, left-to-right walk `dag::flatten` and `sliver::flatten_ext`
+  performed: variables shared by name — a name at two widths refused,
+  `FlatError::NameWidth` — constants interned by value and width, arrays
+  and functions numbered by first appearance), `project_core` (the
+  `ordeal-term/v1` block of a closed tree) and the by-name model
+  binding `check_tree_model` / `check_tree_model_ext` (entry `k`'s node,
+  through the map(s), reads the value advertised under entry `k`'s
+  name). `lean/TreeFlatten.lean` gives the tree a semantics (`treeBv` /
+  `treeBool`, an environment keyed by name and width, array / UF
+  interpretations by name) and proves `flatten_tree_sound`, the
+  capstones `tree_unsat_sound` / `tree_model_sound` /
+  `tree_verdicts_exclusive` (closed trees, composed with `check_term_dag`
+  and `check_query` / `check_query_model`) and `ext_tree_unsat_sound` /
+  `ext_tree_model_sound` / `ext_tree_verdicts_exclusive` (extended trees,
+  composed with `check_sliver_lowering`), all pinned axiom-clean in
+  `AxiomCheck.lean`; `Kernel.lean` keeps 0 axioms.
+- `ordeal::mirror`: the 1:1 copy of a `BoolTerm` / `ExtBoolTerm` into
+  the kernel's tree and back (a bijection, tested over every seeded
+  corpus), and the kernel's tables read back as the bundle's `vars` /
+  `arrays` / `funcs`.
+- `examples/term_scan.rs`: the core-path verdict scan (the seeded
+  `0x192` / `0xC0FFEE` corpora, the bmc corpus, the #262 shapes), the
+  twin of `examples/sliver_scan.rs`.
+
+### Changed
+- `QueryTerm::flatten` and `QueryTerm::flatten_sliver` produce the term
+  and `ext` blocks with the kernel's `flatten_tree` and take the
+  variable table from it; the model re-checks (`TermSatCertificate` /
+  `SliverSatCertificate::recheck`) run the kernel's by-name binding.
+  `dag::flatten` stays as the differential twin — every corpus flattens
+  byte-identically through both. The untrusted width guard
+  (`check_var_widths_bool`) stays as defence in depth; the proof does
+  not rely on it, and a test disarms it to show the kernel refuses a
+  name at two widths by itself.
+- `QueryTerm::flatten` returns `Result<QueryTerm, ordeal_lrat::FlatError>`
+  and `flatten_sliver` `Result<_, SliverFlattenError>` (a refused tree
+  degrades to `Unknown` on every entry point, as every other trusted
+  rejection does).
+
+### Fixed
+- #262: a constant whose raw value exceeds its width (`x = 0x1FF:8`) was
+  compared and interned by its raw value in the sliver lowering, so the
+  trusted check refused the lowering and the answer was `Unknown`; two
+  `select` indices equal in bits but not as raw values were two reads
+  with no congruence root (the same refusal). The lowering now masks
+  constants (`sliver::masked_bv`, `as_const`, the memo keys); the DAG
+  builder and the kernel are unchanged and raw, so every block stays
+  byte-identical, and the three shapes decide (`Sat` with `x = 255`,
+  `Unsat`, `Unsat`).
+
 ## [0.33.0] - 2026-10-21
 
 **The proven sliver** (#192, TR-072). Every answer about a query with

@@ -27,7 +27,20 @@ the CNF:
 > Aeneas-generated model of the Rust that both the solver and the re-check
 > run.
 
-Everything below qualifies both sentences. The qualifications are the point.
+Since v0.34.0 (TR-073) there is a third, about the query as the caller
+built it:
+
+> The **flattener** `kernel::term_kernel::flatten_tree` is machine-checked
+> to be **sound**: the node lists it produces from the caller's trees —
+> variables, arrays and functions by name — denote those trees under
+> every assignment that agrees with the environment through its own
+> variable table, so an accepted certificate refutes the TREES
+> (`tree_unsat_sound`, `ext_tree_unsat_sound`) and an accepted model
+> satisfies them with every value bound BY NAME (`tree_model_sound`,
+> `ext_tree_model_sound`) — **zero `sorry`**, over the Aeneas-generated
+> model of the Rust the production path runs.
+
+Everything below qualifies all three sentences. The qualifications are the point.
 
 ## The theorem, exactly
 
@@ -428,13 +441,14 @@ file in the repository; `--with-query` and `--with-term` are unchanged
 and cost nothing beyond `check` now. What it changes in the trust base:
 `canon.rs`, `dag.rs` (the builder, `term_map`), `eval.rs` and the
 model-to-inputs glue leave **every** answer's trust path, not only the
-`--with-term` one. **What is still trusted, on every path:** the 1:1
-flattening of the assertions into the term (`dag::flatten`, a
+`--with-term` one. **What was still trusted, on every path, in v0.32.0:**
+the 1:1 flattening of the assertions into the term (`dag::flatten`, a
 post-order walk with no semantic decision — a consumer holding the
 assertions re-runs and compares it), the variable names, the SMT-LIB /
 Verus front ends — and the sliver lowering (`sliver.rs`, array/UF
 elimination into the closed core), until TR-072 put it under the trusted
-`check_sliver_lowering` (next section).
+`check_sliver_lowering` (next section) and TR-073 moved the flattening
+and the names into the kernel (`flatten_tree`, the section after it).
 
 ## The extended query: the sliver check (TR-072 / `ordeal-cert/v4`)
 
@@ -511,15 +525,141 @@ What a v4 recheck proves: **the extended query the bundle carries is
 unsatisfiable under every array and UF interpretation, or is satisfied
 by the interpretation built from the model** (the `ext_model` block:
 arrays at every read's index value, functions at every call's argument
-values). What stays trusted: the 1:1 flattening of the `ExtBoolTerm`s
-into the `ext` block (`sliver::flatten_ext`, one walk with the lowering,
-no semantic decision — a consumer re-runs it and compares by hash), the
-variable, array and function names, and the front ends. Every sliver
+values). What stayed trusted in v0.33.0: the 1:1 flattening of the
+`ExtBoolTerm`s into the `ext` block (`sliver::flatten_ext`, one walk with
+the lowering, no semantic decision — a consumer re-runs it and compares
+by hash), the variable, array and function names, and the front ends —
+the flattening and the names moved into the kernel with TR-073 (next
+section). Every sliver
 entry point (`Solver::from_sliver` and every `check*` on it, the
 one-shots, `prove_equiv_sliver`) runs the check before the term and
 query checks; a rejection is `Unknown`. A solver that lowers through
 `sliver::lower` itself and asserts the core is a core solver: it gets the
 term and query checks about the core, not the sliver check.
+
+## The tree direction: the proven flattener (TR-073 / v0.34.0)
+
+Phase 7 and TR-072 are stated over NODE LISTS — the `term` block and the
+`ext` block a bundle carries. The step from the caller's TREES
+(`BoolTerm` / `ExtBoolTerm`: variables, arrays and functions by NAME) to
+those lists was untrusted Rust (`dag::flatten`, `sliver::flatten_ext`),
+and so were the names and the one untrusted guard that made the
+flattening's name identification sound (a name at two widths,
+`check_var_widths_bool` — finding F2 of
+`docs/design/flattener-proof.md`). TR-073 moves the flattening into the
+trusted crate, over the kernel's own tree type:
+
+```rust
+pub enum TBv { Const(u128, usize), Var(Vec<u8>, usize), Add(Box<TBv>, Box<TBv>), …,
+               Select(Box<TArray>, Box<TBv>), Call(Vec<u8>, usize, Box<TArgs>) }
+pub enum TArray { Var(Vec<u8>), Store(Box<TArray>, Box<TBv>, Box<TBv>) }
+pub enum TArgs { Nil, Cons(Box<TBv>, Box<TArgs>) }
+pub enum TBool { Eq(Box<TBv>, Box<TBv>), …, Not(Box<TBool>), And(..), Or(..) }
+pub fn flatten_tree(ts: &[TBool]) -> Result<Flat, FlatError>
+pub fn project_core(nodes: &[ExtNode]) -> Result<Vec<DagNode>, FlatError>
+pub fn check_tree_model(var_node, var_width, map, ns, inp, values) -> bool
+pub fn check_tree_model_ext(var_node, var_width, emap, t, map, ns, inp, values) -> bool
+```
+
+`flatten_tree` (`crates/ordeal-lrat/src/term_kernel.rs`, a `#[path]`
+submodule of `kernel.rs`: one Aeneas translation unit with the checker,
+the lowering and the sliver check) is the post-order, left-to-right walk
+`dag::flatten` and `sliver::flatten_ext` performed: variables shared BY
+NAME, one node per name and a second width for a name REFUSED
+(`FlatError::NameWidth` — F2 is now a kernel error, not a guard),
+constants interned by value and width, arrays and functions numbered by
+first appearance, every operator its own node. Its output is the `ext`
+block (`nodes`, `bits`, `side`, `roots`) plus the variable table (name,
+width, node); `project_core` is the `term` block of a closed tree.
+`check_tree_model` / `check_tree_model_ext` bind a model BY NAME through
+that table: entry `k`'s node, through the map(s), reads the value
+advertised under entry `k`'s name (`var_offset` / `check_input_value`,
+the phase-7 binding; the extended one also checks the term node is a
+`Var` of the entry's width).
+
+`lean/TreeFlatten.lean` (namespace `kernel.spec`) gives the tree a
+semantics — `treeBv` / `treeBool`: `dagNodeVal`'s arms over the
+children's values, an environment `TEnv := Name → (w : Nat) → BitVec w`,
+array and UF interpretations keyed by name (`NArrs`, `NUfs`) — and
+proves, `sorry`-free and axiom-clean (pinned in `AxiomCheck.lean`):
+
+```lean
+theorem flatten_tree_sound (ts : Slice TBool) (f : Flat)
+    (h : flatten_tree ts = ok (Ok f)) :
+    Inv f ∧ f.roots.val.length = ts.val.length ∧
+    ∀ env arrs ufs inp, VarAgree f env inp → ∀ k (hk : k < ts.val.length),
+      extBool inp f.bits.val (arrsI f arrs) (ufsI f ufs) f.side.val f.nodes.val (rootOf f k)
+        = treeBool env arrs ufs ts.val[k]
+
+theorem tree_unsat_sound … (hf : flatten_tree ts = ok (Ok f)) (he : e.val = f.nodes.val)
+    (hp : project_core e = ok (Ok t)) (htS : tS.val = t.val) (htb : tbits.val = f.bits.val)
+    (htr : troots.val = f.roots.val)
+    (ht : check_term_dag tS tbits troots map ns bits roots = ok (Ok ()))
+    (hq : check_query ns bits roots hints steps = ok (Ok cnf)) :
+    ∀ (env : TEnv) (arrs : NArrs) (ufs : NUfs), ¬ TreeSat env arrs ufs ts.val
+
+theorem tree_model_sound … (hm : check_query_model ns bits roots inp2 = ok (Ok ()))
+    (hvn : vn.val = f.var_node.val) (hvw : vw.val = f.var_width.val)
+    (hb : check_tree_model vn vw map ns inp2 values = ok true) :
+    ∃ env : TEnv, (∀ arrs ufs, TreeSat env arrs ufs ts.val) ∧
+      ∀ k < nvars f, img map.val (varNodeOf f k) ≠ NONE →
+        env (varName f k) (varWidthOf f k)
+          = BitVec.ofNat (varWidthOf f k) (values.val.getD k 0#u128).val
+
+theorem tree_verdicts_exclusive … : False
+theorem ext_tree_unsat_sound … (hs : check_sliver_lowering e ebits eside eroots map … = ok (Ok ()))
+    (ht : …) (hq : …) : ∀ (env : TEnv) (arrs : NArrs) (ufs : NUfs), ¬ TreeSat env arrs ufs ts.val
+theorem ext_tree_model_sound … (hb : check_tree_model_ext vn vw map t map1 ns inp2 values = ok true) :
+    ∃ env narrs' nufs' arrs ufs inp1, TreeSat env narrs' nufs' ts.val ∧
+      TablesAgree t.val tbits.val reads.val calls.val cargs.val arrs ufs inp1 ∧
+      (∀ a < narrs f, narrs' (arrName f a) = arrs a) ∧ (∀ g < nfuncs f, nufs' (funName f g) = ufs g) ∧
+      ∀ k < nvars f, img map.val (varNodeOf f k) ≠ NONE → img map1.val (…).val ≠ NONE →
+        env (varName f k) (varWidthOf f k) = BitVec.ofNat (varWidthOf f k) (values.val.getD k 0#u128).val
+theorem ext_tree_verdicts_exclusive … : False
+```
+
+The proof is a structural induction over the tree with the generated
+(`partial_fixpoint`) definitions unfolded: a structural invariant of the
+flattening state (`Inv`: the tables consistent, every table variable a
+`Var` of its width, names injective — one node per name, one name per
+node — every constant memo entry a `Const` over its own bits, every
+select and call naming a registered array / function) and a semantic
+conclusion per subtree stated for EVERY later state (`TreeCorr`: the
+node denotes the tree under every assignment that agrees with the
+environment through the table, `VarAgree`). The two transports are
+`layout_exists` (an environment lays out into inputs) and `envOf_agree`
+(inputs read back into an environment, well defined because the
+kernel's own lookup made the names injective) — this is where F2's
+guard used to sit; the kernel refuses the shape itself, so the proof
+needs no guard. The by-name interpretations of the extended capstone
+are read through the tables from the id-keyed ones TR-072 binds to the
+model's reads and calls (`narrsOf`, `nufsOf`).
+
+What this changes on the untrusted side: `ordeal::mirror` copies a
+`BoolTerm` / `ExtBoolTerm` into the kernel's tree constructor for
+constructor (names as bytes, no interning, no ordering — a bijection,
+tested: `to_bool(of_bool(t)) == t` over every seeded corpus);
+`QueryTerm::flatten` and `flatten_sliver` call `flatten_tree`
+(`project_core` on the core path) and take the variable table from the
+kernel; the model-binding re-checks run `check_tree_model` /
+`check_tree_model_ext`; `dag::flatten` stays as the differential twin
+(`flatten_tree ∘ of_bools == dag::flatten` over the latency, bmc,
+`0x192`, `0xC0FFEE` and sliver corpora — the positive control that let
+the production path switch with no bundle change: every term and ext
+block is byte-identical). The untrusted width guard stays as defence in
+depth; `a_name_at_two_widths_is_refused_by_the_kernel_itself` disarms
+it and shows every entry point `Unknown` on F2's shape. Along the way
+the lowering's raw-constant comparison (#262, F1: `x = 0x1FF:8` left
+`Unknown`; two reads at indices equal in bits were two reads with no
+congruence root) is fixed by masking at the lowering
+(`sliver::masked_bv`, `as_const`, memo keys) — the kernel and the DAG
+builder are unchanged and raw, so the blocks stay byte-identical.
+
+**What stays trusted after TR-073, on every path:** the 1:1 copy of the
+trees into the kernel's mirror type (`mirror.rs`, one `match` arm per
+constructor), and the SMT-LIB / Verus front ends. The flattening, the
+variable / array / function names and the width guard are no longer in
+the list: an answer rests on the query AS THE CALLER BUILT IT.
 
 ## Out of scope (explicitly NOT proven)
 
@@ -610,10 +750,11 @@ term and query checks about the core, not the sliver check.
   since v0.32.0 / TR-070** (the section above), so the DAG builder,
   canonicalization and `eval.rs` have left this list, and **since
   TR-072** the sliver lowering has too (`check_sliver_lowering`, the
-  section above). What stays: the 1:1 flattening of the assertions into
-  the term (`dag::flatten`; of an extended query into the `ext` block,
-  `sliver::flatten_ext`), the variable, array and function names, and the
-  front ends.
+  section above), and **since TR-073** the flattening of the trees into
+  the term / `ext` block and the variable, array and function names
+  (`flatten_tree`, `check_tree_model`, the section above). What stays:
+  the 1:1 copy of the trees into the kernel's mirror type (`mirror.rs`,
+  constructor for constructor, bijection-tested) and the front ends.
   `dag::strash_hints` is untrusted by design: it only reproduces the
   sharing decisions of the old `Aig::and` strash so the shipped CNF stays
   byte-identical, and `compact_sound` holds for any hints. The shipped
@@ -673,9 +814,16 @@ cd lean
 lake env lean Sound.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 lake env lean SatWitness.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 lake env lean QueryCheck.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
+lake env lean TreeFlatten.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 echo 'import Sound
 import SatWitness
 import QueryCheck
+import TreeFlatten
+#print axioms kernel.spec.flatten_tree_sound
+#print axioms kernel.spec.tree_unsat_sound
+#print axioms kernel.spec.tree_model_sound
+#print axioms kernel.spec.ext_tree_unsat_sound
+#print axioms kernel.spec.ext_tree_model_sound
 #print axioms kernel.spec.lrat_check_sound
 #print axioms kernel.spec.check_binding_sound
 #print axioms kernel.spec.check_sat_sound

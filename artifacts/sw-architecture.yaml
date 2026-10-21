@@ -89,6 +89,8 @@ artifacts:
         target: TR-071
       - type: allocated-from
         target: TR-072
+      - type: allocated-from
+        target: TR-073
   - id: ARC-003
     type: sw-arch-component
     title: ordeal-aig (bit-blaster and And-Inverter Graph)
@@ -231,6 +233,8 @@ artifacts:
         target: TR-070
       - type: allocated-from
         target: TR-072
+      - type: allocated-from
+        target: TR-073
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)
@@ -327,6 +331,8 @@ artifacts:
         target: TR-070
       - type: allocated-from
         target: TR-072
+      - type: allocated-from
+        target: TR-073
   - id: ARC-012
     type: sw-arch-component
     title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)

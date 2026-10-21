@@ -384,3 +384,132 @@ fn empty_extended_query_and_core_solver_edges() {
         SliverCheckResult::Unknown
     ));
 }
+
+// ── TR-073: the proven flattener on the sliver path ─────────────────────
+
+// rivet: verifies VER-073
+/// #262 (F1 of docs/design/flattener-proof.md): a constant whose value
+/// has bits above its width degraded every sliver answer to `Unknown`
+/// (and panicked a debug build at the gate's `debug_assert!`): the mapper
+/// re-interned the constant by its masked value and missed the raw memo.
+/// Both verdicts now decide, in every build profile.
+#[test]
+fn an_unmasked_constant_decides_on_the_sliver_path() {
+    let x = || {
+        ExtBvTerm::Core(BvTerm::Var {
+            name: "x".into(),
+            sort: Sort::new(8),
+        })
+    };
+    let c = |v: u128| {
+        ExtBvTerm::Core(BvTerm::Const {
+            value: v,
+            sort: Sort::new(8),
+        })
+    };
+    let sat = [ExtBoolTerm::Eq(x(), c(0x1FF))];
+    match Solver::check_sliver(&sat) {
+        CheckResult::Sat(m) => assert_eq!(m.assignments, vec![("x".to_string(), 255)]),
+        other => panic!("expected Sat, got {other:?}"),
+    }
+}
+
+// rivet: verifies VER-073
+/// #262, the UNSAT shape: `x = 0x1FF:8 ∧ x ≠ 0xFF:8`.
+#[test]
+fn an_unmasked_constant_refutes_on_the_sliver_path() {
+    let x = || {
+        ExtBvTerm::Core(BvTerm::Var {
+            name: "x".into(),
+            sort: Sort::new(8),
+        })
+    };
+    let c = |v: u128| {
+        ExtBvTerm::Core(BvTerm::Const {
+            value: v,
+            sort: Sort::new(8),
+        })
+    };
+    let unsat = [
+        ExtBoolTerm::Eq(x(), c(0x1FF)),
+        ExtBoolTerm::Ne(x(), c(0xFF)),
+    ];
+    assert!(matches!(
+        Solver::check_sliver(&unsat),
+        CheckResult::Unsat(_)
+    ));
+}
+
+// rivet: verifies VER-073
+/// #262 inside a `select`'s index: two reads at indices equal in bits
+/// but not as raw values are ONE read (the lowering's concrete fast path
+/// and memo compare masked values), so `a[0x1_0000_0005] ≠ a[5]` is
+/// refuted — the shape that made the lowering emit two reads with no
+/// congruence root, which the trusted check refused.
+#[test]
+fn equal_bits_constant_indices_are_one_read() {
+    let idx = [ExtBoolTerm::Ne(
+        sel(
+            arr("a"),
+            ExtBvTerm::Core(BvTerm::Const {
+                value: 0x1_0000_0005,
+                sort: Sort::new(32),
+            }),
+        ),
+        sel(arr("a"), c32(5)),
+    )];
+    assert!(matches!(Solver::check_sliver(&idx), CheckResult::Unsat(_)));
+}
+
+// rivet: verifies VER-073
+/// The binding of the extended model BY NAME rests on the kernel's
+/// variable table: with the nodes of the first two variables swapped in
+/// the `ext` block (the solver, the lowering, the proof and the model
+/// untouched), every SAT entry point degrades to `Unknown`; UNSAT does not
+/// read the table and is unaffected.
+#[test]
+fn the_extended_model_binding_rests_on_the_kernel_table() {
+    // i ≠ j, both read: two variables with different values in any model.
+    let q = vec![
+        ExtBoolTerm::Ne(sel(arr("a"), v32("i")), sel(arr("a"), v32("j"))),
+        ExtBoolTerm::Ne(v32("i"), v32("j")),
+    ];
+    let s = Solver::from_sliver(&q).expect("in the sliver");
+    {
+        let _armed = tamper::arm(Tamper::SwapExtVars);
+        assert!(matches!(s.check(), CheckResult::Unknown));
+        assert!(matches!(
+            s.check_with_deadline(60_000),
+            CheckResult::Unknown
+        ));
+        assert!(matches!(
+            s.check_with_term(),
+            crate::query::TermCheckResult::Unknown
+        ));
+        assert!(matches!(
+            s.check_sliver_with_term(),
+            SliverCheckResult::Unknown
+        ));
+        assert!(matches!(Solver::check_sliver(&q), CheckResult::Unknown));
+        assert!(matches!(
+            Solver::check_sliver(&loom_unsat()),
+            CheckResult::Unsat(_)
+        ));
+    }
+    assert!(matches!(s.check(), CheckResult::Sat(_)));
+}
+
+// rivet: verifies VER-073
+/// The copy into the kernel's tree is a bijection on the extended
+/// language: `of_ext_bool ∘ to_ext_bool` is the identity on the kernel's
+/// trees of this file's queries.
+#[test]
+fn the_mirror_copy_is_a_bijection_on_extended_terms() {
+    use crate::mirror::{of_ext_bool, to_ext_bool, tree_eq};
+    for q in [loom_unsat(), mixed_sat(), uf_unsat()] {
+        for a in &q {
+            let t = of_ext_bool(a);
+            assert!(tree_eq(&of_ext_bool(&to_ext_bool(&t)), &t), "{a:?}");
+        }
+    }
+}

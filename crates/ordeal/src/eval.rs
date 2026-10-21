@@ -28,6 +28,11 @@ pub enum EvalError {
     UnsupportedWidth(u32),
 }
 
+/// `value`'s low `width` bits (#262: constant identity is by bits).
+pub fn mask_to(value: u128, width: u32) -> u128 {
+    value & mask(width)
+}
+
 fn mask(width: u32) -> u128 {
     if width >= 128 {
         u128::MAX

@@ -53,12 +53,19 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
 - The **checker is the only proven component.** It replays the LRAT proof
   against the CNF and confirms the empty clause is derivable. Its soundness
   theorem is discharged in Lean 4, sorry-free and CI-gated (see below).
-- The **query-to-CNF translation is trusted but not proven.** That covers the
-  front ends, rewriting, bit-blasting, AIG construction and Tseitin encoding.
-  The checker certifies the CNF, not the query, so a bug here yields a
-  *certified* wrong answer. #182 was exactly that. The defence is tests at
-  every width and the Z3 differential. The structural fix is tracked in #192.
-  See [docs/formal-verification.md](docs/formal-verification.md) for the exact
+- The **query-to-CNF translation was trusted but not proven** until #192: the
+  checker certified the CNF, not the query, so a bug in the front ends,
+  rewriting, bit-blasting, AIG construction or Tseitin encoding yielded a
+  *certified* wrong answer — #182 was exactly that. #192 closed it stage by
+  stage: the proven lowering (`blast_kernel.rs`) and `check_query` (the DAG),
+  `check_term_dag` (the term), `check_sliver_lowering` (arrays / UFs) and,
+  since v0.34.0, `flatten_tree` (TR-073: the trees AS THE CALLER BUILT THEM,
+  variables, arrays and functions by name) all live in the trusted crate and
+  run on every path; what a trusted check rejects is `Unknown`. What remains
+  trusted: the SMT-LIB / Verus front ends and the one-`match`-arm-per-
+  constructor copy of the trees into the kernel's mirror type (`mirror.rs`).
+  The defence for those is tests at every width and the Z3 differential. See
+  [docs/formal-verification.md](docs/formal-verification.md) for the exact
   scope.
 
 ### Verifying the checker: Aeneas → Lean
@@ -113,7 +120,12 @@ The soundness argument therefore reduces to: *the LRAT checker is correct.* Not
 
 1. **Term graph.** The query is a DAG of `BvTerm` / `BoolTerm` nodes (see
    `term.rs`). The fragment is closed and small on purpose — every node has one
-   well-defined bit-blasting rule.
+   well-defined bit-blasting rule. Since v0.34.0 (TR-073) the trees are copied
+   1:1 into the trusted crate's mirror type (`mirror.rs`) and flattened THERE
+   (`ordeal_lrat::flatten_tree`, proven: `lean/TreeFlatten.lean`) into the
+   node list every later trusted check is stated over; the solver's own DAG
+   (`dag.rs`, canonicalized and hash-consed) is untrusted advice that
+   `check_term_dag` relates back to that list.
 2. **Bit-blast.** Each `w`-bit operation expands to a fixed boolean-gate
    pattern (ripple-carry adder for `bvadd`, barrel shifter for `bvshl`, etc.).
    Widths are 1 to 128, so the blow-up is bounded and predictable.
@@ -238,12 +250,13 @@ solver.
 
 | Path | Purpose |
 |------|---------|
-| `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4) and, since #192 phase 4, the proven lowering (`blast_kernel.rs`, a `#[path]` submodule of `kernel.rs`: one Aeneas translation unit) plus `check_query`, the query-level re-check an `ordeal-cert/v2` bundle is verified with (`lean/QueryCheck.lean`). |
+| `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4) and, since #192 phase 4, the proven lowering (`blast_kernel.rs`, a `#[path]` submodule of `kernel.rs`: one Aeneas translation unit) plus `check_query`, the query-level re-check an `ordeal-cert/v2` bundle is verified with (`lean/QueryCheck.lean`); `check_term_dag` (phase 7, `lean/TermCheck.lean`); the sliver check `sliver_kernel.rs` (TR-072, `lean/SliverCheck.lean`); and the proven flattener `term_kernel.rs` (TR-073, `lean/TreeFlatten.lean`: the kernel's own tree type, `flatten_tree`, `project_core`, the by-name model binding `check_tree_model` / `_ext`). |
+| `crates/ordeal/src/mirror.rs` | The one remaining trusted step of the term direction (TR-073): the 1:1 copy of a `BoolTerm` / `ExtBoolTerm` into the kernel's tree (`of_bools`, `of_ext_bools` — one `match` arm per constructor, names as bytes) and its inverse (`to_bool`, `to_ext_bool`; a bijection, tested), plus the kernel's tables read back as the bundle's `vars` / `arrays` / `funcs`. |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat` interface; result / certificate / model types. |
 | `crates/ordeal/src/blast_kernel.rs` | The solver's view of THE lowering (one implementation; #192 phases 2–4): a re-export of `ordeal_lrat::blast_kernel` — the blast rules, the term-DAG encoder (`encode`), the folding + hashing pass (`compact`) and the Tseitin encoder (`tseitin`) the solver runs, proven in Lean (`Kernel.lean` / `Blaster*.lean`) — plus the solver-side differential and gate-identity tests. |
 | `crates/ordeal/src/query.rs` | The certificate-carried query (#192 phase 4): `QueryDag` (nodes, constant bits, roots, hints), `QueryCertificate` with the trusted `recheck()` through `ordeal_lrat::check_query`, and `Solver::check_with_query`. Always compiled; the `ordeal-cert/v2` JSON lives in `cert_bundle.rs`. |
-| `crates/ordeal/src/dag.rs` | The term DAG the proven encoder consumes (#192 phase 3): the hash-consed builder from assertions and the untrusted structural-hashing hints `compact` checks. |
+| `crates/ordeal/src/dag.rs` | The term DAG the proven encoder consumes (#192 phase 3): the hash-consed builder from assertions and the untrusted structural-hashing hints `compact` checks; `dag::flatten`, the untrusted twin of the kernel's `flatten_tree` (the differential over every corpus since TR-073). |
 | `crates/ordeal/src/blast/` | The phase-2 per-rule bridge (`mod.rs`: run a rule on a reference arena, replay it into `aig::Aig` through `Aig::and`) — since phase 3 a test harness, not the production path: one-line per-op-family entry points for the evaluator differentials (`arith`, `bitwise`, `muldiv`, `shift`, `structural` — no rule bodies) + the Kani proof harnesses (`proofs.rs`). |
 | `crates/ordeal/src/aig.rs` | And-Inverter Graph with structural sharing + const-folding (the gate-identity reference for `blast_kernel::compact`; test path since #192 phase 3). |
 | `crates/ordeal/src/cnf.rs` | Tseitin CNF encoding (the clause-for-clause reference for `blast_kernel::tseitin`; test path since #192 phase 3). |

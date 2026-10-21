@@ -422,6 +422,21 @@ pub use kernel::{TermError, check_input_value, check_term_dag, var_offset};
 /// [`kernel::sliver_kernel::check_sliver_lowering`].
 pub use kernel::sliver_kernel::{ExtNode, SliverCheckError, check_sliver_lowering, ext_wf};
 
+/// The proven flattener (TR-073): the query AS THE CALLER BUILT IT — a
+/// tree with named variables, arrays and functions — flattened into the
+/// `ordeal-ext/v1` node list ([`flatten_tree`]) and, for a closed tree,
+/// the `ordeal-term/v1` term ([`project_core`]) the other checks are
+/// stated over; the variable table it builds binds a model value to a
+/// NAME ([`check_tree_model`], [`check_tree_model_ext`]). Composed with
+/// the term, query and sliver checks, an accepted answer then proves the
+/// tree, names included: `kernel.spec.tree_unsat_sound`,
+/// `tree_model_sound`, `ext_tree_unsat_sound`, `ext_tree_model_sound`
+/// (`lean/TreeFlatten.lean`). See [`kernel::term_kernel`].
+pub use kernel::term_kernel::{
+    Flat, FlatError, TArgs, TArray, TBool, TBv, check_tree_model, check_tree_model_ext,
+    flatten_tree, project_core,
+};
+
 /// Why a query re-check ([`check_query`]) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryCheckError {

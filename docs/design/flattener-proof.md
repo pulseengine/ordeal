@@ -718,3 +718,115 @@ None is created by this phase; `rivet validate` after they are.
   queries with out-of-range constants changes bytes (none in the
   repository's 29 query files; `ordeal-term/v1` keeps its tag because
   the semantics is unchanged).
+
+
+## 10. What was delivered (v0.34.0, TR-073)
+
+Decision 2026-10-21: **(A1)**, scope core + sliver. Implemented as
+9b + 9c + 9d above; the deviations from the plan, and the measured
+facts, are recorded here so the design and the artefact do not drift.
+
+**Kernel (9b).** `crates/ordeal-lrat/src/term_kernel.rs` (1157 lines
+incl. tests), `#[path]`-included into `kernel.rs` after
+`sliver_kernel`. The tree is `TBv` / `TArray` / `TArgs` / `TBool` with
+`Vec<u8>` names and `usize` widths (the design's `TExtBv` folded into
+`TBv`: `Select` and `Call` are two more `TBv` constructors, so there is
+ONE flattener and `project_core` is the core path — simpler than a twin
+`flatten_ext_tree`, and the capstones for closed trees go through
+`project_core_ok`: `extSim` over `Core`-only nodes is `dagSim`). The
+state `Flat` is nineteen `Vec`s (nodes, bits, side, roots; the variable
+table as a byte arena + start/len columns + node + width; the constant
+memo; the array and function name tables + the function widths). What
+the spike predicted held: the recursive functions regenerate as
+`partial_fixpoint`, zero axioms, in the single unit; two shapes had to
+be reshaped for Charon/Aeneas — a `match` on an indexed element is
+copied to a local first, and `v == w` in match-arm position is an
+if/else (`var_of_width`) because the bare comparison came out as an
+unresolved `Decidable` instance. `?` is still absent (clippy's
+`question_mark` is allowed per function, with the reason).
+
+**Proof (9b).** `lean/TreeFlatten.lean`: 4031 lines, 117 theorems, 54
+definitions, 0 `sorry`, 0 `native_decide`; `lake build` 7.3 s for the
+file. The architecture is the one sketched in 9b with one refinement
+worth recording: the per-subtree conclusion (`TreeCorr`) is stated for
+EVERY later state of the flattening (`Later`: every table a prefix of
+the later one — and the roots EQUAL, since no subtree pushes a root;
+that equality is what lets the roots loop reuse `BoolCorr` across its
+own pushes, `BoolCorr_set_roots`), which removes the need for separate
+stability lemmas in the parent arms. The transports are
+`layout_exists` (an environment laid out through `layoutAux` over the
+table) and `envOf_agree` (an environment read back by name, defined by
+classical choice over the table and well defined by `Inv.var_inj`);
+`narrsOf` / `nufsOf` read the by-name interpretations through the
+array / function tables from the id-keyed ones `check_sliver_model_sound`
+binds, with `simOf_congr` (the simulation reads only registered ids,
+`Inv.sel_range`). Capstones pinned in `AxiomCheck.lean`:
+`flatten_tree_sound`, `tree_unsat_sound`, `tree_model_sound`,
+`tree_verdicts_exclusive`, `ext_tree_unsat_sound`, `ext_tree_model_sound`,
+`ext_tree_verdicts_exclusive` — each `[propext, Classical.choice,
+Quot.sound]`. No earlier theorem's statement changed; `Kernel.lean`
+12620 lines, 0 `^axiom`, 6 `partial_fixpoint`.
+
+**Negative controls (9b).** Each a one-line mutation of
+`term_kernel.rs` (pristine sha256 `e7c9e05a…`), regenerated, `lake
+build TreeFlatten` must fail, restored byte for byte:
+
+| mutation | first failing theorem |
+|---|---|
+| `flat_var`: `f.var_width[k] != w` → `< w` (a name found at a larger width is reused — the width ignored) | `flat_var_ok`, `TreeFlatten.lean:1775` |
+| `name_is`: `arena[start + j] != name[j]` → compares the arena byte with itself (lengths only — F2's shape, two names on one node) | `name_is_loop_ok`, `TreeFlatten.lean:813` |
+| `Const` arm: `flat_const(f, *value, w)` → `*value >> 1` | `flat_bv_ok` (the `Const` arm), `TreeFlatten.lean:2272` |
+| `Sub` arm: `flat_bin(a, b, f, 1)` → `flat_bin(b, a, f, 1)` | `flat_bv_ok` (the `Sub` arm), `TreeFlatten.lean:2316` |
+
+After the four, the pristine source regenerated to the same
+`Kernel.lean` (sha256 `95dd1ce5…`, 0 axioms) and the full `lake build`
+and the axiom gate were green again.
+
+**Untrusted side (9c).** `ordeal::mirror` (506 lines): `of_bool` /
+`of_ext_bool` and their inverses, `tree_eq`, the tables read back
+(`var_table`, `array_table`, `func_table`, `ext_query`, `const_table`).
+`QueryTerm::flatten` → `flatten_tree` + `project_core` + `var_table`
+(`Result<_, FlatError>`); `QueryTerm::flatten_sliver` → `flatten_tree`
+over `of_ext_bools` (`Result<_, SliverFlattenError>`), the lowering's
+own `flatten_ext` kept and compared in a `debug_assert`; the SAT
+re-checks run `check_tree_model` / `check_tree_model_ext`. `dag::flatten`
+and `sliver::flatten_ext` are the differential twins (tests over the
+seeded assertions, the latency and bmc corpora, the `0x192` /
+`0xC0FFEE` oracle corpora and three seeded sliver corpora: nodes, bits,
+roots and tables equal — so every block is byte-identical). The width
+guard stays as defence in depth with a test-only bypass
+(`solver::width_guard::skip`) showing the kernel refuses F2 by itself.
+`Tamper::SwapExtVars` is the potency control on the ext table. **F1
+(#262)** is fixed where the design put it — the sliver lowering's
+constant handling (`masked_bv` on `Core` leaves, `as_const` masked, memo
+keys by `term_key`, the mapper interning `mask_to(raw)`) — with the DAG
+builder and the kernel raw, so the `term` block of a query with an
+out-of-range constant keeps its bytes.
+
+**Evidence (VE-063, rivet).** `cargo test --workspace` debug, release
+and `--features cert-bundle`: 267 / 267 / 295 (+ 14 + 3 + 2 + 43) passed,
+0 failed; clippy `-D warnings` on default, `oracle,cert-bundle` and
+`ordeal/cert-bundle,ordeal/cadical` clean (`+stable`, 1.99.1); fmt
+clean incl. `fuzz/`; the citation check PASS on both feature sets;
+nextest `ci` + `junit_to_rivet.py` exit 0. Z3 suite 19 / 19, 0
+disagreements, incl. the oracle-corpora byte-identity test. Verdict
+scan (v0.33.0 sources vs this tree, 10 s deadline, streamed): core 1216
+rows identical (530 sat / 684 unsat / 2 unknown on both sides — the
+#262 core shapes were already decided by v0.33.0, which only compared
+raw values in the sliver lowering); sliver 1053 rows, 1050 identical and
+EXACTLY the three #262 rows moved, each `unknown` → its verdict
+(`f1-eq-sat` → sat, `f1-eq-ne-unsat` → unsat, `f1-index-bits-unsat` →
+unsat); latency flat (loom 6-pair all-unsat 116 → 113 ms). CLI byte
+comparison against the published v0.33.0 aarch64-apple-darwin binary
+(`--version` asserted on both) over the 27 query files in four modes:
+108 same / 0 differ — 96 decided runs (33 + 39 JSON, 11 + 13 text) and
+12 identical exit-2 usage errors (the two raw Verus dumps with
+`declare-sort`, the fuzz seed `regression_redeclare_width`), so the
+comparison is not vacuous. The "29 files" of §9 was an over-count: the
+repository holds 27 `.smt2` files.
+
+**Not delivered / deferred.** The SMT-LIB / Verus front ends stay
+trusted (the front-end item); loom still asserts the lowered core
+itself (loom#433); per-array widths. (A2) — the `String` model that
+would remove `mirror.rs` from the trust list — stays gated on the
+pinned Aeneas.

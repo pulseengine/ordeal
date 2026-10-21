@@ -3061,3 +3061,70 @@ artifacts:
         target: VER-072
       - type: part-of-execution
         target: VE-062
+
+  - id: VE-063
+    type: verification-execution
+    title: The proven flattener verified
+    status: implemented
+    description: "Model regenerated (lean/regen.sh all): Kernel.lean 12620 lines, 0 ^axiom lines before and after (sha256 95dd1ce5…), 6 partial_fixpoint definitions (the recursive flattener); the term kernel translated in the single unit with two translation-driven reshapes (an indexed match copied to a local; var_of_width as if/else because a bare v == w in match-arm position came out as an unresolved Decidable instance). lake build: Build completed successfully (1732 jobs), TreeFlatten 7.3 s, AxiomCheck elaborated with the seven new pins; scripts/axiom_check.sh exit 0. lean/TreeFlatten.lean 4031 lines, 117 theorems, 54 definitions, 0 sorry, 0 native_decide; #print axioms of flatten_tree_sound, tree_unsat_sound, tree_model_sound, tree_verdicts_exclusive, ext_tree_unsat_sound, ext_tree_model_sound, ext_tree_verdicts_exclusive: [propext, Classical.choice, Quot.sound]; TermCheck.lean, QueryCheck.lean and SliverCheck.lean untouched. One proof-driven change to the statement discipline worth recording: Later (every table a prefix of the later state's) pins the roots by EQUALITY, since no subtree pushes a root — that equality is what lets the roots loop carry BoolCorr across its own pushes (BoolCorr_set_roots). Four Lean negative controls, each a one-line mutation of term_kernel.rs (pristine sha256 e7c9e05a…), regenerated (0 axioms each), lake build TreeFlatten must fail, restored byte for byte (sha256 re-checked after each): (a) flat_var reusing a name found at a larger width (!= w → < w; mutated sha256 30546cad…, model sha256 3a9fc07e…) — exit 1, TreeFlatten.lean:1775:58 flat_var_ok (Type mismatch); (b) name_is comparing the arena byte with itself (lengths only — F2's shape; 374e4183…, model 5ec8fa5b…) — exit 1, TreeFlatten.lean:813 name_is_loop_ok; (c) the Const arm pushing value >> 1 (c8a9a8e7…, model 099a7d9f…, 12621 lines) — exit 1, TreeFlatten.lean:2272:6 flat_bv_ok, the Const arm (Dependent elimination failed); (d) the Sub arm with swapped operands (f07eb946…, model fc9c0cd3…) — exit 1, TreeFlatten.lean:2316:92 flat_bv_ok, the Sub arm (Application type mismatch). Afterwards the pristine source regenerated to the same Kernel.lean (95dd1ce5…, 0 axioms), full lake build green, axiom gate exit 0. cargo test --workspace (rustc 1.99.1 stable): debug 267 + 14 + 3 + 2 + 43 passed / 0 failed / 3 ignored; release 267 + 14 + 3 + 2 + 43 passed / 0 failed / 3 ignored; --features cert-bundle 295 + 14 + 3 + 2 + 43 passed / 0 failed / 3 ignored — incl. the byte-identity positive control on the seeded assertions (1500 sets), the latency + bmc corpora and three seeded sliver corpora, the mirror bijection on closed and extended terms, F2's shape refused by the kernel with the width guard disarmed (every entry point Unknown), the ext-table tamper (every SAT entry point Unknown, UNSAT unaffected) and the three #262 shapes decided on the sliver path and the core shape on the core path, in debug and release. cargo +stable clippy -D warnings clean on default (workspace, all targets), oracle+cert-bundle and ordeal/cert-bundle,ordeal/cadical; cargo fmt --all --check and --manifest-path fuzz/Cargo.toml --check clean; scripts/check_verification_citations.sh PASS (84 legs / 20 skipped by feature) and with CITATION_FEATURES=ordeal/cert-bundle,ordeal/cadical,ordeal/oracle PASS (104 legs / 0 skipped); cargo nextest run --workspace --features ordeal/cert-bundle --profile ci then scripts/junit_to_rivet.py exit 0 (the oracle-only flattener marker listed in junit_to_rivet.skip). Z3 oracle suite (LIBRARY_PATH=/opt/homebrew/lib, --features oracle --release --lib -- oracle::): 19 passed / 0 failed in 32.3 s, incl. the new flatten_tree_matches_dag_flatten_on_the_oracle_corpora (0x192/200, 0xC0FFEE/1000) and every differential through the gated entry points (differential_ordeal_vs_z3_on_corpus, term_differential_through_check_with_term, sliver_diff_through_from_sliver, sliver_diff_lifted_ops, …): 0 disagreements. Verdict scan (examples/term_scan.rs and examples/sliver_scan.rs, release, built against the v0.33.0 sources — git archive v0.33.0 — and against this tree; check_with_deadline(10 s) per query, streamed line by line): core 1216 rows — gen_corpus(0x192, 200), gen_corpus(0xC0FFEE, 1000), bmc queue_overflow(k, 3) / deadlock(k) / deadlock_inv(k) for k in 2, 4, 8, 16, the four #262 core shapes — verdict-identical on all 1216 (530 sat, 684 unsat, 2 unknown on both sides, the same two seeded rows at the 10 s deadline; the #262 core shapes were already decided by v0.33.0: sat / unsat / unsat / sat), total 26682 ms new against 27183 ms old; sliver 1053 rows — gen_sliver_corpus(0x5111_5EED_A55A_0001, 300), gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300), gen_sliver_corpus(0x5111_0DFF_1CE0_0002, 250), the loom-shaped chains for 1..6 store/load pairs, the #231 trap-guard shapes, the bounded-entry queries and the three #262 shapes — 1050 identical, and EXACTLY the three #262 rows moved, each from unknown to its verdict: f1-eq-sat unknown → sat, f1-eq-ne-unsat unknown → unsat, f1-index-bits-unsat unknown → unsat (old: 928 sat / 122 unsat / 3 unknown; new: 929 sat / 124 unsat / 0 unknown); total 5065 ms new against 5074 ms old; the loom all-unsat rows (old → new ms): 1 pair 0 → 0, 2: 5 → 5, 3: 16 → 16, 4: 36 → 36, 5: 71 → 65, 6: 116 → 113. Byte identity: the published v0.33.0 aarch64-apple-darwin binary (gh release download, 749720 bytes, --version = ordeal 0.33.0, asserted) against this tree's release build (--version = ordeal 0.33.0, no bump) over the 27 query files in the repository (crates/ordeal/tests/fixtures incl. differential/, evidence/certs, fuzz/seeds/smtlib) in text, --format json, --with-query and --with-term mode, sha256 of stdout + stderr + exit code: 108 same / 0 differ; output kinds over the 108 runs: 96 decided (JSON: 33 sat / 39 unsat; text: 11 sat / 13 unsat) and 12 exit-2 usage errors — the two raw Verus dumps (declare-sort, outside the front end) and the fuzz seed regression_redeclare_width (malformed declare-const), identically on both binaries — so the comparison is not vacuous. rivet validate: 0 errors, 0 warnings once the verdicts below are linked."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, pinned Charon/Aeneas via nix, Z3 via Homebrew (LIBRARY_PATH=/opt/homebrew/lib), Lean v4.30.0-rc2, rustc 1.99.1 stable (rustup update stable first); branch feat/v0.34.0-proven-flattener on main d984a70 (#261); the proof written and its verifier run in this worktree"
+      executor: local
+      timestamp: 2026-10-21T15:33:34Z
+      version: 7f28089+flattener-proof
+
+  - id: VV-132
+    type: verification-verdict
+    title: VER-073 pass — flatten_tree_sound and the six tree capstones axiom-pinned from the regenerated model (0 axioms, 0 sorry); four Lean negative controls each fail a named proof (flat_var_ok, name_is_loop_ok, flat_bv_ok Const, flat_bv_ok Sub), restored byte for byte
+    status: implemented
+    description: Executed pass as recorded in the linked execution (the proof and its potency).
+    fields:
+      evidence: see VE-063
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-073
+      - type: part-of-execution
+        target: VE-063
+
+  - id: VV-133
+    type: verification-verdict
+    title: "VER-073 pass — byte identity through the kernel's flattener over every corpus, the mirror bijection, F2 refused by the kernel with the guard disarmed, the ext-table tamper degrades every SAT entry point, the #262 shapes decided (debug and release, three test profiles)"
+    status: implemented
+    description: Executed pass as recorded in the linked execution (the untrusted side's controls).
+    fields:
+      evidence: see VE-063
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-073
+      - type: part-of-execution
+        target: VE-063
+
+  - id: VV-134
+    type: verification-verdict
+    title: "VER-073 pass — Z3 oracle suite 19/19 with 0 disagreements; old-vs-new verdict scan identical on 1216 core and 1050 sliver rows, exactly the three #262 sliver rows moving unknown → verdict"
+    status: implemented
+    description: Executed pass as recorded in the linked execution (differential and non-regression).
+    fields:
+      evidence: see VE-063
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-073
+      - type: part-of-execution
+        target: VE-063
+
+  - id: VV-135
+    type: verification-verdict
+    title: VER-073 pass — the CLI byte-identical to the published v0.33.0 binary (108 same / 0 differ over 27 files in four modes, 96 decided runs, --version asserted); clippy on three feature sets, fmt, the citation check and nextest + junit_to_rivet clean
+    status: implemented
+    description: Executed pass as recorded in the linked execution (byte identity and the lint / mapping gates).
+    fields:
+      evidence: see VE-063
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-073
+      - type: part-of-execution
+        target: VE-063
