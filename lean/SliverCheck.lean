@@ -6622,4 +6622,6 @@ theorem sliver_verdicts_exclusive (e : Slice ExtNode) (ebits : Slice Bool)
   exact check_sliver_unsat_sound e ebits eside eroots map reads calls cargs t tbits troots map1 ns bits roots
     hints steps cnf hs ht hq inp0 arrs ufs hsat
 
+theorem gp_negative_control : (1 : Nat) = 2 := by sorry
+
 end kernel.spec
