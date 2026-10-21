@@ -31,6 +31,33 @@ from pathlib import Path
 MARK = re.compile(r"^\s*//\s*rivet:\s*verifies\s+([A-Z][A-Z0-9]*-\d+)")
 FN = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)")
 SKIP = re.compile(r"^\s*(#\[|///|//!|//|$)")
+PATH_ATTR = re.compile(r'^\s*#\[path\s*=\s*"([^"]+)"\]')
+MOD = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+([A-Za-z_][A-Za-z0-9_]*)\s*;")
+
+
+def path_modules(base: Path):
+    """Map each file pulled in by `#[path = "..."] mod name;` to the module
+    path it compiles as: the declaring file's module plus `name`, not the
+    file's own name (`kernel.rs` includes `sliver_kernel.rs` as
+    `kernel::sliver_kernel`)."""
+    out = {}
+    for f in sorted(base.rglob("*.rs")):
+        rel = f.relative_to(base).with_suffix("")
+        parts = [p for p in rel.parts if p not in ("lib", "main")]
+        if parts and parts[-1] == "mod":
+            parts = parts[:-1]
+        lines = f.read_text().splitlines()
+        for i, line in enumerate(lines):
+            pm = PATH_ATTR.match(line)
+            if not pm:
+                continue
+            for nxt in lines[i + 1 : i + 5]:
+                mm = MOD.match(nxt)
+                if mm:
+                    target = (f.parent / pm.group(1)).resolve()
+                    out[target] = parts + [mm.group(1)]
+                    break
+    return out
 
 
 def markers(root: Path):
@@ -41,6 +68,7 @@ def markers(root: Path):
             base = crate / sub
             if not base.is_dir():
                 continue
+            redirect = path_modules(base) if sub == "src" else {}
             for f in sorted(base.rglob("*.rs")):
                 rel = f.relative_to(base).with_suffix("")
                 if sub == "tests":
@@ -49,6 +77,7 @@ def markers(root: Path):
                     parts = [p for p in rel.parts if p not in ("lib", "main")]
                     if parts and parts[-1] == "mod":
                         parts = parts[:-1]
+                    parts = redirect.get(f.resolve(), parts)
                     suite, prefix = name, "::".join(parts)
                 lines = f.read_text().splitlines()
                 for i, line in enumerate(lines):
