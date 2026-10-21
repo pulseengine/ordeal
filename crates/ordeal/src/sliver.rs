@@ -641,7 +641,7 @@ impl Lowering {
     /// the name is unused. Deterministic — the same query always gets the
     /// same names, and a query that uses no `$`-prefixed names keeps the
     /// names it always had.
-    fn fresh(&mut self, base: String) -> String {
+    fn fresh(&mut self,base: String) -> String {
         let mut name = base;
         while self.taken.contains(&name) {
             name.push('\'');
