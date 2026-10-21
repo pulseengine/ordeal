@@ -104,3 +104,6 @@ pub use query::{
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};
 pub use witness::{SatCertificate, SatRecheckError, WitnessCheckResult};
+
+#[cfg(not(debug_assertions))]
+compile_error!("gate-potency negative control (release)");
