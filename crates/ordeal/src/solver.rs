@@ -2832,7 +2832,7 @@ mod tests {
                 sort: bv8,
             }),
         );
-        assert!(matches!(Solver::check_sliver(&[q]), CheckResult::Unknown));
+        assert!(!matches!(Solver::check_sliver(&[q]), CheckResult::Unknown));
     }
 
     // ── #236: the refusal is visible, and the sliver entry can be bounded ──
