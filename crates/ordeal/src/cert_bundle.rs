@@ -992,7 +992,7 @@ struct TermBlock {
 
 fn term_to_block(t: &QueryTerm) -> TermBlock {
     TermBlock {
-        encoding: TERM_ENCODING.into(),
+        encoding: t.encoding().into(),
         num_nodes: t.nodes.len(),
         nodes: t.nodes.iter().map(node_to_json).collect(),
         bits: bits_string(&t.bits),
@@ -1012,12 +1012,13 @@ fn term_to_block(t: &QueryTerm) -> TermBlock {
 }
 
 fn term_from_block(block: TermBlock) -> Result<QueryTerm, BundleError> {
-    if block.encoding != TERM_ENCODING {
-        return Err(BundleError::Unsupported(format!(
-            "term encoding {}",
-            block.encoding
-        )));
-    }
+    let shared = match block.encoding.as_str() {
+        TERM_ENCODING => false,
+        crate::query::TERM_ENCODING_V2 => true,
+        other => {
+            return Err(BundleError::Unsupported(format!("term encoding {other}")));
+        }
+    };
     let mut nodes = Vec::with_capacity(block.nodes.len());
     for n in &block.nodes {
         nodes.push(node_from_json(n)?);
@@ -1042,6 +1043,7 @@ fn term_from_block(block: TermBlock) -> Result<QueryTerm, BundleError> {
             .map(|v| (v.name.clone(), v.width, v.node))
             .collect(),
         map: block.map,
+        shared,
     };
     if term.sha256() != block.sha256 {
         return Err(BundleError::HashMismatch("term"));
@@ -1384,6 +1386,571 @@ impl TermSatCertificate {
                     inputs,
                 },
                 term,
+            },
+            attests: env.attests,
+            produced_by: env.produced_by,
+        })
+    }
+}
+
+// ── ordeal-cert/v4: the extended-query bundles (TR-072) ──────────────────
+
+use crate::query::{
+    EXT_ENCODING, SliverBlock, SliverCertificate, SliverModelRecheckError, SliverRecheckError,
+    SliverSatCertificate, ext_node_from_op, ext_node_op,
+};
+use crate::sliver::{ExtQuery, SliverModel};
+
+/// The `ext` block of an `ordeal-cert/v4` bundle ([`SliverBlock`]): the
+/// extended query as asked — nodes in the `query` block's spelling plus
+/// `["select", aid, idx, s, n]` / `["call", fid, w, s, n]`, the side
+/// table, the roots, the variable, array and function names — the
+/// untrusted map onto the `term` block's nodes, the read and call tables,
+/// and the block's content hash (`SliverBlock::canonical_text`).
+#[derive(Serialize, Deserialize)]
+struct ExtBlock {
+    encoding: String,
+    num_nodes: usize,
+    nodes: Vec<serde_json::Value>,
+    bits: String,
+    side: Vec<usize>,
+    roots: Vec<usize>,
+    vars: Vec<InputVarEntry>,
+    arrays: Vec<String>,
+    funcs: Vec<FuncEntry>,
+    /// Extended node → `term` node; `usize::MAX` for a node with no image.
+    map: Vec<usize>,
+    /// 3 per entry: read var node, array id, index node.
+    reads: Vec<usize>,
+    /// 4 per entry: result var node, function id, first arg, arity.
+    calls: Vec<usize>,
+    cargs: Vec<usize>,
+    sha256: String,
+}
+
+/// A function of the `ext` block: its name and result width, by id.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+struct FuncEntry {
+    name: String,
+    width: u32,
+}
+
+/// The extended model of a v4 SAT bundle: the pullback of the core model.
+#[derive(Serialize, Deserialize)]
+struct ExtModelBlock {
+    encoding: String,
+    /// The query variables' bindings, sorted by name.
+    assignments: Vec<(String, u128)>,
+    /// Per array, the cells the reads touched: `(index, byte)`, sorted.
+    arrays: Vec<ArrayCells>,
+    /// Per function, the tuples the calls touched, sorted.
+    calls: Vec<CallEntryBlock>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ArrayCells {
+    name: String,
+    cells: Vec<(u32, u8)>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct CallEntryBlock {
+    name: String,
+    args: Vec<u128>,
+    value: u128,
+}
+
+fn ext_node_to_json(n: &ordeal_lrat::ExtNode) -> serde_json::Value {
+    let (op, args) = ext_node_op(n);
+    let mut arr = vec![serde_json::Value::String(op.into())];
+    arr.extend(args.into_iter().map(|a| serde_json::Value::from(a as u64)));
+    serde_json::Value::Array(arr)
+}
+
+fn ext_node_from_json(v: &serde_json::Value) -> Result<ordeal_lrat::ExtNode, BundleError> {
+    let malformed = || BundleError::Malformed(format!("ext node {v} is not [\"op\", arg…]"));
+    let arr = v.as_array().ok_or_else(malformed)?;
+    let op = arr.first().and_then(|o| o.as_str()).ok_or_else(malformed)?;
+    let args = arr[1..]
+        .iter()
+        .map(|a| a.as_u64().map(|x| x as usize).ok_or_else(malformed))
+        .collect::<Result<Vec<_>, _>>()?;
+    ext_node_from_op(op, &args).ok_or_else(|| {
+        BundleError::Unsupported(format!("ext node operation {op} with {} args", args.len()))
+    })
+}
+
+fn ext_to_block(b: &SliverBlock) -> ExtBlock {
+    ExtBlock {
+        encoding: EXT_ENCODING.into(),
+        num_nodes: b.ext.nodes.len(),
+        nodes: b.ext.nodes.iter().map(ext_node_to_json).collect(),
+        bits: bits_string(&b.ext.bits),
+        side: b.ext.side.clone(),
+        roots: b.ext.roots.clone(),
+        vars: b
+            .ext
+            .vars
+            .iter()
+            .map(|(name, width, node)| InputVarEntry {
+                name: name.clone(),
+                width: *width,
+                node: *node,
+            })
+            .collect(),
+        arrays: b.ext.arrays.clone(),
+        funcs: b
+            .ext
+            .funcs
+            .iter()
+            .map(|(name, width)| FuncEntry {
+                name: name.clone(),
+                width: *width,
+            })
+            .collect(),
+        map: b.map.clone(),
+        reads: b.reads.clone(),
+        calls: b.calls.clone(),
+        cargs: b.cargs.clone(),
+        sha256: b.sha256(),
+    }
+}
+
+fn ext_from_block(block: ExtBlock) -> Result<SliverBlock, BundleError> {
+    if block.encoding != EXT_ENCODING {
+        return Err(BundleError::Unsupported(format!(
+            "ext encoding {}",
+            block.encoding
+        )));
+    }
+    let mut nodes = Vec::with_capacity(block.nodes.len());
+    for n in &block.nodes {
+        nodes.push(ext_node_from_json(n)?);
+    }
+    if nodes.len() != block.num_nodes {
+        return Err(BundleError::Malformed(format!(
+            "ext.num_nodes {} but {} nodes",
+            block.num_nodes,
+            nodes.len()
+        )));
+    }
+    let bits = bits_from_string(&block.bits).ok_or_else(|| {
+        BundleError::Malformed("ext bits contain a character other than '0'/'1'".into())
+    })?;
+    let sliver = SliverBlock {
+        ext: ExtQuery {
+            nodes,
+            bits,
+            side: block.side,
+            roots: block.roots,
+            vars: block
+                .vars
+                .iter()
+                .map(|v| (v.name.clone(), v.width, v.node))
+                .collect(),
+            arrays: block.arrays,
+            funcs: block
+                .funcs
+                .iter()
+                .map(|f| (f.name.clone(), f.width))
+                .collect(),
+        },
+        map: block.map,
+        reads: block.reads,
+        calls: block.calls,
+        cargs: block.cargs,
+    };
+    if sliver.sha256() != block.sha256 {
+        return Err(BundleError::HashMismatch("ext"));
+    }
+    Ok(sliver)
+}
+
+fn ext_model_to_block(m: &SliverModel) -> ExtModelBlock {
+    let mut assignments: Vec<(String, u128)> = m.env.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    assignments.sort();
+    ExtModelBlock {
+        encoding: "ext-model".into(),
+        assignments,
+        arrays: m
+            .arrays
+            .iter()
+            .map(|(name, cells)| ArrayCells {
+                name: name.clone(),
+                cells: cells.iter().map(|(i, b)| (*i, *b)).collect(),
+            })
+            .collect(),
+        calls: m
+            .calls
+            .iter()
+            .map(|((name, args), value)| CallEntryBlock {
+                name: name.clone(),
+                args: args.clone(),
+                value: *value,
+            })
+            .collect(),
+    }
+}
+
+fn ext_model_from_block(block: ExtModelBlock) -> Result<SliverModel, BundleError> {
+    if block.encoding != "ext-model" {
+        return Err(BundleError::Unsupported(format!(
+            "ext model encoding {}",
+            block.encoding
+        )));
+    }
+    let mut m = SliverModel::default();
+    for (k, v) in block.assignments {
+        m.env.insert(k, v);
+    }
+    for a in block.arrays {
+        m.arrays.entry(a.name).or_default().extend(a.cells);
+    }
+    for c in block.calls {
+        m.calls.insert((c.name, c.args), c.value);
+    }
+    Ok(m)
+}
+
+/// The v4 UNSAT envelope: v3's fields plus `ext` after `term`.
+#[derive(Serialize, Deserialize)]
+struct UnsatEnvelopeV4 {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    proof: ProofBlock,
+    query: QueryBlock,
+    term: TermBlock,
+    ext: ExtBlock,
+    recheck: RecheckBlockV2,
+}
+
+/// A parsed, hash-verified `ordeal-cert/v4` UNSAT bundle: the v3 bundle
+/// plus the extended query the core was lowered from.
+#[derive(Debug)]
+pub struct SliverBundle {
+    /// The certificate with its query, term and ext block, reconstructed.
+    pub certificate: SliverCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl SliverBundle {
+    /// Re-run the trusted EXTENDED re-check (`check_sliver_lowering`,
+    /// then `check_term_dag`, then `check_query`) — the operation a
+    /// v4-aware consumer performs to turn this bundle into a verification
+    /// link about the extended query. The v3 recheck stays available as
+    /// `certificate.term.recheck()`.
+    pub fn recheck(&self) -> Result<(), SliverRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+/// The `recheck.cmd` of a v4 UNSAT bundle.
+const V4_UNSAT_CMD: &str = "ordeal_lrat::check_sliver_lowering(ext.nodes, ext.bits, ext.side, ext.roots, \
+     ext.map, ext.reads, ext.calls, ext.cargs, term.nodes, term.bits, term.roots) == Ok(()) && \
+     ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
+     query.nodes, query.bits, query.roots) == Ok(()) && \
+     ordeal_lrat::check_query(query.nodes, query.bits, query.roots, query.hints, proof.body) \
+     == Ok(problem.clauses)";
+
+/// Readers from this version on decode `ordeal-cert/v4`.
+const V4_MIN_VERSION: &str = "0.33.0";
+
+impl SliverCertificate {
+    /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v4`
+    /// UNSAT bundle: the v3 envelope (same `problem`, `proof`, `query` and
+    /// `term` blocks, same hashes) plus the `ext` block, `format:
+    /// "ordeal-cert/v4"`. A v1, v2 or v3 reader rejects it by format (no
+    /// silent downgrade); `to_cert_v3` on `self.term` still produces the
+    /// v3 bundle about the lowered core.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v4(&self, attests: &Attests) -> String {
+        let cert = &self.term.query.certificate;
+        let problem_text = cnf_text(&cert.cnf);
+        let proof_text = cert.lrat_text().unwrap_or_default().to_string();
+        let env = UnsatEnvelopeV4 {
+            format: "ordeal-cert/v4".into(),
+            verdict: "unsat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: cert.cnf.len(),
+                clauses: cert.cnf.clone(),
+            },
+            proof: ProofBlock {
+                encoding: "lrat".into(),
+                body: proof_text.clone(),
+            },
+            query: query_to_block(&self.term.query.query),
+            term: term_to_block(&self.term.term),
+            ext: ext_to_block(&self.sliver),
+            recheck: RecheckBlockV2 {
+                tool: "ordeal-lrat".into(),
+                min_version: V4_MIN_VERSION.into(),
+                cmd: V4_UNSAT_CMD.into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+                proof_sha256: sha256_hex(proof_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v4` UNSAT bundle, verifying all five content
+    /// hashes (problem, proof, query, term, ext) BEFORE returning. The
+    /// caller then runs [`SliverBundle::recheck`]. A v1, v2 or v3 bundle
+    /// is [`BundleError::WrongFormat`]: read it with its own reader.
+    pub fn from_cert_v4(json: &str) -> Result<SliverBundle, BundleError> {
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some("ordeal-cert/v4") => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        match head.get("verdict").and_then(|f| f.as_str()) {
+            Some("unsat") => {}
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
+        }
+        let env: UnsatEnvelopeV4 =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.problem.encoding != "dimacs-cnf" {
+            return Err(BundleError::Unsupported(format!(
+                "problem encoding {}",
+                env.problem.encoding
+            )));
+        }
+        if env.proof.encoding != "lrat" {
+            return Err(BundleError::Unsupported(format!(
+                "proof encoding {}",
+                env.proof.encoding
+            )));
+        }
+        if !encoding_supported(&env.query.encoding) {
+            return Err(BundleError::Unsupported(format!(
+                "query encoding {}",
+                env.query.encoding
+            )));
+        }
+        let problem_text = cnf_text(&env.problem.clauses);
+        if sha256_hex(problem_text.as_bytes()) != env.recheck.problem_sha256 {
+            return Err(BundleError::HashMismatch("problem"));
+        }
+        if sha256_hex(env.proof.body.as_bytes()) != env.recheck.proof_sha256 {
+            return Err(BundleError::HashMismatch("proof"));
+        }
+        let query = query_from_block(env.query)?;
+        let term = term_from_block(env.term)?;
+        let sliver = ext_from_block(env.ext)?;
+        Ok(SliverBundle {
+            certificate: SliverCertificate {
+                term: TermCertificate {
+                    query: QueryCertificate {
+                        certificate: Certificate {
+                            lrat: env.proof.body.into_bytes(),
+                            cnf: env.problem.clauses,
+                        },
+                        query,
+                    },
+                    term,
+                },
+                sliver,
+            },
+            attests: env.attests,
+            produced_by: env.produced_by,
+        })
+    }
+}
+
+/// The v4 SAT envelope: v3's fields plus `ext` and `ext_model` after
+/// `term`.
+#[derive(Serialize)]
+struct SatEnvelopeV4 {
+    format: String,
+    verdict: String,
+    produced_by: Tool,
+    checked_by: Tool,
+    attests: Attests,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    query: QueryBlock,
+    inputs: InputsBlock,
+    term: TermBlock,
+    ext: ExtBlock,
+    ext_model: ExtModelBlock,
+    recheck: SatWitnessRecheck,
+}
+
+#[derive(Deserialize)]
+struct SatEnvelopeV4In {
+    format: String,
+    verdict: String,
+    attests: Attests,
+    produced_by: Tool,
+    problem: ProblemBlock,
+    model: SatModelBlock,
+    witness: WitnessBlock,
+    query: QueryBlock,
+    inputs: InputsBlock,
+    term: TermBlock,
+    ext: ExtBlock,
+    ext_model: ExtModelBlock,
+    recheck: SatWitnessRecheck,
+}
+
+/// A parsed, hash-verified `ordeal-cert/v4` SAT bundle: the v3 SAT bundle
+/// plus the extended query and the extended model.
+#[derive(Debug)]
+pub struct SliverSatBundle {
+    /// The witness with its query, inputs, term, ext block and extended
+    /// model, reconstructed.
+    pub certificate: SliverSatCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl SliverSatBundle {
+    /// Re-run the trusted EXTENDED re-check: `check_sliver_lowering`, the
+    /// v3 SAT recheck, and that the extended model is the pullback of the
+    /// core model.
+    pub fn recheck(&self) -> Result<(), SliverModelRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+impl SliverSatCertificate {
+    /// Serialize this trusted-rechecked certificate as an `ordeal-cert/v4`
+    /// SAT bundle: the v3 SAT envelope (same blocks, same hashes) plus the
+    /// `ext` and `ext_model` blocks, `format: "ordeal-cert/v4"`.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v4(&self, attests: &Attests) -> String {
+        let w = &self.term.query.witness;
+        let problem_text = cnf_text(&w.cnf);
+        let env = SatEnvelopeV4 {
+            format: "ordeal-cert/v4".into(),
+            verdict: "sat".into(),
+            produced_by: Tool {
+                name: "ordeal".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            checked_by: Tool {
+                name: "ordeal-lrat".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+            },
+            attests: attests.clone(),
+            problem: ProblemBlock {
+                encoding: "dimacs-cnf".into(),
+                num_clauses: w.cnf.len(),
+                clauses: w.cnf.clone(),
+            },
+            model: SatModelBlock {
+                encoding: "assignments".into(),
+                assignments: w.model.assignments.clone(),
+            },
+            witness: w.witness_block(),
+            query: query_to_block(&self.term.query.query),
+            inputs: InputsBlock {
+                encoding: crate::query::INPUTS_ENCODING.into(),
+                bits: bits_string(&self.term.query.inputs.bits),
+                vars: self
+                    .term
+                    .query
+                    .inputs
+                    .vars
+                    .iter()
+                    .map(|(name, width, node)| InputVarEntry {
+                        name: name.clone(),
+                        width: *width,
+                        node: *node,
+                    })
+                    .collect(),
+                sha256: self.term.query.inputs.sha256(),
+            },
+            term: term_to_block(&self.term.term),
+            ext: ext_to_block(&self.sliver),
+            ext_model: ext_model_to_block(&self.model),
+            recheck: SatWitnessRecheck {
+                tool: "ordeal-lrat".into(),
+                min_version: V4_MIN_VERSION.into(),
+                cmd:
+                    "ordeal_lrat::check_sliver_lowering(ext.nodes, ext.bits, ext.side, ext.roots, \
+                      ext.map, ext.reads, ext.calls, ext.cargs, term.nodes, term.bits, term.roots) \
+                      == Ok(()) + ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, \
+                      term.map, query.nodes, query.bits, query.roots) == Ok(()) + \
+                      ordeal_lrat::check_sat(problem, witness.assignment) + \
+                      ordeal_lrat::check_binding per model binding + \
+                      ordeal_lrat::check_query_model(query.nodes, query.bits, query.roots, \
+                      inputs.bits) == Ok(()) + ordeal_lrat::check_input_value(inputs.bits, \
+                      ordeal_lrat::var_offset(query.nodes, term.map[term.vars[name].node]), \
+                      width, value) per model binding + ext_model is the pullback of model \
+                      through ext.reads / ext.calls"
+                        .into(),
+                problem_sha256: sha256_hex(problem_text.as_bytes()),
+            },
+        };
+        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v4` SAT bundle, verifying all seven content
+    /// hashes (problem, witness assignment, bit map, query, inputs, term,
+    /// ext) BEFORE returning. The caller then runs
+    /// [`SliverSatBundle::recheck`].
+    pub fn from_cert_v4(json: &str) -> Result<SliverSatBundle, BundleError> {
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some("ordeal-cert/v4") => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        match head.get("verdict").and_then(|f| f.as_str()) {
+            Some("sat") => {}
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
+        }
+        let env: SatEnvelopeV4In =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        if env.format != "ordeal-cert/v4" {
+            return Err(BundleError::WrongFormat(env.format));
+        }
+        if env.verdict != "sat" {
+            return Err(BundleError::WrongVerdict(env.verdict));
+        }
+        let witness = sat_witness_from_blocks(env.problem, env.model, env.witness, &env.recheck)?;
+        let query = query_from_block(env.query)?;
+        let inputs = inputs_from_block(env.inputs)?;
+        let term = term_from_block(env.term)?;
+        let sliver = ext_from_block(env.ext)?;
+        let model = ext_model_from_block(env.ext_model)?;
+        Ok(SliverSatBundle {
+            certificate: SliverSatCertificate {
+                term: TermSatCertificate {
+                    query: QuerySatCertificate {
+                        witness,
+                        query,
+                        inputs,
+                    },
+                    term,
+                },
+                sliver,
+                model,
             },
             attests: env.attests,
             produced_by: env.produced_by,

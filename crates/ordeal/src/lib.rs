@@ -57,6 +57,8 @@ pub mod canon;
 pub mod cert_bundle;
 #[cfg(all(test, feature = "cert-bundle"))]
 mod cert_bundle_v3_tests;
+#[cfg(all(test, feature = "cert-bundle"))]
+mod cert_bundle_v4_tests;
 pub mod cnf;
 /// The term DAG the proven encoder consumes (issue #192 phase 3): the
 /// hash-consed builder from assertions and the structural-hashing hints
@@ -77,6 +79,8 @@ pub mod sat;
 /// integrity only, never part of the soundness argument.
 pub mod sha256;
 pub mod sliver;
+#[cfg(test)]
+mod sliver_check_tests;
 pub mod smtlib;
 pub mod solver;
 pub mod term;
@@ -93,8 +97,9 @@ pub mod sat_cadical;
 
 pub use query::{
     QueryCertificate, QueryCheckResult, QueryDag, QueryInputs, QueryModelRecheckError,
-    QueryRecheckError, QuerySatCertificate, QueryTerm, TermCertificate, TermCheckResult,
-    TermModelRecheckError, TermRecheckError, TermSatCertificate,
+    QueryRecheckError, QuerySatCertificate, QueryTerm, SliverBlock, SliverCertificate,
+    SliverCheckResult, SliverModelRecheckError, SliverRecheckError, SliverSatCertificate,
+    TermCertificate, TermCheckResult, TermModelRecheckError, TermRecheckError, TermSatCertificate,
 };
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};

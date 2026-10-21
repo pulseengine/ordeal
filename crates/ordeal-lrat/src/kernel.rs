@@ -40,6 +40,12 @@
 #[path = "blast_kernel.rs"]
 pub mod blast_kernel;
 
+/// The sliver correspondence check (TR-072): the same translation unit,
+/// so `kernel.sliver_kernel.*` is modelled next to the checker and the
+/// lowering it composes with.
+#[path = "sliver_kernel.rs"]
+pub mod sliver_kernel;
+
 use blast_kernel::{DagNode, Lit, aig_new, compact, encode, eval_lit, map_word, simulate, tseitin};
 
 /// One already-parsed certificate step.

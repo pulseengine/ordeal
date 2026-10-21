@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The proven sliver: every array/UF answer rests on the trusted
+  `check_sliver_lowering`** (TR-072, `ordeal-cert/v4`). Until now the
+  proven chain of #192 stopped at the LOWERED core: a certificate about a
+  loom memory or `pure_call` obligation proved the core unsat, and that
+  the core was the elimination of the extended query — eager
+  read-over-write, Ackermannization, array and call congruence — was the
+  trusted Rust of `sliver.rs`. The trusted `ordeal-lrat` crate gains
+  `kernel::sliver_kernel::check_sliver_lowering(e, ebits, eside, eroots,
+  map, reads, calls, cargs, t, tbits, troots)`: given the EXTENDED query
+  as asked (`ordeal-ext/v1`: a node list with `select` over a store chain
+  and `call` beyond the closed fragment; arrays and functions by id) and
+  the untrusted map and read / call tables, it verifies node by node that
+  the lowered core is the elimination — a `select` by walking its chain
+  (two constant indices settle a level statically, exactly as the
+  lowering does; otherwise `ite(index = idx, value, rest)` over the
+  images) down to the registered read variable, a call to the registered
+  result variable over its arguments' images, a closed operator exactly,
+  a variable to an unclassified core variable (the three classes — query
+  variable, read, call — partition the core variables the extended query
+  reaches, which is #247 re-established by the check itself), and the
+  congruence roots computed by the check (every pair of reads of one
+  array, every pair of sites of one function, in table order) rather than
+  hinted. Lean (`lean/SliverCheck.lean`): the extended semantics
+  `extSim` (Lean `BitVec`, arrays as total `BitVec 32 → BitVec 8`
+  functions, functions as total maps from argument values),
+  `sliver_corr_values`, the two transports — `pushforward_sat` (an
+  extended model pushes forward to a core model: Ackermann's functional
+  consistency) and `pullback_tables_agree` (a core model pulls back to an
+  interpretation built from the read and call variables, well defined by
+  the congruence roots) — and the capstones `check_sliver_lowering_sound`,
+  `check_sliver_unsat_sound` (composed with `check_term_dag` and
+  `check_query`: the extended query is unsatisfiable under EVERY array
+  and UF interpretation), `check_sliver_model_sound` (with
+  `check_query_model`: an interpretation built from the model satisfies
+  it) and `sliver_verdicts_exclusive`, axiom-clean and pinned in
+  `AxiomCheck.lean`; no earlier theorem's statement changed. Every sliver
+  entry point — `Solver::from_sliver` and every `check*` on it,
+  `check_sliver`, the bounded twins, `prove_equiv_sliver` — runs the
+  check before the term and query checks; a rejection is `Unknown`.
+  `Solver::check_sliver_with_term` returns the extended certificate
+  (`SliverCertificate` / `SliverSatCertificate`, the latter with the
+  extended model the core model pulls back to: arrays at every read's
+  index value, functions at every call's argument values). Untrusted
+  side: `sliver::lower_ext` / `flatten_ext` (one walk flattens and
+  lowers), `QueryTerm::flatten_sliver` (the lowered core hash-consed,
+  `ordeal-term/v2`, with the reads' indices and the calls' arguments as
+  witness nodes), the `ext` block (`SliverBlock`, sha256 over its
+  canonical text), `ordeal-cert/v4` = v3 plus `ext` (and `ext_model` on
+  `sat`), `recheck.min_version 0.33.0`, a NEW format tag so v1–v3 readers
+  refuse it and the v4 readers refuse them. Core queries, their v3
+  bundles and the CLI output are byte-identical.
+
+### Changed
+- **The sliver lowering's congruence roots come in table order** (TR-072):
+  pairs `p < q` of the access set in creation order (one array), then
+  of the call sites (one function) — the order the trusted check
+  enumerates — instead of arrays and functions grouped by name; and a
+  `select` settled by a concrete hit no longer registers the base-array
+  read it discards (that read variable was unconstrained, so no verdict
+  changes; the trusted check refuses a dead table entry). Sliver CNFs with
+  several arrays or functions, or a concrete hit above a base read, differ
+  from v0.32.1's; verdicts do not (the old-vs-new scan is recorded in
+  VE-062). loom should build its solver with `Solver::from_sliver` rather
+  than call `sliver::lower` and assert the core itself: only a solver
+  built from the extended query runs the sliver check.
+
 ## [0.32.1] - 2026-10-20
 
 **Patch: a sliver soundness fix** (#247). A query variable named like one

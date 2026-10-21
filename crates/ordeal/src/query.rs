@@ -723,6 +723,21 @@ pub enum QueryCheckResult {
 /// map to the lowered DAG's nodes.
 pub const TERM_ENCODING: &str = "ordeal-term/v1";
 
+/// The `term.encoding` of a sliver bundle (TR-072, `ordeal-cert/v4`): the
+/// LOWERED core — `sliver::lower`'s output — flattened with hash-consing
+/// (so that a shared lowered subterm is one node, which is what the read
+/// and call tables are keyed on) and with the lowered index of every read
+/// and the lowered arguments of every call appended as non-root nodes
+/// (so the trusted check and the model can always reach them). The
+/// question as asked is the `ext` block; this term is the checked
+/// intermediate, as the `query` block is.
+pub const TERM_ENCODING_V2: &str = "ordeal-term/v2";
+
+/// The `ext.encoding` value (TR-072): the extended query flattened as it
+/// was asked — [`crate::sliver::flatten_ext`] — plus the untrusted map
+/// and tables the trusted `check_sliver_lowering` verifies.
+pub const EXT_ENCODING: &str = "ordeal-ext/v1";
+
 /// The term a `v3` certificate is about (#192 phase 7): what the caller
 /// asserted, flattened, plus the untrusted index map from its nodes to the
 /// lowered [`QueryDag`]'s. The trusted `ordeal_lrat::check_term_dag`
@@ -747,6 +762,11 @@ pub struct QueryTerm {
     /// (the inside of a folded constant). Untrusted advice: the trusted
     /// check rejects a wrong entry.
     pub map: Vec<usize>,
+    /// Whether this is a sliver bundle's lowered core ([`TERM_ENCODING_V2`]:
+    /// hash-consed, with the reads' indices and the calls' arguments
+    /// appended) rather than the assertions flattened 1:1
+    /// ([`TERM_ENCODING`]). The canonical text carries the tag.
+    pub shared: bool,
 }
 
 impl std::fmt::Debug for QueryTerm {
@@ -756,12 +776,138 @@ impl std::fmt::Debug for QueryTerm {
             .field("bits", &self.bits.len())
             .field("roots", &self.roots)
             .field("vars", &self.vars.len())
+            .field("shared", &self.shared)
             .field("sha256", &self.sha256())
             .finish()
     }
 }
 
 impl QueryTerm {
+    /// The `term.encoding` this term carries.
+    pub fn encoding(&self) -> &'static str {
+        if self.shared {
+            TERM_ENCODING_V2
+        } else {
+            TERM_ENCODING
+        }
+    }
+
+    /// Flatten a SLIVER query's lowered core (TR-072): the hash-consed
+    /// `DagBuilder` over the lowered assertions, then — as non-root
+    /// witness nodes — the lowered index of every read and the lowered
+    /// arguments of every call, which is where the read and call tables
+    /// point; the extended query's map onto this core (a variable by name,
+    /// a constant by value, a closed operator as the operator over its
+    /// operands' images, a `select` or a call by its lowered term); and
+    /// the map onto the solver's DAG (`dag::term_map`) as for a core
+    /// query. Every map and table is untrusted advice the trusted checks
+    /// verify. Fails only on an ill-sorted term.
+    pub fn flatten_sliver(
+        trace: &crate::sliver::SliverTrace,
+        query: &QueryDag,
+        query_vars: &[(String, u32, usize)],
+    ) -> Result<(QueryTerm, SliverBlock), crate::eval::EvalError> {
+        use crate::dag::{DagBuilder, NO_IMAGE};
+        use crate::term::{BvTerm, Sort};
+        let ext = &trace.ext;
+        let lowered = &trace.lowered;
+        let mut builder = DagBuilder::new(true);
+        for a in &lowered.assertions {
+            builder.assert_root(a)?;
+        }
+        let var = |name: &str, width: u32| BvTerm::Var {
+            name: name.to_string(),
+            sort: Sort::new(width),
+        };
+        let mut reads = Vec::with_capacity(3 * lowered.read_sites.len());
+        for (name, array, index) in &lowered.read_sites {
+            let v = builder.bv(&var(name, 8))?;
+            let x = builder.bv(index)?;
+            let aid = ext
+                .arrays
+                .iter()
+                .position(|a| a == array)
+                .unwrap_or(NO_IMAGE);
+            reads.extend([v, aid, x]);
+        }
+        let mut calls = Vec::with_capacity(4 * lowered.calls.len());
+        let mut cargs = Vec::new();
+        for (name, func, args, sort) in &lowered.calls {
+            let v = builder.bv(&var(name, sort.width))?;
+            let fid = ext
+                .funcs
+                .iter()
+                .position(|(f, _)| f == func)
+                .unwrap_or(NO_IMAGE);
+            let s = cargs.len();
+            for a in args {
+                cargs.push(builder.bv(a)?);
+            }
+            calls.extend([v, fid, s, args.len()]);
+        }
+        let name_of: std::collections::HashMap<usize, (&str, u32)> = ext
+            .vars
+            .iter()
+            .map(|(name, width, node)| (*node, (name.as_str(), *width)))
+            .collect();
+        let mut map: Vec<usize> = Vec::with_capacity(ext.nodes.len());
+        for (i, n) in ext.nodes.iter().enumerate() {
+            let image = match n {
+                ExtNode::Core(k::DagNode::Var(_)) => match name_of.get(&i) {
+                    Some((name, width)) => builder.bv(&var(name, *width))?,
+                    None => NO_IMAGE,
+                },
+                ExtNode::Core(k::DagNode::Const(s, w)) => {
+                    let (s, w) = (*s, *w);
+                    if s + w > ext.bits.len() || w > 128 {
+                        NO_IMAGE
+                    } else {
+                        let mut value = 0u128;
+                        for j in 0..w {
+                            if ext.bits[s + j] {
+                                value |= 1u128 << j;
+                            }
+                        }
+                        builder.bv(&BvTerm::Const {
+                            value,
+                            sort: Sort::new(w as u32),
+                        })?
+                    }
+                }
+                ExtNode::Core(nd) => {
+                    let at = |a: usize| map.get(a).copied().filter(|&m| m != NO_IMAGE);
+                    match crate::dag::map_operands(nd, at) {
+                        Some(mapped) => builder.intern_node(mapped).unwrap_or(NO_IMAGE),
+                        None => NO_IMAGE,
+                    }
+                }
+                ExtNode::Select(..) | ExtNode::Call(..) => match &trace.images[i] {
+                    Some(t) => builder.bv(t)?,
+                    None => NO_IMAGE,
+                },
+            };
+            map.push(image);
+        }
+        let dag = builder.finish();
+        let term_map =
+            crate::dag::term_map(&dag, &query.nodes, &query.bits, &query.roots, query_vars);
+        let term = QueryTerm {
+            nodes: dag.nodes,
+            bits: dag.bits,
+            roots: dag.roots,
+            vars: dag.vars,
+            map: term_map,
+            shared: true,
+        };
+        let block = SliverBlock {
+            ext: ext.clone(),
+            map,
+            reads,
+            calls,
+            cargs,
+        };
+        Ok((term, block))
+    }
     /// Flatten `assertions` and map the result onto the lowered `query`
     /// (`query_vars`: the lowered DAG's `(name, width, Var node)` map).
     /// Fails only on an ill-sorted term.
@@ -778,6 +924,7 @@ impl QueryTerm {
             roots: term.roots,
             vars: term.vars,
             map,
+            shared: false,
         })
     }
 
@@ -802,7 +949,7 @@ impl QueryTerm {
     /// then `map <m…>`.
     pub fn canonical_text(&self) -> String {
         let mut s = String::new();
-        s.push_str(TERM_ENCODING);
+        s.push_str(self.encoding());
         s.push('\n');
         s.push_str("nodes ");
         s.push_str(&self.nodes.len().to_string());
@@ -989,6 +1136,339 @@ pub enum TermCheckResult {
     /// `check_term_dag`, `check_query_model` and the binding checks
     /// accepted before return.
     Sat(TermSatCertificate),
+    /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
+    Unknown,
+}
+
+// ── TR-072: the extended query, next to the core it was lowered to ──
+
+use crate::sliver::{ExtQuery, SliverModel};
+use ordeal_lrat::{ExtNode, SliverCheckError};
+
+/// The `ext` block of an `ordeal-cert/v4` bundle (TR-072): the extended
+/// query as asked ([`ExtQuery`]) plus the untrusted map from its nodes to
+/// the lowered core's ([`QueryTerm`] with [`TERM_ENCODING_V2`]) and the
+/// untrusted read and call tables — everything
+/// `ordeal_lrat::check_sliver_lowering` verifies.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct SliverBlock {
+    /// The extended query as asked.
+    pub ext: ExtQuery,
+    /// Extended node → core node, [`crate::dag::NO_IMAGE`] for none.
+    pub map: Vec<usize>,
+    /// The read table, 3 per entry: `(read var node, array id, index node)`.
+    pub reads: Vec<usize>,
+    /// The call table, 4 per entry: `(result var node, function id,
+    /// first argument in `cargs`, arity)`.
+    pub calls: Vec<usize>,
+    /// The calls' argument nodes.
+    pub cargs: Vec<usize>,
+}
+
+impl std::fmt::Debug for SliverBlock {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SliverBlock")
+            .field("ext", &self.ext)
+            .field("reads", &(self.reads.len() / 3))
+            .field("calls", &(self.calls.len() / 4))
+            .field("sha256", &self.sha256())
+            .finish()
+    }
+}
+
+/// The spelling of an extended node in the `ext` block and its canonical
+/// text: a closed node as [`node_op`], `["select", aid, idx, s, n]`,
+/// `["call", fid, w, s, n]`.
+pub fn ext_node_op(node: &ExtNode) -> (&'static str, Vec<usize>) {
+    match node {
+        ExtNode::Core(nd) => node_op(nd),
+        ExtNode::Select(aid, idx, s, n) => ("select", vec![*aid, *idx, *s, *n]),
+        ExtNode::Call(fid, w, s, n) => ("call", vec![*fid, *w, *s, *n]),
+    }
+}
+
+/// The inverse of [`ext_node_op`]; `None` for an unknown spelling.
+pub fn ext_node_from_op(op: &str, args: &[usize]) -> Option<ExtNode> {
+    match (op, args) {
+        ("select", [aid, idx, s, n]) => Some(ExtNode::Select(*aid, *idx, *s, *n)),
+        ("call", [fid, w, s, n]) => Some(ExtNode::Call(*fid, *w, *s, *n)),
+        _ => node_from_op(op, args).map(ExtNode::Core),
+    }
+}
+
+impl SliverBlock {
+    /// The trusted check: is `term` (the lowered core) the elimination of
+    /// the extended query along the map and tables
+    /// (`ordeal_lrat::check_sliver_lowering`,
+    /// `kernel.spec.check_sliver_lowering_sound`)?
+    pub fn check(&self, term: &QueryTerm) -> Result<(), SliverCheckError> {
+        ordeal_lrat::check_sliver_lowering(
+            &self.ext.nodes,
+            &self.ext.bits,
+            &self.ext.side,
+            &self.ext.roots,
+            &self.map,
+            &self.reads,
+            &self.calls,
+            &self.cargs,
+            &term.nodes,
+            &term.bits,
+            &term.roots,
+        )
+    }
+
+    /// The canonical text the content hash covers: the encoding tag,
+    /// `nodes <n>`, one `<op> <args…>` line per node, `bits <bitstring>`,
+    /// `side <s…>`, `roots <r…>`, one `var <name> <width> <node>` line per
+    /// variable, one `array <name>` line per array id, one `func <name>
+    /// <width>` line per function id, then `map <m…>`, `reads <r…>`,
+    /// `calls <c…>`, `cargs <a…>`.
+    pub fn canonical_text(&self) -> String {
+        let mut s = String::new();
+        s.push_str(EXT_ENCODING);
+        s.push('\n');
+        s.push_str("nodes ");
+        s.push_str(&self.ext.nodes.len().to_string());
+        s.push('\n');
+        for n in &self.ext.nodes {
+            let (op, args) = ext_node_op(n);
+            s.push_str(op);
+            push_usizes(&mut s, &args);
+            s.push('\n');
+        }
+        s.push_str("bits ");
+        s.push_str(&bits_string(&self.ext.bits));
+        s.push('\n');
+        s.push_str("side");
+        push_usizes(&mut s, &self.ext.side);
+        s.push('\n');
+        s.push_str("roots");
+        push_usizes(&mut s, &self.ext.roots);
+        s.push('\n');
+        for (name, width, node) in &self.ext.vars {
+            s.push_str("var ");
+            s.push_str(name);
+            s.push(' ');
+            s.push_str(&width.to_string());
+            s.push(' ');
+            s.push_str(&node.to_string());
+            s.push('\n');
+        }
+        for name in &self.ext.arrays {
+            s.push_str("array ");
+            s.push_str(name);
+            s.push('\n');
+        }
+        for (name, width) in &self.ext.funcs {
+            s.push_str("func ");
+            s.push_str(name);
+            s.push(' ');
+            s.push_str(&width.to_string());
+            s.push('\n');
+        }
+        for (key, xs) in [
+            ("map", &self.map),
+            ("reads", &self.reads),
+            ("calls", &self.calls),
+            ("cargs", &self.cargs),
+        ] {
+            s.push_str(key);
+            push_usizes(&mut s, xs);
+            s.push('\n');
+        }
+        s
+    }
+
+    /// `sha256(canonical_text)` — the bundle's `ext.sha256`. Integrity
+    /// only: the verdict rests on the recheck.
+    #[must_use]
+    pub fn sha256(&self) -> String {
+        sha256_hex(self.canonical_text().as_bytes())
+    }
+
+    /// The extended model a core model denotes — the pullback the SAT
+    /// capstone is stated with (`kernel.spec.check_sliver_model_sound`):
+    /// the lowered core is evaluated under the model with the proven
+    /// encoder and simulator, and then every base array holds, at each
+    /// read's index value, the read variable's value; every function maps
+    /// each call's argument values to the result variable's value; the
+    /// query variables keep their bindings. Cells and tuples no read or
+    /// call touched are free and read as `0`. `None` if a table entry is
+    /// out of range (the trusted check would have rejected it).
+    pub fn pullback_model(
+        &self,
+        term: &QueryTerm,
+        model: &crate::solver::Model,
+    ) -> Option<SliverModel> {
+        let dag = QueryDag {
+            nodes: term.nodes.clone(),
+            bits: term.bits.clone(),
+            roots: term.roots.clone(),
+            hints: Vec::new(),
+        };
+        let inputs = QueryInputs::from_model(&dag, &term.vars, model);
+        let mut raw = k::aig_new();
+        let (words, _) = k::encode(&mut raw, &term.nodes, &term.bits, &[]);
+        let vals = k::simulate(&raw, &inputs.bits);
+        let value = |node: usize| -> Option<u128> {
+            let word = words.get(node)?;
+            let mut v = 0u128;
+            for (j, l) in word.iter().enumerate().take(128) {
+                if k::eval_lit(&vals, *l) {
+                    v |= 1u128 << j;
+                }
+            }
+            Some(v)
+        };
+        let mut out = SliverModel::default();
+        for (name, _, _) in &self.ext.vars {
+            if let Some((_, v)) = model.assignments.iter().find(|(n, _)| n == name) {
+                out.env.insert(name.clone(), *v);
+            }
+        }
+        for &[var, aid, idx] in self.reads.as_chunks::<3>().0 {
+            let array = self.ext.arrays.get(aid)?;
+            let i = value(idx)? as u32;
+            let v = value(var)? as u8;
+            out.arrays.entry(array.clone()).or_default().insert(i, v);
+        }
+        for &[var, fid, s, n] in self.calls.as_chunks::<4>().0 {
+            let (func, _) = self.ext.funcs.get(fid)?;
+            let args = self.cargs.get(s..s.checked_add(n)?)?;
+            let argv = args.iter().map(|&a| value(a)).collect::<Option<Vec<_>>>()?;
+            out.calls.insert((func.clone(), argv), value(var)?);
+        }
+        Some(out)
+    }
+}
+
+/// An UNSAT certificate about an EXTENDED query (TR-072, `ordeal-cert/v4`):
+/// the v3 term certificate about the lowered core, plus the `ext` block
+/// relating that core to the query as asked.
+/// [`SliverCertificate::recheck`] is the strongest re-check: the trusted
+/// crate relates the extended query to the core (`check_sliver_lowering`),
+/// the core to the DAG (`check_term_dag`) and refutes the DAG
+/// (`check_query`), so an accepted re-check proves the EXTENDED query
+/// unsatisfiable under every array and UF interpretation —
+/// `kernel.spec.check_sliver_unsat_sound`.
+#[derive(Clone, Debug)]
+pub struct SliverCertificate {
+    /// The v3 certificate about the lowered core.
+    pub term: TermCertificate,
+    /// The extended query, its map and tables onto `term.term`.
+    pub sliver: SliverBlock,
+}
+
+/// Why a [`SliverCertificate::recheck`] could not confirm the proof.
+#[derive(Debug)]
+pub enum SliverRecheckError {
+    /// The trusted crate rejected the extended-to-core correspondence.
+    Sliver(SliverCheckError),
+    /// The v3 (term-level) re-check failed.
+    Term(TermRecheckError),
+}
+
+impl std::fmt::Display for SliverRecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SliverRecheckError::Sliver(e) => write!(f, "trusted sliver re-check rejected: {e:?}"),
+            SliverRecheckError::Term(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for SliverRecheckError {}
+
+impl SliverCertificate {
+    /// Re-establish the verdict at the EXTENDED level, with zero trust in
+    /// the solver: `check_sliver_lowering`, then the v3 recheck.
+    pub fn recheck(&self) -> Result<(), SliverRecheckError> {
+        self.sliver
+            .check(&self.term.term)
+            .map_err(SliverRecheckError::Sliver)?;
+        self.term.recheck().map_err(SliverRecheckError::Term)
+    }
+}
+
+/// A SAT witness about an EXTENDED query (TR-072, `ordeal-cert/v4`): the
+/// v3 SAT certificate about the lowered core, the `ext` block, and the
+/// extended model the core model pulls back to
+/// ([`SliverBlock::pullback_model`]). An accepted
+/// [`SliverSatCertificate::recheck`] proves the EXTENDED query satisfied
+/// by an interpretation built from the model —
+/// `kernel.spec.check_sliver_model_sound`.
+#[derive(Clone, Debug)]
+pub struct SliverSatCertificate {
+    /// The v3 SAT certificate about the lowered core.
+    pub term: TermSatCertificate,
+    /// The extended query, its map and tables onto `term.term`.
+    pub sliver: SliverBlock,
+    /// The extended model: the pullback of the core model.
+    pub model: SliverModel,
+}
+
+/// Why a [`SliverSatCertificate::recheck`] could not confirm the model.
+#[derive(Debug)]
+pub enum SliverModelRecheckError {
+    /// The trusted crate rejected the extended-to-core correspondence.
+    Sliver(SliverCheckError),
+    /// The v3 (term-level) re-check failed.
+    Term(TermModelRecheckError),
+    /// The advertised extended model is not the pullback of the core
+    /// model through the tables.
+    Model,
+}
+
+impl std::fmt::Display for SliverModelRecheckError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SliverModelRecheckError::Sliver(e) => {
+                write!(f, "trusted sliver re-check rejected: {e:?}")
+            }
+            SliverModelRecheckError::Term(e) => write!(f, "{e}"),
+            SliverModelRecheckError::Model => {
+                write!(
+                    f,
+                    "the extended model is not the pullback of the core model"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for SliverModelRecheckError {}
+
+impl SliverSatCertificate {
+    /// `check_sliver_lowering`, the v3 SAT recheck, then that the
+    /// advertised extended model is the pullback of the core model.
+    pub fn recheck(&self) -> Result<(), SliverModelRecheckError> {
+        self.sliver
+            .check(&self.term.term)
+            .map_err(SliverModelRecheckError::Sliver)?;
+        self.term.recheck().map_err(SliverModelRecheckError::Term)?;
+        let expected = self
+            .sliver
+            .pullback_model(&self.term.term, &self.term.query.witness.model)
+            .ok_or(SliverModelRecheckError::Model)?;
+        if expected.env != self.model.env
+            || expected.arrays != self.model.arrays
+            || expected.calls != self.model.calls
+        {
+            return Err(SliverModelRecheckError::Model);
+        }
+        Ok(())
+    }
+}
+
+/// The result of [`crate::Solver::check_sliver_with_term`]: both decided
+/// verdicts carry the extended query and its correspondence to the
+/// lowered core, whose trusted re-check passed before it was returned.
+#[derive(Clone, Debug)]
+pub enum SliverCheckResult {
+    /// Unsatisfiable under every array and UF interpretation.
+    Unsat(SliverCertificate),
+    /// Satisfiable, with the extended model.
+    Sat(SliverSatCertificate),
     /// No claim (identical semantics to [`crate::CheckResult::Unknown`]).
     Unknown,
 }

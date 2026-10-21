@@ -352,6 +352,13 @@ impl Blaster {
 #[derive(Clone, Debug, Default)]
 pub struct Solver {
     assertions: Vec<BoolTerm>,
+    /// The EXTENDED query this solver was built from
+    /// ([`Solver::from_sliver`], TR-072), when it was: `assertions` is its
+    /// lowering, and the trusted gate re-lowers it and runs
+    /// `check_sliver_lowering` before the term and query checks. A later
+    /// [`Solver::assert`] is appended here too (as a closed extended
+    /// term) and the lowering is redone, so the two never drift.
+    ext: Option<Vec<crate::sliver::ExtBoolTerm>>,
 }
 
 impl Solver {
@@ -359,6 +366,7 @@ impl Solver {
     pub fn new() -> Self {
         Self {
             assertions: Vec::new(),
+            ext: None,
         }
     }
 
@@ -369,9 +377,29 @@ impl Solver {
         &self.assertions
     }
 
-    /// Add a boolean assertion to the conjunction to be checked.
+    /// Add a boolean assertion to the conjunction to be checked. On a
+    /// solver built by [`Solver::from_sliver`] the assertion joins the
+    /// extended query (as a closed extended term) and the lowering is
+    /// redone, so the sliver gate still sees the whole query.
     pub fn assert(&mut self, term: BoolTerm) {
+        if let Some(ext) = &mut self.ext {
+            ext.push(crate::sliver::ext_of_core(&term));
+            // A closed term never leaves the sliver; the lowering of the
+            // extended list it joined was already accepted.
+            if let Ok(lowered) = crate::sliver::lower(ext) {
+                self.assertions = lowered;
+                return;
+            }
+        }
         self.assertions.push(term);
+    }
+
+    /// Whether this solver was built from an extended query
+    /// ([`Solver::from_sliver`]): then every verdict also rests on the
+    /// trusted `check_sliver_lowering`, and
+    /// [`Solver::check_sliver_with_term`] returns the extended certificate.
+    pub fn is_sliver(&self) -> bool {
+        self.ext.is_some()
     }
 
     /// Number of assertions accumulated so far.
@@ -417,11 +445,36 @@ impl Solver {
     pub fn from_sliver(
         assertions: &[crate::sliver::ExtBoolTerm],
     ) -> Result<Solver, crate::sliver::SliverError> {
-        let mut solver = Solver::new();
-        for a in crate::sliver::lower(assertions)? {
-            solver.assert(a);
+        let lowered = crate::sliver::lower(assertions)?;
+        Ok(Solver {
+            assertions: lowered,
+            ext: Some(assertions.to_vec()),
+        })
+    }
+
+    /// Decide an EXTENDED query (a solver built by [`Solver::from_sliver`])
+    /// and return, with the v3 term certificate about the lowered core,
+    /// the `ext` block relating that core to the query as asked (TR-072,
+    /// `ordeal-cert/v4`): the extended query flattened
+    /// ([`crate::sliver::flatten_ext`]), the untrusted map from its nodes
+    /// to the core's and the read / call tables. The trusted
+    /// `ordeal_lrat::check_sliver_lowering` verifies — BEFORE a verdict is
+    /// returned, on every entry point of such a solver — that the core is
+    /// the read-over-write, Ackermann and congruence elimination of the
+    /// extended query, so the proof (`check_sliver_unsat_sound`: unsat
+    /// under EVERY array and UF interpretation) or the model
+    /// (`check_sliver_model_sound`: an interpretation built from the model
+    /// satisfies the extended query) is about the question loom asked.
+    /// Anything the trusted crate rejects degrades to `Unknown`; on a
+    /// solver not built from the sliver the result is `Unknown` too (use
+    /// [`Solver::check_with_term`]).
+    pub fn check_sliver_with_term(&self) -> crate::query::SliverCheckResult {
+        use crate::query::SliverCheckResult;
+        match self.solve_core(Bound::None) {
+            Outcome::Unsat(_, Some(sliver)) => SliverCheckResult::Unsat(*sliver),
+            Outcome::Sat(_, Some(sliver)) => SliverCheckResult::Sat(*sliver),
+            _ => SliverCheckResult::Unknown,
         }
-        Ok(solver)
     }
 
     /// One-shot decision for an **extended (array/UF sliver) query**:
@@ -669,28 +722,38 @@ impl Solver {
     /// certificate (CNF + LRAT) or the model, as every entry point returned
     /// them before TR-070 — the term and the query the gate checked are
     /// dropped here and kept by [`Solver::check_with_term`].
-    fn verdict(outcome: crate::query::TermCheckResult) -> CheckResult {
+    fn verdict(outcome: Outcome) -> CheckResult {
+        match outcome {
+            Outcome::Sat(cert, _) => CheckResult::Sat(cert.query.witness.model),
+            Outcome::Unsat(cert, _) => CheckResult::Unsat(cert.query.certificate),
+            // The trusted crate rejected our own certificate, model, term
+            // map or sliver tables: an ordeal bug, but a sound outcome —
+            // degrade to Unknown rather than assert a verdict.
+            Outcome::Unknown => CheckResult::Unknown,
+        }
+    }
+
+    /// The term-level projection of an outcome: what
+    /// [`Solver::check_with_term`] returns (the sliver block, if any, was
+    /// checked and is dropped here).
+    fn term_outcome(outcome: Outcome) -> crate::query::TermCheckResult {
         use crate::query::TermCheckResult;
         match outcome {
-            TermCheckResult::Sat(cert) => CheckResult::Sat(cert.query.witness.model),
-            TermCheckResult::Unsat(cert) => CheckResult::Unsat(cert.query.certificate),
-            // The trusted crate rejected our own certificate, model or term
-            // map: an ordeal bug, but a sound outcome — degrade to Unknown
-            // rather than assert a verdict.
-            TermCheckResult::Unknown => CheckResult::Unknown,
+            Outcome::Sat(cert, _) => TermCheckResult::Sat(cert),
+            Outcome::Unsat(cert, _) => TermCheckResult::Unsat(cert),
+            Outcome::Unknown => TermCheckResult::Unknown,
         }
     }
 
     /// The engine's raw verdict — crate-internal, differential oracle only.
     #[cfg(any(test, feature = "oracle"))]
     pub(crate) fn check_raw(&self) -> RawVerdict {
-        use crate::query::TermCheckResult;
         match self.solve_core(Bound::None) {
-            TermCheckResult::Sat(cert) => {
+            Outcome::Sat(cert, _) => {
                 RawVerdict::Sat(cert.query.witness.model.assignments.into_iter().collect())
             }
-            TermCheckResult::Unsat(_) => RawVerdict::Unsat,
-            TermCheckResult::Unknown => RawVerdict::Unknown,
+            Outcome::Unsat(_, _) => RawVerdict::Unsat,
+            Outcome::Unknown => RawVerdict::Unknown,
         }
     }
 
@@ -703,17 +766,17 @@ impl Solver {
     /// An exhausted bound, a refused lowering (disabled op, ill-sorted
     /// input) and a rejection by the trusted crate all surface as
     /// [`crate::query::TermCheckResult::Unknown`].
-    fn solve_core(&self, bound: Bound) -> crate::query::TermCheckResult {
-        use crate::query::{
-            QueryInputs, QuerySatCertificate, QueryTerm, TermCheckResult, TermSatCertificate,
-        };
+    fn solve_core(&self, bound: Bound) -> Outcome {
+        use crate::query::{QueryInputs, QuerySatCertificate, QueryTerm, TermSatCertificate};
         use crate::witness::SatCertificate;
         if self.assertions.is_empty() {
             // An empty conjunction is trivially satisfiable by the empty
             // model: the empty witness re-checks vacuously (no clauses, no
             // bindings), and so do the empty query and the empty term (no
-            // roots to evaluate, no nodes to relate).
-            return TermCheckResult::Sat(TermSatCertificate {
+            // roots to evaluate, no nodes to relate). An empty EXTENDED
+            // query likewise: its block is empty and the trusted check
+            // accepts it; the gate below handles it uniformly.
+            let cert = TermSatCertificate {
                 query: QuerySatCertificate {
                     witness: SatCertificate {
                         model: Model {
@@ -727,15 +790,19 @@ impl Solver {
                     inputs: QueryInputs::default(),
                 },
                 term: QueryTerm::default(),
-            });
+            };
+            return match &self.ext {
+                None => Outcome::Sat(cert, None),
+                Some(_) => self.gate_sat_sliver(cert),
+            };
         }
         let Some((mut blaster, cnf)) = self.lower() else {
-            return TermCheckResult::Unknown;
+            return Outcome::Unknown;
         };
         // `lower()` always compacts, so the lowered query is always there;
         // moved out, not cloned. (Unknown is the sound answer regardless.)
         let Some(query) = blaster.query.take() else {
-            return TermCheckResult::Unknown;
+            return Outcome::Unknown;
         };
         let vars = std::mem::take(&mut blaster.query_vars);
         let mut sat_solver = SatSolver::new();
@@ -745,11 +812,11 @@ impl Solver {
             // budget and a wall-clock deadline.
             Bound::Conflicts(max) => match sat_solver.solve_with_budget(&cnf, max) {
                 Some(v) => v,
-                None => return TermCheckResult::Unknown,
+                None => return Outcome::Unknown,
             },
             Bound::Deadline(d) => match sat_solver.solve_with_deadline(&cnf, d) {
                 Some(v) => v,
-                None => return TermCheckResult::Unknown,
+                None => return Outcome::Unknown,
             },
             Bound::None => sat_solver.solve(&cnf),
         };
@@ -792,21 +859,92 @@ impl Solver {
         query: crate::query::QueryDag,
         vars: &[(String, u32, usize)],
         certificate: Certificate,
-    ) -> crate::query::TermCheckResult {
-        use crate::query::{QueryCertificate, QueryTerm, TermCertificate, TermCheckResult};
-        let Ok(term) = QueryTerm::flatten(&self.assertions, &query, vars) else {
-            return TermCheckResult::Unknown;
+    ) -> Outcome {
+        use crate::query::{QueryCertificate, QueryTerm, SliverCertificate, TermCertificate};
+        // A sliver solver (TR-072): the term is the lowered core, hash-consed
+        // with the tables' witness nodes, and the `ext` block relates the
+        // extended query to it; the trusted `check_sliver_lowering` runs
+        // first. A core solver: the assertions flattened as asked.
+        let (term, sliver) = match &self.ext {
+            Some(ext) => {
+                let Ok(trace) = crate::sliver::lower_ext(ext) else {
+                    return Outcome::Unknown;
+                };
+                let Ok((term, block)) = QueryTerm::flatten_sliver(&trace, &query, vars) else {
+                    return Outcome::Unknown;
+                };
+                (term, Some(block))
+            }
+            None => {
+                let Ok(term) = QueryTerm::flatten(&self.assertions, &query, vars) else {
+                    return Outcome::Unknown;
+                };
+                (term, None)
+            }
         };
         let (term, tampered) = tamper::apply(term);
-        let result = Self::term_verdict(TermCertificate {
+        let cert = TermCertificate {
             query: QueryCertificate { certificate, query },
             term,
-        });
+        };
+        let result = match sliver {
+            Some(block) => {
+                let (block, tampered_block) = tamper::apply_sliver(block);
+                let sliver = SliverCertificate {
+                    term: cert,
+                    sliver: block,
+                };
+                let outcome = match sliver.recheck() {
+                    Ok(()) => Outcome::Unsat(sliver.term.clone(), Some(Box::new(sliver))),
+                    Err(_) => Outcome::Unknown,
+                };
+                debug_assert!(
+                    tampered
+                        || tampered_block
+                        || tamper::lowering_tampered()
+                        || !matches!(outcome, Outcome::Unknown),
+                    "trusted crate rejected our certificate, term map or sliver block — ordeal bug"
+                );
+                return outcome;
+            }
+            None => match cert.recheck() {
+                Ok(()) => Outcome::Unsat(cert, None),
+                Err(_) => Outcome::Unknown,
+            },
+        };
         debug_assert!(
-            tampered || !matches!(result, TermCheckResult::Unknown),
+            tampered || !matches!(result, Outcome::Unknown),
             "trusted crate rejected our certificate or term map — ordeal bug"
         );
         result
+    }
+
+    /// The sliver SAT gate for the EMPTY extended query (every root
+    /// trivially true; the block is empty and the trusted check accepts an
+    /// empty extended query against an empty core).
+    fn gate_sat_sliver(&self, cert: crate::query::TermSatCertificate) -> Outcome {
+        use crate::query::{QueryTerm, SliverSatCertificate};
+        let Some(ext) = &self.ext else {
+            return Outcome::Unknown;
+        };
+        let Ok(trace) = crate::sliver::lower_ext(ext) else {
+            return Outcome::Unknown;
+        };
+        let Ok((term, block)) = QueryTerm::flatten_sliver(&trace, &cert.query.query, &[]) else {
+            return Outcome::Unknown;
+        };
+        let Some(model) = block.pullback_model(&term, &cert.query.witness.model) else {
+            return Outcome::Unknown;
+        };
+        let sliver = SliverSatCertificate {
+            term: crate::query::TermSatCertificate { term, ..cert },
+            sliver: block,
+            model,
+        };
+        match sliver.recheck() {
+            Ok(()) => Outcome::Sat(sliver.term.clone(), Some(Box::new(sliver))),
+            Err(_) => Outcome::Unknown,
+        }
     }
 
     /// The trusted SAT gate of every entry point (TR-070): the model is
@@ -829,12 +967,13 @@ impl Solver {
         blaster: &Blaster,
         cnf: Vec<Vec<i32>>,
         assignment: Vec<bool>,
-    ) -> crate::query::TermCheckResult {
-        use crate::query::TermCheckResult;
-        use crate::query::{QueryInputs, QuerySatCertificate, QueryTerm, TermSatCertificate};
+    ) -> Outcome {
+        use crate::query::{
+            QueryInputs, QuerySatCertificate, QueryTerm, SliverSatCertificate, TermSatCertificate,
+        };
         use crate::witness::SatCertificate;
         let Some(env) = self.decode_and_check(blaster, &assignment) else {
-            return TermCheckResult::Unknown;
+            return Outcome::Unknown;
         };
         let mut assignments: Vec<(String, u128)> = env.into_iter().collect();
         assignments.sort();
@@ -851,23 +990,71 @@ impl Solver {
             bit_map,
         };
         let inputs = QueryInputs::from_model(&query, vars, &witness.model);
-        let Ok(term) = QueryTerm::flatten(&self.assertions, &query, vars) else {
-            return TermCheckResult::Unknown;
+        let (term, sliver) = match &self.ext {
+            Some(ext) => {
+                let Ok(trace) = crate::sliver::lower_ext(ext) else {
+                    return Outcome::Unknown;
+                };
+                let Ok((term, block)) = QueryTerm::flatten_sliver(&trace, &query, vars) else {
+                    return Outcome::Unknown;
+                };
+                (term, Some(block))
+            }
+            None => {
+                let Ok(term) = QueryTerm::flatten(&self.assertions, &query, vars) else {
+                    return Outcome::Unknown;
+                };
+                (term, None)
+            }
         };
         let (term, tampered) = tamper::apply(term);
-        let result = Self::term_sat_verdict(TermSatCertificate {
+        let cert = TermSatCertificate {
             query: QuerySatCertificate {
                 witness,
                 query,
                 inputs,
             },
             term,
-        });
-        debug_assert!(
-            tampered || !matches!(result, TermCheckResult::Unknown),
-            "trusted crate rejected our model or term map — ordeal bug"
-        );
-        result
+        };
+        match sliver {
+            Some(block) => {
+                let (block, tampered_block) = tamper::apply_sliver(block);
+                // The extended model: the pullback of the core model through
+                // the tables (what `check_sliver_model_sound` builds).
+                let Some(model) = block.pullback_model(&cert.term, &cert.query.witness.model)
+                else {
+                    return Outcome::Unknown;
+                };
+                let sliver = SliverSatCertificate {
+                    term: cert,
+                    sliver: block,
+                    model,
+                };
+                let outcome = match sliver.recheck() {
+                    Ok(()) => Outcome::Sat(sliver.term.clone(), Some(Box::new(sliver))),
+                    Err(_) => Outcome::Unknown,
+                };
+                debug_assert!(
+                    tampered
+                        || tampered_block
+                        || tamper::lowering_tampered()
+                        || !matches!(outcome, Outcome::Unknown),
+                    "trusted crate rejected our model, term map or sliver block — ordeal bug"
+                );
+                outcome
+            }
+            None => {
+                let outcome = match cert.recheck() {
+                    Ok(()) => Outcome::Sat(cert, None),
+                    Err(_) => Outcome::Unknown,
+                };
+                debug_assert!(
+                    tampered || !matches!(outcome, Outcome::Unknown),
+                    "trusted crate rejected our model or term map — ordeal bug"
+                );
+                outcome
+            }
+        }
     }
 
     /// The pipeline's front half — validation, canonicalization, blasting,
@@ -1033,12 +1220,11 @@ impl Solver {
     /// this entry costs nothing beyond `check` and returns the same
     /// certificate or model.
     pub fn check_with_witness(&self) -> crate::witness::WitnessCheckResult {
-        use crate::query::TermCheckResult;
         use crate::witness::WitnessCheckResult;
         match self.solve_core(Bound::None) {
-            TermCheckResult::Unsat(cert) => WitnessCheckResult::Unsat(cert.query.certificate),
-            TermCheckResult::Sat(cert) => WitnessCheckResult::Sat(cert.query.witness),
-            TermCheckResult::Unknown => WitnessCheckResult::Unknown,
+            Outcome::Unsat(cert, _) => WitnessCheckResult::Unsat(cert.query.certificate),
+            Outcome::Sat(cert, _) => WitnessCheckResult::Sat(cert.query.witness),
+            Outcome::Unknown => WitnessCheckResult::Unknown,
         }
     }
 
@@ -1075,11 +1261,11 @@ impl Solver {
     /// still run first (defence in depth); the answer rests on the trusted
     /// evaluation. A model it rejects degrades to `Unknown`.
     pub fn check_with_query(&self) -> crate::query::QueryCheckResult {
-        use crate::query::{QueryCheckResult, TermCheckResult};
+        use crate::query::QueryCheckResult;
         match self.solve_core(Bound::None) {
-            TermCheckResult::Unsat(cert) => QueryCheckResult::Unsat(cert.query),
-            TermCheckResult::Sat(cert) => QueryCheckResult::Sat(cert.query),
-            TermCheckResult::Unknown => QueryCheckResult::Unknown,
+            Outcome::Unsat(cert, _) => QueryCheckResult::Unsat(cert.query),
+            Outcome::Sat(cert, _) => QueryCheckResult::Sat(cert.query),
+            Outcome::Unknown => QueryCheckResult::Unknown,
         }
     }
 
@@ -1102,7 +1288,7 @@ impl Solver {
     /// same term gate, and this one keeps the term, the query and the
     /// certificate or witness it checked. It costs nothing beyond `check`.
     pub fn check_with_term(&self) -> crate::query::TermCheckResult {
-        self.solve_core(Bound::None)
+        Self::term_outcome(self.solve_core(Bound::None))
     }
 
     /// The UNSAT gate of [`Solver::check_with_term`]: `Unsat` only if the
@@ -1110,6 +1296,7 @@ impl Solver {
     /// recheck); a rejection degrades to `Unknown`. Separate so the
     /// degradation is testable with a tampered certificate (the caller's
     /// `debug_assert` is what flags an ordeal bug in the real pipeline).
+    #[cfg(test)]
     pub(crate) fn term_verdict(
         cert: crate::query::TermCertificate,
     ) -> crate::query::TermCheckResult {
@@ -1123,6 +1310,7 @@ impl Solver {
     /// The SAT gate of [`Solver::check_with_term`]: `Sat` only if the
     /// trusted crate accepts the correspondence, the model and every
     /// binding; a rejection degrades to `Unknown`.
+    #[cfg(test)]
     pub(crate) fn term_sat_verdict(
         cert: crate::query::TermSatCertificate,
     ) -> crate::query::TermCheckResult {
@@ -1167,17 +1355,16 @@ impl Solver {
     }
 
     #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
-    fn solve_core_cadical(&self) -> crate::query::TermCheckResult {
-        use crate::query::TermCheckResult;
+    fn solve_core_cadical(&self) -> Outcome {
         use crate::sat_cadical::{self, CadicalVerdict};
         if self.assertions.is_empty() {
             return self.solve_core(Bound::None);
         }
         let Some((mut blaster, cnf)) = self.lower() else {
-            return TermCheckResult::Unknown;
+            return Outcome::Unknown;
         };
         let Some(query) = blaster.query.take() else {
-            return TermCheckResult::Unknown;
+            return Outcome::Unknown;
         };
         let vars = std::mem::take(&mut blaster.query_vars);
         match sat_cadical::solve(&cnf) {
@@ -1193,7 +1380,7 @@ impl Solver {
                 self.gate_sat(query, &vars, &blaster, cnf.clauses, assignment)
             }
             // Every CaDiCaL error is conservative no-verdict.
-            Err(_) => TermCheckResult::Unknown,
+            Err(_) => Outcome::Unknown,
         }
     }
 }
@@ -1205,6 +1392,22 @@ enum Bound {
     None,
     Conflicts(u64),
     Deadline(std::time::Instant),
+}
+
+/// The gated outcome of one solve (crate-internal): the term certificate
+/// every entry point projects its verdict from, and — for a solver built
+/// from the sliver (TR-072) — the extended certificate whose trusted
+/// re-check (`check_sliver_lowering` first) also passed.
+enum Outcome {
+    Unsat(
+        crate::query::TermCertificate,
+        Option<Box<crate::query::SliverCertificate>>,
+    ),
+    Sat(
+        crate::query::TermSatCertificate,
+        Option<Box<crate::query::SliverSatCertificate>>,
+    ),
+    Unknown,
 }
 
 /// The test-only tamper hook of the trusted gate (TR-070's negative
@@ -1230,6 +1433,21 @@ pub(crate) mod tamper {
         /// reject a model whose two values differ; UNSAT does not read the
         /// variable map and must be unaffected.
         SwapVars,
+        /// TR-072: point the first mapped `select` or call of the
+        /// extended query at a different core node (a tampered ext
+        /// block): `check_sliver_lowering` must reject.
+        ExtMap,
+        /// TR-072: make the first two read entries share one read variable
+        /// (a wrong read share): the table check must reject.
+        ReadShare,
+        /// TR-072: register the first query variable as the first read
+        /// entry's variable (the #247 capture shape): the class partition
+        /// must reject. (The fourth sliver control, a lowering that omits
+        /// a congruence clause, is `sliver::hooks::drop_last_congruence`:
+        /// it must live in the lowering so the core, the DAG and the CNF
+        /// stay consistent with each other and only the sliver check can
+        /// catch it.)
+        CaptureName,
     }
 
     thread_local! {
@@ -1273,6 +1491,51 @@ pub(crate) mod tamper {
                 term.vars[1].2 = n0;
                 (term, true)
             }
+            // The sliver tampers leave the term alone; `apply_sliver` acts.
+            Some(Tamper::ExtMap | Tamper::ReadShare | Tamper::CaptureName) => (term, false),
+        }
+    }
+
+    /// Is the lowering itself tampered (`sliver::hooks::drop_last_congruence`)?
+    /// Then the gate's rejection is the expected one.
+    pub(crate) fn lowering_tampered() -> bool {
+        crate::sliver::hooks::dropping_last_congruence()
+    }
+
+    /// Apply the armed sliver tamper, if any, to the `ext` block; the flag
+    /// says whether one was.
+    pub(crate) fn apply_sliver(
+        mut block: crate::query::SliverBlock,
+    ) -> (crate::query::SliverBlock, bool) {
+        use ordeal_lrat::ExtNode;
+        match ACTIVE.with(|c| c.get()) {
+            Some(Tamper::ExtMap) => {
+                let i = block
+                    .ext
+                    .nodes
+                    .iter()
+                    .position(|n| matches!(n, ExtNode::Select(..) | ExtNode::Call(..)))
+                    .expect("an extended query with a select or a call");
+                block.map[i] = if block.map[i] == 0 { 1 } else { 0 };
+                (block, true)
+            }
+            Some(Tamper::ReadShare) => {
+                assert!(block.reads.len() >= 6, "an extended query with two reads");
+                block.reads[3] = block.reads[0];
+                (block, true)
+            }
+            Some(Tamper::CaptureName) => {
+                assert!(block.reads.len() >= 3, "an extended query with a read");
+                let (_, _, node) = block
+                    .ext
+                    .vars
+                    .first()
+                    .expect("an extended query with a variable");
+                let image = block.map[*node];
+                block.reads[0] = image;
+                (block, true)
+            }
+            _ => (block, false),
         }
     }
 }
@@ -1284,6 +1547,16 @@ mod tamper {
     #[inline]
     pub(crate) fn apply(term: crate::query::QueryTerm) -> (crate::query::QueryTerm, bool) {
         (term, false)
+    }
+    #[inline]
+    pub(crate) fn apply_sliver(
+        block: crate::query::SliverBlock,
+    ) -> (crate::query::SliverBlock, bool) {
+        (block, false)
+    }
+    #[inline]
+    pub(crate) fn lowering_tampered() -> bool {
+        false
     }
 }
 

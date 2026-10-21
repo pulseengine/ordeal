@@ -89,6 +89,7 @@ fn term_of(cert: &serde_json::Value) -> ordeal::QueryTerm {
             })
             .collect(),
         map: usizes(&cert["term"]["map"]),
+        shared: false,
     }
 }
 

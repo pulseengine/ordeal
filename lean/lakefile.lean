@@ -121,6 +121,17 @@ lean_lib «Sound» {}
 
 @[default_target] lean_lib «TermCheck» {}
 
+-- TR-072: the sliver correspondence check. `check_sliver_lowering_sound`
+-- — the kernel's `check_sliver_lowering` accepts only a core that is the
+-- read-over-write + Ackermann + congruence elimination of the EXTENDED
+-- query (arrays and uninterpreted functions): every extended model pushes
+-- forward to a core model, every core model pulls back to an extended
+-- one — composed with the unchanged phase-7 and phase-4/6 theorems into
+-- `check_sliver_unsat_sound`, `check_sliver_model_sound` and
+-- `sliver_verdicts_exclusive`. `sorry`-free, axiom-clean (pinned in
+-- AxiomCheck.lean).
+@[default_target] lean_lib «SliverCheck» {}
+
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —
 -- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),

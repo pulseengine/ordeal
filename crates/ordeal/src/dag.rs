@@ -135,6 +135,61 @@ impl DagBuilder {
         i
     }
 
+    /// The hash-consing key of an operator node — the key [`DagBuilder::bv`]
+    /// / [`DagBuilder::boolean`] intern it under; `None` for a variable or
+    /// a constant (interned by name / by value instead).
+    fn key_of(node: k::DagNode) -> Option<(u8, usize, usize, usize)> {
+        use k::DagNode as N;
+        Some(match node {
+            N::Var(_) | N::Const(_, _) => return None,
+            N::Add(a, b) => (tag::ADD, a, b, 0),
+            N::Sub(a, b) => (tag::SUB, a, b, 0),
+            N::Mul(a, b) => (tag::MUL, a, b, 0),
+            N::Udiv(a, b) => (tag::UDIV, a, b, 0),
+            N::Urem(a, b) => (tag::UREM, a, b, 0),
+            N::And(a, b) => (tag::AND, a, b, 0),
+            N::Or(a, b) => (tag::OR, a, b, 0),
+            N::Xor(a, b) => (tag::XOR, a, b, 0),
+            N::Shl(a, b) => (tag::SHL, a, b, 0),
+            N::Lshr(a, b) => (tag::LSHR, a, b, 0),
+            N::Ashr(a, b) => (tag::ASHR, a, b, 0),
+            N::Rotr(a, b) => (tag::ROTR, a, b, 0),
+            N::Extract(hi, lo, a) => (tag::EXTRACT, a, hi, lo),
+            N::Concat(a, b) => (tag::CONCAT, a, b, 0),
+            N::ZeroExt(a, by) => (tag::ZEXT, a, by, 0),
+            N::SignExt(a, by) => (tag::SEXT, a, by, 0),
+            N::Ite(c, t, e) => (tag::ITE, c, t, e),
+            N::Eq(a, b) => (tag::EQ, a, b, 0),
+            N::Ne(a, b) => (tag::NE, a, b, 0),
+            N::Ult(a, b) => (tag::ULT, a, b, 0),
+            N::Ule(a, b) => (tag::ULE, a, b, 0),
+            N::Ugt(a, b) => (tag::UGT, a, b, 0),
+            N::Uge(a, b) => (tag::UGE, a, b, 0),
+            N::Slt(a, b) => (tag::SLT, a, b, 0),
+            N::Sle(a, b) => (tag::SLE, a, b, 0),
+            N::Sgt(a, b) => (tag::SGT, a, b, 0),
+            N::Sge(a, b) => (tag::SGE, a, b, 0),
+            N::Not(a) => (tag::NOT, a, 0, 0),
+            N::BoolAnd(a, b) => (tag::BAND, a, b, 0),
+            N::BoolOr(a, b) => (tag::BOR, a, b, 0),
+            N::BvNot(a) => (tag::BVNOT, a, 0, 0),
+            N::Neg(a) => (tag::NEG, a, 0, 0),
+            N::Rotl(a, b) => (tag::ROTL, a, b, 0),
+            N::Sdiv(a, b) => (tag::SDIV, a, b, 0),
+            N::Srem(a, b) => (tag::SREM, a, b, 0),
+        })
+    }
+
+    /// Intern an operator node whose operands are already nodes of this
+    /// builder (TR-072: the sliver mapper finds an extended operator's
+    /// core image as the operator over its operands' images). The same
+    /// key as the term walk, so the node is shared with any equal one the
+    /// walk built. `None` for a variable or a constant.
+    pub fn intern_node(&mut self, node: k::DagNode) -> Option<usize> {
+        let key = Self::key_of(node)?;
+        Some(self.intern(key, node))
+    }
+
     /// The node of a bitvector term. Visits operands left to right (the
     /// old walk's order), sort-checking each term as it did.
     pub fn bv(&mut self, t: &BvTerm) -> Result<usize, EvalError> {
@@ -408,7 +463,10 @@ fn operands(n: &k::DagNode) -> Vec<usize> {
 
 /// A node with its operands replaced by `f(operand)`; `None` if `f` has no
 /// image for one of them.
-fn map_operands(n: &k::DagNode, f: impl Fn(usize) -> Option<usize>) -> Option<k::DagNode> {
+pub(crate) fn map_operands(
+    n: &k::DagNode,
+    f: impl Fn(usize) -> Option<usize>,
+) -> Option<k::DagNode> {
     use k::DagNode as N;
     Some(match *n {
         N::Var(w) => N::Var(w),

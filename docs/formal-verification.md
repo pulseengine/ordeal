@@ -369,7 +369,8 @@ satisfied by the advertised model.** What it does NOT prove, the
 remaining trust on the query path, stated plainly: that the term block
 is the caller's assertions (`dag::flatten`, a 1:1 serialization with no
 semantic decision, which a consumer holding the assertions re-runs and
-compares by hash), the variable names, the sliver and the front ends.
+compares by hash), the variable names, the front ends — and, until
+TR-072 (the sliver section below), the sliver.
 `canon.rs`, `dag.rs`, `dag::term_map` and `QueryInputs::from_model` are
 no longer trusted: a wrong decision in any of them is rejected by the
 trusted check, and the solver degrades the verdict to `Unknown`
@@ -430,9 +431,95 @@ model-to-inputs glue leave **every** answer's trust path, not only the
 `--with-term` one. **What is still trusted, on every path:** the 1:1
 flattening of the assertions into the term (`dag::flatten`, a
 post-order walk with no semantic decision — a consumer holding the
-assertions re-runs and compares it), the variable names, the sliver
-lowering (`sliver.rs`, array/UF elimination into the closed core) and
-the SMT-LIB / Verus front ends.
+assertions re-runs and compares it), the variable names, the SMT-LIB /
+Verus front ends — and the sliver lowering (`sliver.rs`, array/UF
+elimination into the closed core), until TR-072 put it under the trusted
+`check_sliver_lowering` (next section).
+
+## The extended query: the sliver check (TR-072 / `ordeal-cert/v4`)
+
+loom's memory and `pure_call` obligations are not closed-fragment terms:
+they are EXTENDED queries (`sliver.rs`: `select`/`store` over
+`Array(BV32 → BV8)` with concrete or symbolic indices, uninterpreted
+`pure_call`s). `sliver::lower` eliminates them into the closed core —
+eager read-over-write into nested `ite`s, Ackermannization of the calls,
+pairwise congruence over the reads of one array and the sites of one
+function — and everything above proves the LOWERED core. That the core
+is the elimination of the extended query was trusted Rust (#247 was a
+certified wrong `Unsat` through exactly that step).
+
+Since TR-072 the trusted crate gains
+`kernel::sliver_kernel::check_sliver_lowering` (`crates/ordeal-lrat/src/sliver_kernel.rs`,
+one translation unit with the rest of the kernel): given the extended
+query as asked (`ordeal-ext/v1` — a node list whose constructors are the
+closed fragment's plus `Select(aid, idx, s, n)` over a store chain in a
+side table and `Call(fid, w, s, n)`; arrays and functions by id, their
+names the untrusted side's as variable names are) and untrusted advice —
+the map from its nodes to the core's, the read table `(read var, array,
+index node)`, the call table `(result var, function, args)` — it checks
+node by node that the core is the elimination: a `select` by walking its
+chain (two constant indices settle a level statically, equal bits to the
+value's image, unequal bits skipped; any other level must be
+`ite(index = idx, value, rest)` over the images) down to the read
+variable registered for `(array, idx)`; a call to the result variable
+registered for its function over its arguments' images; a closed operator
+exactly (no rewrite — the sliver makes none); a variable to an
+unclassified core variable, the three classes (query variable, read,
+call) partitioning the core variables the extended query reaches; the
+extended roots' images leading the core roots; and the remaining core
+roots being exactly the congruence roots the check itself enumerates
+(pairs `p < q` of the read table with one array, skipping two unequal
+constants; pairs of the call table with one function and arity). The
+roots are computed, not hinted; every table entry must be reached by a
+mapped `select` or call (a dead entry is refused).
+
+```lean
+abbrev Arrs := Nat → BitVec 32 → BitVec 8            -- an array interpretation
+abbrev Ufs  := Nat → List DVal → DVal                 -- a UF interpretation (coerced to the call's width)
+-- extSim: dagSim with two more arms — chainRead (the most recent store whose
+-- index equals the selected one wins, else the base array) and the call.
+
+theorem check_sliver_lowering_sound … (h : kernel.sliver_kernel.check_sliver_lowering … = ok (Ok ())) :
+    (∀ inp0 arrs ufs, ExtSat inp0 ebits arrs ufs eside e eroots →
+        ∃ inp1, ∀ k < troots.length, dagBool inp1 tbits t troots[k] = true) ∧
+    (∀ inp1, (∀ k < troots.length, dagBool inp1 tbits t troots[k] = true) →
+        ∃ inp0 arrs ufs, ExtVarsAgree … ∧ TablesAgree … ∧ ExtSat inp0 ebits arrs ufs eside e eroots)
+
+theorem check_sliver_unsat_sound … (hs : check_sliver_lowering … = ok (Ok ()))
+    (ht : kernel.check_term_dag t tbits troots map1 ns bits roots = ok (Ok ()))
+    (hq : kernel.check_query ns bits roots hints steps = ok (Ok cnf)) :
+    ∀ inp0 (arrs : Arrs) (ufs : Ufs), ¬ ExtSat inp0 ebits arrs ufs eside e eroots
+
+theorem check_sliver_model_sound … (hs) (ht) (hm : kernel.check_query_model ns bits roots inp2 = ok (Ok ())) :
+    ∃ inp0 inp1 arrs ufs, VarsAgree t ns map1 inp1 inp2 ∧ ExtVarsAgree … ∧ TablesAgree … ∧ ExtSat …
+
+theorem sliver_verdicts_exclusive … (hs) (ht) (hq) (hm) : False
+```
+
+`lean/SliverCheck.lean`: `sliver_corr_values` (under agreement on the
+variables and on the tables, every mapped extended node has the value of
+its image — the `Core` arm is phase 7's `pMapNode_val`, the `select` arm
+the chain-walk lemma, the call arm the table), `pushforward_sat` (an
+extended model pushes forward: the extended roots by the correspondence,
+every congruence root by functional consistency — Ackermann's theorem is
+this lemma) and `pullback_tables_agree` (a core model pulls back: `arrs`
+and `ufs` built from the read and call variables' values, well defined
+because the congruence roots are complete and a skipped pair is two
+constants with unequal bits). The capstones are pinned axiom-clean in
+`AxiomCheck.lean`; `TermCheck.lean` and `QueryCheck.lean` are untouched.
+What a v4 recheck proves: **the extended query the bundle carries is
+unsatisfiable under every array and UF interpretation, or is satisfied
+by the interpretation built from the model** (the `ext_model` block:
+arrays at every read's index value, functions at every call's argument
+values). What stays trusted: the 1:1 flattening of the `ExtBoolTerm`s
+into the `ext` block (`sliver::flatten_ext`, one walk with the lowering,
+no semantic decision — a consumer re-runs it and compares by hash), the
+variable, array and function names, and the front ends. Every sliver
+entry point (`Solver::from_sliver` and every `check*` on it, the
+one-shots, `prove_equiv_sliver`) runs the check before the term and
+query checks; a rejection is `Unknown`. A solver that lowers through
+`sliver::lower` itself and asserts the core is a core solver: it gets the
+term and query checks about the core, not the sliver check.
 
 ## Out of scope (explicitly NOT proven)
 
@@ -521,9 +608,12 @@ the SMT-LIB / Verus front ends.
   bind the model values through the term's own variable map — on the
   `check_with_term` / `--with-term` path in v0.31.0, and **on every path
   since v0.32.0 / TR-070** (the section above), so the DAG builder,
-  canonicalization and `eval.rs` have left this list. What stays: the
-  1:1 flattening of the assertions into the term (`dag::flatten`), the
-  variable names, the sliver and the front ends.
+  canonicalization and `eval.rs` have left this list, and **since
+  TR-072** the sliver lowering has too (`check_sliver_lowering`, the
+  section above). What stays: the 1:1 flattening of the assertions into
+  the term (`dag::flatten`; of an extended query into the `ext` block,
+  `sliver::flatten_ext`), the variable, array and function names, and the
+  front ends.
   `dag::strash_hints` is untrusted by design: it only reproduces the
   sharing decisions of the old `Aig::and` strash so the shipped CNF stays
   byte-identical, and `compact_sound` holds for any hints. The shipped
