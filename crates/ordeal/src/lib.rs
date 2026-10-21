@@ -104,3 +104,6 @@ pub use query::{
 pub use solver::{Certificate, CertificateError, CheckResult, Model, Solver};
 pub use term::{BoolTerm, BvTerm, Sort};
 pub use witness::{SatCertificate, SatRecheckError, WitnessCheckResult};
+
+#[cfg(target_arch = "wasm32")]
+compile_error!("gate-potency negative control (wasm)");
