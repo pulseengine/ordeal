@@ -407,8 +407,94 @@ pub(crate) mod hooks {
 /// decidable never reaches the SAT core.
 fn as_const(t: &BvTerm) -> Option<u128> {
     match t {
-        BvTerm::Const { value, .. } => Some(*value),
+        // Masked (#262): two constants with equal bits are one index, as
+        // the trusted check reads them; the raw value's bits above the
+        // width mean nothing to the core.
+        BvTerm::Const { value, sort } => Some(eval::mask_to(*value, sort.width)),
         _ => None,
+    }
+}
+
+/// A closed term with every constant MASKED to its width (#262): what the
+/// lowered core carries, so that two constants with equal bits are one
+/// constant everywhere downstream — the solver's DAG interns by value,
+/// the trusted sliver check keys the read table on node identity, and
+/// the read / call memos compare values.
+pub fn masked_bv(t: &BvTerm) -> BvTerm {
+    use BvTerm as B;
+    let c = |x: &BvTerm| Box::new(masked_bv(x));
+    match t {
+        B::Const { value, sort } => B::Const {
+            value: eval::mask_to(*value, sort.width),
+            sort: *sort,
+        },
+        B::Var { .. } => t.clone(),
+        B::Add(a, b) => B::Add(c(a), c(b)),
+        B::Sub(a, b) => B::Sub(c(a), c(b)),
+        B::Mul(a, b) => B::Mul(c(a), c(b)),
+        B::Udiv(a, b) => B::Udiv(c(a), c(b)),
+        B::Urem(a, b) => B::Urem(c(a), c(b)),
+        B::And(a, b) => B::And(c(a), c(b)),
+        B::Or(a, b) => B::Or(c(a), c(b)),
+        B::Xor(a, b) => B::Xor(c(a), c(b)),
+        B::Shl(a, b) => B::Shl(c(a), c(b)),
+        B::Lshr(a, b) => B::Lshr(c(a), c(b)),
+        B::Ashr(a, b) => B::Ashr(c(a), c(b)),
+        B::Rotr(a, b) => B::Rotr(c(a), c(b)),
+        B::Rotl(a, b) => B::Rotl(c(a), c(b)),
+        B::Sdiv(a, b) => B::Sdiv(c(a), c(b)),
+        B::Srem(a, b) => B::Srem(c(a), c(b)),
+        B::Concat(a, b) => B::Concat(c(a), c(b)),
+        B::Not(a) => B::Not(c(a)),
+        B::Neg(a) => B::Neg(c(a)),
+        B::Extract { hi, lo, arg } => B::Extract {
+            hi: *hi,
+            lo: *lo,
+            arg: c(arg),
+        },
+        B::ZeroExt { by, arg } => B::ZeroExt {
+            by: *by,
+            arg: c(arg),
+        },
+        B::SignExt { by, arg } => B::SignExt {
+            by: *by,
+            arg: c(arg),
+        },
+        B::Ite { cond, then_, else_ } => B::Ite {
+            cond: Box::new(masked_bool(cond)),
+            then_: c(then_),
+            else_: c(else_),
+        },
+    }
+}
+
+/// [`masked_bv`] on a closed boolean term.
+pub fn masked_bool(t: &BoolTerm) -> BoolTerm {
+    use BoolTerm as T;
+    let c = |x: &BvTerm| Box::new(masked_bv(x));
+    match t {
+        T::Eq(a, b) => T::Eq(c(a), c(b)),
+        T::Ne(a, b) => T::Ne(c(a), c(b)),
+        T::Ult(a, b) => T::Ult(c(a), c(b)),
+        T::Ule(a, b) => T::Ule(c(a), c(b)),
+        T::Ugt(a, b) => T::Ugt(c(a), c(b)),
+        T::Uge(a, b) => T::Uge(c(a), c(b)),
+        T::Slt(a, b) => T::Slt(c(a), c(b)),
+        T::Sle(a, b) => T::Sle(c(a), c(b)),
+        T::Sgt(a, b) => T::Sgt(c(a), c(b)),
+        T::Sge(a, b) => T::Sge(c(a), c(b)),
+        T::Not(a) => T::Not(Box::new(masked_bool(a))),
+        T::And(a, b) => T::And(Box::new(masked_bool(a)), Box::new(masked_bool(b))),
+        T::Or(a, b) => T::Or(Box::new(masked_bool(a)), Box::new(masked_bool(b))),
+    }
+}
+
+/// The memo key of a lowered index or argument term: a constant by its
+/// masked value (#262), anything else by its structure.
+fn term_key(t: &BvTerm) -> String {
+    match as_const(t) {
+        Some(c) => format!("#{c}"),
+        None => format!("{t:?}"),
     }
 }
 
@@ -733,7 +819,7 @@ impl Lowering {
         Ok(match t {
             ExtBvTerm::Core(bv) => {
                 let id = self.ext.core_bv(bv);
-                (bv.clone(), id)
+                (masked_bv(bv), id)
             }
             ExtBvTerm::Op(op) => self.lower_op(op)?,
             ExtBvTerm::Select { array, index } => {
@@ -1007,7 +1093,7 @@ impl Lowering {
     /// the same variable. Every read is registered in the array's access set
     /// so [`Lowering::array_congruence`] can relate it to the others.
     fn read_at(&mut self, array: &str, index: &BvTerm) -> BvTerm {
-        let key = (array.to_string(), format!("{index:?}"));
+        let key = (array.to_string(), term_key(index));
         if let Some(v) = self.read_memo.get(&key) {
             return v.clone();
         }
@@ -1085,7 +1171,10 @@ impl Lowering {
             _ => {}
         }
 
-        let key = (name.to_string(), format!("{args:?}"));
+        let key = (
+            name.to_string(),
+            args.iter().map(term_key).collect::<Vec<_>>().join(","),
+        );
         if let Some(v) = self.call_memo.get(&key) {
             return Ok(v.clone());
         }
@@ -2330,6 +2419,48 @@ mod lowering {
             env.insert(var.clone(), result);
         }
         env
+    }
+
+    // rivet: verifies VER-073
+    /// TR-073: the trusted `flatten_tree` over the kernel's copy of the
+    /// extended trees produces exactly the `ordeal-ext/v1` block the
+    /// lowering's own walk (`lower_ext`, the differential twin) produces —
+    /// nodes, bits, side table, roots, variable / array / function tables
+    /// — on three seeded corpora (the ones `sliver_lowering_preserves_every_model`
+    /// and the v0.33.0 verdict scan used), and the copy round-trips.
+    #[test]
+    fn kernel_flattening_matches_the_lowering_walk() {
+        let mut checked = 0usize;
+        for (seed, n_queries, depth) in [
+            (0x5117_5EED_0000_0001u64, 400usize, 2u32),
+            (0x5111_0231_0000_0001, 300, 2),
+            (0x5111_0DFF_0000_0001, 250, 3),
+        ] {
+            let mut rng = Rng(seed);
+            for _ in 0..n_queries {
+                let n = 1 + rng.below(3) as usize;
+                let query: Vec<ExtBoolTerm> = (0..n).map(|_| gen_bool(&mut rng, depth)).collect();
+                let Ok(trace) = lower_ext(&query) else {
+                    continue;
+                };
+                let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_ext_bools(&query))
+                    .unwrap_or_else(|e| panic!("the kernel refused {query:?}: {e:?}"));
+                let kernel = crate::mirror::ext_query(&flat).expect("utf-8");
+                assert!(kernel == trace.ext, "the two walks differ on {query:?}");
+                for a in &query {
+                    let t = crate::mirror::of_ext_bool(a);
+                    assert!(
+                        crate::mirror::tree_eq(
+                            &crate::mirror::of_ext_bool(&crate::mirror::to_ext_bool(&t)),
+                            &t
+                        ),
+                        "round trip on {a:?}"
+                    );
+                }
+                checked += 1;
+            }
+        }
+        assert!(checked >= 900, "{checked} queries compared");
     }
 
     #[test]

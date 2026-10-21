@@ -132,6 +132,19 @@ lean_lib «Sound» {}
 -- AxiomCheck.lean).
 @[default_target] lean_lib «SliverCheck» {}
 
+-- TR-073: the proven flattener. `flatten_tree_sound` — the kernel's
+-- `flatten_tree` (the caller's TREE, variables / arrays / functions by
+-- NAME, to the node lists every other trusted check is stated over)
+-- produces roots that denote the trees they came from, under assignments
+-- that agree through the kernel's own variable table — composed with the
+-- unchanged phase-7 / TR-072 theorems into `tree_unsat_sound` /
+-- `tree_model_sound` / `tree_verdicts_exclusive` (closed trees, through
+-- `project_core`) and `ext_tree_unsat_sound` / `ext_tree_model_sound` /
+-- `ext_tree_verdicts_exclusive` (extended trees), with the model bound BY
+-- NAME (`check_tree_model`, `check_tree_model_ext`). `sorry`-free,
+-- axiom-clean (pinned in AxiomCheck.lean).
+@[default_target] lean_lib «TreeFlatten» {}
+
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —
 -- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),

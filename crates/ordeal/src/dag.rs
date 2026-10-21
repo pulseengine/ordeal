@@ -1100,6 +1100,44 @@ mod denotation_guard {
         }
     }
 
+    // rivet: verifies VER-073
+    /// TR-073: `dag::flatten` is the differential twin of the trusted
+    /// `ordeal_lrat::flatten_tree` — node for node, bit for bit, variable
+    /// for variable — on 1500 seeded assertion sets of this generator,
+    /// and the copy into the kernel's tree round-trips on each.
+    #[test]
+    fn flatten_tree_matches_dag_flatten_on_the_seeded_assertions() {
+        let mut rng = Rng(0x7_7E73_F1A7_0001);
+        let mut checked = 0usize;
+        for case in 0..1500 {
+            let n = 1 + rng.below(3) as usize;
+            let assertions: Vec<BoolTerm> = (0..n).map(|_| gen_bool(&mut rng, 3)).collect();
+            let twin = super::flatten(&assertions).expect("well-sorted");
+            let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_bools(&assertions))
+                .expect("the kernel accepts a well-sorted closed tree");
+            let nodes = ordeal_lrat::project_core(&flat.nodes).expect("closed");
+            assert!(nodes == twin.nodes, "case {case}: nodes differ");
+            assert_eq!(flat.bits, twin.bits, "case {case}: bits differ");
+            assert_eq!(flat.roots, twin.roots, "case {case}: roots differ");
+            assert_eq!(
+                crate::mirror::var_table(&flat).expect("utf-8"),
+                twin.vars,
+                "case {case}: variable tables differ"
+            );
+            assert!(flat.side.is_empty());
+            for a in &assertions {
+                let back = crate::mirror::to_bool(&crate::mirror::of_bool(a)).expect("closed");
+                assert_eq!(
+                    format!("{back:?}"),
+                    format!("{a:?}"),
+                    "case {case}: round trip"
+                );
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 1500);
+    }
+
     fn gen_bool(rng: &mut Rng, depth: u32) -> BoolTerm {
         if depth == 0 || rng.below(3) != 0 {
             let w = WIDTHS[rng.below(WIDTHS.len() as u64) as usize];

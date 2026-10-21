@@ -434,15 +434,23 @@ byte-identical to v0.30.0 — and to v0.31.0 after the default path
 switched to the term check: the verdict, the certificate bytes and the
 model are unchanged, only what they rest on is.
 
-**What to compare it against.** Flatten your own assertions with
-`ordeal::dag::flatten` (or by hand: it is a post-order, left-to-right
-walk with variables shared by name) and compare `term.sha256` with
-`QueryTerm::canonical_text` of the result, or compare the `nodes` /
-`vars` / `roots` lists; the `map` is the solver's and does not need to
-be reproduced. What a v3 recheck does *not* cover: that flattening
-(1:1, no semantic decision), the variable names, the sliver and the
-front ends. A v1 or v2 reader refuses a v3 bundle by its `format`, and
-the v3 readers refuse v1 and v2, so nobody silently downgrades.
+**What to compare it against.** Since v0.34.0 (TR-073) the term block
+is produced by the trusted crate itself: re-run
+`ordeal_lrat::flatten_tree(&ordeal::mirror::of_bools(&assertions))`,
+`ordeal_lrat::project_core` on its `nodes`, and compare `term.sha256`
+with `QueryTerm::canonical_text` of the result, or compare the `nodes`
+/ `vars` / `roots` lists (`ordeal::dag::flatten` is the same walk and
+remains as the differential twin; by hand: post-order, left-to-right,
+variables shared by name, a name at two widths refused); the `map` is
+the solver's and does not need to be reproduced. What a v3 recheck does
+*not* cover: the copy of your `BoolTerm`s into the kernel's tree
+(`ordeal::mirror`, one `match` arm per constructor, a tested
+bijection), the sliver (a v4 bundle covers it) and the front ends — the
+flattening and the names it does cover (`tree_unsat_sound`,
+`tree_model_sound`: the model's values are bound BY NAME through the
+kernel's own variable table). A v1 or v2 reader refuses a v3 bundle by
+its `format`, and the v3 readers refuse v1 and v2, so nobody silently
+downgrades.
 
 ## Verdicts as evidence about the EXTENDED query: `ordeal-cert/v4`
 
@@ -500,15 +508,22 @@ term.bits, term.roots)` before the v3 calls. `recheck.min_version` is
 `0.33.0`; a v1, v2 or v3 reader refuses a v4 bundle by its `format`, and
 the v4 readers refuse them.
 
-**What to compare it against.** Flatten your own `ExtBoolTerm`s with
-`ordeal::sliver::flatten_ext` and compare it with `ext` (`nodes`, `bits`,
-`side`, `roots`, `vars`, `arrays`, `funcs` — or the hash after putting
-your flattening into the block's `canonical_text`); the `map` and the
-tables are the solver's and do not need to be reproduced. What a v4
-recheck does *not* cover: that flattening (1:1, one walk with the
-lowering, no semantic decision), the variable, array and function names,
-and the front ends. Core queries are untouched: they keep producing v3
-bundles, byte for byte.
+**What to compare it against.** Since v0.34.0 (TR-073) the `ext` block
+is produced by the trusted crate itself: re-run
+`ordeal_lrat::flatten_tree(&ordeal::mirror::of_ext_bools(&assertions))`
+and compare it with `ext` (`nodes`, `bits`, `side`, `roots`, and the
+tables `vars`, `arrays`, `funcs` read back with `ordeal::mirror::ext_query`
+— or the hash after putting your flattening into the block's
+`canonical_text`; `ordeal::sliver::flatten_ext` is the same walk and
+remains as the differential twin); the `map` and the tables are the
+solver's and do not need to be reproduced. What a v4 recheck does *not*
+cover: the copy of your `ExtBoolTerm`s into the kernel's tree
+(`ordeal::mirror`, a tested bijection) and the front ends — the
+flattening and the variable, array and function names it does cover
+(`ext_tree_unsat_sound`, `ext_tree_model_sound`: the extended model's
+variables are bound BY NAME through the kernel's table and the two
+maps). Core queries are untouched: they keep producing v3 bundles, byte
+for byte.
 
 ## Supply chain: SBOM and VEX
 

@@ -1159,6 +1159,34 @@ mod tests {
         );
     }
 
+    // rivet: verifies VER-073
+    /// TR-073: the trusted `flatten_tree` and its differential twin
+    /// `dag::flatten` agree on the two oracle corpora (`0x192`/200 and
+    /// `0xC0FFEE`/1000: every operator, widths to 128, the equal-bits
+    /// constants of TR-070).
+    #[test]
+    fn flatten_tree_matches_dag_flatten_on_the_oracle_corpora() {
+        let mut checked = 0usize;
+        for (seed, n) in [(0x192u64, 200usize), (0xC0FFEE, 1000)] {
+            for (i, query) in gen_corpus(seed, n).into_iter().enumerate() {
+                let twin = crate::dag::flatten(&query).expect("well-sorted");
+                let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_bools(&query))
+                    .unwrap_or_else(|e| panic!("{seed:#x}/{i}: the kernel refused: {e:?}"));
+                let nodes = ordeal_lrat::project_core(&flat.nodes).expect("closed");
+                assert!(nodes == twin.nodes, "{seed:#x}/{i}: nodes differ");
+                assert_eq!(flat.bits, twin.bits, "{seed:#x}/{i}: bits differ");
+                assert_eq!(flat.roots, twin.roots, "{seed:#x}/{i}: roots differ");
+                assert_eq!(
+                    crate::mirror::var_table(&flat).expect("utf-8"),
+                    twin.vars,
+                    "{seed:#x}/{i}: variable tables differ"
+                );
+                checked += 1;
+            }
+        }
+        assert_eq!(checked, 1200);
+    }
+
     #[test]
     fn corpus_is_reproducible() {
         let a = format!("{:?}", gen_corpus(42, 10));

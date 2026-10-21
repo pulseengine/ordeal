@@ -544,6 +544,14 @@ impl Solver {
         for a in &self.assertions {
             validate_bool(a)?;
         }
+        // Defence in depth since TR-073: the trusted flattener refuses a
+        // name at two widths itself (`FlatError::NameWidth`, the F2 shape
+        // of docs/design/flattener-proof.md); this guard only gives the
+        // actionable diagnosis. `width_guard::skipping()` is a test-only
+        // bypass that shows the proof does not rest on it.
+        if width_guard::skipping() {
+            return Ok(());
+        }
         let mut widths: std::collections::HashMap<&str, u32> = std::collections::HashMap::new();
         for a in &self.assertions {
             check_var_widths_bool(a, &mut widths)?;
@@ -870,7 +878,7 @@ impl Solver {
                 let Ok(trace) = crate::sliver::lower_ext(ext) else {
                     return Outcome::Unknown;
                 };
-                let Ok((term, block)) = QueryTerm::flatten_sliver(&trace, &query, vars) else {
+                let Ok((term, block)) = QueryTerm::flatten_sliver(ext, &trace, &query, vars) else {
                     return Outcome::Unknown;
                 };
                 (term, Some(block))
@@ -930,7 +938,8 @@ impl Solver {
         let Ok(trace) = crate::sliver::lower_ext(ext) else {
             return Outcome::Unknown;
         };
-        let Ok((term, block)) = QueryTerm::flatten_sliver(&trace, &cert.query.query, &[]) else {
+        let Ok((term, block)) = QueryTerm::flatten_sliver(ext, &trace, &cert.query.query, &[])
+        else {
             return Outcome::Unknown;
         };
         let Some(model) = block.pullback_model(&term, &cert.query.witness.model) else {
@@ -995,7 +1004,7 @@ impl Solver {
                 let Ok(trace) = crate::sliver::lower_ext(ext) else {
                     return Outcome::Unknown;
                 };
-                let Ok((term, block)) = QueryTerm::flatten_sliver(&trace, &query, vars) else {
+                let Ok((term, block)) = QueryTerm::flatten_sliver(ext, &trace, &query, vars) else {
                     return Outcome::Unknown;
                 };
                 (term, Some(block))
@@ -1448,6 +1457,11 @@ pub(crate) mod tamper {
         /// stay consistent with each other and only the sliver check can
         /// catch it.)
         CaptureName,
+        /// TR-073: swap the nodes of the extended query's first two
+        /// variables in the kernel-built table of the `ext` block: the
+        /// binding by name (`check_tree_model_ext`) must reject a model
+        /// whose two values differ; nothing else reads that table.
+        SwapExtVars,
     }
 
     thread_local! {
@@ -1492,7 +1506,9 @@ pub(crate) mod tamper {
                 (term, true)
             }
             // The sliver tampers leave the term alone; `apply_sliver` acts.
-            Some(Tamper::ExtMap | Tamper::ReadShare | Tamper::CaptureName) => (term, false),
+            Some(
+                Tamper::ExtMap | Tamper::ReadShare | Tamper::CaptureName | Tamper::SwapExtVars,
+            ) => (term, false),
         }
     }
 
@@ -1535,6 +1551,16 @@ pub(crate) mod tamper {
                 block.reads[0] = image;
                 (block, true)
             }
+            Some(Tamper::SwapExtVars) => {
+                assert!(
+                    block.ext.vars.len() >= 2,
+                    "an extended query with two variables"
+                );
+                let (n0, n1) = (block.ext.vars[0].2, block.ext.vars[1].2);
+                block.ext.vars[0].2 = n1;
+                block.ext.vars[1].2 = n0;
+                (block, true)
+            }
             _ => (block, false),
         }
     }
@@ -1556,6 +1582,40 @@ mod tamper {
     }
     #[inline]
     pub(crate) fn lowering_tampered() -> bool {
+        false
+    }
+}
+
+/// Test-only bypass of the width guard in [`Solver::validate`] (TR-073):
+/// armed, the untrusted guard is skipped so a test can show that a name
+/// at two widths is refused by the TRUSTED flattener itself.
+#[cfg(test)]
+pub(crate) mod width_guard {
+    use std::cell::Cell;
+    thread_local! {
+        static SKIP: Cell<bool> = const { Cell::new(false) };
+    }
+    /// Arm the bypass for the calling thread; the guard disarms it on drop.
+    pub(crate) fn skip() -> Armed {
+        SKIP.with(|c| c.set(true));
+        Armed
+    }
+    pub(crate) fn skipping() -> bool {
+        SKIP.with(|c| c.get())
+    }
+    /// Disarms the bypass when dropped.
+    pub(crate) struct Armed;
+    impl Drop for Armed {
+        fn drop(&mut self) {
+            SKIP.with(|c| c.set(false));
+        }
+    }
+}
+
+#[cfg(not(test))]
+mod width_guard {
+    #[inline]
+    pub(crate) fn skipping() -> bool {
         false
     }
 }
@@ -1713,6 +1773,43 @@ mod cnf_gap_measurement {
             value: val,
             sort: Sort::new(w),
         }
+    }
+
+    // rivet: verifies VER-073
+    /// TR-073: the trusted `flatten_tree` and its differential twin
+    /// `dag::flatten` agree on every query of the latency and bmc corpora.
+    #[test]
+    fn flatten_tree_matches_dag_flatten_on_the_bench_corpora() {
+        let mut corpora: Vec<(String, Vec<BoolTerm>)> = latency_corpus();
+        for k in [2usize, 4, 8, 16] {
+            corpora.push((
+                format!("queue_overflow_{k}"),
+                crate::bmc_corpus::queue_overflow(k, 3),
+            ));
+            corpora.push((
+                format!("deadlock_{k}"),
+                crate::bmc_corpus::deadlock(k, false),
+            ));
+            corpora.push((
+                format!("deadlock_inv_{k}"),
+                crate::bmc_corpus::deadlock(k, true),
+            ));
+        }
+        for (name, assertions) in &corpora {
+            let twin = crate::dag::flatten(assertions).expect("well-sorted");
+            let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_bools(assertions))
+                .unwrap_or_else(|e| panic!("{name}: the kernel refused: {e:?}"));
+            let nodes = ordeal_lrat::project_core(&flat.nodes).expect("closed");
+            assert!(nodes == twin.nodes, "{name}: nodes differ");
+            assert_eq!(flat.bits, twin.bits, "{name}: bits differ");
+            assert_eq!(flat.roots, twin.roots, "{name}: roots differ");
+            assert_eq!(
+                crate::mirror::var_table(&flat).expect("utf-8"),
+                twin.vars,
+                "{name}: variable tables differ"
+            );
+        }
+        assert!(corpora.len() >= 18);
     }
 
     /// The `benches/latency.rs` corpus (copied: a bench's `corpus()` is not

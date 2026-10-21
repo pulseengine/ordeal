@@ -233,6 +233,49 @@ assignment and a DAG assignment. `docs/formal-verification.md` and
 `docs/design/query-cnf-gap.md` (phase 7) state what is and is not
 covered.
 
+## The proven flattener (TR-073 / v0.34.0)
+
+`TreeFlatten.lean` proves `kernel::term_kernel::flatten_tree` — the
+trusted flattening of the caller's TREES (the kernel's own `TBv` /
+`TArray` / `TArgs` / `TBool`, variables, arrays and functions by NAME)
+into the node lists `check_term_dag` and `check_sliver_lowering` are
+stated over — and composes it with the phase-7 and TR-072 capstones, so
+the answer rests on the query as the caller built it. The tree gets a
+semantics of its own (`treeBv` / `treeBool`: `dagNodeVal`'s arms over
+the children's values, an environment `TEnv := Name → (w : Nat) →
+BitVec w`, interpretations `NArrs` / `NUfs` keyed by name); the proof
+is a structural induction over the tree with the generated
+`partial_fixpoint` definitions unfolded (every lemma is partial
+correctness, `= ok … → …`), a structural invariant of the flattening
+state (`Inv`: consistent tables, injective names — one node per name,
+one name per node — constant memo entries over their own bits) and a
+per-subtree conclusion stated for every later state (`TreeCorr`). The
+two transports are `layout_exists` (an environment lays out into
+inputs) and `envOf_agree` (inputs read back by name, well defined by the
+injectivity the kernel's lookup establishes — no untrusted width guard
+in the proof). `sorry`-free, axiom-clean (pinned in `AxiomCheck.lean`),
+a default `lake build` target:
+
+```lean
+theorem flatten_tree_sound (ts : Slice TBool) (f : Flat) (h : flatten_tree ts = ok (Ok f)) :
+    Inv f ∧ f.roots.val.length = ts.val.length ∧
+    ∀ env arrs ufs inp, VarAgree f env inp → ∀ k (hk : k < ts.val.length),
+      extBool inp f.bits.val (arrsI f arrs) (ufsI f ufs) f.side.val f.nodes.val (rootOf f k)
+        = treeBool env arrs ufs ts.val[k]
+
+theorem tree_unsat_sound … (hf : flatten_tree ts = ok (Ok f)) (hp : project_core e = ok (Ok t))
+    … (ht : check_term_dag …) (hq : check_query …) :
+    ∀ (env : TEnv) (arrs : NArrs) (ufs : NUfs), ¬ TreeSat env arrs ufs ts.val
+theorem tree_model_sound … (hm : check_query_model …) (hb : check_tree_model vn vw map ns inp2 values = ok true) :
+    ∃ env : TEnv, (∀ arrs ufs, TreeSat env arrs ufs ts.val) ∧
+      ∀ k < nvars f, img map.val (varNodeOf f k) ≠ NONE →
+        env (varName f k) (varWidthOf f k) = BitVec.ofNat (varWidthOf f k) (values.val.getD k 0#u128).val
+theorem tree_verdicts_exclusive … : False
+theorem ext_tree_unsat_sound … (hs : check_sliver_lowering …) … : ∀ env arrs ufs, ¬ TreeSat env arrs ufs ts.val
+theorem ext_tree_model_sound … (hb : check_tree_model_ext …) : ∃ env narrs' nufs' arrs ufs inp1, TreeSat env narrs' nufs' ts.val ∧ …
+theorem ext_tree_verdicts_exclusive … : False
+```
+
 ## The SAT-witness checker (TR-038 → TR-044 / VER-039)
 
 `SatWitness.lean` extends the same semantics — nothing in `Sound.lean`

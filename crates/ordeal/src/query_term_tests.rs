@@ -612,3 +612,66 @@ fn every_entry_point_returns_the_gated_certificate() {
         .recheck()
         .expect("the default model re-checks at the term level");
 }
+
+// ── TR-073: the proven flattener at the API level ──────────────────────
+
+// rivet: verifies VER-073
+/// F2 of docs/design/flattener-proof.md: one name at two widths. The
+/// untrusted width guard refuses it today; with that guard bypassed (the
+/// test-only hook), the TRUSTED flattener refuses it itself
+/// (`FlatError::NameWidth`) and the verdict is `Unknown` — where v0.33.0
+/// returned a certified `Unsat` for `x:8 < x:32[7:0]`.
+#[test]
+fn a_name_at_two_widths_is_refused_by_the_kernel_itself() {
+    let query = || {
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ult(
+            b(var("x", 8)),
+            b(BvTerm::Extract {
+                hi: 7,
+                lo: 0,
+                arg: b(var("x", 32)),
+            }),
+        ));
+        s
+    };
+    assert_eq!(
+        ordeal_lrat::flatten_tree(&crate::mirror::of_bools(query().assertions())).err(),
+        Some(ordeal_lrat::FlatError::NameWidth)
+    );
+    {
+        let _skip = crate::solver::width_guard::skip();
+        assert!(query().validate().is_ok(), "the guard is bypassed");
+        every_entry_point_is_unknown(&query(), "a name at two widths, guard bypassed");
+    }
+    assert!(query().validate().is_err());
+    assert!(matches!(query().check(), CheckResult::Unknown));
+}
+
+// rivet: verifies VER-073
+/// The copy into the kernel's tree is a bijection on the closed fragment:
+/// `to_bool ∘ of_bool` is the identity (pinned by the `Debug` spelling,
+/// which is total on these trees) on the queries of this file.
+#[test]
+fn the_mirror_copy_is_a_bijection_on_closed_terms() {
+    for s in [rewrite_heavy_unsat(), sat_solver()] {
+        for a in s.assertions() {
+            let back = crate::mirror::to_bool(&crate::mirror::of_bool(a)).expect("closed");
+            assert_eq!(format!("{back:?}"), format!("{a:?}"));
+        }
+    }
+}
+
+// rivet: verifies VER-073
+/// #262 on the core path: a constant with bits above its width decides
+/// (it always did here; the sliver path is the regression's home).
+#[test]
+fn an_unmasked_constant_decides_on_the_core_path() {
+    let mut s = Solver::new();
+    s.assert(BoolTerm::Eq(b(var("x", 8)), b(konst(0x1FF, 8))));
+    s.assert(BoolTerm::Eq(b(var("x", 8)), b(konst(0xFF, 8))));
+    match s.check() {
+        CheckResult::Sat(m) => assert_eq!(m.assignments, vec![("x".to_string(), 255)]),
+        other => panic!("expected Sat, got {other:?}"),
+    }
+}

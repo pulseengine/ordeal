@@ -1,8 +1,10 @@
 //! TR-072 verdict scan: every sliver corpus through `Solver::from_sliver`
 //! and `check_with_deadline(10_000)`, one line per query streamed to the
 //! file named by the first argument — `<corpus>\t<index>\t<verdict>\t<ms>`.
-//! Built and run against v0.32.0 and against this tree, the two files
-//! must agree verdict for verdict (the latency column is the overhead).
+//! Built and run against the previous release and against this tree, the
+//! two files must agree verdict for verdict (the latency column is the
+//! overhead); since TR-073 the `f1-*` rows (#262) are the one allowed
+//! move, from `unknown` to a verdict.
 //!
 //! Needs `--features oracle` for the seeded corpora (Z3 is linked but not
 //! called).
@@ -216,6 +218,35 @@ pub fn trap_and_entry_shapes() -> Vec<(String, Vec<ExtBoolTerm>)> {
     out
 }
 
+/// The #262 shapes (TR-073): a constant whose raw value exceeds its
+/// width — compared, refuted against its masked twin, and as a select
+/// index equal in bits to another read's. v0.33.0 may leave these
+/// `unknown` (the lowering compared raw values); every other row of the
+/// scan must keep its verdict.
+pub fn f1_shapes() -> Vec<(String, Vec<ExtBoolTerm>)> {
+    let a = || ArrayTerm::Var { name: "a".into() };
+    vec![
+        (
+            "f1-eq-sat".into(),
+            vec![ExtBoolTerm::Eq(v8("x"), c8(0x1FF))],
+        ),
+        (
+            "f1-eq-ne-unsat".into(),
+            vec![
+                ExtBoolTerm::Eq(v8("x"), c8(0x1FF)),
+                ExtBoolTerm::Ne(v8("x"), c8(0xFF)),
+            ],
+        ),
+        (
+            "f1-index-bits-unsat".into(),
+            vec![ExtBoolTerm::Ne(
+                sel(a(), c32(0x1_0000_0005)),
+                sel(a(), c32(5)),
+            )],
+        ),
+    ]
+}
+
 fn verdict(q: &[ExtBoolTerm]) -> (&'static str, u128) {
     let t0 = std::time::Instant::now();
     let v = match Solver::from_sliver(q) {
@@ -253,7 +284,11 @@ fn main() {
             out.flush().unwrap();
         }
     }
-    for (name, q) in loom_shaped().into_iter().chain(trap_and_entry_shapes()) {
+    for (name, q) in loom_shaped()
+        .into_iter()
+        .chain(trap_and_entry_shapes())
+        .chain(f1_shapes())
+    {
         let (v, ms) = verdict(&q);
         writeln!(out, "{name}\t0\t{v}\t{ms}").unwrap();
         out.flush().unwrap();

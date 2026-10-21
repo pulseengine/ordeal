@@ -69,6 +69,9 @@ pub mod eval;
 pub mod layout;
 pub mod lowering;
 pub mod lrat;
+/// The copy of the caller's trees into the kernel's tree type (TR-073):
+/// the one trusted step of the term direction, a bijection.
+pub mod mirror;
 /// The certificate-carried query (#192 phase 4, `ordeal-cert/v2`) — always
 /// compiled; the JSON envelope is in `cert_bundle`.
 pub mod query;

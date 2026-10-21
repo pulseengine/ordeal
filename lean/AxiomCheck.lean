@@ -32,6 +32,7 @@ import BlasterCapstone
 import QueryCheck
 import TermCheck
 import SliverCheck
+import TreeFlatten
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -247,3 +248,44 @@ import SliverCheck
 /-- info: 'kernel.spec.sliver_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms kernel.spec.sliver_verdicts_exclusive
+
+-- The proven flattener (TreeFlatten.lean, TR-073): the kernel's
+-- `flatten_tree` takes the caller's TREE — variables, arrays and
+-- functions BY NAME — to the node lists the phase-7 / TR-072 checks are
+-- stated over, and `flatten_tree_sound` says every root denotes the tree
+-- it came from under assignments that agree through the kernel's own
+-- variable table. Composed with the unchanged capstones: the proof
+-- refutes the trees as the caller built them (`tree_unsat_sound`,
+-- `ext_tree_unsat_sound`), the model satisfies them with every kept
+-- variable bound BY NAME to the advertised value (`tree_model_sound`,
+-- `ext_tree_model_sound`), and no tree set has both. The transports
+-- (an environment read back from a layout; by-name interpretations from
+-- by-id ones) pick table entries by classical choice, well defined by
+-- the injectivity the kernel's lookups establish.
+/-- info: 'kernel.spec.flatten_tree_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.flatten_tree_sound
+
+/-- info: 'kernel.spec.tree_unsat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.tree_unsat_sound
+
+/-- info: 'kernel.spec.tree_model_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.tree_model_sound
+
+/-- info: 'kernel.spec.tree_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.tree_verdicts_exclusive
+
+/-- info: 'kernel.spec.ext_tree_unsat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.ext_tree_unsat_sound
+
+/-- info: 'kernel.spec.ext_tree_model_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.ext_tree_model_sound
+
+/-- info: 'kernel.spec.ext_tree_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.ext_tree_verdicts_exclusive

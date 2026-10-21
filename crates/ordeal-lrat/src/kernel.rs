@@ -46,6 +46,12 @@ pub mod blast_kernel;
 #[path = "sliver_kernel.rs"]
 pub mod sliver_kernel;
 
+/// The proven flattener (TR-073): the query as a tree, flattened into the
+/// node lists the other checks are stated over, names included. The same
+/// translation unit; proofs in `lean/TreeFlatten.lean`.
+#[path = "term_kernel.rs"]
+pub mod term_kernel;
+
 use blast_kernel::{DagNode, Lit, aig_new, compact, encode, eval_lit, map_word, simulate, tseitin};
 
 /// One already-parsed certificate step.
