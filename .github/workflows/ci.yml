@@ -27,6 +27,10 @@ jobs:
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
+      # fuzz/ is its own [workspace]; `--all` above does not reach it
+      # (gate-potency audit 2026-10-21).
+      - name: Check formatting (fuzz workspace)
+        run: cargo fmt --all --check --manifest-path fuzz/Cargo.toml
 
   clippy:
     name: Clippy
@@ -42,6 +46,11 @@ jobs:
         # which needs libz3 on the runner and is linted + tested by the
         # dedicated non-blocking `oracle` job below.
         run: cargo clippy --all-targets -- -D warnings
+      # The Z3-free optional features, blocking: cert-bundle carries the
+      # ordeal-cert/v1..v4 bundle code and cadical the accelerator. Before
+      # 2026-10-21 only the optional Z3 job linted them (gate-potency audit).
+      - name: Run clippy (cert-bundle + cadical)
+        run: cargo clippy --all-targets --features ordeal/cert-bundle,ordeal/cadical -- -D warnings
 
   build:
     name: Build (release)
@@ -551,6 +560,13 @@ jobs:
       # without it no job ever built them (caught 2026-08-08).
       - name: Run oracle tests (incl. three-way backend parity)
         run: cargo test --all --features "oracle cadical cert-bundle" --release
+      # The oracle-feature citation legs the required Test job must skip
+      # (it has no Z3). UV-016 cited a test that never existed behind that
+      # skip (gate-potency audit 2026-10-21).
+      - name: Check rivet verification citations (incl. oracle legs)
+        env:
+          CITATION_FEATURES: ordeal/cert-bundle,ordeal/cadical,ordeal/oracle
+        run: scripts/check_verification_citations.sh
 
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
   # change, not first at release time: install varve the verified way,

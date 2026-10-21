@@ -12,8 +12,14 @@
 #      >= 1 name in the default-features test inventory
 #      (`cargo test --workspace -- --list`). A filter matching zero tests is
 #      the class-1 defect of #141 (vacuous green) => exit 1.
-# Legs with `--features` are reported as SKIP and counted: the default
-# inventory cannot vouch for feature-gated test names.
+# Legs with `--features` are checked against a SECOND inventory built with
+# $CITATION_FEATURES (default `ordeal/cert-bundle,ordeal/cadical`) when every
+# feature the leg names is in that set; otherwise they are reported as SKIP
+# and counted. The Z3 job re-runs this with `ordeal/oracle` added. Default
+# legs keep the default inventory, so a default leg citing a feature-only
+# test still fails. (Before 2026-10-21 every feature leg was skipped; the
+# gate-potency audit found two rotted citations behind that skip: UV-016's
+# `ite_diff`, which never existed, and VER-044's prose-in-run.)
 #
 # Issue #187: this script used to crash on string-shaped `steps` and still
 # exit 0 (no pipefail), and only read verification.yaml. Any internal error
@@ -25,6 +31,8 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 TMPDIR_LOCAL="$(mktemp -d)"
 trap 'rm -rf "$TMPDIR_LOCAL"' EXIT
 INVENTORY="$TMPDIR_LOCAL/inventory.txt"
+FINVENTORY="$TMPDIR_LOCAL/inventory-features.txt"
+CITATION_FEATURES="${CITATION_FEATURES:-ordeal/cert-bundle,ordeal/cadical}"
 META="$TMPDIR_LOCAL/metadata.json"
 
 python3 -c 'import yaml' || { echo "FATAL: python3 with PyYAML is required" >&2; exit 2; }
@@ -38,15 +46,24 @@ python3 -c 'import yaml' || { echo "FATAL: python3 with PyYAML is required" >&2;
 [ -s "$INVENTORY" ] || { echo "FATAL: test inventory came back empty (build broken?)" >&2; exit 2; }
 echo "inventory: $(wc -l <"$INVENTORY" | tr -d ' ') test names"
 
-python3 - "$ROOT" "$META" "$INVENTORY" <<'PYEOF'
+# Feature inventory (missing evidence is red: an empty list is a failure).
+(cd "$ROOT" && cargo test -q --workspace --features "$CITATION_FEATURES" -- --list 2>/dev/null) \
+  | { grep ': test$' || true; } >"$FINVENTORY"
+[ -s "$FINVENTORY" ] || { echo "FATAL: feature test inventory ($CITATION_FEATURES) came back empty" >&2; exit 2; }
+echo "feature inventory ($CITATION_FEATURES): $(wc -l <"$FINVENTORY" | tr -d ' ') test names"
+
+python3 - "$ROOT" "$META" "$INVENTORY" "$FINVENTORY" "$CITATION_FEATURES" <<'PYEOF'
 import glob, json, os, re, shlex, sys
 import yaml
 
-root, meta_path, inv_path = sys.argv[1:4]
+root, meta_path, inv_path, finv_path, feats = sys.argv[1:6]
 meta = json.load(open(meta_path))
 crates = {p["name"] for p in meta["packages"]}
 test_targets = {t["name"] for p in meta["packages"] for t in p["targets"] if "test" in t["kind"]}
 inventory = [l.rsplit(": test", 1)[0] for l in open(inv_path).read().splitlines()]
+finventory = [l.rsplit(": test", 1)[0] for l in open(finv_path).read().splitlines()]
+# available features, as bare names (`ordeal/oracle` -> `oracle`)
+available = {f.split("/")[-1] for f in feats.split(",") if f}
 
 # cargo options that consume the following token
 CARGO_VALUE = {"-p", "--package", "--features", "-F", "--test", "--example", "--bin",
@@ -80,10 +97,19 @@ for fname, aid, run in runs():
         if not leg.startswith("cargo test"):
             continue
         toks = shlex.split(leg)[2:]
-        if any(t in ("--features", "-F") or t.startswith("--features=") for t in toks):
-            print(f"SKIP  {aid}: non-default features (inventory cannot vouch): {leg}")
+        named = set()
+        for j, t in enumerate(toks):
+            if t in ("--features", "-F") and j + 1 < len(toks):
+                named |= {f.split("/")[-1] for f in re.split(r"[ ,]", toks[j + 1]) if f}
+            elif t.startswith("--features="):
+                named |= {f.split("/")[-1] for f in re.split(r"[ ,]", t.split("=", 1)[1]) if f}
+        if "--all-features" in toks:
+            named.add("*all*")
+        if named and not named <= available:
+            print(f"SKIP  {aid}: features {sorted(named - available)} not in this run's inventory: {leg}")
             skipped += 1
             continue
+        inv = finventory if named else inventory
         checked += 1
         filters, i, harness = [], 0, False
         while i < len(toks):
@@ -103,7 +129,7 @@ for fname, aid, run in runs():
                 filters.append(t)
             i += 1
         for tok in filters:
-            n = sum(tok in name for name in inventory)
+            n = sum(tok in name for name in inv)
             if n == 0:
                 print(f"FAIL  {aid}: filter '{tok}' matches ZERO tests in inventory: {leg}"); fails += 1
             else:
