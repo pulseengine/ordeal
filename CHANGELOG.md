@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-21
+
+**The proven flattener** (#192, TR-073). Every answer now rests on a
+Lean theorem about the query as the caller built it: the trusted
+`flatten_tree` takes the caller's trees, variables identified by name,
+to the node lists the earlier proven checks are stated over.
+`tree_unsat_sound` and `ext_tree_unsat_sound`: no assignment and no
+array or UF interpretation, keyed by name, makes every asserted tree
+true. `tree_model_sound` and `ext_tree_model_sound`: the model is bound
+by name. What stays trusted: the SMT-LIB / Verus front ends and the 1:1
+copy into the kernel's mirror type. Also fixes #262: a constant with
+bits above its width no longer degrades a sliver query to `Unknown`.
+CLI output and certificate bundles are byte-identical to 0.33.0.
+
 **The proven flattener** (#192, TR-073). Every answer now rests on the
 query AS THE CALLER BUILT IT: the step from the assertion trees —
 variables, arrays and functions by name — to the node lists the
@@ -1909,7 +1923,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.34.0
 [0.33.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.33.0
 [0.32.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.1
 [0.32.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.0
