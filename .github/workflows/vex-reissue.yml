@@ -53,7 +53,7 @@ jobs:
       INPUT_TAG: ${{ inputs.tag }}
       PUBLISH: ${{ inputs.publish }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
@@ -97,7 +97,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         if: steps.rel.outputs.skip != 'true'
 
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         if: steps.rel.outputs.skip != 'true'
         with:
           tool: cargo-audit@0.22.2
@@ -156,7 +156,7 @@ jobs:
 
       - name: Install cosign (publish only)
         if: steps.cmp.outputs.changed == 'true' && env.PUBLISH == 'true'
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
         with:
           cosign-release: 'v2.4.1'
 

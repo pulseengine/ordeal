@@ -64,7 +64,7 @@ jobs:
     outputs:
       wide: ${{ steps.wide.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Every harness in proofs.rs is in exactly one tier (or unscheduled with a reason)
         run: bash scripts/kani_tiers.sh check
       - id: wide
@@ -78,15 +78,15 @@ jobs:
     continue-on-error: true
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: kani-fast
       - id: tier
         run: echo "args=$(bash scripts/kani_tiers.sh args fast)" >> "$GITHUB_OUTPUT"
       - name: Run Kani (fast tier)
-        uses: model-checking/kani-github-action@v1
+        uses: model-checking/kani-github-action@69d357bade1eb7b32bc3fc3d5c3d173c5bfa5237 # v1
         with:
           # Pinned (#189 class): "latest" made the action query crates.io,
           # and a failed lookup failed a job (run 36821560393, and_32).
@@ -105,15 +105,15 @@ jobs:
       matrix:
         harness: [mul_8]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: kani-heavy
       - id: tier
         run: echo "args=$(bash scripts/kani_tiers.sh args heavy:${{ matrix.harness }})" >> "$GITHUB_OUTPUT"
       - name: Run Kani (${{ matrix.harness }})
-        uses: model-checking/kani-github-action@v1
+        uses: model-checking/kani-github-action@69d357bade1eb7b32bc3fc3d5c3d173c5bfa5237 # v1
         with:
           # Pinned (#189 class): "latest" made the action query crates.io,
           # and a failed lookup failed a job (run 36821560393, and_32).
@@ -133,15 +133,15 @@ jobs:
       matrix:
         harness: ${{ fromJSON(needs.tiers.outputs.wide) }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: kani-wide
       - id: tier
         run: echo "args=$(bash scripts/kani_tiers.sh args wide:${{ matrix.harness }})" >> "$GITHUB_OUTPUT"
       - name: Run Kani (${{ matrix.harness }})
-        uses: model-checking/kani-github-action@v1
+        uses: model-checking/kani-github-action@69d357bade1eb7b32bc3fc3d5c3d173c5bfa5237 # v1
         with:
           # Pinned (#189 class): "latest" made the action query crates.io,
           # and a failed lookup failed a job (run 36821560393, and_32).
