@@ -44,7 +44,7 @@ jobs:
       contents: read
       actions: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
@@ -73,7 +73,7 @@ jobs:
       # the gate into its own job, cosign had been installed earlier in the
       # same job for checksum signing.
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
         with:
           cosign-release: 'v2.4.1'
 
@@ -154,7 +154,7 @@ jobs:
             archive: tar.gz
             cross: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
 
@@ -162,7 +162,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: release-${{ matrix.target }}
 
@@ -254,7 +254,7 @@ jobs:
           tar -czf "$ARCHIVE" -C staging .
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binary-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
@@ -272,7 +272,7 @@ jobs:
     needs: [gate]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
       - uses: dtolnay/rust-toolchain@stable
@@ -306,7 +306,7 @@ jobs:
           VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
           mkdir -p wasm-out
           cp target/a/wasm32-wasip2/release/ordeal.wasm "wasm-out/ordeal-${VERSION}-wasm32-wasip2.wasm"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-component
           path: wasm-out/*.wasm
@@ -322,7 +322,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
           # Full history + tags: the rivet release note walks the commits
@@ -331,7 +331,7 @@ jobs:
           fetch-depth: 0
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts
 
@@ -388,7 +388,7 @@ jobs:
       # BEFORE the checksum step so its digest is cosign-signed with
       # everything else. Re-issues after release are handled by
       # vex-reissue.yml and never touch these signed sums.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: cargo-audit@0.22.2
 
@@ -429,7 +429,7 @@ jobs:
       #     --bundle SHA256SUMS.txt.cosign.bundle \
       #     SHA256SUMS.txt
       - name: Install cosign
-        uses: sigstore/cosign-installer@v3
+        uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
         with:
           cosign-release: 'v2.4.1'
 
@@ -451,7 +451,7 @@ jobs:
       # archive, signed keyless via Sigstore and recorded in Rekor. Verify
       # with `gh attestation verify <file> --repo pulseengine/ordeal`.
       - name: Generate SLSA build provenance
-        uses: actions/attest-build-provenance@v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             release-assets/*.tar.gz

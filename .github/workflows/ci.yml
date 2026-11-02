@@ -21,7 +21,7 @@ jobs:
     name: Format
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -36,11 +36,11 @@ jobs:
     name: Clippy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run clippy
         # Default feature set only — the `oracle` feature pulls in Z3 (z3-sys),
         # which needs libz3 on the runner and is linted + tested by the
@@ -56,9 +56,9 @@ jobs:
     name: Build (release)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build release
         run: cargo build --release
 
@@ -68,9 +68,9 @@ jobs:
     env:
       RUSTFLAGS: -Dwarnings
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run tests
         # Default build must NOT require Z3 — the Z3-backed `oracle` feature is
         # covered by the separate `oracle` job so the core gate stays hermetic.
@@ -116,7 +116,7 @@ jobs:
       # `// rivet: verifies <ID>` markers name (and FAILS on a marker that
       # matches no test), and the mapped XML is uploaded. The release gate
       # downloads it from the tagged commit's own main CI run.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: cargo-nextest@0.9.146
       - name: Test results as rivet evidence (nextest JUnit, mapped to measures)
@@ -124,7 +124,7 @@ jobs:
           set -euo pipefail
           cargo nextest run --workspace --features ordeal/cert-bundle --profile ci
           python3 scripts/junit_to_rivet.py target/nextest/ci/junit.xml rivet-test-results.xml
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: rivet-test-results
           path: rivet-test-results.xml
@@ -138,7 +138,7 @@ jobs:
     name: Reproducible build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Assert dependency-free default build
         run: |
@@ -152,7 +152,7 @@ jobs:
       # Cargo.lock. Negative-controlled 2026-09-24: RUSTSEC-2020-0071 in the
       # shipped closure -> blocking red; same crate dev-only -> blocking
       # green, advisory red.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: cargo-deny@0.20.2
       - name: Advisories — shipped closure (BLOCKING)
@@ -200,11 +200,11 @@ jobs:
     name: Build (wasm32-wasip2)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Add wasm32-wasip2 target
         run: rustup target add wasm32-wasip2
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: wasip2
       - name: Build wasm32-wasip2 (release)
@@ -230,9 +230,9 @@ jobs:
     name: macOS build + smoke
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: macos
       - name: Build (release) and smoke the binary
@@ -255,11 +255,11 @@ jobs:
     name: musl build + SBOM smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-musl
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: musl-sbom
       - name: Build x86_64-musl (release) and execute it
@@ -282,7 +282,7 @@ jobs:
           cp "$SBOM" /tmp/smoke.cdx.json
       # #146: the EXACT release VEX recipe, per PR, so it cannot first fail
       # at a tag cut (the #135 lesson).
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
         with:
           tool: cargo-audit@0.22.2
       - name: VEX generation smoke (release recipe)
@@ -301,13 +301,13 @@ jobs:
     name: cross aarch64-musl + qemu smoke
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
       # #189: the same pinned cross rev the release builds the shipped
       # aarch64 binaries with (release.yml), not crates.io's 0.2.5.
       - name: Install cross (pinned rev)
         run: cargo install cross --git https://github.com/cross-rs/cross --rev 74e99b2223de06166f8cdcc1af7f1308ec52baf4 --locked
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: cross-aarch64-musl
       - name: Install qemu-user
@@ -332,7 +332,7 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Bazel build //...
         run: bazel build //... --config=dev
       # #136: a built-but-never-run test binary is the relay-class smell —
@@ -365,9 +365,9 @@ jobs:
     name: Lean model + soundness proof
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install Nix (flakes)
-        uses: DeterminateSystems/nix-installer-action@v23
+        uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
       # Cache the /nix/store so the cold Charon(OCaml)+Aeneas build (~15+ min)
       # only happens when the pinned toolchain revisions change.
       # The key hashes the pins AND regen.sh: cache-nix-action skips saving
@@ -376,7 +376,7 @@ jobs:
       # gets saved and every run restores the stale snapshot (learned on
       # PR #126: its rooted store was never persisted under the old key).
       - name: Cache nix store (Charon/Aeneas)
-        uses: nix-community/cache-nix-action@v7
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
         with:
           primary-key: nix-charon-aeneas-${{ runner.os }}-${{ hashFiles('lean/toolchain-pins.env', 'lean/regen.sh') }}
           restore-prefixes-first-match: nix-charon-aeneas-${{ runner.os }}-
@@ -408,7 +408,7 @@ jobs:
           curl -sSfL https://raw.githubusercontent.com/leanprover/elan/v4.2.4/elan-init.sh \
             | sh -s -- -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
-      - uses: actions/cache@v6
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: |
             lean/.lake
@@ -497,7 +497,7 @@ jobs:
       # This job has no Rust toolchain of its own (everything above is
       # nix/elan), so install one for the corpus dumper.
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: diffcheck
       - name: Dump the shared LRAT certificate corpus (TR-035)
@@ -516,9 +516,9 @@ jobs:
     name: CaDiCaL backend (cadical feature)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: cadical
       - name: Clippy (cadical feature)
@@ -544,9 +544,9 @@ jobs:
     # blocked the next main commit's CI. Bound it.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: oracle
       - name: Install Z3
@@ -580,11 +580,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # full history: the commit-trailer gate below walks the PR range
           fetch-depth: 0
-      - uses: sigstore/cosign-installer@v3
+      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac # v3
       - name: Install varve (verified) and the pinned layer
         env:
           VARVE_VERSION: v0.38.0
