@@ -1,29 +1,12 @@
 version: 2
-# One PR per logical release across all directories: version-locked families
-# (wasm-tools, wasmtime) and all github-actions pins in / must not split into
-# one PR per directory. (Learned from loom/witness/mcp/relay/rules_wasm_component,
-# where one release arrived as 4-8 PRs.)
-groups:
-  wasm-tools-family:
-    patterns:
-      - "wasmparser"
-      - "wasm-encoder"
-      - "wasmprinter"
-      - "wit-component"
-      - "wit-parser"
-      - "wasm-metadata"
-      - "wat"
-      - "walrus"
-  wasmtime:
-    patterns:
-      - "wasmtime"
-      - "wasmtime-*"
-  github-actions-all:
-    # groups cannot be scoped by package-ecosystem; action names are
-    # owner/name (contain a slash, never start with @), which cargo crates
-    # and unscoped npm packages never match.
-    patterns:
-      - "^[^@]+/"
+# Groups live inside the `updates` entry they apply to: a top-level `groups:`
+# key is not part of the dependabot schema, and a group only ever sees the
+# ecosystem of its own entry. Group patterns are globs, not regexes.
+#
+# One PR per weekly round of github-actions pins (they used to arrive one PR
+# per action). The cargo workspaces are `/` and the separate `fuzz/`
+# workspace; `crates/ordeal` is a member of `/`, not a root of its own, so an
+# entry for it fails every run ("not the workspace root").
 updates:
   - package-ecosystem: github-actions
     directory: /
@@ -31,6 +14,10 @@ updates:
       interval: weekly
     labels:
       - dependencies
+    groups:
+      github-actions-all:
+        patterns:
+          - "*"
   - package-ecosystem: cargo
     directory: /
     schedule:
@@ -38,7 +25,7 @@ updates:
     labels:
       - dependencies
   - package-ecosystem: cargo
-    directory: /crates/ordeal
+    directory: /fuzz
     schedule:
       interval: weekly
     labels:
