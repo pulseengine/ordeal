@@ -1984,3 +1984,34 @@ artifacts:
         target: ARC-006
       - type: allocated-to
         target: ARC-011
+
+  - id: TR-074
+    type: sw-req
+    title: Public claims about what ordeal proves and trusts are bound to re-derivable evidence and gated in CI
+    status: verified
+    release: v0.35.0
+    description: "Between v0.31.0 and v0.34.0 the trusted base shrank four times (TR-069/070 the term check on every path, TR-072 the proven sliver check, TR-073 the proven flattener), and prose written before those releases still said the flattener, the sliver, the variable names or the width guard were trusted, said the default path still rewrote the derived ops (false since v0.28.0), said edition 2021 (2024), said kernel.rs was 486 lines (2359, one translation unit with three #[path] submodules), described the P4 Z3 demotion and the TR-035 differential as future work, and flattened four distinct techniques (Lean theorem proving over the Aeneas translation, Kani bounded model checking, the Z3 differential, LRAT certificate checking) into \"formally verified\". Nothing gated the documents except one grep over lean/README.md inside the Lean CI job. Requirement: every load-bearing public claim — what is proven and by which theorem, what is trusted, every count, every version, every capability statement, every badge — shall be marked in claims.yaml (repo root), bound to evidence that scripts/claim_check.py (stdlib + PyYAML; the pulseengine-claude claim-verification reference adapted: whitespace-normalised verbatim so wrapped prose can be gated, an epoch field per claim, a self-test over every predicate kind) re-derives from the tree, and gated as a step of the REQUIRED Test job in ci.yml, so that drift between a document and the code, the Lean files, lean/AxiomCheck.lean, the CI workflows or the Cargo manifests fails the build. The trusted-base sentence has one home (docs/formal-verification.md, \"The trusted base after TR-073 — the canonical statement\") and every other document carries it verbatim, gated against the same anchor; distinct techniques are named, never flattened. Each claim group records an epoch — the Charon/Aeneas revisions in lean/toolchain-pins.env (and the same Aeneas revision in lakefile.lean, set-equal), the Lean toolchain, the Rust edition, the workspace version — with a proof surface that turns red when it moves, so a pin bump re-opens every proof claim rather than letting it green silently. The lean/README.md status guard of issue #53 moves from the Lean job into the ledger (LEAN-README-STATUS-NOT-OPEN, same pattern). When a check goes red the claim is changed to what is true; the evidence is never loosened to keep a claim."
+    tags: [documentation, claims, trusted-core, soundness, gate, negative-control]
+    fields:
+      priority: must
+      req-type: constraint
+      verification-criteria: python3 scripts/claim_check.py --self-test shows every predicate kind (verbatim, file-exists, count-min, count-max / no-new, set-equal, count-equals) failing and passing over fixtures; python3 scripts/claim_check.py claims.yaml exits 0 on the pristine tree; the step is in the required Test job of ci.yml; for at least five predicate kinds an injected drift (a re-worded trusted-base sentence, a sorry added to a proof file, a capstone theorem renamed, the required-checks list emptied, a pin removed from AxiomCheck.lean, a stated count changed, a proof file removed, a toolchain pin changed, an axiom declared, the CI step deleted) turns the gate red with the drifted claim named, and the file is restored byte for byte (sha256 asserted); every stated number in the audited documents is derived (count-equals) or bound (count-min), every capstone theorem the documents name is present in its file and pinned in lean/AxiomCheck.lean, the kernel.spec pin list in docs/formal-verification.md equals the pins in AxiomCheck.lean both ways, the hand-written Lean proofs carry no sorry / native_decide / axiom declaration, and the trusted-base sentence is verbatim-identical in README.md, ARCHITECTURE.md, AGENTS.md, lean/README.md and docs/consuming-ordeal.md to its single source in docs/formal-verification.md.
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: derives-from
+        target: SYS-005
+      - type: traces-to
+        target: TR-073
+      - type: traces-to
+        target: TR-047
+      - type: allocated-to
+        target: ARC-014
+      - type: allocated-to
+        target: ARC-006
+      - type: traces-to
+        target: TR-069
+      - type: traces-to
+        target: TR-072
+      - type: traces-to
+        target: TR-035

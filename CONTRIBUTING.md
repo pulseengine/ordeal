@@ -42,8 +42,14 @@ cargo fmt
 # Check formatting
 cargo fmt --all -- --check
 
-# Run clippy
-cargo clippy --all-targets --all-features -- -D warnings
+# Run clippy as CI does (default features, then the Z3-free optional ones)
+cargo clippy --all-targets -- -D warnings
+cargo clippy --all-targets --features ordeal/cert-bundle,ordeal/cadical -- -D warnings
+# `--all-features` additionally lints the `oracle` feature and needs libz3
+
+# The documentation claim gate (claims.yaml): every load-bearing doc claim
+# bound to evidence re-derived from the tree
+python3 scripts/claim_check.py
 ```
 
 ### Testing
@@ -67,7 +73,20 @@ run as a non-blocking CI job.
 3. Make your changes.
 4. Ensure `cargo fmt`, `cargo clippy`, and `cargo test --all` pass.
 5. Push to your fork and submit a pull request.
-6. Ensure all CI checks pass.
+6. Ensure all CI checks pass. The checks branch protection requires on
+   `main` (every other job in `.github/workflows/ci.yml` is advisory):
+
+   - `Format`
+   - `Clippy`
+   - `Build (release)`
+   - `Build (wasm32-wasip2)`
+   - `Test`
+   - `Reproducible build`
+   - `Lean model + soundness proof`
+   - `CaDiCaL backend (cadical feature)`
+
+   `claims.yaml` checks this list against the job names in `ci.yml`, so a
+   job added to the workflow must be listed here or waived there.
 
 ## Commit Message Trailers
 

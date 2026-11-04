@@ -41,8 +41,9 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
   └───────────────────────────────────┬────────────┘
                                        │
   ┌────────────────────────────────────▼───────────┐
-  │  TRUSTED (and formally verified)                │
-  │  LRAT checker  ──▶  verdict is sound            │  ← small, proven
+  │  TRUSTED: ordeal-lrat                           │
+  │  LRAT checker + proven lowering + query, term,  │  ← small; soundness proven
+  │  sliver and tree checks  ──▶  verdict is sound  │    in Lean 4 (Aeneas model)
   └─────────────────────────────────────────────────┘
 ```
 
@@ -50,9 +51,11 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
   emitter can, at worst, cause ordeal to *fail to produce a valid
   certificate*. It cannot make the checker accept a wrong verdict *for the CNF
   it was given*.
-- The **checker is the only proven component.** It replays the LRAT proof
-  against the CNF and confirms the empty clause is derivable. Its soundness
-  theorem is discharged in Lean 4, sorry-free and CI-gated (see below).
+- The **checker is proven, and so is everything the trusted crate stacks on
+  it** (the lowering and the query, term, sliver and tree checks, next
+  bullet). The checker replays the LRAT proof against the CNF and confirms
+  the empty clause is derivable. Its soundness theorem is discharged in
+  Lean 4, sorry-free and CI-gated (see below).
 - The **query-to-CNF translation was trusted but not proven** until #192: the
   checker certified the CNF, not the query, so a bug in the front ends,
   rewriting, bit-blasting, AIG construction or Tseitin encoding yielded a
@@ -61,12 +64,17 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
   `check_term_dag` (the term), `check_sliver_lowering` (arrays / UFs) and,
   since v0.34.0, `flatten_tree` (TR-073: the trees AS THE CALLER BUILT THEM,
   variables, arrays and functions by name) all live in the trusted crate and
-  run on every path; what a trusted check rejects is `Unknown`. What remains
-  trusted: the SMT-LIB / Verus front ends and the one-`match`-arm-per-
-  constructor copy of the trees into the kernel's mirror type (`mirror.rs`).
-  The defence for those is tests at every width and the Z3 differential. See
+  run on every path; what a trusted check rejects is `Unknown`. What stays
+  trusted, on every path: the SMT-LIB / Verus front ends, the 1:1 copy of
+  the trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`,
+  one `match` arm per constructor), and the toolchain — Lean's kernel with
+  its three standard axioms, the pinned Charon/Aeneas translation of the
+  Rust source, and rustc. The defence for the first two is tests at every
+  width and the Z3 differential; for the translation, the TR-035
+  dual-mechanisation differential. See
   [docs/formal-verification.md](docs/formal-verification.md) for the exact
-  scope.
+  scope (that sentence is single-sourced there and gated by
+  `claims.yaml`).
 
 ### Verifying the checker: Aeneas → Lean
 
@@ -92,8 +100,11 @@ For a **SAT** verdict the "certificate" is the model itself: ordeal (and its
 callers) can independently evaluate the assignment against the assertions to
 confirm satisfiability — checking a model is trivial and total.
 
-The soundness argument therefore reduces to: *the LRAT checker is correct.* Not
-"Z3 is correct," not "our bit-blaster is correct" — just the small checker.
+The soundness argument therefore reduces to: *the trusted crate's checks are
+correct* — which is what the Lean theorems establish, over the Aeneas model
+of that crate — plus the trusted base named above. Not "Z3 is correct", not
+"the SAT search is correct": those are untrusted and can only fail to
+produce a certificate.
 
 ## The pipeline
 
@@ -268,7 +279,7 @@ solver.
 | `crates/ordeal/src/sliver.rs` | The array/UF sliver (symbolic-index read-over-write + Ackermannization). |
 | `crates/ordeal/src/trap.rs` | WASM trap conditions as QF_BV predicates; trap-preservation VCs. |
 | `crates/ordeal/src/layout.rs` | Little-endian byte split/reassembly for layout-equivalence queries. |
-| `crates/ordeal/src/lowering.rs` | The formerly derived ops (`bvnot bvneg bvrotl bvsdiv bvsrem`): constructors of the `BvTerm` variants (proven DAG constructs since #192 phase 5) and the core-fragment rewrite `expand_*` the default `check` path still applies first (byte-identical certificates); `check_with_query` lowers them as nodes. |
+| `crates/ordeal/src/lowering.rs` | The formerly derived ops (`bvnot bvneg bvrotl bvsdiv bvsrem`): constructors of the `BvTerm` variants (proven DAG nodes since #192 phase 5, lowered as nodes on every path since v0.28.0) and the core-fragment rewrite `expand_*`, kept only for the differential tests that compare the old rewrite against the proven nodes. |
 | `crates/ordeal/src/smtlib.rs` | Minimal SMT-LIB2 QF_BV front end (the `check` subcommand). |
 | `crates/ordeal/src/verus.rs` | Verus `by (bit_vector)` obligation extraction (the `verus` subcommand). |
 | `crates/ordeal/src/cert_bundle.rs` | `ordeal-cert/v1` bundle serialization (`cert-bundle` feature). |

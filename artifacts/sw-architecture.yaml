@@ -235,6 +235,8 @@ artifacts:
         target: TR-072
       - type: allocated-from
         target: TR-073
+      - type: allocated-from
+        target: TR-074
   - id: ARC-007
     type: sw-arch-component
     title: ordeal-oracle (Z3 differential harness)
@@ -415,3 +417,5 @@ artifacts:
         target: TR-057
       - type: allocated-from
         target: TR-058
+      - type: allocated-from
+        target: TR-074

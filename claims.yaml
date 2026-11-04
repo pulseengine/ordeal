@@ -1,0 +1,852 @@
+# claims.yaml — ordeal's documentation claims, bound to evidence (TR-074).
+#
+# A README is a claim about the system: the same species as a requirement,
+# pointing the other way. Each entry below marks one load-bearing assertion a
+# document makes — what is proven, by which theorem, what is trusted, every
+# stated number, the badges — and binds it to evidence that
+# `scripts/claim_check.py` re-derives from the tree on every change (a step of
+# the required `Test` job). Drift fails the build. The predicate kinds are
+# documented in the script's header.
+#
+# Discipline (pulseengine-claude `claim-verification`):
+#   - mark the CLAIMS, not the narrative: rationale and examples stay free;
+#   - never type a number in prose the tree can derive (`count-equals`);
+#   - presence claims use `count-min` (a `count-max` greens a 0-match);
+#   - the trusted-base sentence has ONE home, docs/formal-verification.md;
+#     every other copy is `verbatim`-gated against the same anchor below;
+#   - when a check goes red, change the CLAIM to what is true — never loosen
+#     the evidence to keep the claim;
+#   - `epoch:` names what expires a claim while its evidence still passes;
+#     the EPOCH-* claims are the proof surfaces that notice those changes.
+
+# ── Anchors ──────────────────────────────────────────────────────────────────
+# The canonical trusted-base sentence. Whitespace is normalised by the gate
+# (a re-wrapped copy matches; a re-worded one does not).
+x-trusted-base: &trusted-base >-
+  What stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1
+  copy of the trees into the kernel's mirror type
+  (`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
+  toolchain — Lean's kernel with its three standard axioms, the pinned
+  Charon/Aeneas translation of the Rust source, and rustc.
+
+x-epoch-proofs: &epoch-proofs >-
+  Every Lean claim is about the Aeneas model generated at the Charon/Aeneas
+  revisions in lean/toolchain-pins.env and elaborated by the toolchain in
+  lean/lean-toolchain; a pin bump re-opens every one of them
+  (EPOCH-AENEAS-CHARON, EPOCH-LEAN-TOOLCHAIN notice it).
+
+x-epoch-rust: &epoch-rust >-
+  Claims about the shipped build hold for the workspace version and edition
+  in Cargo.toml (EPOCH-RUST-EDITION, CONS-DEP-VERSION notice a change).
+
+# Hand-written proof files only: every lean/*.lean whose name starts with a
+# capital after A — i.e. all Blaster*, DiffCheck, Kernel (the generated model,
+# when present), QueryCheck, SatWitness, SliverCheck, Sound, TermCheck,
+# TreeFlatten — and NOT AxiomCheck.lean / lakefile.lean, whose comments name
+# `native_decide` and `axiom` while describing the gate.
+x-proof-glob: &proof-glob 'lean/[B-Z]*.lean'
+
+claims:
+  # ── Epochs: proof surfaces for what would expire the claims below ─────────
+  - id: EPOCH-AENEAS-CHARON
+    doc: lean/toolchain-pins.env
+    epoch: >-
+      The translator revisions. A bump changes the generated model every Lean
+      theorem is stated over; the negative controls recorded in VE-063/VE-064
+      were run at THESE revisions. Bump → red → re-run them and update here.
+    evidence:
+      - kind: count-min
+        pattern: '^AENEAS_REV=9dd45ecf2de55e732a4a89e5fd065e96eeab3657$'
+        glob: lean/toolchain-pins.env
+        min: 1
+      - kind: count-min
+        pattern: '^CHARON_REV=40ee060a8df43f4e7e0842d3f05387b0a4426aaf$'
+        glob: lean/toolchain-pins.env
+        min: 1
+      # The Lake package must pin the Aeneas SUPPORT library to the same
+      # revision as the translator (generated code and library must match).
+      - kind: set-equal
+        left:  {file: lean/toolchain-pins.env, pattern: '^AENEAS_REV=([0-9a-f]{40})$'}
+        right: {file: lean/lakefile.lean, pattern: 'AeneasVerif/aeneas\.git" @\n  "([0-9a-f]{40})"'}
+
+  - id: EPOCH-LEAN-TOOLCHAIN
+    doc: lean/lean-toolchain
+    epoch: The Lean release the proofs elaborate under.
+    evidence:
+      - kind: count-min
+        pattern: '^leanprover/lean4:v4\.30\.0-rc2$'
+        glob: lean/lean-toolchain
+        min: 1
+
+  - id: EPOCH-RUST-EDITION
+    doc: Cargo.toml
+    epoch: The Rust edition every "builds with rustc >= 1.85" statement assumes.
+    evidence:
+      - kind: count-min
+        pattern: '^edition = "2024"$'
+        glob: Cargo.toml
+        min: 1
+
+  # ── The trusted-base sentence: one home, five verbatim copies ─────────────
+  - id: FV-TRUSTED-BASE
+    doc: docs/formal-verification.md
+    text: *trusted-base
+    epoch: *epoch-proofs
+    evidence:
+      - kind: verbatim
+        text: "The trusted base after TR-073 — the canonical statement."
+      - kind: file-exists
+        path: crates/ordeal/src/mirror.rs
+      - kind: file-exists
+        path: crates/ordeal/src/smtlib.rs
+      - kind: file-exists
+        path: crates/ordeal/src/verus.rs
+      # The mirror copy really is where the trusted step sits (its own words).
+      - kind: count-min
+        pattern: 'the one remaining trusted'
+        glob: crates/ordeal/src/mirror.rs
+        min: 1
+      # Each listed trusted Rust piece has an untrusted-side defence named in the tree.
+      - kind: count-min
+        pattern: 'fn the_mirror_copy_is_a_bijection_on_(closed|extended)_terms'
+        glob: ['crates/ordeal/src/**/*.rs']
+        min: 2
+  - id: README-TRUSTED-BASE
+    doc: README.md
+    evidence: [{kind: verbatim, text: *trusted-base}]
+  - id: ARCH-TRUSTED-BASE
+    doc: ARCHITECTURE.md
+    evidence: [{kind: verbatim, text: *trusted-base}]
+  - id: AGENTS-TRUSTED-BASE
+    doc: AGENTS.md
+    evidence: [{kind: verbatim, text: *trusted-base}]
+  - id: LEAN-README-TRUSTED-BASE
+    doc: lean/README.md
+    evidence: [{kind: verbatim, text: *trusted-base}]
+  - id: CONS-TRUSTED-BASE
+    doc: docs/consuming-ordeal.md
+    evidence: [{kind: verbatim, text: *trusted-base}]
+
+  # ── README.md ─────────────────────────────────────────────────────────────
+  - id: README-BADGES
+    doc: README.md
+    # The two badges. No "formally verified" badge exists, by design; one
+    # may be added only as a claim here with evidence.
+    evidence:
+      - kind: verbatim
+        text: '![Rust](https://img.shields.io/badge/Rust-CE422B?style=flat-square&logo=rust&logoColor=white&labelColor=1a1b27)'
+      - kind: verbatim
+        text: '![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square&labelColor=1a1b27)'
+      - kind: count-min
+        pattern: '^license = "Apache-2\.0"$'
+        glob: Cargo.toml
+        min: 1
+      - kind: file-exists
+        path: LICENSE
+
+  - id: README-TAGLINE
+    doc: README.md
+    text: "A certificate-checked QF_BV SMT solver for the PulseEngine toolchain"
+    evidence:
+      - kind: count-min
+        pattern: 'certificate-checked'
+        glob: crates/ordeal/Cargo.toml
+        min: 1
+
+  - id: README-LEAN-SOUNDNESS
+    doc: README.md
+    text: >-
+      Both are re-checked by a small checker whose soundness is machine-checked
+      in Lean 4. The solver itself is untrusted.
+    epoch: *epoch-proofs
+    evidence:
+      - kind: count-min
+        pattern: '^theorem lrat_check_sound\b'
+        glob: lean/Sound.lean
+        min: 1
+      - kind: count-min
+        pattern: '^theorem check_sat_sound\b'
+        glob: lean/SatWitness.lean
+        min: 1
+      - kind: count-min
+        pattern: '^#print axioms kernel\.spec\.(lrat_check_sound|check_sat_sound)$'
+        glob: lean/AxiomCheck.lean
+        min: 2
+
+  - id: README-NO-DEPS
+    doc: README.md
+    text: "Pure Rust, no external dependencies"
+    epoch: *epoch-rust
+    evidence:
+      - kind: count-max            # the trusted crate has no dependency table at all
+        pattern: '^\[dependencies\]'
+        glob: crates/ordeal-lrat/Cargo.toml
+        max: 0
+      - kind: count-min            # …and a test pins that
+        pattern: 'fn manifest_declares_no_dependencies\(\)'
+        glob: crates/ordeal-lrat/src/lib.rs
+        min: 1
+      - kind: count-min            # the required Reproducible build job asserts the solver's closure is the two crates
+        pattern: '- name: Assert dependency-free default build'
+        glob: .github/workflows/ci.yml
+        min: 1
+      - kind: count-min            # the only external deps are optional and feature-gated
+        pattern: '^(z3|cadical-sys|serde|serde_json) = \{[^}]*optional = true[^}]*\}$'
+        glob: crates/ordeal/Cargo.toml
+        min: 4
+
+  - id: README-WASIP2
+    doc: README.md
+    text: "it runs as a `wasm32-wasip2` component as well as natively"
+    evidence:
+      - kind: count-min
+        pattern: '^    name: Build \(wasm32-wasip2\)$'
+        glob: .github/workflows/ci.yml
+        min: 1
+      - kind: count-min
+        pattern: 'cargo build --target wasm32-wasip2 --release'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: README-RELEASE-ARCHIVES
+    doc: README.md
+    text: "ships archives for Linux (glibc and static musl, x86_64 and aarch64) and macOS"
+    evidence:
+      - kind: count-min
+        pattern: '- target: (x86_64|aarch64)-unknown-linux-gnu$'
+        glob: .github/workflows/release.yml
+        min: 2
+      - kind: count-min
+        pattern: '- target: (x86_64|aarch64)-unknown-linux-musl$'
+        glob: .github/workflows/release.yml
+        min: 2
+      - kind: count-min
+        pattern: '- target: (x86_64|aarch64)-apple-darwin$'
+        glob: .github/workflows/release.yml
+        min: 2
+
+  - id: README-SIGNED-SUMS
+    doc: README.md
+    text: "`SHA256SUMS.txt` is cosign-signed, and a CycloneDX SBOM and VEX are listed in it"
+    evidence:
+      - kind: count-min
+        pattern: 'cosign sign-blob'
+        glob: .github/workflows/release.yml
+        min: 1
+      - kind: count-min
+        pattern: '\.cdx\.json'
+        glob: .github/workflows/release.yml
+        min: 1
+      - kind: count-min
+        pattern: '\.vex\.json'
+        glob: .github/workflows/release.yml
+        min: 1
+
+  - id: README-QUICKSTART-CI
+    doc: README.md
+    text: "CI runs it on every change"
+    evidence:
+      - kind: file-exists
+        path: crates/ordeal/examples/quickstart.rs
+      - kind: count-min
+        pattern: 'cargo run -q -p ordeal --example quickstart'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: README-WIDTHS
+    doc: README.md
+    text: "bit-widths 1 to 128"
+    evidence:
+      - kind: count-min
+        pattern: 'if w == 0 \|\| w > 128'
+        glob: crates/ordeal/src/eval.rs
+        min: 1
+
+  - id: README-UNSUPPORTED-EXIT
+    doc: README.md
+    text: "Other constructs are rejected as `unsupported` (exit 2)"
+    evidence:
+      - kind: count-min
+        pattern: 'ExitCode::from\(2\)'
+        glob: crates/ordeal/src/main.rs
+        min: 1
+
+  - id: README-DERIVED-OPS-NODES
+    doc: README.md
+    text: "lowered as nodes on every path since v0.28.0"
+    evidence:
+      - kind: count-min            # the production lowering entry uses the proven nodes
+        pattern: 'self\.lower_with\(AigOptions::default\(\), DerivedOps::Nodes\)'
+        glob: crates/ordeal/src/solver.rs
+        min: 1
+      - kind: count-min            # and the rewrite is documented as test-only
+        pattern: 'Since v0\.28\.0 no\s+/// production path uses it'
+        glob: crates/ordeal/src/solver.rs
+        min: 1
+      - kind: count-min
+        pattern: '^#print axioms kernel\.blast_kernel\.spec\.blast_(bvnot|neg|rotl|sdiv|srem)_bitvec$'
+        glob: lean/AxiomCheck.lean
+        min: 5
+
+  - id: README-REGEN-BEFORE-PROOF
+    doc: README.md
+    text: "CI regenerates the Lean model from the Rust source before every proof build"
+    evidence:
+      - kind: count-min
+        pattern: '^\s+bash lean/regen\.sh all$'
+        glob: .github/workflows/ci.yml
+        min: 1
+      - kind: count-min
+        pattern: '^\s+run: lake build Sound$'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: README-PROOF-CHAIN
+    doc: README.md
+    # The named capstones of each stage, each in its file and pinned axiom-clean.
+    epoch: *epoch-proofs
+    evidence:
+      - kind: verbatim
+        text: "Every one of these theorems is `sorry`-free and pinned axiom-clean in `lean/AxiomCheck.lean`"
+      - kind: count-min
+        pattern: '^theorem dag_refuted\b'
+        glob: lean/BlasterCapstone.lean
+        min: 1
+      - kind: count-min
+        pattern: '^theorem (check_query_sound|check_query_model_sound)\b'
+        glob: lean/QueryCheck.lean
+        min: 2
+      - kind: count-min
+        pattern: '^theorem (check_term_unsat_sound|check_term_model_sound)\b'
+        glob: lean/TermCheck.lean
+        min: 2
+      - kind: count-min
+        pattern: '^theorem (check_sliver_unsat_sound|check_sliver_model_sound)\b'
+        glob: lean/SliverCheck.lean
+        min: 2
+      - kind: count-min
+        pattern: '^theorem (tree_unsat_sound|ext_tree_unsat_sound|tree_model_sound|ext_tree_model_sound)\b'
+        glob: lean/TreeFlatten.lean
+        min: 4
+      - kind: count-min
+        pattern: '^#print axioms kernel\.(blast_kernel\.)?spec\.(dag_refuted|check_query_sound|check_query_model_sound|check_term_unsat_sound|check_term_model_sound|check_sliver_unsat_sound|check_sliver_model_sound|tree_unsat_sound|ext_tree_unsat_sound|tree_model_sound|ext_tree_model_sound)$'
+        glob: lean/AxiomCheck.lean
+        min: 11
+
+  # ── ARCHITECTURE.md ───────────────────────────────────────────────────────
+  - id: ARCH-SORRY-FREE-GATED
+    doc: ARCHITECTURE.md
+    text: "Its soundness theorem is discharged in Lean 4, sorry-free and CI-gated"
+    epoch: *epoch-proofs
+    evidence:
+      # No `sorry` in any proof form in the hand-written proofs (the CI
+      # elaboration gate counts Lean's own warnings; this binds the prose).
+      - kind: count-max
+        pattern: ':=\s*sorry\b|\bby\s+sorry\b|^\s*sorry\s*$|·\s*sorry\b|exact\s+sorry\b|\(\s*sorry\s*\)|<;>\s*sorry\b'
+        glob: *proof-glob
+        max: 0
+      - kind: count-min            # the CI sorry budget step exists and is 0
+        pattern: "grep -cE 'declaration uses .sorry.'"
+        glob: .github/workflows/ci.yml
+        min: 1
+      - kind: count-min
+        pattern: 'if \[ "\$total" -ne 0 \]; then'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: ARCH-TWO-CRATES
+    doc: ARCHITECTURE.md
+    text: "One workspace, **two crates**"
+    evidence:
+      - kind: set-equal            # the crate table names exactly the workspace crates
+        left:  {glob: 'crates/*/Cargo.toml', name: 'crates/([^/]+)/'}
+        right: {file: ARCHITECTURE.md, pattern: '`crates/([a-z-]+)/', after: '## Crate layout'}
+      - kind: count-min
+        pattern: '^members = \["crates/ordeal", "crates/ordeal-lrat"\]$'
+        glob: Cargo.toml
+        min: 1
+
+  - id: ARCH-LRAT-NO-DEPS
+    doc: ARCHITECTURE.md
+    text: "`ordeal-lrat` declares no dependencies at all (enforced by test)"
+    evidence:
+      - kind: count-max
+        pattern: '^\[(dev-|build-)?dependencies\]'
+        glob: crates/ordeal-lrat/Cargo.toml
+        max: 0
+      - kind: count-min
+        pattern: 'fn manifest_declares_no_dependencies\(\)'
+        glob: crates/ordeal-lrat/src/lib.rs
+        min: 1
+
+  - id: ARCH-WASIP2-REQUIRED
+    doc: ARCHITECTURE.md
+    text: "`wasm32-wasip2` is a **first-class build target**, CI-gated and required"
+    evidence:
+      - kind: count-min            # "required" is branch protection; its on-disk witness is CONTRIBUTING's list
+        pattern: '^   - `Build \(wasm32-wasip2\)`$'
+        glob: CONTRIBUTING.md
+        min: 1
+
+  - id: ARCH-RULES-LEAN-PLACEHOLDER
+    doc: ARCHITECTURE.md
+    text: "`rules_lean` exists only as a commented placeholder in `MODULE.bazel`"
+    evidence:
+      - kind: count-max
+        pattern: '^bazel_dep\(name = "rules_lean"'
+        glob: MODULE.bazel
+        max: 0
+      - kind: count-min
+        pattern: '^# bazel_dep\(name = "rules_lean"'
+        glob: MODULE.bazel
+        min: 1
+
+  - id: ARCH-BAZEL-VERSION
+    doc: ARCHITECTURE.md
+    text: "Bazel 7.4.1"
+    evidence:
+      - kind: count-min
+        pattern: '^7\.4\.1$'
+        glob: .bazelversion
+        min: 1
+
+  - id: ARCH-TRUSTED-CRATE-FILES
+    doc: ARCHITECTURE.md
+    # The crate table names the trusted crate's four kernel files and their proofs.
+    evidence:
+      - kind: count-min
+        pattern: '^#\[path = "(blast_kernel|sliver_kernel|term_kernel)\.rs"\]$'
+        glob: crates/ordeal-lrat/src/kernel.rs
+        min: 3
+      - kind: verbatim
+        text: "the sliver check `sliver_kernel.rs` (TR-072, `lean/SliverCheck.lean`); and the proven flattener `term_kernel.rs` (TR-073, `lean/TreeFlatten.lean`"
+      - kind: file-exists
+        path: lean/SliverCheck.lean
+      - kind: file-exists
+        path: lean/TreeFlatten.lean
+      - kind: file-exists
+        path: lean/QueryCheck.lean
+      - kind: file-exists
+        path: lean/TermCheck.lean
+
+  # ── AGENTS.md ─────────────────────────────────────────────────────────────
+  - id: AGENTS-EDITION
+    doc: AGENTS.md
+    text: "Rust edition 2024"
+    epoch: *epoch-rust
+    evidence:
+      - kind: count-min
+        pattern: '^edition = "2024"$'
+        glob: Cargo.toml
+        min: 1
+
+  - id: AGENTS-ORACLE-FEATURE
+    doc: AGENTS.md
+    text: "behind the off-by-default `oracle` feature"
+    evidence:
+      - kind: count-min
+        pattern: '^oracle = \["dep:z3"\]$'
+        glob: crates/ordeal/Cargo.toml
+        min: 1
+      - kind: count-max            # never in the default feature set
+        pattern: '^default = \[.*oracle'
+        glob: crates/ordeal/Cargo.toml
+        max: 0
+
+  # ── CONTRIBUTING.md ───────────────────────────────────────────────────────
+  - id: CONTRIB-REQUIRED-CHECKS
+    doc: CONTRIBUTING.md
+    text: "The checks branch protection requires on `main`"
+    # The required list (branch protection, read 2026-11-04 via the GitHub
+    # API) against the job names in ci.yml. Advisory jobs are waived here —
+    # printed every run. A job added to ci.yml must be listed or waived.
+    evidence:
+      - kind: set-equal
+        left:  {file: .github/workflows/ci.yml, pattern: '^    name: (.+)$'}
+        right: {file: CONTRIBUTING.md, pattern: '^   - `([^`]+)`$', after: 'The checks branch protection requires', before: '`claims.yaml` checks this list'}
+        waive:
+          - macOS build + smoke
+          - musl build + SBOM smoke
+          - cross aarch64-musl + qemu smoke
+          - Bazel build (optional)
+          - Z3 Oracle (optional)
+          - varve layer pin resolves (pinned rivet validates the graph)
+      - kind: count-min            # the claim gate runs inside the required Test job
+        pattern: 'python3 scripts/claim_check\.py claims\.yaml'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: CONTRIB-ORACLE-NONBLOCKING
+    doc: CONTRIBUTING.md
+    text: "run as a non-blocking CI job"
+    evidence:
+      - kind: count-min
+        pattern: 'name: Z3 Oracle \(optional\)\n    runs-on: [^\n]+\n    continue-on-error: true'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: CONTRIB-COMMIT-MSG-HOOK
+    doc: CONTRIBUTING.md
+    text: "`rivet commit-msg-check` (wired into the pre-commit hooks)"
+    evidence:
+      - kind: count-min
+        pattern: 'entry: rivet commit-msg-check'
+        glob: .pre-commit-config.yaml
+        min: 1
+
+  # ── lean/README.md ────────────────────────────────────────────────────────
+  - id: LEAN-README-PROOF-FILES
+    doc: lean/README.md
+    # The "Proof files" list is exactly the directory (Kernel.lean is the
+    # gitignored build product: listed, present only after regen.sh).
+    evidence:
+      - kind: set-equal
+        left:  {glob: 'lean/*.lean', name: 'lean/([A-Za-z]+)\.lean$'}
+        right: {file: lean/README.md, pattern: '^- `([A-Za-z]+)\.lean`', after: '## Proof files', before: '## Trust boundary'}
+        waive: [Kernel]
+
+  - id: LEAN-README-STATUS-NOT-OPEN
+    doc: lean/README.md
+    # Issue #53: the doc must not drift back to describing the discharged
+    # proof as open. Folded here from the ci.yml grep guard (same pattern).
+    evidence:
+      - kind: count-max
+        pattern: '(?i)no proof yet|tracked and open|single tracked .?sorry|one tracked .?sorry|still open \(issue #12\)|until the theorem is discharged|kernel-model-drift|committed .?Kernel\.lean|does not re-run Aeneas|remaining P2 obligation'
+        glob: lean/README.md
+        max: 0
+      - kind: verbatim
+        text: "Issue #12 is discharged."
+
+  - id: LEAN-README-MAIN-THEOREM
+    doc: lean/README.md
+    text: "proved as `kernel.spec.lrat_check_sound` in `Sound.lean`"
+    epoch: *epoch-proofs
+    evidence:
+      - kind: count-min
+        pattern: '^theorem (lrat_check_sound|pure_check_sound|kernel_refines_pure)\b'
+        glob: lean/Sound.lean
+        min: 3
+      - kind: count-min
+        pattern: '^    unsat \(cnf\.val\.map \(fun c => c\.val\)\)'
+        glob: lean/Sound.lean
+        min: 1
+
+  - id: LEAN-README-ZERO-AXIOMS-GATE
+    doc: lean/README.md
+    text: "That \"zero axioms\" is now a CI gate of its own"
+    evidence:
+      - kind: count-min
+        pattern: "k=\\$\\(grep -c '\\^axiom' lean/Kernel\\.lean \\|\\| true\\)"
+        glob: .github/workflows/ci.yml
+        min: 1
+      - kind: count-max            # no hand-written proof declares an axiom either
+        pattern: '^axiom\s'
+        glob: 'lean/*.lean'
+        max: 0
+
+  - id: LEAN-README-THREE-AXIOMS
+    doc: lean/README.md
+    text: "shows ONLY the three standard Lean axioms (`propext`, `Classical.choice`, `Quot.sound`) — no `sorryAx`, no `native_decide`"
+    epoch: *epoch-proofs
+    evidence:
+      - kind: count-max            # every pin in AxiomCheck lists exactly the three
+        pattern: 'depends on axioms: \[(?!propext, Classical\.choice, Quot\.sound\])'
+        glob: lean/AxiomCheck.lean
+        max: 0
+      - kind: count-min
+        pattern: 'depends on axioms: \[propext, Classical\.choice, Quot\.sound\]'
+        glob: lean/AxiomCheck.lean
+        min: 1
+      - kind: count-max            # no native_decide in the hand-written proofs
+        pattern: '\bnative_decide\b'
+        glob: *proof-glob
+        max: 0
+      - kind: count-min            # the axiom gate is a CI step
+        pattern: 'run: bash \.\./scripts/axiom_check\.sh'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: LEAN-README-ENCODE-ARMS
+    doc: lean/README.md
+    text: "`encode_node_spec` has 37 arms since"
+    evidence:
+      - kind: count-equals         # one arm per DagNode variant
+        number: {file: lean/README.md, pattern: '`encode_node_spec` has (\d+) arms'}
+        set:    {file: crates/ordeal-lrat/src/blast_kernel.rs, pattern: '^    ([A-Z][A-Za-z]*)\(', after: 'pub enum DagNode {', before: "\n}"}
+
+  - id: LEAN-README-GATEBOUND
+    doc: lean/README.md
+    text: "`gateBound` is `70·W² + 70·W + 1`"
+    evidence:
+      - kind: count-min
+        pattern: '^def gateBound \(W : Nat\) : Nat := 70 \* W \* W \+ 70 \* W \+ 1$'
+        glob: lean/BlasterDag.lean
+        min: 1
+
+  - id: LEAN-README-SATWITNESS
+    doc: lean/README.md
+    text: "with four theorems, `sorry`-free and a default `lake build` target"
+    epoch: *epoch-proofs
+    evidence:
+      - kind: count-min
+        pattern: '^theorem (check_sat_sound|check_sat_satisfiable|check_binding_sound|verdicts_exclusive)\b'
+        glob: lean/SatWitness.lean
+        min: 4
+      - kind: count-min
+        pattern: '^@\[default_target\] lean_lib «SatWitness» \{\}$'
+        glob: lean/lakefile.lean
+        min: 1
+
+  - id: LEAN-README-TR035-GATED
+    doc: lean/README.md
+    text: "TR-035 dual-mechanisation differential (CI-gated)"
+    evidence:
+      - kind: file-exists
+        path: lean/DiffCheck.lean
+      - kind: count-min
+        pattern: 'run: lake exe diffcheck /tmp/lrat-corpus'
+        glob: .github/workflows/ci.yml
+        min: 1
+      - kind: count-min
+        pattern: 'Std\.Tactic\.BVDecide\.LRAT'
+        glob: lean/DiffCheck.lean
+        min: 1
+
+  - id: LEAN-README-TREEFLATTEN
+    doc: lean/README.md
+    text: "`TreeFlatten.lean` proves `kernel::term_kernel::flatten_tree`"
+    epoch: *epoch-proofs
+    evidence:
+      - kind: count-min
+        pattern: '^theorem (flatten_tree_sound|tree_unsat_sound|tree_model_sound|tree_verdicts_exclusive|ext_tree_unsat_sound|ext_tree_model_sound|ext_tree_verdicts_exclusive)\b'
+        glob: lean/TreeFlatten.lean
+        min: 7
+      - kind: count-min
+        pattern: 'pub fn flatten_tree\('
+        glob: crates/ordeal-lrat/src/term_kernel.rs
+        min: 1
+
+  # ── docs/formal-verification.md ───────────────────────────────────────────
+  - id: FV-ONE-SENTENCE-CLAIMS
+    doc: docs/formal-verification.md
+    epoch: *epoch-proofs
+    evidence:
+      # (One line each: the sentences sit in `> ` blockquotes, whose markers
+      # the whitespace normalisation does not strip.)
+      - kind: verbatim
+        text: "The **LRAT/RUP checking algorithm** `kernel::check_steps` is machine-checked"
+      - kind: verbatim
+        text: "The **query re-check** `kernel::check_query` is machine-checked to be"
+      - kind: verbatim
+        text: "The **flattener** `kernel::term_kernel::flatten_tree` is machine-checked"
+      - kind: count-min
+        pattern: 'pub fn check_steps\(cnf: &\[Vec<i32>\], steps: &\[Step\]\)'
+        glob: crates/ordeal-lrat/src/kernel.rs
+        min: 1
+      - kind: count-min
+        pattern: 'pub fn check_query\('
+        glob: crates/ordeal-lrat/src/kernel.rs
+        min: 1
+      - kind: count-min
+        pattern: '^theorem check_query_sound\b'
+        glob: lean/QueryCheck.lean
+        min: 1
+
+  - id: FV-AXIOMCHECK-PINS
+    doc: docs/formal-verification.md
+    # The reproduce block lists EVERY checker-level (kernel.spec.*) pin of
+    # AxiomCheck.lean — both directions, so a new capstone must be documented
+    # and a documented one must still be pinned.
+    epoch: *epoch-proofs
+    evidence:
+      - kind: set-equal
+        left:  {file: lean/AxiomCheck.lean, pattern: '^#print axioms kernel\.spec\.(\w+)$'}
+        right: {file: docs/formal-verification.md, pattern: '^#print axioms kernel\.spec\.(\w+)'}   # the last line ends the heredoc quote
+
+  - id: FV-TCB-PINS
+    doc: docs/formal-verification.md
+    text: "by pinned Charon/Aeneas revisions (`lean/toolchain-pins.env`, sourced by `lean/regen.sh`"
+    evidence:
+      - kind: count-min
+        pattern: '^source lean/toolchain-pins\.env$'
+        glob: lean/regen.sh
+        min: 1
+      - kind: count-min
+        pattern: '^(AENEAS|CHARON)_REV=[0-9a-f]{40}$'
+        glob: lean/toolchain-pins.env
+        min: 2
+
+  - id: FV-ONE-TRANSLATION-UNIT
+    doc: docs/formal-verification.md
+    text: "the trusted crate is one translation unit (`kernel.rs` and its three `#[path]` submodules)"
+    evidence:
+      - kind: count-min
+        pattern: '^#\[path = "[a-z_]+\.rs"\]$'
+        glob: crates/ordeal-lrat/src/kernel.rs
+        min: 3
+      - kind: count-max            # exactly three — a fourth would make the sentence false
+        pattern: '^#\[path = "[a-z_]+\.rs"\]$'
+        glob: crates/ordeal-lrat/src/kernel.rs
+        max: 3
+
+  - id: FV-NO-AXIOM-IN-MODEL-GATE
+    doc: docs/formal-verification.md
+    text: "the Lean CI job fails on any `^axiom` in a generated model"
+    evidence:
+      - kind: count-min
+        pattern: '- name: Generated models carry no axioms'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: FV-KANI
+    doc: docs/formal-verification.md
+    text: "bounded model checking at widths 8/32/64, run by the non-blocking `Kani proofs` workflow"
+    evidence:
+      - kind: file-exists
+        path: crates/ordeal/src/blast/proofs.rs
+      - kind: count-min
+        pattern: 'widths 8/32/64'
+        glob: crates/ordeal/src/blast/proofs.rs
+        min: 1
+      - kind: count-min
+        pattern: '^name: Kani proofs$'
+        glob: .github/workflows/kani.yml
+        min: 1
+      - kind: count-min
+        pattern: '^    continue-on-error: true$'
+        glob: .github/workflows/kani.yml
+        min: 1
+
+  - id: FV-TR035-DIFFERENTIAL
+    doc: docs/formal-verification.md
+    text: "a step of the required *Lean model + soundness proof* job"
+    evidence:
+      - kind: count-min
+        pattern: '^   - `Lean model \+ soundness proof`$'
+        glob: CONTRIBUTING.md
+        min: 1
+      - kind: count-min
+        pattern: 'run: lake exe diffcheck /tmp/lrat-corpus'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: FV-DERIVED-OPS-NODES
+    doc: docs/formal-verification.md
+    text: "lowered as nodes on every path since v0.28.0, so no rewrite of them is trusted"
+    evidence:
+      - kind: count-min
+        pattern: 'self\.lower_with\(AigOptions::default\(\), DerivedOps::Nodes\)'
+        glob: crates/ordeal/src/solver.rs
+        min: 1
+
+  - id: FV-OVERFLOW-CHECKS
+    doc: docs/formal-verification.md
+    # The proofs assume fail-on-overflow; the release profile makes the shipped checker match.
+    evidence:
+      - kind: count-min
+        pattern: '^\[profile\.release\.package\.ordeal-lrat\]\noverflow-checks = true$'
+        glob: Cargo.toml
+        min: 1
+
+  # ── docs/consuming-ordeal.md ──────────────────────────────────────────────
+  - id: CONS-DEP-VERSION
+    doc: docs/consuming-ordeal.md
+    text: 'ordeal = "0.34"'
+    epoch: >-
+      The workspace version. A release bump makes this red until the
+      dependency line is bumped with it (the doc must name the version that
+      carries the API it describes).
+    evidence:
+      - kind: count-min
+        pattern: '^version = "0\.34\.\d+"$'
+        glob: Cargo.toml
+        min: 1
+
+  - id: CONS-EDITION
+    doc: docs/consuming-ordeal.md
+    text: "Requires a Rust toolchain with **edition 2024** support (rustc ≥ 1.85)"
+    epoch: *epoch-rust
+    evidence:
+      - kind: count-min
+        pattern: '^edition = "2024"$'
+        glob: Cargo.toml
+        min: 1
+
+  - id: CONS-SEND-SYNC
+    doc: docs/consuming-ordeal.md
+    text: "guaranteed by a compile-time assertion in ordeal's test suite"
+    evidence:
+      - kind: count-min
+        pattern: 'fn assert_send_sync<T: Send \+ Sync>\(\) \{\}'
+        glob: crates/ordeal/src/solver.rs
+        min: 1
+      - kind: count-min
+        pattern: 'assert_send_sync::<(Solver|BvTerm|crate::term::BoolTerm|CheckResult|Certificate|Model)>\(\);'
+        glob: crates/ordeal/src/solver.rs
+        min: 6
+
+  - id: CONS-SATWITNESS-THEOREMS
+    doc: docs/consuming-ordeal.md
+    text: "All four depend only on Lean's three standard axioms, pinned in CI"
+    epoch: *epoch-proofs
+    evidence:
+      - kind: count-min
+        pattern: '^#print axioms kernel\.spec\.(check_sat_sound|check_binding_sound|verdicts_exclusive)$'
+        glob: lean/AxiomCheck.lean
+        min: 3
+      - kind: count-min
+        pattern: '^theorem check_sat_satisfiable\b'
+        glob: lean/SatWitness.lean
+        min: 1
+
+  - id: CONS-DERIVED-OPS-NODES
+    doc: docs/consuming-ordeal.md
+    text: "Every path lowers them as nodes since v0.28.0"
+    evidence:
+      - kind: count-min
+        pattern: 'self\.lower_with\(AigOptions::default\(\), DerivedOps::Nodes\)'
+        glob: crates/ordeal/src/solver.rs
+        min: 1
+
+  - id: CONS-SBOM-VEX
+    doc: docs/consuming-ordeal.md
+    text: "each GitHub Release carries a CycloneDX SBOM"
+    evidence:
+      - kind: count-min
+        pattern: 'ordeal-\$\{BARE\}\.(cdx|vex)\.json'
+        glob: .github/workflows/release.yml
+        min: 2
+      - kind: file-exists
+        path: .github/workflows/vex-reissue.yml
+      - kind: file-exists
+        path: scripts/vex.py
+
+  - id: CONS-OVERFLOW-CHECKS
+    doc: docs/consuming-ordeal.md
+    text: "enable `overflow-checks` for `ordeal-lrat`"
+    evidence:
+      - kind: count-min
+        pattern: '^\[profile\.release\.package\.ordeal-lrat\]\noverflow-checks = true$'
+        glob: Cargo.toml
+        min: 1
+
+  - id: CONS-V3-NOT-COVERED
+    doc: docs/consuming-ordeal.md
+    text: "What a v3 recheck does *not* cover: the copy of your `BoolTerm`s into the kernel's tree"
+    evidence:
+      - kind: count-min
+        pattern: 'pub fn (of_bools|of_ext_bools|to_bool|to_ext_bool)\('
+        glob: crates/ordeal/src/mirror.rs
+        min: 4
+
+  # ── CHANGELOG.md (the latest release's trust statement) ──────────────────
+  - id: CHANGELOG-0-34-TRUSTED
+    doc: CHANGELOG.md
+    text: "What stays trusted: the SMT-LIB / Verus front ends and the 1:1 copy into the kernel's mirror type"
+    evidence:
+      - kind: file-exists
+        path: crates/ordeal-lrat/src/term_kernel.rs
+      - kind: count-min
+        pattern: '^theorem (tree_unsat_sound|ext_tree_unsat_sound|tree_model_sound|ext_tree_model_sound)\b'
+        glob: lean/TreeFlatten.lean
+        min: 4

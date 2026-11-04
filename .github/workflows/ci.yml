@@ -102,6 +102,17 @@ jobs:
       # is a vacuous-green citation (the VER-016/017 class).
       - name: Check rivet verification citations
         run: scripts/check_verification_citations.sh
+      # TR-074 / VER-074: the documentation claim gate. claims.yaml binds
+      # every load-bearing doc claim (what is proven, by which theorem, what
+      # is trusted, the stated numbers, the badges) to evidence re-derived
+      # from the tree; the self-test first shows every predicate kind can
+      # fail. Lives in this REQUIRED job on purpose: a new job would not be.
+      # rivet: verifies VER-074
+      - name: Documentation claims bound to evidence (claims.yaml, TR-074)
+        run: |
+          set -euo pipefail
+          python3 scripts/claim_check.py --self-test
+          python3 scripts/claim_check.py claims.yaml
       # rivet: verifies VER-053
       # #186: nothing in the release may run, sign, attest or publish
       # before the release gate job.
@@ -470,23 +481,10 @@ jobs:
             echo "::error::proofs must stay sorry-free; found $total sorry-bearing declaration(s)"
             exit 1
           fi
-      - name: Guard lean/README.md against status drift (issue #53)
-        working-directory: lean
-        run: |
-          # The soundness proof is complete and gated by the step above. The doc
-          # must not drift back to describing it as open/unfinished, or a reader
-          # (or an external reviewer) wrongly concludes the theorem is
-          # undischarged — exactly the stale-doc regression of issue #53. One-way
-          # binding: if the proof ever genuinely regressed, the sorry-budget step
-          # above fails first, so this guard only bites when the proof IS complete
-          # and the prose says otherwise.
-          stale=$(grep -niE 'no proof yet|tracked and open|single tracked .?sorry|one tracked .?sorry|still open \(issue #12\)|until the theorem is discharged|kernel-model-drift|committed .?Kernel\.lean|does not re-run Aeneas|remaining P2 obligation' README.md || true)
-          if [ -n "$stale" ]; then
-            echo "$stale"
-            echo "::error file=lean/README.md::lean/README.md describes the soundness proof as open, but it is discharged and gated above (see issue #53). Update the prose to match the proved state."
-            exit 1
-          fi
-          echo "lean/README.md status wording is consistent with the proved, gated state."
+      # The issue #53 guard (lean/README.md must not drift back to describing
+      # the discharged proof as open) moved to claims.yaml
+      # (LEAN-README-STATUS-NOT-OPEN, same pattern), run by the required
+      # Test job alongside every other documentation claim (TR-074).
       # ── TR-035 (issue #47): dual-mechanisation differential ─────────────
       # Cross-check ordeal's own verified checker against Lean core's
       # INDEPENDENTLY verified LRAT checker (Std.Tactic.BVDecide.LRAT.check,
