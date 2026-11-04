@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.35.0] - 2026-11-05
+
+**The public claims are gated** (TR-074). The trusted base shrank four
+times between 0.31.0 and 0.34.0, and the documents had not kept up. Every
+load-bearing claim in README, ARCHITECTURE, AGENTS, CONTRIBUTING,
+`lean/README.md`, `docs/formal-verification.md` and
+`docs/consuming-ordeal.md` was checked against the code and the proofs,
+and corrected where it was false, stale or an overclaim. The claims are now
+bound to re-derivable evidence in `claims.yaml` and checked by
+`scripts/claim_check.py` in the required Test job: a claim that drifts
+from the code fails the build, and so does a removed overclaim that
+reappears. No code or proof changed; CLI output and certificate bundles are
+byte-identical to 0.34.0.
+
 **The documentation claims are gated** (TR-074). Between v0.31.0 and
 v0.34.0 the trusted base shrank four times, and prose written before
 those releases still said the flattener, the names or the derived-op
@@ -1986,7 +2000,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.34.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.35.0
 [0.34.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.34.0
 [0.33.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.33.0
 [0.32.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.32.1
