@@ -116,7 +116,7 @@ jobs:
       # `// rivet: verifies <ID>` markers name (and FAILS on a marker that
       # matches no test), and the mapped XML is uploaded. The release gate
       # downloads it from the tagged commit's own main CI run.
-      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2
         with:
           tool: cargo-nextest@0.9.146
       - name: Test results as rivet evidence (nextest JUnit, mapped to measures)
@@ -152,7 +152,7 @@ jobs:
       # Cargo.lock. Negative-controlled 2026-09-24: RUSTSEC-2020-0071 in the
       # shipped closure -> blocking red; same crate dev-only -> blocking
       # green, advisory red.
-      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2
         with:
           tool: cargo-deny@0.20.2
       - name: Advisories — shipped closure (BLOCKING)
@@ -282,7 +282,7 @@ jobs:
           cp "$SBOM" /tmp/smoke.cdx.json
       # #146: the EXACT release VEX recipe, per PR, so it cannot first fail
       # at a tag cut (the #135 lesson).
-      - uses: taiki-e/install-action@68a389c788b2cd04016ce8c80ee23b80d2ab3d68 # v2
+      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2
         with:
           tool: cargo-audit@0.22.2
       - name: VEX generation smoke (release recipe)
