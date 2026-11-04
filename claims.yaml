@@ -850,3 +850,26 @@ claims:
         pattern: '^theorem (tree_unsat_sound|ext_tree_unsat_sound|tree_model_sound|ext_tree_model_sound)\b'
         glob: lean/TreeFlatten.lean
         min: 4
+
+  # Drift BACK is the other half of drift. The 2026-11-04 audit removed these
+  # overclaims and stale statements. Each was true of some earlier release and
+  # false since v0.31–v0.34, so none may reappear in the gated documents. The
+  # positive claims above only prove that the right sentences are present; this
+  # proves the wrong ones stay gone. (Orchestrator negative control: appending
+  # "Only `ordeal-lrat` is trusted" to README.md passed the gate before this
+  # claim existed.) CHANGELOG.md and docs/design/ are dated records and are
+  # deliberately not in the glob.
+  - id: DOCS-NO-STALE-TRUST-OVERCLAIMS
+    doc: docs/formal-verification.md
+    evidence:
+      - kind: count-max
+        pattern: '(?i)only\s+the\s+checker\s+is\s+trusted|only\s+`?ordeal-lrat`?\s+is\s+trusted|sole\s+trusted\s+component|only\s+proven\s+component|checker\s+is\s+the\s+only\s+proven|edition\s+2021|default\s+`?check`?\s+still\s+rewrites|intended\s+query\s+is\s+not\s+proved|closing\s+that\s+gap\s+is\s+tracked\s+in|phase-0:\s+prints\s+status|TRUSTED\s+\(and\s+formally\s+verified\)'
+        glob:
+          - README.md
+          - ARCHITECTURE.md
+          - AGENTS.md
+          - CONTRIBUTING.md
+          - lean/README.md
+          - docs/formal-verification.md
+          - docs/consuming-ordeal.md
+        max: 0

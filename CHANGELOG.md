@@ -18,7 +18,7 @@ trusted-base sentence has one home and is verbatim in every document
 that carries it.
 
 ### Added
-- **`claims.yaml` and `scripts/claim_check.py`** (TR-074): 62 claims over
+- **`claims.yaml` and `scripts/claim_check.py`** (TR-074): 63 claims over
   `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, `CONTRIBUTING.md`,
   `lean/README.md`, `docs/formal-verification.md`,
   `docs/consuming-ordeal.md` and the latest `CHANGELOG` entry — theorem

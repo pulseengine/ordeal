@@ -3170,3 +3170,17 @@ artifacts:
         target: VER-074
       - type: part-of-execution
         target: VE-064
+
+  - id: VV-138
+    type: verification-verdict
+    title: "VER-074 pass — drift back is gated: a reintroduced overclaim (re-wrapped over two lines) fails DOCS-NO-STALE-TRUST-OVERCLAIMS; 63/63 claims hold on the pristine tree"
+    status: implemented
+    description: "Orchestrator re-verification, 2026-11-04. The agent's 62-claim ledger passed with the removed overclaim 'Only ordeal-lrat is trusted' appended to README.md (rc 0): only presence was gated, not absence. Added DOCS-NO-STALE-TRUST-OVERCLAIMS (count-max 0 over eleven removed phrasings across the seven gated documents). Negative control: the same append, re-wrapped, gives 'count grew: 1 > recorded max 0', rc 1; restored with git checkout; pristine tree 63/63, rc 0. Also re-ran: a sorry appended to lean/TreeFlatten.lean is red (count grew 1 > 0); self-test 28/28."
+    fields:
+      evidence: python3 scripts/claim_check.py claims.yaml (63/63; control rc 1)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-074
+      - type: part-of-execution
+        target: VE-064
