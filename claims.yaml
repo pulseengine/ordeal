@@ -541,7 +541,13 @@ claims:
         min: 1
       - kind: count-max            # no hand-written proof declares an axiom either
         pattern: '^axiom\s'
-        glob: 'lean/*.lean'
+        # [!K]: not the generated, gitignored lean/Kernel.lean. A stale local
+        # copy (one regenerated before TR-038's lit_var still carried the
+        # unsigned_abs axiom) turned this red on a developer checkout while
+        # CI, which has no Kernel.lean in the Test job, stayed green. The
+        # generated model's zero is the Lean job's `^axiom` step after regen,
+        # bound by the count-min above.
+        glob: 'lean/[!K]*.lean'
         max: 0
 
   - id: LEAN-README-THREE-AXIOMS
@@ -751,14 +757,14 @@ claims:
   # ── docs/consuming-ordeal.md ──────────────────────────────────────────────
   - id: CONS-DEP-VERSION
     doc: docs/consuming-ordeal.md
-    text: 'ordeal = "0.34"'
+    text: 'ordeal = "0.35"'
     epoch: >-
       The workspace version. A release bump makes this red until the
       dependency line is bumped with it (the doc must name the version that
       carries the API it describes).
     evidence:
       - kind: count-min
-        pattern: '^version = "0\.34\.\d+"$'
+        pattern: '^version = "0\.35\.\d+"$'
         glob: Cargo.toml
         min: 1
 
