@@ -140,9 +140,8 @@ The same program, runnable:
 A deliberately closed fragment of QF_BV, bit-widths 1 to 128 (SMT-LIB names):
 
 - arithmetic: `bvadd bvsub bvmul bvudiv bvurem bvneg bvsdiv bvsrem`
-  (`bvneg bvsdiv bvsrem` with proven composite rules since v0.28.0;
-  `ordeal check` still lowers them through the older core rewrite by
-  default, `--with-query` through the proven rules)
+  (`bvneg bvsdiv bvsrem` are DAG nodes with proven composite rules,
+  lowered as nodes on every path since v0.28.0)
 - bitwise: `bvand bvor bvxor bvnot`
 - shifts and rotation: `bvshl bvlshr bvashr rotate_right rotate_left`
 - structure: `extract concat zero_extend sign_extend ite`
@@ -166,42 +165,45 @@ formula → bit-blast → AIG → CNF → SAT solver ──unsat──▶ LRAT p
                                                    ordeal-lrat checker (trusted)
 ```
 
-Only `ordeal-lrat` is trusted. It is a small, dependency-free crate. The Rust
-source is translated to Lean 4 with [Aeneas](https://github.com/AeneasVerif/aeneas)
-and proven sound: an accepted proof means the **CNF** really is
-unsatisfiable, and an accepted assignment really satisfies it. CI regenerates
-the Lean model from the Rust source before every proof build, so the proof
-cannot drift from the checker's code.
+The only trusted crate is `ordeal-lrat`: dependency-free, and its checks
+are translated to Lean 4 with [Aeneas](https://github.com/AeneasVerif/aeneas)
+and proven sound — an accepted LRAT proof refutes the **CNF**
+(`lrat_check_sound`), an accepted assignment satisfies it
+(`check_sat_sound`), and the proven lowering and the proven checks stacked
+on them (next paragraph) carry both verdicts up to the query the caller
+built. CI regenerates the Lean model from the Rust source before every
+proof build, so the proofs cannot drift from the code.
 
-**What the checker does not cover.** It certifies the CNF it is given, not
-your original query. The translation from query to CNF (parsing, rewriting,
-bit-blasting, CNF encoding) is not proven. A bug there can produce a wrong
-answer with a valid certificate; [#182](https://github.com/pulseengine/ordeal/issues/182)
-was such a bug. Since #192 phase 3 the lowering from the term DAG to the
-CNF is proven end to end and is the code the solver runs: the proven
-rules, the proven DAG encoder, the proven folding + hashing pass and the
-proven Tseitin encoder, composed with the checker's soundness theorem
-(`dag_refuted`: an accepted certificate refutes the term DAG). Since
-phase 4 that proven lowering lives in the trusted crate and a certificate
-can carry the term DAG (`ordeal-cert/v2`, `Solver::check_with_query`,
-`ordeal check --with-query`): `ordeal_lrat::check_query` re-encodes the
-DAG itself and checks the proof against the CNF it produced
-(`check_query_sound`, no side conditions), so a consumer re-checking a v2
-bundle certifies the query, not a CNF it has to take on faith. Since
-phase 5 (v0.28.0) the five formerly derived ops (`bvnot bvneg bvrotl
-bvsdiv bvsrem`) are DAG nodes with proven rules, so a v2 bundle carries
-the operation rather than its rewrite. Since phase 6 the `sat` direction
-is symmetric on that path: `ordeal_lrat::check_query_model` evaluates the
-term DAG under the model's input bits with the proven encoder and
-simulator (`check_query_model_sound`, the same semantics
-`check_query_sound` negates), so `check_with_query` returns `Sat` only
-after the trusted crate confirmed the model satisfies the query, and a v2
-SAT bundle carries the query and the inputs for an independent re-check.
-Everything above the DAG — building the DAG from the terms (incl. which
-`Var` node a model value is written into), rewriting, the front ends — is
-defended by tests and by a differential against Z3, not by proof.
-Closing that gap is tracked in [#192](https://github.com/pulseengine/ordeal/issues/192).
-Details and exact scope: [docs/formal-verification.md](docs/formal-verification.md).
+**What the proofs cover, and what they do not.** The checker certifies the
+CNF it is given, not your original query; a bug in the translation from
+query to CNF would give a wrong answer with a valid certificate, and
+[#182](https://github.com/pulseengine/ordeal/issues/182) was such a bug.
+That translation is now proven stage by stage
+([#192](https://github.com/pulseengine/ordeal/issues/192)), and the code the
+proofs are about is the code every entry point runs: the lowering from the
+term DAG to the CNF (`dag_refuted`, v0.26.0); the query re-check that
+re-encodes the DAG inside the trusted crate and checks the proof against
+the CNF *it* produced (`check_query_sound`, v0.27.0) and its SAT twin
+(`check_query_model_sound`, v0.29.0); the term-to-DAG correspondence
+(`check_term_unsat_sound` / `check_term_model_sound`, v0.31.0, on every
+path since v0.32.0); the array / uninterpreted-function lowering
+(`check_sliver_unsat_sound` / `check_sliver_model_sound`, v0.33.0); and
+the flattening of the caller's trees — variables, arrays and functions by
+name — into the node lists those checks are stated over
+(`tree_unsat_sound`, `ext_tree_unsat_sound`, `tree_model_sound`,
+`ext_tree_model_sound`, v0.34.0). Every one of these theorems is
+`sorry`-free and pinned axiom-clean in `lean/AxiomCheck.lean`, and
+whatever a trusted check rejects is answered `Unknown`, never a verdict.
+What stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1
+copy of the trees into the kernel's mirror type
+(`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
+toolchain — Lean's kernel with its three standard axioms, the pinned
+Charon/Aeneas translation of the Rust source, and rustc. The two pieces of
+Rust are defended by tests at every width and by the differential against
+Z3, not by proof; the translation by the TR-035 differential against Lean
+core's own LRAT checker; Lean's kernel and rustc are assumed. Exact scope,
+theorem by theorem:
+[docs/formal-verification.md](docs/formal-verification.md).
 
 ## Documentation
 

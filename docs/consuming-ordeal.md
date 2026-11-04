@@ -7,7 +7,7 @@ guide for trying it as a dependency and reporting back.
 
 ```toml
 [dependencies]
-ordeal = "0.23"
+ordeal = "0.34"
 ```
 
 `ordeal-lrat` (the trusted checker) is pulled transitively. The default
@@ -130,7 +130,8 @@ match Solver::prove_equiv(
 }
 ```
 
-`cert.recheck()` runs the formally-verified `ordeal-lrat` checker over
+`cert.recheck()` runs the `ordeal-lrat` checker — its soundness proven in
+Lean 4 (`lrat_check_sound`, `docs/formal-verification.md`) — over
 `(cert.cnf, cert.lrat)` — the same validation ordeal did internally, now
 reproducible on your side or in a separate audit step. See the runnable
 [`translation_validation` example](../crates/ordeal/examples/translation_validation.rs)
@@ -175,7 +176,7 @@ depth and per property. That independence is where your speedup lives:
   Keep the original.
 - **`Unsat` is the only verdict that authorizes a transformation.** It
   carries a self-contained proof — the refuted CNF (`cert.cnf`) and the LRAT
-  refutation (`cert.lrat`) — that the formally-verified `ordeal-lrat`
+  refutation (`cert.lrat`) — that the Lean-proven `ordeal-lrat`
   checker already validated. Since v0.32.0 (TR-070) it validated more than
   the proof: before `check` returned, the trusted crate related your
   assertions (flattened as asked) to the DAG the solver lowered them to
@@ -195,6 +196,14 @@ depth and per property. That independence is where your speedup lives:
 - **Anything the trusted crate rejects is `Unknown`**, on every entry
   point — the solver, the search, the proof and the model are all
   untrusted, and a rejection never becomes a verdict.
+- **What you are still trusting.** What stays trusted, on every path: the
+  SMT-LIB / Verus front ends, the 1:1 copy of the trees into the kernel's
+  mirror type (`crates/ordeal/src/mirror.rs`, one `match` arm per
+  constructor), and the toolchain — Lean's kernel with its three standard
+  axioms, the pinned Charon/Aeneas translation of the Rust source, and
+  rustc. (Single-sourced in `docs/formal-verification.md`; gated by
+  `claims.yaml`.) If you build terms through the Rust API, the front ends
+  are not in your path at all.
 
 ## Reporting trials back
 
@@ -337,11 +346,9 @@ asked about rather than its rewrite. A block that uses one of them is
 tagged `"encoding": "ordeal-dag/v2"` with `recheck.min_version` `0.28.0`
 (a v0.27.0 reader refuses it as unsupported rather than misreading it); a
 block without them stays `ordeal-dag/v1`, and readers from v0.28.0 accept
-both. Only `check_with_query` / `--with-query` lower them as nodes: the
-default `check` still rewrites them first, so its certificates are
-byte-identical to v0.27.0's (for a few queries the two paths' CNFs differ
-in variable numbering — both certified; `docs/design/query-cnf-gap.md`,
-phase 5).
+both. Every path lowers them as nodes since v0.28.0 (`DerivedOps::Nodes`
+in `solver.rs`; the old `lowering.rs` rewrite is kept only for the
+differential tests that compare it against the proven nodes).
 
 Since v0.29.0 (#192 phase 6, TR-065) the `sat` direction is symmetric on
 this path. `QueryCheckResult::Sat` carries a `QuerySatCertificate`: the

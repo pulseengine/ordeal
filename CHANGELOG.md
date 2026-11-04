@@ -7,6 +7,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The documentation claims are gated** (TR-074). Between v0.31.0 and
+v0.34.0 the trusted base shrank four times, and prose written before
+those releases still said the flattener, the names or the derived-op
+rewrite were trusted, or flattened four techniques into "formally
+verified". Every load-bearing claim in the public documents is now
+marked in `claims.yaml`, bound to evidence `scripts/claim_check.py`
+re-derives from the tree, and checked by the required `Test` job; the
+trusted-base sentence has one home and is verbatim in every document
+that carries it.
+
+### Added
+- **`claims.yaml` and `scripts/claim_check.py`** (TR-074): 63 claims over
+  `README.md`, `ARCHITECTURE.md`, `AGENTS.md`, `CONTRIBUTING.md`,
+  `lean/README.md`, `docs/formal-verification.md`,
+  `docs/consuming-ordeal.md` and the latest `CHANGELOG` entry — theorem
+  names present in their Lean files and pinned axiom-clean in
+  `lean/AxiomCheck.lean` (the `kernel.spec.*` pin list in
+  `docs/formal-verification.md` equals the file's, both ways), no
+  `sorry` / `native_decide` / `axiom` form in the hand-written proofs,
+  every stated number derived (`encode_node_spec` arms = `DagNode`
+  variants), the badges, the release targets, the signing and SBOM / VEX
+  steps, the dependency-free default build, the CI gates each document
+  names, the required-checks list in `CONTRIBUTING.md` against the
+  `ci.yml` job names, and the trusted-base sentence verbatim in five
+  documents against its single source. Epochs: the Charon/Aeneas
+  revisions (`lean/toolchain-pins.env`, set-equal with `lakefile.lean`),
+  the Lean toolchain, the Rust edition and the workspace version each
+  turn the gate red when they move, so a pin or version bump re-opens
+  the claims that depend on it rather than greening silently (on a
+  release bump, update the dependency line in `docs/consuming-ordeal.md`
+  with it). The script is the pulseengine-claude `claim-verification`
+  reference adapted (whitespace-normalised `verbatim`, an `epoch` field,
+  a 28-case self-test over every predicate kind in both directions). Ten
+  negative controls (VE-064), each red for the named claim and restored
+  byte for byte.
+
+### Changed
+- **Prose corrected to what the tree shows** (TR-074). `README.md`,
+  `docs/consuming-ordeal.md` and `ARCHITECTURE.md` said the default
+  `check` path still rewrote `bvneg` / `bvsdiv` / `bvsrem` through the
+  old `lowering.rs` rewrite — false since v0.28.0, every path lowers
+  them as proven nodes. `README.md` said everything above the DAG was
+  unproven — stale since v0.32.0–v0.34.0; the paragraph now walks the
+  proven chain theorem by theorem. "Only `ordeal-lrat` is trusted",
+  "the checker is the only proven component", "just the small checker"
+  and "formally-verified checker" are replaced by the precise statement:
+  the lowering and the query, term, sliver and tree checks are proven in
+  Lean 4 over the Aeneas model, and what stays trusted is the SMT-LIB /
+  Verus front ends, the 1:1 mirror copy and the toolchain. `AGENTS.md`
+  said edition 2021 (it is 2024), a phase-0 CLI and a future P4;
+  `lean/README.md` said `kernel.rs` is 486 lines (it is one translation
+  unit of four files) and that the query encoding is not proved;
+  `lean/lakefile.lean` said the `check_sat` family is conditional on an
+  `unsigned_abs` axiom (it is axiom-clean, pinned); `docs/consuming-ordeal.md`
+  pinned `ordeal = "0.23"`; `docs/formal-verification.md` located the
+  pins in `regen.sh`, called phase 5 planned and the TR-035 differential
+  future work. The Kani harnesses are named as bounded model checking in
+  a non-blocking workflow, the Z3 oracle as a differential, never as
+  proof. `CONTRIBUTING.md` lists the checks branch protection requires.
+- The issue #53 guard on `lean/README.md` (must not describe the proof
+  as open) moves from the Lean CI job into `claims.yaml`
+  (`LEAN-README-STATUS-NOT-OPEN`), same pattern, now run by `Test`.
+
 ## [0.34.0] - 2026-10-21
 
 **The proven flattener** (#192, TR-073). Every answer now rests on a

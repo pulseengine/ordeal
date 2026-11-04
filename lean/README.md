@@ -6,9 +6,12 @@ gated in CI (the *Lean model + soundness proof* job). Issue #12 is discharged.
 
 ## The obligation
 
-The sole trusted component is `crates/ordeal-lrat` (a small, dependency-free,
-RUP-only textual LRAT checker; its string-free checking core, `kernel.rs`, is
-486 lines). Its soundness theorem:
+The sole trusted crate is `crates/ordeal-lrat` (dependency-free; a RUP-only
+textual LRAT checker whose string-free checking core is `kernel.rs`, which
+since #192 phase 4 `#[path]`-includes the proven lowering
+`blast_kernel.rs`, the sliver check `sliver_kernel.rs` and the flattener
+`term_kernel.rs` as ONE Aeneas translation unit). The checker's soundness
+theorem:
 
 > If `ordeal_lrat::check(cnf, cert)` returns `Ok(())`, then `cnf` is
 > unsatisfiable.
@@ -328,6 +331,57 @@ theorem verdicts_exclusive
   which is why the spec speaks of "a witnessing literal", not "every literal
   in range".
 
+## Proof files
+
+Every `.lean` file in this directory, what it is and whether it is built by
+the required *Lean model + soundness proof* job. `claims.yaml` checks this
+list against the directory, both ways.
+
+- `Kernel.lean` — the Aeneas-generated model of `crates/ordeal-lrat`
+  (checker + lowering + sliver check + flattener). A build product of
+  `regen.sh`, `.gitignore`d, never committed. Default `lake build` target.
+- `Sound.lean` — the pure RUP checker, `pure_check_sound`,
+  `kernel_refines_pure`, `lrat_check_sound`. Default target.
+- `SatWitness.lean` — `check_sat_sound`, `check_sat_satisfiable`,
+  `check_binding_sound`, `verdicts_exclusive`. Default target.
+- `BlasterProof.lean` — the pure AIG simulator and the bitwise rules.
+  Default target.
+- `BlasterArith.lean` — ripple-carry add / sub / ult. Default target.
+- `BlasterCmp.lean` — comparisons, equality, ite, structural ops. Default
+  target.
+- `BlasterShift.lean` — the barrel shifter at every width. Default target.
+- `BlasterMul.lean` — the shift-add multiplier. Default target.
+- `BlasterDiv.lean` — the restoring divider. Default target.
+- `BlasterRotr.lean` — rotate-right at every width. Default target.
+- `BlasterTseitin.lean` — `tseitin_sat_preserving`, `tseitin_satisfiable`,
+  `tseitin_refutes_outputs`. Default target.
+- `BlasterFrame.lean` — frame lemmas and the encoder helpers' specs.
+  Default target.
+- `BlasterDerived.lean` — the five formerly derived ops as proven rules.
+  Default target.
+- `BlasterCompact.lean` — `compact_sound`. Default target.
+- `BlasterDag.lean` — the DAG semantics `dagSim` and `encode_sound`.
+  Default target.
+- `BlasterCapstone.lean` — `dag_refuted`, `dag_refuted_raw`. Default
+  target.
+- `QueryCheck.lean` — `dag_wf_spec`, `check_query_sound`,
+  `check_query_refutes_cnf`, `check_query_model_sound`,
+  `query_verdicts_exclusive`. Default target.
+- `TermCheck.lean` — `check_term_dag_sound`, `check_term_unsat_sound`,
+  `check_term_model_sound`, `term_verdicts_exclusive`,
+  `check_input_value_sound`. Default target.
+- `SliverCheck.lean` — `check_sliver_lowering_sound`,
+  `check_sliver_unsat_sound`, `check_sliver_model_sound`,
+  `sliver_verdicts_exclusive`. Default target.
+- `TreeFlatten.lean` — `flatten_tree_sound` and the six tree capstones.
+  Default target.
+- `AxiomCheck.lean` — the `#guard_msgs`-pinned `#print axioms` of every
+  capstone (the axiom gate). Default target.
+- `DiffCheck.lean` — the TR-035 dual-mechanisation differential
+  executable (`lake exe diffcheck`), run by the same CI job.
+- `lakefile.lean` — the Lake package: the Aeneas support library pinned to
+  the translator's revision, one `lean_lib` per file above.
+
 ## Trust boundary (what the proof does and does not cover)
 
 The theorem is about the **Aeneas-generated model** (`Kernel.lean`). That
@@ -349,6 +403,16 @@ witnessed adversarially by the TR-035 dual-mechanisation differential
 independently verified `Std.Tactic.BVDecide.LRAT.check` on a shared
 pristine + mutant certificate corpus, and any verdict disagreement fails CI.
 
+Above the checker, the same residual applies to every other theorem in this
+directory (they are all stated over the same generated model), and two
+pieces of Rust outside the trusted crate are trusted without proof. What
+stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1 copy
+of the trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`,
+one `match` arm per constructor), and the toolchain — Lean's kernel with
+its three standard axioms, the pinned Charon/Aeneas translation of the Rust
+source, and rustc. (Single-sourced in `docs/formal-verification.md`; gated
+by `claims.yaml`.)
+
 Two developer notes:
 - The Aeneas *support library* carries a few `sorry`s of its own
   (`Aeneas/Std/{Slice,StringIter}.lean`). `#print axioms` above confirms
@@ -362,9 +426,12 @@ Two developer notes:
   Worth reporting to AeneasVerif/aeneas.
 
 With the theorem discharged, an `Unsat` from ordeal is backed by a certificate
-whose acceptance criterion is **formally proved** to imply unsatisfiability
-of the CNF it was checked against (modulo the residual trust base above;
-that the CNF encodes the intended query is not proved, see #182/#192) — not merely validated by a
+whose acceptance criterion is **proved in Lean 4** to imply unsatisfiability
+of the CNF it was checked against — and, through the proven lowering and
+checks of the sections above (`check_query_sound`, `check_term_unsat_sound`,
+`check_sliver_unsat_sound`, `tree_unsat_sound`, `ext_tree_unsat_sound`), of
+the query as the caller built it, modulo the trust boundary stated above
+(#182 was the bug this closes; #192 tracks it). Not merely validated by a
 mutation-tested Rust checker. There is no open mathematics and no open
 freshness gap: the model is regenerated under the same required CI job that
 proves it.

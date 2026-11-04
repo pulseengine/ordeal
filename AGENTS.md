@@ -17,15 +17,28 @@ Ordeal's design is the **certifying-algorithm** pattern (CompCert-style;
 blueprint = Lean 4 `bv_decide`, OOPSLA 2025):
 
 > The **solver is untrusted**. It emits a machine-checkable **LRAT UNSAT
-> certificate**. A small, **formally-verified checker** validates it. **Only
-> the checker is trusted.** A bug in the solver can at worst fail to produce a
-> valid certificate — it can never make a wrong answer be accepted.
+> certificate**. A small checker whose soundness is **proven in Lean 4**
+> (over the Aeneas translation of its Rust source) validates it, and the
+> same trusted crate re-derives the CNF from the query the caller built.
+> **Only that crate, plus the trusted base named below, is trusted.** A bug
+> in the solver can at worst fail to produce a valid certificate — it can
+> never make a wrong answer be accepted.
+
+What stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1
+copy of the trees into the kernel's mirror type
+(`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
+toolchain — Lean's kernel with its three standard axioms, the pinned
+Charon/Aeneas translation of the Rust source, and rustc. (That sentence is
+single-sourced in `docs/formal-verification.md` and gated by `claims.yaml`;
+do not paraphrase it.)
 
 This is not aspirational. It governs every decision:
 
 1. **No unchecked answers.** An `Unsat` verdict is only returned once the
-   verified checker has validated its certificate. A `Sat` verdict carries a
-   model that is trivially self-checkable.
+   trusted crate has validated its certificate against the CNF it re-derived
+   from the query. A `Sat` verdict is returned only after the trusted crate
+   confirmed the model satisfies the query (`check_query_model`,
+   `check_tree_model`).
 2. **Conservative `Unknown`.** If ordeal cannot decide (or cannot yet blast an
    op), it returns `Unknown`. Callers (loom/synth) MUST treat `Unknown`
    conservatively: **do not optimize, do not accept the transformation.** This
@@ -34,7 +47,7 @@ This is not aspirational. It governs every decision:
    widen it silently — a new operation needs a proven bit-blasting rule first.
 4. **Z3 is not trusted.** It is a development/CI differential oracle and a
    benchmark rival, behind the off-by-default `oracle` feature. It is not part
-   of the soundness argument, and ROADMAP phase P4 removes it from soundness
+   of the soundness argument; phase P4 (shipped) removed it from soundness
    reasoning entirely.
 5. **Proof-first.** An operation is added, then its bit-blasting rule is
    justified, then it is enabled. Never the reverse.
@@ -57,14 +70,20 @@ cargo build --features oracle
 cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 
-# Run the CLI (phase-0: prints status)
-cargo run --bin ordeal
+# Run the CLI on an SMT-LIB2 file (`-` for stdin)
+cargo run --bin ordeal -- check query.smt2
+
+# The documentation claim gate (claims.yaml, TR-074) — also a step of the
+# required Test job
+python3 scripts/claim_check.py
 ```
 
 ## Layout
 
 | Path | Purpose |
 |------|---------|
+| `crates/ordeal-lrat/` | **The trusted crate** (dependency-free): the LRAT checker, the proven lowering and the query / term / sliver / tree checks, proven in Lean 4 (`lean/`). |
+| `crates/ordeal/src/mirror.rs` | The trusted 1:1 copy of the caller's trees into the kernel's tree type. |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat`; result / certificate / model types. |
 | `crates/ordeal/src/oracle.rs` | Z3 differential oracle (behind `oracle` feature). |
@@ -76,7 +95,7 @@ verified checker) and `ROADMAP.md` for phases P0–P5.
 
 ## Conventions
 
-- Rust edition 2021.
+- Rust edition 2024 (`Cargo.toml`, workspace-wide).
 - Keep the default build dependency-free. New external dependencies must be
   justified and, where they affect soundness, sit *below* the trust boundary
   (the verified checker never depends on an untrusted crate for its guarantee).

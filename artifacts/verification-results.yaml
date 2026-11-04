@@ -3128,3 +3128,59 @@ artifacts:
         target: VER-073
       - type: part-of-execution
         target: VE-063
+
+  - id: VE-064
+    type: verification-execution
+    title: The documentation claim gate verified (VER-074)
+    status: implemented
+    description: "Audit of README.md, ARCHITECTURE.md, AGENTS.md, CONTRIBUTING.md, lean/README.md, docs/formal-verification.md, docs/consuming-ordeal.md, CHANGELOG 0.31.0–0.34.0 and lean/lakefile.lean against the code, the Lean files, lean/AxiomCheck.lean (48 #print axioms pins, every one \"[propext, Classical.choice, Quot.sound]\"), the CI workflows, the branch protection (gh api: Format, Clippy, Build (release), Build (wasm32-wasip2), Test, Reproducible build, Lean model + soundness proof, CaDiCaL backend (cadical feature)), the Cargo manifests and the release workflow. Findings fixed (false / stale / overclaim): README \"ordeal check still lowers them through the older core rewrite by default\" and docs/consuming-ordeal.md \"the default check still rewrites them first\" and the ARCHITECTURE lowering.rs row — false since v0.28.0 (solver.rs: lower_with(.., DerivedOps::Nodes); DerivedOps::Rewrite \"Since v0.28.0 no production path uses it\"); README \"Everything above the DAG … is defended by tests and by a differential against Z3, not by proof\" — stale since v0.32.0–v0.34.0; README \"Only ordeal-lrat is trusted\" and ARCHITECTURE \"the checker is the only proven component\" / \"just the small checker\" and AGENTS \"formally-verified checker … Only the checker is trusted\" — overclaims and flattening (the lowering and four checks are proven too; the mirror copy, the front ends and the toolchain are trusted); AGENTS \"Rust edition 2021\" — false (Cargo.toml edition = \"2024\"); AGENTS \"phase-0: prints status\" CLI and \"P4 removes\" — stale (check subcommand; P4 shipped); lean/README \"kernel.rs is 486 lines\" — false (2359 lines; one translation unit with blast_kernel.rs, sliver_kernel.rs, term_kernel.rs; the number is dropped) and \"that the CNF encodes the intended query is not proved\" — stale; lean/lakefile.lean \"the check_sat family is explicitly CONDITIONAL on UnsignedAbsSpec\" — stale (AxiomCheck pins check_sat_sound axiom-clean; the kernel uses lit_var); docs/formal-verification.md \"pinned … (lean/regen.sh)\" (the pins live in lean/toolchain-pins.env), \"kernel.rs is one file\", \"closing them is #192 phase 5, planned\" (shipped) and \"the target of the adversarial dual-mechanisation work\" (shipped, CI-gated); docs/consuming-ordeal.md ordeal = \"0.23\" (0.34) and \"formally-verified ordeal-lrat\" twice. Claims verified true and bound: the Lean soundness theorems (lrat_check_sound Sound.lean:1742, check_sat_sound SatWitness.lean:257, check_query_sound QueryCheck.lean:920, check_term_unsat_sound TermCheck.lean:2444, check_sliver_unsat_sound SliverCheck.lean:6567, flatten_tree_sound TreeFlatten.lean:3162 and the six tree capstones), 37 DagNode variants = \"37 arms\", gateBound = 70·W² + 70·W + 1 (BlasterDag.lean:434), zero-axiom and sorry-budget CI steps, the TR-035 diffcheck step, widths 1..=128 (eval.rs:45), exit 2 on unsupported (main.rs:178), dependency-free default build (ordeal-lrat has no [dependencies] table + manifest_declares_no_dependencies + the Reproducible build assertion), the six release targets, cosign / SBOM / VEX in release.yml, overflow-checks for ordeal-lrat, Send + Sync assertion (solver.rs:2242), Bazel 7.4.1, rules_lean commented, the required wasm32-wasip2 job. Not verifiable locally: the Aeneas support library sorries lean/README.md mentions (no lake checkout) — kept as a developer note, not a gated claim; the dated latency numbers in docs/consuming-ordeal.md — left as dated measurements, not bound. Gate: python3 scripts/claim_check.py --self-test 28/28; python3 scripts/claim_check.py claims.yaml 62/62 claims hold, exit 0 (claims.yaml sha256 f97a0611…, scripts/claim_check.py sha256 d76da7da…). Negative controls, each exit 1 and restored byte for byte (pristine sha256 asserted after restore): README.md 26a19f77… (verbatim), lean/Sound.lean 5b2a5557… (sorry appended), lean/TreeFlatten.lean 9e4e19e3… (flatten_tree_sound renamed: 6 < 7), CONTRIBUTING.md 77ba5662… (required-checks list emptied: \"side pattern matched NOTHING — an empty side compares nothing\"), lean/AxiomCheck.lean 7b1e2b40… (pin removed: \"in right but not left: ext_tree_verdicts_exclusive\"), lean/README.md 9046fbf5… (36 vs 37: \"states 36, the source holds 37\"), lean/SliverCheck.lean 8b52bca4… (moved: \"evidence file missing\" + \"matched NO files\" + \"in right but not left: SliverCheck\"), lean/toolchain-pins.env 5369c0a0… (one hex digit: count-min 0 < 1 and the lakefile set-equal mismatch), lean/QueryCheck.lean ffd9af6f… (axiom declared: 1 > 0), .github/workflows/ci.yml ab035e19… (gate step deleted: 0 < 1); positive control exit 0 before and after. cargo +stable fmt --all --check and --manifest-path fuzz/Cargo.toml clean; cargo +stable test --workspace, scripts/check_verification_citations.sh and rivet validate recorded in the verdicts."
+    fields:
+      environment: "note: macOS arm64 (Apple M4), local, Python 3.14.7 + PyYAML 6.0.3, rustc 1.99.1 stable (rustup update stable first); branch feat/v0.35.0-claims-gate on main 9b585a6 (#268); no Lean toolchain installed locally — the Lean files are checked as text (theorem declarations, AxiomCheck pins, the absence of sorry / native_decide / axiom forms), their elaboration stays with the required Lean CI job"
+      executor: local
+      timestamp: 2026-11-04 22:28:55+00:00
+      version: 9b585a6+claims-gate
+    links:
+      - type: traces-to
+        target: TR-035
+
+  - id: VV-136
+    type: verification-verdict
+    title: VER-074 pass — self-test 28/28; 62/62 claims hold on the pristine tree; ten negative controls over seven predicate kinds each red for the named claim and restored byte for byte
+    status: implemented
+    description: Executed pass as recorded in the linked execution (the gate and its controls).
+    fields:
+      evidence: see VE-064
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-074
+      - type: part-of-execution
+        target: VE-064
+
+  - id: VV-137
+    type: verification-verdict
+    title: "VER-074 pass — the audit: every false / stale / overclaiming statement in the eight documents corrected to what the tree shows, the trusted-base sentence single-sourced and verbatim in five documents, the gate wired into the required Test job"
+    status: implemented
+    description: Executed pass as recorded in the linked execution (the audit table and the prose changes).
+    fields:
+      evidence: see VE-064
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-074
+      - type: part-of-execution
+        target: VE-064
+
+  - id: VV-138
+    type: verification-verdict
+    title: "VER-074 pass — drift back is gated: a reintroduced overclaim (re-wrapped over two lines) fails DOCS-NO-STALE-TRUST-OVERCLAIMS; 63/63 claims hold on the pristine tree"
+    status: implemented
+    description: "Orchestrator re-verification, 2026-11-04. The agent's 62-claim ledger passed with the removed overclaim 'Only ordeal-lrat is trusted' appended to README.md (rc 0): only presence was gated, not absence. Added DOCS-NO-STALE-TRUST-OVERCLAIMS (count-max 0 over eleven removed phrasings across the seven gated documents). Negative control: the same append, re-wrapped, gives 'count grew: 1 > recorded max 0', rc 1; restored with git checkout; pristine tree 63/63, rc 0. Also re-ran: a sorry appended to lean/TreeFlatten.lean is red (count grew 1 > 0); self-test 28/28."
+    fields:
+      evidence: python3 scripts/claim_check.py claims.yaml (63/63; control rc 1)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-074
+      - type: part-of-execution
+        target: VE-064

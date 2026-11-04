@@ -151,11 +151,11 @@ lean_lib «Sound» {}
 -- `check_sat_satisfiable` (⟹ ¬ unsat), `check_binding_sound` (bit k of the
 -- advertised value IS the truth value of literal bits[k]) and
 -- `verdicts_exclusive` (no cnf has both an accepted refutation and an
--- accepted witness). `sorry`-free. `check_binding_sound` is axiom-clean;
--- the `check_sat` family is explicitly CONDITIONAL on `UnsignedAbsSpec`,
--- the contract of the one external the pinned Aeneas leaves opaque
--- (`i32::unsigned_abs`, an `axiom` in the generated model) — see the file
--- header and the pins in AxiomCheck.lean.
+-- accepted witness). `sorry`-free and axiom-clean, all four pinned in
+-- AxiomCheck.lean. (History: the first TR-044 proof had to state the
+-- `check_sat` family conditionally on the contract of `i32::unsigned_abs`,
+-- which the pinned Aeneas left as an opaque `axiom`; the kernel now spells
+-- `|lit|` through `lit_var`, which Aeneas models — see the file header.)
 @[default_target] lean_lib «SatWitness» {}
 
 -- Axiom-cleanliness gate (issue #137 / TR-042): #guard_msgs-pinned
