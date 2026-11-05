@@ -61,7 +61,16 @@ HEAVY=(mul_8)
 # 2026-09-30: all 8 below SUCCESS — job wall time xor_32 3m41s, and_32 1m49s,
 # or_32 2m27s, add_32 8m56s, sub_32 9m00s, xor_64 8m20s, and_64 4m14s,
 # or_64 4m34s. add_64 and sub_64 were cancelled by the runner (see below).
-WIDE=(xor_32 and_32 or_32 add_32 sub_32 xor_64 and_64 or_64)
+# #280 (2026-11-05): twelve more, timed locally under WIDE_CBMC (Kani 0.67 /
+# CBMC, arm64, 16 GB; Verification Time, peak RSS): sext_16_16 58 s (1.6 GB)
+# | zext_16_16 65 s (1.4 GB) | extract_32_mid 77 s (2.6 GB) | sext_32_32
+# 105 s (2.1 GB) | zext_32_32 122 s (3.1 GB) | extract_64_hi 175 s (2.1 GB)
+# | concat_16_16 187 s (3.4 GB) | ite_32 244 s (4.1 GB) | eq_32 251 s
+# (4.5 GB) | concat_32_32 308 s (2.4 GB) | ite_64 587 s (4.3 GB) | ne_32
+# 635 s (2.9 GB). CI times are in the dispatch run recorded below.
+WIDE=(xor_32 and_32 or_32 add_32 sub_32 xor_64 and_64 or_64
+  sext_16_16 zext_16_16 extract_32_mid sext_32_32 zext_32_32 extract_64_hi
+  concat_16_16 ite_32 eq_32 concat_32_32 ite_64 ne_32)
 WIDE_CBMC="-Z unstable-options --cbmc-args --max-field-sensitivity-array-size 1024"
 
 # Deliberately not scheduled — each with its reason. Promote a harness out
@@ -90,14 +99,19 @@ UNSCHEDULED=(
   add_64 sub_64
   # CBMC/SAT-infeasible: multiplier/divider at 32/64 (same coverage).
   mul_32 mul_64 udiv_32 udiv_64 urem_32 urem_64
-  # Unmeasured at 32/64 (barrel shifters, comparators, structural rules,
-  # mux): no timed run yet. The WIDE cause (#169) applies to them too —
-  # promote each to WIDE only with a timed run under WIDE_CBMC.
+  # Measured under WIDE_CBMC for #280 (2026-11-05, local arm64, 20-min cap)
+  # and too slow for a hosted runner (CI runs ~2.7x the local time):
+  # the barrel shifters and the 64-bit ordering comparators crash CBMC with
+  # SIGSEGV (status 139, 0 failed checks: a stack overflow in symbolic
+  # execution under the 8 MB default, not a counterexample) after 2-7 min;
+  # with a 64 MB stack lshr_32, shl_32 and ult_64 no longer crash but run
+  # past 25 min. eq_64, ne_64 and the eight ordering comparators at 32 ran
+  # past 20 min. All are proven at every width in Lean (BlasterCmp.lean,
+  # BlasterShift.lean, BlasterRotr.lean) over the shipped rule code (#219) and tested
+  # exhaustively at 8 and randomized at 32/64.
   shl_32 shl_64 lshr_32 lshr_64 ashr_32 ashr_64 rotr_32 rotr_64
-  eq_32 eq_64 ne_32 ne_64 ult_32 ult_64 ule_32 ule_64 ugt_32 ugt_64
+  eq_64 ne_64 ult_32 ult_64 ule_32 ule_64 ugt_32 ugt_64
   uge_32 uge_64 slt_32 slt_64 sle_32 sle_64 sgt_32 sgt_64 sge_32 sge_64
-  concat_16_16 concat_32_32 extract_32_mid extract_64_hi
-  zext_16_16 zext_32_32 sext_16_16 sext_32_32 ite_32 ite_64
 )
 
 inventory() {
