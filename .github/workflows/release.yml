@@ -179,9 +179,22 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} -p ordeal
 
+      # TR-075 / #277: the standalone re-checker, built in its OWN cargo
+      # invocation — building it together with ordeal would unify
+      # ordeal-cert's `json` feature into the ordeal binary.
+      - name: Build ordeal-recheck (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} -p ordeal-recheck
+
+      - name: Build ordeal-recheck (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} -p ordeal-recheck
+
       - name: Strip binary
         if: ${{ !matrix.cross }}
-        run: strip "target/${{ matrix.target }}/release/ordeal" 2>/dev/null || true
+        run: |
+          strip "target/${{ matrix.target }}/release/ordeal" 2>/dev/null || true
+          strip "target/${{ matrix.target }}/release/ordeal-recheck" 2>/dev/null || true
 
       # The binary that ships must report the version being tagged (#120;
       # the varve#38 lesson — a v0.14.0 release once shipped a binary
@@ -206,6 +219,17 @@ jobs:
           printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' \
             | "$BIN" check - | head -1 | grep -qx unsat
           echo "::notice::'$GOT' matches the tag; certified-unsat smoke OK"
+          # TR-075: ordeal-recheck reports the tag and re-checks the
+          # committed real-solver bundles (v3 unsat + sat), so its deepest
+          # exercised path is the trusted recheck, not `--version`.
+          RBIN="target/${TARGET}/release/ordeal-recheck"
+          RGOT=$("$RBIN" --version)
+          if [ "$RGOT" != "ordeal-recheck ${VERSION#v}" ]; then
+            echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
+            exit 1
+          fi
+          "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          echo "::notice::'$RGOT' matches the tag; fixture recheck smoke OK"
 
       # #135: the cross MUSL leg is static, so it executes under qemu-user —
       # same assert + smoke as the native legs (recipe proven per-PR by the
@@ -233,6 +257,14 @@ jobs:
           printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' \
             | qemu-aarch64 "$BIN" check - | head -1 | grep -qx unsat
           echo "::notice::'$GOT' matches the tag under qemu; certified-unsat smoke OK"
+          RBIN="target/${TARGET}/release/ordeal-recheck"
+          RGOT=$(qemu-aarch64 "$RBIN" --version)
+          if [ "$RGOT" != "ordeal-recheck ${VERSION#v}" ]; then
+            echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
+            exit 1
+          fi
+          qemu-aarch64 "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          echo "::notice::'$RGOT' matches the tag under qemu; fixture recheck smoke OK"
 
       - name: Package archive
         env:
@@ -253,11 +285,21 @@ jobs:
           cp README.md LICENSE staging/
           tar -czf "$ARCHIVE" -C staging .
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          # TR-075: the re-checker ships as its own archive (an auditor
+          # downloads it without the solver).
+          RECHECK_ARCHIVE="ordeal-recheck-${VERSION}-${TARGET}.tar.gz"
+          mkdir -p staging-recheck
+          cp "target/${TARGET}/release/ordeal-recheck" staging-recheck/
+          cp README.md LICENSE staging-recheck/
+          tar -czf "$RECHECK_ARCHIVE" -C staging-recheck .
+          echo "RECHECK_ARCHIVE=$RECHECK_ARCHIVE" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binary-${{ matrix.target }}
-          path: ${{ env.ARCHIVE }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.RECHECK_ARCHIVE }}
           retention-days: 7
 
   # ── Create the GitHub Release: checksums + provenance ─────────────────
@@ -287,6 +329,17 @@ jobs:
           b=$(sha256sum target/b/wasm32-wasip2/release/ordeal.wasm | cut -d' ' -f1)
           echo "wasm sha256: $a / $b"
           test "$a" = "$b" || { echo "::error::wasm component is not reproducible"; exit 1; }
+      # TR-075: the ordeal-recheck component, same discipline (its own cargo
+      # invocation: no feature unification into ordeal.wasm).
+      - name: Build ordeal-recheck twice, require identical bytes
+        run: |
+          set -euo pipefail
+          cargo build --release -p ordeal-recheck --target wasm32-wasip2 --target-dir target/ra
+          cargo build --release -p ordeal-recheck --target wasm32-wasip2 --target-dir target/rb
+          a=$(sha256sum target/ra/wasm32-wasip2/release/ordeal-recheck.wasm | cut -d' ' -f1)
+          b=$(sha256sum target/rb/wasm32-wasip2/release/ordeal-recheck.wasm | cut -d' ' -f1)
+          echo "ordeal-recheck wasm sha256: $a / $b"
+          test "$a" = "$b" || { echo "::error::ordeal-recheck wasm component is not reproducible"; exit 1; }
       - name: Build native (release) for the differential
         run: cargo build --release -p ordeal
       - name: Install wasmtime
@@ -298,6 +351,20 @@ jobs:
           scripts/wasm_native_differential.sh \
             target/release/ordeal \
             wasmtime run --dir . target/a/wasm32-wasip2/release/ordeal.wasm
+      - name: ordeal-recheck component — tag version, recheck smoke, native differential
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          cargo build --release -p ordeal-recheck
+          W="wasmtime run --dir . target/ra/wasm32-wasip2/release/ordeal-recheck.wasm"
+          GOT=$($W --version)
+          test "$GOT" = "ordeal-recheck ${VERSION#v}" || { echo "::error::ordeal-recheck component says '$GOT', tag demands 'ordeal-recheck ${VERSION#v}'"; exit 1; }
+          F="crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json"
+          $W --format json $F > recheck-wasm.json
+          target/release/ordeal-recheck --format json $F > recheck-native.json
+          cmp recheck-wasm.json recheck-native.json
       - name: Stage the component
         env:
           INPUT_TAG: ${{ inputs.tag }}
@@ -306,6 +373,7 @@ jobs:
           VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
           mkdir -p wasm-out
           cp target/a/wasm32-wasip2/release/ordeal.wasm "wasm-out/ordeal-${VERSION}-wasm32-wasip2.wasm"
+          cp target/ra/wasm32-wasip2/release/ordeal-recheck.wasm "wasm-out/ordeal-recheck-${VERSION}-wasm32-wasip2.wasm"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-component

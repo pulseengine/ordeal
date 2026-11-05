@@ -8,6 +8,11 @@
 #
 #   scripts/verify_release.sh v0.21.0
 #
+# From v0.36.0 on (TR-075) it also covers the standalone `ordeal-recheck`
+# assets: six native archives and the wasm32-wasip2 component in the signed
+# sums, the darwin binary's version and exit codes (2 on a bad flag, 1 on a
+# malformed bundle), the component's version, and the two new crates.
+#
 # Every check prints PASS/FAIL; exits nonzero on any FAIL. Needs gh, cosign,
 # shasum, python3, tar, curl, network. The darwin-arm64 execution checks run
 # only on an arm64 mac; elsewhere they are reported as SKIP.
@@ -90,7 +95,9 @@ props={p["name"]:p["value"] for p in v["metadata"]["properties"]}
 serial=s["serialNumber"][len("urn:uuid:"):]
 assert props["ordeal:sbom"]==f"urn:cdx:{serial}/{s.get('version',1)}", (props["ordeal:sbom"], serial)
 assert len(props["advisory-db.commit"])==40 and props["asserted-at"].endswith("Z")
-assert props["ordeal:shipped-closure"]==f"ordeal@{bare},ordeal-lrat@{bare}", props["ordeal:shipped-closure"]
+# TR-075 (v0.36.0): ordeal links the extracted ordeal-cert (no features).
+want = f"ordeal@{bare},ordeal-cert@{bare},ordeal-lrat@{bare}" if tuple(map(int, bare.split("."))) >= (0, 36, 0) else f"ordeal@{bare},ordeal-lrat@{bare}"
+assert props["ordeal:shipped-closure"]==want, props["ordeal:shipped-closure"]
 print("VEX statements:", len(v["vulnerabilities"]), "| SBOM components:", [c["name"] for c in s.get("components",[])])
 PY
 
@@ -100,7 +107,9 @@ grep -q "## Falsification statement" body.md && grep -q "Release note (rivet, fr
 grep -qE "\`(TR|VER)-[0-9]{3}\` \(verified\)" body.md && ok "release body lists the release's verified artifacts (from the trace): $(grep -oE '\`TR-[0-9]{3}\`' body.md | tr -d '\`' | sort -u | tr '\n' ' ')" || bad "body lacks in-scope artifacts"
 
 # 6. crates.io
-for c in ordeal ordeal-lrat; do
+CRATES="ordeal ordeal-lrat"
+python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 36, 0) else 1)" && CRATES="ordeal ordeal-lrat ordeal-cert ordeal-recheck"
+for c in $CRATES; do
   V=$(curl -s -H "User-Agent: ordeal-release-verify (release-verify)" "https://crates.io/api/v1/crates/$c" | python3 -c 'import json,sys; print(json.load(sys.stdin)["crate"]["max_version"])' 2>/dev/null)
   [ "$V" = "$BARE" ] && ok "crates.io $c = $V" || bad "crates.io $c = '$V' (want $BARE)"
 done
@@ -114,5 +123,26 @@ if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= 
     wasmtime run --dir . "$W" check wq.smt2 2>/dev/null | head -1 | grep -qx unsat && ok "published wasm component: certified unsat" || bad "wasm component smoke"
   else skip "wasmtime not installed: wasm component not executed"; fi
 else skip "wasm component published from v0.23.0 on"; fi
+
+# 7. ordeal-recheck (TR-075, from v0.36.0): six archives + the wasm component
+#    in the signed sums; the published binary reports the tag, exits 2 on
+#    a bad flag and 1 on a malformed bundle (darwin-arm64), the component runs.
+if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 36, 0) else 1)"; then
+  n=$(ls ordeal-recheck-$TAG-*.tar.gz 2>/dev/null | wc -l | tr -d ' '); [ "$n" = "6" ] && ok "6 ordeal-recheck archives ($n)" || bad "expected 6 ordeal-recheck archives, got $n"
+  for f in ordeal-recheck-$TAG-*.tar.gz ordeal-recheck-$TAG-wasm32-wasip2.wasm; do
+    [ -f "$f" ] && grep -q " ./$f\$" SHA256SUMS.txt && ok "listed in SHA256SUMS: $f" || bad "not listed in SHA256SUMS: $f"
+  done
+  RW="ordeal-recheck-$TAG-wasm32-wasip2.wasm"
+  if command -v wasmtime >/dev/null 2>&1 && [ -f "$RW" ]; then
+    [ "$(wasmtime run --dir . "$RW" --version 2>/dev/null)" = "ordeal-recheck $BARE" ] && ok "published ordeal-recheck component reports ordeal-recheck $BARE" || bad "ordeal-recheck component version"
+  else skip "wasmtime not installed: ordeal-recheck component not executed"; fi
+  if [ "$(uname -s)-$(uname -m)" = "Darwin-arm64" ]; then
+    mkdir -p rmac && tar -xzf ordeal-recheck-$TAG-aarch64-apple-darwin.tar.gz -C rmac ordeal-recheck
+    [ "$(rmac/ordeal-recheck --version)" = "ordeal-recheck $BARE" ] && ok "published ordeal-recheck reports ordeal-recheck $BARE" || bad "ordeal-recheck version: $(rmac/ordeal-recheck --version)"
+    rmac/ordeal-recheck --definitely-not-a-flag >/dev/null 2>&1; [ $? = 2 ] && ok "ordeal-recheck: unknown flag exits 2" || bad "ordeal-recheck: unknown flag exit code"
+    printf '{"format":"ordeal-cert/v1","verdict":"unsat"}' > bogus.json
+    rmac/ordeal-recheck bogus.json >/dev/null 2>&1; [ $? = 1 ] && ok "ordeal-recheck rejects a malformed bundle (exit 1)" || bad "ordeal-recheck accepted or crashed on a malformed bundle"
+  else skip "darwin-arm64 ordeal-recheck execution checks (host is $(uname -s)-$(uname -m))"; fi
+else skip "ordeal-recheck published from v0.36.0 on"; fi
 
 echo "=== result: $([ $fail = 0 ] && echo ALL PASS || echo FAILURES PRESENT)"; exit $fail

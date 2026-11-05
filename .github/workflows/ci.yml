@@ -45,12 +45,12 @@ jobs:
         # Default feature set only — the `oracle` feature pulls in Z3 (z3-sys),
         # which needs libz3 on the runner and is linted + tested by the
         # dedicated non-blocking `oracle` job below.
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
       # The Z3-free optional features, blocking: cert-bundle carries the
       # ordeal-cert/v1..v4 bundle code and cadical the accelerator. Before
       # 2026-10-21 only the optional Z3 job linted them (gate-potency audit).
       - name: Run clippy (cert-bundle + cadical)
-        run: cargo clippy --all-targets --features ordeal/cert-bundle,ordeal/cadical -- -D warnings
+        run: cargo clippy --workspace --all-targets --features ordeal/cert-bundle,ordeal/cadical -- -D warnings
 
   build:
     name: Build (release)
@@ -122,6 +122,13 @@ jobs:
       # #189: the trusted checker is pinned exactly (=X.Y.Z) by the solver.
       - name: Check exact ordeal-lrat pin
         run: python3 scripts/check_exact_lrat_pin.py
+      # rivet: verifies VER-075
+      # #277 / TR-075: the standalone re-checker is built WITHOUT the solver
+      # — no crate named `ordeal` (nor cadical-sys / z3) in ordeal-recheck's
+      # normal dependency tree; an empty tree fails too. Negative-controlled
+      # when it landed (ordeal injected as a dep -> exit 1).
+      - name: ordeal-recheck closure has no solver (TR-075)
+        run: bash scripts/recheck_closure.sh
       # #203: test results become rivet evidence. nextest writes JUnit,
       # junit_to_rivet.py maps each test to the measures its
       # `// rivet: verifies <ID>` markers name (and FAILS on a marker that
@@ -156,7 +163,9 @@ jobs:
           # #187: build-dependencies count (they run at build time), and the
           # match is on exact crate names, not a prefix.
           cargo tree -p ordeal --edges normal,build
-          test "$(cargo tree -p ordeal --edges normal,build --prefix none | awk '{print $1}' | grep -vcxE 'ordeal|ordeal-lrat')" -eq 0
+          # TR-075: ordeal-cert (the extracted certificate types, no default
+          # features) is a workspace crate with ordeal-lrat as its only dep.
+          test "$(cargo tree -p ordeal --edges normal,build --prefix none | awk '{print $1}' | grep -vcxE 'ordeal|ordeal-cert|ordeal-lrat')" -eq 0
       # #146 / TR-043 supply-chain gate (deny.toml). BLOCKING over the
       # shipped closure (--exclude-dev at default features = exactly what a
       # release binary is built from); ADVISORY over everything else in
@@ -231,6 +240,24 @@ jobs:
           scripts/wasm_native_differential.sh \
             target/release/ordeal \
             wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm
+      # TR-075: the ordeal-recheck component (built on its own — it is not a
+      # default member, see Cargo.toml) EXECUTES under wasmtime: it accepts
+      # the committed real-solver fixtures with output byte-identical to the
+      # native binary's, and the version line is the crate's.
+      # rivet: verifies VER-075
+      - name: ordeal-recheck wasm32-wasip2 — build, run, native differential
+        run: |
+          set -euo pipefail
+          cargo build --target wasm32-wasip2 --release -p ordeal-recheck
+          cargo build --release -p ordeal-recheck
+          W="wasmtime run --dir . target/wasm32-wasip2/release/ordeal-recheck.wasm"
+          F="crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json"
+          test "$($W --version)" = "ordeal-recheck $(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(next(p["version"] for p in json.load(sys.stdin)["packages"] if p["name"]=="ordeal-recheck"))')"
+          $W --format json $F > recheck-wasm.json
+          target/release/ordeal-recheck --format json $F > recheck-native.json
+          cat recheck-wasm.json
+          cmp recheck-wasm.json recheck-native.json
+          python3 -c 'import json; d=json.load(open("recheck-wasm.json")); assert d["accepted"]==2 and d["rejected"]==0, d'
 
   # ── macOS build + smoke (#189) ─────────────────────────────────────────
   # Both darwin release archives were only ever built at tag time, so a

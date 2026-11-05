@@ -2033,3 +2033,25 @@ artifacts:
         target: SYS-003
       - type: allocated-to
         target: ARC-014
+
+  - id: TR-075
+    type: sw-req
+    title: "ordeal-recheck: standalone signed binary + wasm component that re-checks ordeal-cert bundles"
+    status: implemented
+    release: v0.36.0
+    description: "Before v0.36.0 the certificate checker was only reachable as a library through the ordeal crate, so an auditor who wanted to re-check an ordeal-cert bundle had to build (and so take into their toolchain) the untrusted solver and its front ends. Requirement: ship ordeal-recheck, a standalone program that re-checks ordeal-cert/v1, v2, v3 and v4 bundles, UNSAT and SAT, whose normal dependency closure contains the trusted ordeal-lrat and the certificate decoder but NOT the solver: the certificate types, their recheck() methods and the bundle codec are extracted into a crate ordeal-cert (depending on ordeal-lrat, plus serde/serde_json only behind its json feature), ordeal re-exports every moved item at its existing path so downstream (loom, rivet, synth) compiles unchanged, and every recheck calls the same ordeal_lrat functions in the same way as before. ordeal-recheck auto-detects the format and verdict, prints accepted or rejected with the reason per file (--format text|json), exits 0 iff every bundle is accepted and 1 if any is rejected or malformed; --version / -V print ordeal-recheck <semver>, --help exits 0, an unknown flag prints the usage on stderr and exits 2 (the PulseEngine CLI conventions). It ships as a native release binary per release target and as a wasm32-wasip2 component, inside the cosign-signed SHA256SUMS with SLSA provenance like the other release assets, and is published to crates.io after ordeal-lrat, ordeal-cert and ordeal. The bundles ordeal emits are byte-identical across the extraction. Effect: behaviour (a new capability for auditors)."
+    tags: [certificate, recheck, auditor, closure, wasm, release]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: "cargo test -p ordeal-recheck --test recheck_cli: every v1..v4 UNSAT and SAT bundle the solver emits on the corpus (odd widths 3/5/12 and 8, all eight format x verdict kinds) is accepted with exit 0, singly and together; each of the 53 mutants (a flipped clause literal, a dropped LRAT line, a swapped query / term / ext node), re-emitted with every content hash recomputed, is rejected with exit 1 by the recheck itself; an un-rehashed edit is rejected by the content hash; malformed, unknown-format, missing and witness-less bundles are rejected; --version, --help, bad flags follow the conventions. bash scripts/recheck_closure.sh passes in the required Test job and fails (exit 1) when ordeal is injected as a dependency of ordeal-recheck, the manifest restored byte for byte; cargo tree -p ordeal -e normal is exactly ordeal, ordeal-cert, ordeal-lrat; the to_cert_v1..v4 output on the corpus is byte-identical to the base commit's; cargo build --target wasm32-wasip2 --release -p ordeal-recheck builds, and the component accepts the committed fixtures with output byte-identical to the native binary's."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: allocated-to
+        target: ARC-011
+      - type: traces-to
+        target: TR-025

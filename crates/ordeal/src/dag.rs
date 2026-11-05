@@ -415,7 +415,7 @@ pub fn flatten(assertions: &[BoolTerm]) -> Result<Dag, EvalError> {
 }
 
 /// `usize::MAX`: the map entry of a term node that has no image.
-pub const NO_IMAGE: usize = usize::MAX;
+pub const NO_IMAGE: usize = ordeal_cert::query::NO_IMAGE;
 
 /// The operands of a node (the earlier nodes whose values it reads), in
 /// constructor order.
@@ -1216,8 +1216,10 @@ mod denotation_guard {
             roots: dag.roots,
             hints: Vec::new(),
         };
-        let term =
-            crate::query::QueryTerm::flatten(assertions, &query, &dag.vars).expect("well-sorted");
+        let term = <crate::query::QueryTerm as crate::query::QueryTermFlatten>::flatten(
+            assertions, &query, &dag.vars,
+        )
+        .expect("well-sorted");
         assert_eq!(
             term.check(&query),
             Ok(()),

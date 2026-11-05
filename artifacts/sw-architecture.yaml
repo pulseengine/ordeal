@@ -304,9 +304,9 @@ artifacts:
         target: FEAT-009
   - id: ARC-011
     type: sw-arch-component
-    title: ordeal-evidence (portable certificate, ordeal-cert/v1 and v2 bundles, SAT witness, in-tree SHA-256)
+    title: ordeal-evidence (portable certificate, ordeal-cert/v1..v4 bundles, SAT witness, in-tree SHA-256; the ordeal-cert crate and the ordeal-recheck re-checker)
     status: verified
-    description: "The evidence formats a consumer re-checks without trusting the solver: the portable UNSAT Certificate carrying its CNF (recheck()), the ordeal-cert/v1 JSON bundle with content hashes (cert_bundle.rs, cert-bundle feature), the ordeal-cert/v2 bundle and the always-compiled QueryCertificate carrying the lowered query (query.rs, TR-062; re-checked by the trusted check_query), the always-compiled SAT witness types and canonical texts (witness.rs), and the dependency-free SHA-256 used for integrity hashes (sha256.rs). UNTRUSTED for soundness: every format is re-established by the trusted checker; the hashes are integrity only."
+    description: "The evidence formats a consumer re-checks without trusting the solver: the portable UNSAT Certificate carrying its CNF (recheck()), the ordeal-cert/v1 JSON bundle with content hashes (cert_bundle.rs), the ordeal-cert/v2 bundle and the always-compiled QueryCertificate carrying the lowered query (query.rs, TR-062; re-checked by the trusted check_query) and their v3/v4 successors, the always-compiled SAT witness types and canonical texts (witness.rs), and the dependency-free SHA-256 used for integrity hashes (sha256.rs). Since TR-075 these live in their own crate, crates/ordeal-cert (moved verbatim; depends on ordeal-lrat only, plus serde/serde_json behind its json feature, which ordeal's cert-bundle feature enables), re-exported by ordeal at every old path; the solver-side constructors (QueryTerm flattening, the CheckResult verdict types) stay in ordeal. crates/ordeal-recheck is the standalone re-checker built from ordeal-cert alone (native binary and wasm32-wasip2 component; its solver-free closure gated by scripts/recheck_closure.sh). UNTRUSTED for soundness: every format is re-established by the trusted checker; the hashes are integrity only."
     links:
       - type: allocated-from
         target: TR-017
@@ -335,6 +335,8 @@ artifacts:
         target: TR-072
       - type: allocated-from
         target: TR-073
+      - type: allocated-from
+        target: TR-075
   - id: ARC-012
     type: sw-arch-component
     title: ordeal-consumer-libs (trap semantics, layout, derived-op lowering, proof toolkit)
