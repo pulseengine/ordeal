@@ -67,10 +67,15 @@ HEAVY=(mul_8)
 # 105 s (2.1 GB) | zext_32_32 122 s (3.1 GB) | extract_64_hi 175 s (2.1 GB)
 # | concat_16_16 187 s (3.4 GB) | ite_32 244 s (4.1 GB) | eq_32 251 s
 # (4.5 GB) | concat_32_32 308 s (2.4 GB) | ite_64 587 s (4.3 GB) | ne_32
-# 635 s (2.9 GB). CI times are in the dispatch run recorded below.
-WIDE=(xor_32 and_32 or_32 add_32 sub_32 xor_64 and_64 or_64
+# 635 s (2.9 GB). CI (ubuntu-latest = ubuntu-26.04 image, Kani 0.68),
+# dispatch run 42002290201 on this branch: all eleven kept below SUCCESS,
+# job wall time sext_16_16 <1m, zext_16_16 1m, extract_32_mid 1m,
+# sext_32_32 1m, zext_32_32 1m, extract_64_hi 1m, concat_16_16 1m,
+# concat_32_32 1m, eq_32 1m, ite_32 3m, ne_32 3m; ite_64 lost the runner
+# (see UNSCHEDULED).
+WIDE=(xor_32 and_32 or_32 and_64 or_64
   sext_16_16 zext_16_16 extract_32_mid sext_32_32 zext_32_32 extract_64_hi
-  concat_16_16 ite_32 eq_32 concat_32_32 ite_64 ne_32)
+  concat_16_16 ite_32 eq_32 concat_32_32 ne_32)
 WIDE_CBMC="-Z unstable-options --cbmc-args --max-field-sensitivity-array-size 1024"
 
 # Deliberately not scheduled — each with its reason. Promote a harness out
@@ -80,7 +85,13 @@ UNSCHEDULED=(
   # had the runner shut down under udiv_8 / urem_8 at 3269 s / 2973 s (not a
   # Kani failure); locally (64 GB arm64, Kani 0.67) urem_8 is SUCCESSFUL in
   # 3035 s under minisat and 3123 s under cadical — the solver is not the
-  # lever. Covered by the exhaustive-8 unit tests and the required Lean
+  # lever. Nor is the u128 reference (#280, 2026-11-05, local arm64 16 GB,
+  # WIDE_CBMC): the same harness with the reference computed at 8 bits
+  # (`u8` division, so CBMC encodes an 8-bit divider, not a 128-bit one)
+  # crashes CBMC (status 139, stack) under the 8 MB default; with a 64 MB
+  # stack udiv_8 is SUCCESSFUL in 3294 s (4.6 GB) and urem_8 runs past
+  # 3600 s. The cost is the blasted divider circuit itself. (mul_8 with an
+  # 8-bit reference: 500 s, 7.6 GB, no gain over the u128 shape either.) Covered by the exhaustive-8 unit tests and the required Lean
   # blast_udivrem_bitvec / blast_udiv_bitvec / blast_urem_bitvec proofs at
   # unbounded width. Tracked in #169.
   udiv_8 urem_8
@@ -97,6 +108,20 @@ UNSCHEDULED=(
   # exhaustively at width 8 and randomized at 32/64. Local Kani completes
   # (add_64 1019 s, sub_64 940 s).
   add_64 sub_64
+  # Promoted to WIDE on 2026-09-30 (one dispatch SUCCESS, 8-9 min) but on
+  # the nightly schedule they never completed again: add_32, sub_32 and
+  # xor_64 failed EVERY scheduled run from 2026-10-02 to 2026-11-05 (35
+  # nights) with the runner-shutdown signature mid-solve (xor_64: CBMC at
+  # 6.65M variables / 16.8M clauses, then "The runner has received a
+  # shutdown signal" at 4-7 min), and the run badge stayed green because
+  # of the job-level continue-on-error (now caught by the verdict job in
+  # kani.yml). Dispatch run 42002290201 and its re-run (#280, 2026-11-05)
+  # reproduced it on all three, twice each. ite_64 (local 587 s, 4.3 GB)
+  # lost the runner at 50 min and again at 8 min in the same run. All four
+  # are proven at every width in Lean (BlasterArith.lean add/sub,
+  # BlasterProof.lean blast_xor_bitvec, BlasterCmp.lean blast_ite_bitvec) over the shipped rule code (#219), and tested
+  # exhaustively at 8 and randomized at 32/64.
+  add_32 sub_32 xor_64 ite_64
   # CBMC/SAT-infeasible: multiplier/divider at 32/64 (same coverage).
   mul_32 mul_64 udiv_32 udiv_64 urem_32 urem_64
   # Measured under WIDE_CBMC for #280 (2026-11-05, local arm64, 20-min cap)

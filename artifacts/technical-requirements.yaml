@@ -2015,3 +2015,23 @@ artifacts:
         target: TR-072
       - type: traces-to
         target: TR-035
+
+  - id: TR-078
+    type: sw-req
+    title: Every 32/64 Kani harness is measured and tiered by its measured cost, and the Kani run conclusion reports a failed proof job
+    status: implemented
+    release: v0.36.0
+    description: "Before v0.36.0, 38 Kani harnesses at widths 32/64 (shifters, comparators, structural rules, mux) sat in UNSCHEDULED with no timed run, and the run badge was green while add_32, sub_32 and xor_64 failed every nightly from 2026-10-02 to 2026-11-05 (job-level continue-on-error masks the run conclusion). Requirement: every harness has a timed local run under WIDE_CBMC (Verification Time, peak RSS or the crash/timeout) recorded in scripts/kani_tiers.sh; a harness is in WIDE only with a workflow_dispatch SUCCESS on ubuntu-latest, and one that loses the runner there moves to UNSCHEDULED with the measured reason; the width-8 divider records a measured attempt at a lighter harness shape; and kani.yml ends with a verdict job that fails the run when any tier job did not succeed, so a proof regression is visible on the run while Kani still does not gate merges. Effect: confidence (every rule is already proven at every width in Lean over the shipped code, #219)."
+    tags: [kani, tiers, ci, gate-potency, confidence]
+    fields:
+      effect: confidence
+      priority: should
+      req-type: constraint
+      verification-criteria: "bash scripts/kani_tiers.sh check PASS (every harness in exactly one tier). workflow_dispatch run of kani.yml on the branch: every WIDE harness SUCCESS and the verdict job SUCCESS; the verdict logic exits 1 on run 42002290201 attempt 2 (four failed tier jobs), on a cancelled job and on an empty job list, and 0 when every tier job succeeded or was skipped."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: allocated-to
+        target: ARC-014
+      - type: traces-to
+        target: TR-046

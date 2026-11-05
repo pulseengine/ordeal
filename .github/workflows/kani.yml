@@ -22,15 +22,17 @@
 #     36019140498, the first completion since July;
 #   * heavy (nightly): mul_8 (374 s), ONE JOB PER HARNESS with its own
 #     timeout, so a runner preemption costs one harness, not the tier;
-#   * wide (nightly, #169): and/or/xor/add/sub at width 32 and 64, one job
+#   * wide (nightly, #169, #280): light 32/64 rules (list in the script), one job
 #     per harness, run with a raised CBMC array field-sensitivity limit
 #     (the reason and the measured times are in scripts/kani_tiers.sh);
 #     the matrix is read from the script, so it cannot drift;
 #   * everything else is explicitly unscheduled in the script WITH the
 #     measured reason (the width-8 divider had the runner shut down under
 #     it at ~50 min) — see #169.
-# Job-level `continue-on-error` masks the run conclusion — read the job and
-# step conclusions (gh api …/runs/<id>/jobs), never the run badge.
+# Job-level `continue-on-error` masks the run conclusion, so the final
+# `verdict` job (#280) reads the job conclusions (gh api …/runs/<id>/jobs)
+# and fails the run if any tier job did not succeed: three wide harnesses
+# failed every nightly for five weeks behind a green badge before it.
 name: Kani proofs
 
 on:
@@ -147,3 +149,41 @@ jobs:
           # and a failed lookup failed a job (run 36821560393, and_32).
           kani-version: "0.68.0"
           args: ${{ steps.tier.outputs.args }}
+
+  # ── Verdict: the run conclusion tells the truth (#280) ─────────────────
+  # Job-level continue-on-error keeps a proof regression from gating merges,
+  # but it also made the run badge green while add_32, sub_32 and xor_64
+  # failed on every nightly from 2026-10-02 to 2026-11-05. This job reads
+  # the run's own job conclusions and fails if any tier job did not succeed,
+  # so the nightly run goes red when a proof job does. It is not a required
+  # check: merges are still not gated on Kani.
+  verdict:
+    name: Kani verdict (every tier job succeeded)
+    needs: [tiers, fast, heavy, wide]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Read this run's tier job conclusions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/actions/runs/$RUN/attempts/$ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name | test("^(Harness coverage|Fast tier|Heavy tier|Wide tier)")) | "\(.conclusion)\t\(.name)"' > jobs.tsv
+          cat jobs.tsv
+          n=$(wc -l < jobs.tsv)
+          test "$n" -ge 1 || { echo "::error::no tier jobs found in run $RUN"; exit 1; }
+          bad=$(grep -cvE '^(success|skipped)'$'\t' jobs.tsv || true)
+          if [ "$bad" != 0 ]; then
+            grep -vE '^(success|skipped)'$'\t' jobs.tsv | while IFS=$'\t' read -r c name; do
+              echo "::error::$name: $c"
+            done
+            exit 1
+          fi
+          echo "all $n tier jobs succeeded or were skipped"
