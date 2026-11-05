@@ -3184,3 +3184,87 @@ artifacts:
         target: VER-074
       - type: part-of-execution
         target: VE-064
+
+  - id: VE-066
+    type: verification-execution
+    title: The ordeal-lrat MC/DC ratchet verified (VER-077)
+    status: implemented
+    description: "Independent re-run by the orchestrating session of bash scripts/mcdc_gate.sh on branch feat/v0.36.0-mcdc (73b1603): 286 rows, witness 0.45.0 from varve layer 2026.10.23; ordeal-lrat files 257 decisions / 235 not full / gap 932 / dead 571 / proved 350, equal to mcdc/baseline.txt, exit 0, 4m36s. Negative control: the 50 single-line run_row_sliver_reject_* rows deleted from mcdc/ordeal-lrat/src/rows.rs, gate exit 1 (sliver_kernel.rs not-full 42 -> 46, proved 38 -> 18), file restored with git checkout, sha256 5fcebbe707741ce33c91aefbf1eb9d806ee53c4128aeb33e3e9406f87159c45c before and after. The authoring agent's second control (an uncovered branch in a scratch copy of check_sat, never crates/) gave exit 1 with kernel.rs gap 371 -> 374. CI: the mcdc.yml job of PR #288 passed on ubuntu (first Linux run)."
+    fields:
+      environment: macOS arm64 local, rustc 1.99.1, witness 0.45.0 (varve layer 2026.10.23); and ubuntu-latest via mcdc.yml
+      executor: local
+      timestamp: 2026-11-05 07:58:23+00:00
+      version: 73b1603
+    links:
+      - type: traces-to
+        target: TR-077
+
+  - id: VV-140
+    type: verification-verdict
+    title: VER-077 pass — the MC/DC ratchet holds on the tree and turns red when checker coverage drops
+    status: implemented
+    description: Gate exit 0 with numbers equal to the baseline; removing 50 sliver reject rows gives exit 1 naming src/sliver_kernel.rs; restored byte for byte.
+    fields:
+      evidence: bash scripts/mcdc_gate.sh (exit 0; control exit 1)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-077
+      - type: part-of-execution
+        target: VE-066
+
+  - id: VE-065
+    type: verification-execution
+    title: ordeal-recheck and the ordeal-cert extraction verified (VER-075)
+    status: implemented
+    description: "Local run of the TR-075 verification on branch feat/v0.36.0-ordeal-recheck (base main 984a6f3). cargo fmt --all --check exit 0; cargo clippy --workspace --all-targets -D warnings exit 0, and with --features ordeal/cert-bundle,ordeal/cadical exit 0; cargo test --workspace exit 0 (341 passed, 0 failed); cargo test --workspace --features ordeal/cert-bundle,ordeal/cadical exit 0 (372 passed, 0 failed) - including recheck_cli: 26 corpus bundles accepted (all eight v1..v4 x unsat/sat kinds), 53 hash-consistent mutants rejected by the recheck, the hash / malformed / unknown-format / missing-file / witness-less controls, the CLI conventions and the committed fixtures. scripts/recheck_closure.sh exit 0 (closure: ordeal-recheck, ordeal-cert, ordeal-lrat, serde, serde_json and their deps; no ordeal, cadical-sys, z3); negative control: ordeal injected as a normal dependency of crates/ordeal-recheck/Cargo.toml -> exit 1 (FAIL ordeal is in ordeal-recheck's dependency closure), manifest restored, sha256 cb93696a... before and after, gate exit 0 again. cargo tree -p ordeal -e normal: ordeal, ordeal-cert, ordeal-lrat. Byte identity: the emit_corpus example run on a scratch copy of 984a6f3 (twice, deterministic) and on this tree, 26 bundles, diff -r empty. cargo build --target wasm32-wasip2 --release -p ordeal -p ordeal-recheck exit 0; the ordeal-recheck component under wasmtime prints ordeal-recheck 0.35.0 and accepts the committed fixtures with JSON byte-identical to the native binary (cmp exit 0), and accepts all 23 re-checkable corpus bundles (cmp with native exit 0). Finding fixed in the run: before the NO_IMAGE wire spelling, the wasm32 component rejected the v3 fixture as malformed (usize::MAX from a 64-bit producer does not fit a 32-bit usize). claim_check.py claims.yaml 63/63, --self-test exit 0; check_verification_citations.sh PASS (90 legs, 21 feature legs skipped); check_release_order.py PASS; check_exact_lrat_pin.py PASS; rivet validate PASS. Bazel: bazel build //crates/... --config=dev completed successfully (bazel test not run locally)."
+    fields:
+      environment: "note: macOS arm64, local, rustc 1.99.1 stable, wasmtime (local install), Python 3 + PyYAML; Z3 oracle tests not run"
+      executor: local
+      timestamp: 2026-11-05 06:56:40+00:00
+      version: 984a6f3+ordeal-recheck
+    links:
+      - type: traces-to
+        target: TR-075
+
+  - id: VV-139
+    type: verification-verdict
+    title: VER-075 pass - 26 v1..v4 bundles accepted, 53 mutants rejected by the recheck, closure gate green with its negative control red, bundles byte-identical across the extraction, wasm component identical to native
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-065
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-075
+      - type: part-of-execution
+        target: VE-065
+
+  - id: VE-067
+    type: verification-execution
+    title: wsc keyless signing and verify_release section 8 exercised before the tag (VER-076)
+    status: implemented
+    description: "Local run on branch feat/v0.36.0-wsc-signing (base main ee79fc4), wsc-cli 0.11.0 from varve layer 2026.10.23 (sha256:af711b5d...). wsc verify --keyless on pulseengine/sigil v0.12.0 wsc-component.wasm: exit 0 for release.yml@refs/tags/v0.12.0; exit 1 (Identity mismatch) for @refs/heads/main and for another repository; exit 0 with no --cert-identity (so the script always passes one); one flipped byte -> exit 1 (No valid signatures). verify_release.sh section 8 sourced with REPO=pulseengine/sigil TAG=v0.12.0 against that module and its wsc-detached form staged as the two ordeal asset names: 8/8 PASS, fail=0; REPO=pulseengine/ordeal -> both verifies FAIL, fail=1; unsigned file with one appended byte -> FAIL signed module is not the published ... plus a signature, fail=1; WSC empty -> FAIL wsc not found, fail=1. Key-based: wsc sign -k on the ordeal 0.35.0 wasm32-wasip2 component -> verify exit 0, wsc detach output cmp-equal to the unsigned component, one flipped byte -> verify exit 1, signed component under wasmtime prints ordeal 0.35.0. bash -n scripts/verify_release.sh exit 0; release.yml parses as YAML. The keyless signing step itself runs only at the tag (it needs the workflow's OIDC token)."
+    fields:
+      environment: "note: macOS arm64, local, wsc-cli 0.11.0 (varve layer 2026.10.23), wasmtime, network to Rekor/Fulcio trust roots"
+      executor: local
+      timestamp: 2026-11-05 12:12:13+00:00
+      version: ee79fc4+wsc-signing
+    links:
+      - type: traces-to
+        target: TR-076
+
+  - id: VV-141
+    type: verification-verdict
+    title: VER-076 pass (pre-tag) - keyless verify bound to the exact identity, detach equals the published bytes, all three negative controls red
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-067
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-076
+      - type: part-of-execution
+        target: VE-067

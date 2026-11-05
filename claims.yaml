@@ -186,14 +186,22 @@ claims:
         pattern: 'fn manifest_declares_no_dependencies\(\)'
         glob: crates/ordeal-lrat/src/lib.rs
         min: 1
-      - kind: count-min            # the required Reproducible build job asserts the solver's closure is the two crates
+      - kind: count-min            # the required Reproducible build job asserts the solver's closure is the workspace crates
         pattern: '- name: Assert dependency-free default build'
         glob: .github/workflows/ci.yml
         min: 1
       - kind: count-min            # the only external deps are optional and feature-gated
-        pattern: '^(z3|cadical-sys|serde|serde_json) = \{[^}]*optional = true[^}]*\}$'
+        pattern: '^(z3|cadical-sys) = \{[^}]*optional = true[^}]*\}$'
         glob: crates/ordeal/Cargo.toml
-        min: 4
+        min: 2
+      - kind: count-min            # TR-075: serde moved with the bundle codec into ordeal-cert, still optional (its `json` feature)
+        pattern: '^(serde|serde_json) = \{[^}]*optional = true[^}]*\}$'
+        glob: crates/ordeal-cert/Cargo.toml
+        min: 2
+      - kind: count-min            # …and the solver takes ordeal-cert with no default features
+        pattern: '^ordeal-cert = \{[^}]*default-features = false[^}]*\}$'
+        glob: crates/ordeal/Cargo.toml
+        min: 1
 
   - id: README-WASIP2
     doc: README.md
@@ -356,15 +364,15 @@ claims:
 
   - id: ARCH-TWO-CRATES
     doc: ARCHITECTURE.md
-    text: "One workspace, **two crates**"
+    text: "One workspace, **four crates**"
     evidence:
       - kind: set-equal            # the crate table names exactly the workspace crates
         left:  {glob: 'crates/*/Cargo.toml', name: 'crates/([^/]+)/'}
         right: {file: ARCHITECTURE.md, pattern: '`crates/([a-z-]+)/', after: '## Crate layout'}
-      - kind: count-min
-        pattern: '^members = \["crates/ordeal", "crates/ordeal-lrat"\]$'
+      - kind: count-min            # …and all four are workspace members (TR-075)
+        pattern: '^    "crates/(ordeal|ordeal-cert|ordeal-lrat|ordeal-recheck)",$'
         glob: Cargo.toml
-        min: 1
+        min: 4
 
   - id: ARCH-LRAT-NO-DEPS
     doc: ARCHITECTURE.md

@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ordeal-recheck`, a standalone bundle re-checker with no solver in it**
+  (TR-075, #277). `ordeal-recheck [--format text|json] <bundle.json>...`
+  reads each bundle's declared `format` (`ordeal-cert/v1`..`v4`) and
+  `verdict` (`unsat` / `sat`), decodes it with the matching hash-verifying
+  reader and runs that format's full recheck through the trusted
+  `ordeal-lrat` checks. It prints accepted or rejected (with the reason) per
+  file and exits 0 iff every bundle is accepted, 1 if any is rejected or
+  malformed, and 2 on a bad flag. `--version` prints `ordeal-recheck
+  <semver>`. Its normal dependency tree contains no `ordeal` (nor
+  `cadical-sys` / `z3`); `scripts/recheck_closure.sh` checks this in the
+  required Test job, and a negative control (`ordeal` added as a
+  dependency) was seen to turn it red. The release workflow builds it as a
+  native binary per release target (`ordeal-recheck-vX.Y.Z-<target>.tar.gz`)
+  and as a wasm32-wasip2 component. Both go into the cosign-signed
+  `SHA256SUMS.txt` with SLSA provenance, are smoke-tested on committed
+  real-solver bundles, and are checked by `scripts/verify_release.sh`.
+- **`ordeal-cert`, the certificate crate** (TR-075). The certificate data
+  types and their `recheck()` methods (`Certificate`, `Model`, the SAT
+  witness, `QueryDag` / `QueryInputs` / `QueryTerm` / `SliverBlock` /
+  `ExtQuery` / `SliverModel` and the v2–v4 certificate types), the encoding
+  constants and node spellings, the in-tree SHA-256 and, behind its `json`
+  feature, the `ordeal-cert/v1..v4` bundle codec moved verbatim out of
+  `ordeal`. It depends on `ordeal-lrat` only (serde with `json`). New in it:
+  `cert_bundle::bundle_header` (the declared format and verdict, for
+  dispatch). Published to crates.io in the order `ordeal-lrat` →
+  `ordeal-cert` → `ordeal` → `ordeal-recheck`.
+
+### Changed
+
+- `ordeal` re-exports every moved item at its old path (`ordeal::Certificate`,
+  `ordeal::query::*`, `ordeal::cert_bundle::*`, `ordeal::witness::*`,
+  `ordeal::sha256::*`, `ordeal::sliver::{ExtQuery, SliverModel}`, …), and
+  `cert-bundle` is now `["ordeal-cert/json"]`. The default build is still
+  free of third-party dependencies: `cargo tree -p ordeal -e normal` is
+  `ordeal`, `ordeal-cert`, `ordeal-lrat`. The bundles `to_cert_v1..v4` emit
+  are byte-identical to 0.35.0's (26 corpus bundles compared with
+  `diff -r`), and every recheck calls the same `ordeal_lrat` functions in the
+  same way.
+- **Portable `NO_IMAGE` spelling.** The "no image" sentinel in the term map
+  and the ext block's map / read / call tables is `usize::MAX`. A 32-bit
+  reader could not decode it as written by a 64-bit producer: the wasm32
+  `ordeal-recheck` rejected v3/v4 bundles as malformed. The bundle and the
+  canonical texts its hashes cover now spell the sentinel as `u64::MAX` on
+  every target (`query::wire_usize` / `unwire_usize`). On a 64-bit host
+  this is the identity, so bundles and hashes there are byte-identical to
+  0.35.0's.
+- **API:** `QueryTerm::flatten` and `QueryTerm::flatten_sliver` build a
+  `QueryTerm` from the solver's term types, so they cannot stay inherent
+  methods of a type that now lives in `ordeal-cert`. They are now the
+  associated functions of the trait `ordeal::query::QueryTermFlatten`. The
+  call syntax `QueryTerm::flatten(..)` is unchanged once that trait is in
+  scope (`use ordeal::query::QueryTermFlatten;`).
+- `ordeal-recheck` is a workspace member but not a default member, so a
+  bare `cargo build` still builds exactly the shipped `ordeal` artifact.
+  Building it alongside `ordeal` would unify `ordeal-cert/json` into the
+  solver. Commands that pass `--workspace` / `--all` include it, and the
+  Clippy job now passes `--workspace`.
+
 ## [0.35.0] - 2026-11-05
 
 **The public claims are gated** (TR-074). The trusted base shrank four

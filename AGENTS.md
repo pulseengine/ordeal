@@ -83,6 +83,8 @@ python3 scripts/claim_check.py
 | Path | Purpose |
 |------|---------|
 | `crates/ordeal-lrat/` | **The trusted crate** (dependency-free): the LRAT checker, the proven lowering and the query / term / sliver / tree checks, proven in Lean 4 (`lean/`). |
+| `crates/ordeal-cert/` | The certificate types, their `recheck()`s and (feature `json`) the `ordeal-cert/v1..v4` bundle codec — no solver dependency; re-exported by `ordeal` at the old paths (TR-075). |
+| `crates/ordeal-recheck/` | The standalone `ordeal-recheck` bundle re-checker (native + wasm32-wasip2); its closure is gated solver-free by `scripts/recheck_closure.sh`. |
 | `crates/ordeal/src/mirror.rs` | The trusted 1:1 copy of the caller's trees into the kernel's tree type. |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat`; result / certificate / model types. |

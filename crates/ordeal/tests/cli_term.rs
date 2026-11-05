@@ -14,12 +14,22 @@ fn ordeal_stdin(args: &[&str], input: &str) -> std::process::Output {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn ordeal");
-    child
+    // A child that rejects its arguments (`--with-term` without `--format
+    // json` exits 2) can exit before reading stdin, so this write can race
+    // the exit and see EPIPE: expected, not an error (the cli_baseline.rs
+    // fix, hit here on Linux CI in #290). Anything else is real.
+    if let Err(e) = child
         .stdin
         .take()
         .expect("stdin")
         .write_all(input.as_bytes())
-        .expect("write script");
+    {
+        assert_eq!(
+            e.kind(),
+            std::io::ErrorKind::BrokenPipe,
+            "write script failed: {e}"
+        );
+    }
     child.wait_with_output().expect("wait")
 }
 

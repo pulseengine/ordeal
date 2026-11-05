@@ -27,7 +27,7 @@
 //! bit-blasting rule" invariant is preserved by construction — the sliver
 //! is sound *because* it never reaches the blaster, only the core does.
 
-use crate::eval::{self, Env, EvalError};
+use crate::eval::{self, EvalError};
 use crate::term::{BoolTerm, BvTerm, Sort};
 use ordeal_lrat::ExtNode;
 use ordeal_lrat::blast_kernel::DagNode;
@@ -216,45 +216,7 @@ pub struct Lowered {
     pub read_sites: Vec<(String, String, BvTerm)>,
 }
 
-/// The extended query flattened as it was asked (`ordeal-ext/v1`, TR-072):
-/// a node list over [`ExtNode`] — 1:1 with the [`ExtBoolTerm`] tree
-/// (operands before operators, left to right; a `select`'s index, then
-/// its chain outermost store first, each level's index then value; a
-/// call's arguments in order), variables shared by name, constants
-/// interned by value and width, arrays and functions numbered by first
-/// appearance. No canonicalization and no hash-consing: a consumer holding
-/// the `ExtBoolTerm`s re-runs [`flatten_ext`] and compares the hash.
-#[derive(Clone, Default, PartialEq, Eq)]
-pub struct ExtQuery {
-    /// The nodes.
-    pub nodes: Vec<ExtNode>,
-    /// The constant table (LSB first).
-    pub bits: Vec<bool>,
-    /// The side table: store chains (index, value pairs) and call arguments.
-    pub side: Vec<usize>,
-    /// The asserted nodes, one per assertion, in assertion order.
-    pub roots: Vec<usize>,
-    /// Per query variable: `(name, width, its `Var` node)`.
-    pub vars: Vec<(String, u32, usize)>,
-    /// Array names by id.
-    pub arrays: Vec<String>,
-    /// Function names and result widths by id.
-    pub funcs: Vec<(String, u32)>,
-}
-
-impl std::fmt::Debug for ExtQuery {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ExtQuery")
-            .field("nodes", &self.nodes.len())
-            .field("bits", &self.bits.len())
-            .field("side", &self.side.len())
-            .field("roots", &self.roots)
-            .field("vars", &self.vars.len())
-            .field("arrays", &self.arrays)
-            .field("funcs", &self.funcs)
-            .finish()
-    }
-}
+pub use ordeal_cert::sliver::{ExtQuery, SliverModel};
 
 /// What [`lower_ext`] produces: the extended query flattened, its lowered
 /// core with the fresh-variable tables, and per extended node the lowered
@@ -1276,25 +1238,6 @@ impl Lowering {
 
 // ─── Concrete sliver evaluator ───────────────────────────────────────────────
 
-/// A concrete model for the extended language: the non-Z3 test oracle.
-///
-/// A model is *total* — any base-array cell or call tuple not listed reads
-/// as `0` — so [`eval_ext_bool`] always yields a definite truth value given
-/// bindings for the free core variables.
-#[derive(Clone, Debug, Default)]
-pub struct SliverModel {
-    /// Bindings for the free core bitvector variables.
-    pub env: Env,
-    /// Base-array contents: `array_name → (index → byte)`; default `0`.
-    pub arrays: BTreeMap<String, BTreeMap<u32, u8>>,
-    /// Uninterpreted-function graph: `(name, arg_values) → result`; default `0`.
-    pub calls: BTreeMap<(String, Vec<u128>), u128>,
-    /// The byte an unlisted base-array cell reads as (default `0`). Lets a
-    /// caller probe interpretation-dependence by evaluating under two fills
-    /// (see [`eval_const`]).
-    pub base_fill: u8,
-}
-
 fn mask(width: u32) -> u128 {
     if width >= 128 {
         u128::MAX
@@ -2286,6 +2229,7 @@ mod uf {
 mod lowering {
     use super::build::*;
     use super::*;
+    use crate::eval::Env;
 
     struct Rng(u64);
     impl Rng {

@@ -25,16 +25,21 @@ path = "src/main.rs"
 # ordeal-lrat's empty dependency table).
 ordeal-lrat = { path = "../ordeal-lrat", version = "=0.35.0" }
 
-# `ordeal-cert/v1` bundle serialization (issue #91 / TR-025 ordeal half).
-# Optional: the default build stays dependency-free; rivet (the consumer)
-# enables `cert-bundle`.
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-# (sha256 is in-tree — crates/ordeal/src/sha256.rs — so the witness hashes
-# ship in the dependency-free default binary; #162 / TR-045.)
+# The certificate data types, their trusted re-checks and the
+# `ordeal-cert/v1..v4` bundle codec (TR-075): extracted so `ordeal-recheck`
+# is built without the solver. In-workspace and dependency-free beyond
+# ordeal-lrat with no features on, so the default build stays free of
+# third-party deps. Everything is re-exported at its old `ordeal::` path.
+ordeal-cert = { path = "../ordeal-cert", version = "=0.35.0", default-features = false }
+# (sha256 is in-tree — crates/ordeal-cert/src/sha256.rs — so the witness
+# hashes ship in the dependency-free default binary; #162 / TR-045.)
 
 [features]
-cert-bundle = ["dep:serde", "dep:serde_json"]
+# `ordeal-cert/v1..v4` bundle serialization (issue #91 / TR-025 ordeal
+# half): the serde envelope is ordeal-cert's `json` feature. Optional: the
+# default build stays dependency-free; rivet (the consumer) enables
+# `cert-bundle`.
+cert-bundle = ["ordeal-cert/json"]
 # The Z3 differential oracle. Off by default: the default build has ZERO
 # external dependencies and always compiles. Enabling this feature pulls in
 # the `z3` crate (native targets only) so dev/CI runs can cross-check every

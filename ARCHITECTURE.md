@@ -254,19 +254,24 @@ entirely — the verified checker stands alone.
 
 ## Crate layout
 
-One workspace, **two crates** — the untrusted solver and, separately, the
-trusted checker. The separation *is* the trust boundary: `ordeal-lrat`
-declares no dependencies at all (enforced by test) and never depends on the
-solver.
+One workspace, **four crates** — the untrusted solver, the trusted checker,
+and (since TR-075) the certificate types extracted from the solver plus the
+standalone re-checker built from them. The separation *is* the trust
+boundary: `ordeal-lrat` declares no dependencies at all (enforced by test)
+and never depends on the solver; `ordeal-cert` and `ordeal-recheck` never
+depend on the solver either (`scripts/recheck_closure.sh`, in the required
+Test job), so an auditor re-checks a bundle without building ordeal.
 
 | Path | Purpose |
 |------|---------|
 | `crates/ordeal-lrat/` | **THE TRUSTED COMPONENT** — the dependency-free LRAT checker (`kernel.rs` is the string-free proven core; soundness discharged in Lean 4) and, since #192 phase 4, the proven lowering (`blast_kernel.rs`, a `#[path]` submodule of `kernel.rs`: one Aeneas translation unit) plus `check_query`, the query-level re-check an `ordeal-cert/v2` bundle is verified with (`lean/QueryCheck.lean`); `check_term_dag` (phase 7, `lean/TermCheck.lean`); the sliver check `sliver_kernel.rs` (TR-072, `lean/SliverCheck.lean`); and the proven flattener `term_kernel.rs` (TR-073, `lean/TreeFlatten.lean`: the kernel's own tree type, `flatten_tree`, `project_core`, the by-name model binding `check_tree_model` / `_ext`). |
+| `crates/ordeal-cert/` | The certificate data types and their re-checks (TR-075, moved verbatim out of `ordeal`, which re-exports every item at its old path): `Certificate` / `Model`, the SAT witness, `QueryDag` / `QueryTerm` / `SliverBlock` and the `*Certificate::recheck` methods that call the trusted `ordeal_lrat` checks, the in-tree SHA-256, and — behind its `json` feature — the `ordeal-cert/v1`..`v4` bundle emitters and hash-verifying readers. Depends on `ordeal-lrat` only (plus serde with `json`); untrusted glue, like the solver side of the boundary. |
+| `crates/ordeal-recheck/` | The standalone `ordeal-recheck` binary (TR-075): reads a bundle's declared format and verdict, decodes it with the `ordeal-cert` reader and runs that format's full recheck; exit 0 iff every bundle is accepted. Built from `ordeal-cert` (`json`) alone — no solver in its closure — natively and as a wasm32-wasip2 component. |
 | `crates/ordeal/src/mirror.rs` | The one remaining trusted step of the term direction (TR-073): the 1:1 copy of a `BoolTerm` / `ExtBoolTerm` into the kernel's tree (`of_bools`, `of_ext_bools` — one `match` arm per constructor, names as bytes) and its inverse (`to_bool`, `to_ext_bool`; a bijection, tested), plus the kernel's tables read back as the bundle's `vars` / `arrays` / `funcs`. |
 | `crates/ordeal/src/term.rs` | The closed QF_BV fragment (loom #246 op set). |
 | `crates/ordeal/src/solver.rs` | One-shot `check-sat` interface; result / certificate / model types. |
 | `crates/ordeal/src/blast_kernel.rs` | The solver's view of THE lowering (one implementation; #192 phases 2–4): a re-export of `ordeal_lrat::blast_kernel` — the blast rules, the term-DAG encoder (`encode`), the folding + hashing pass (`compact`) and the Tseitin encoder (`tseitin`) the solver runs, proven in Lean (`Kernel.lean` / `Blaster*.lean`) — plus the solver-side differential and gate-identity tests. |
-| `crates/ordeal/src/query.rs` | The certificate-carried query (#192 phase 4): `QueryDag` (nodes, constant bits, roots, hints), `QueryCertificate` with the trusted `recheck()` through `ordeal_lrat::check_query`, and `Solver::check_with_query`. Always compiled; the `ordeal-cert/v2` JSON lives in `cert_bundle.rs`. |
+| `crates/ordeal/src/query.rs` | The certificate-carried query (#192 phase 4): re-exports `ordeal_cert::query` (`QueryDag`, `QueryCertificate` with the trusted `recheck()` through `ordeal_lrat::check_query`, and their v3/v4 successors) and keeps the solver side — the `*CheckResult` verdict types and `QueryTermFlatten` (the constructors that flatten the caller's trees). Always compiled; the bundle JSON lives in `ordeal-cert`'s `cert_bundle.rs`. |
 | `crates/ordeal/src/dag.rs` | The term DAG the proven encoder consumes (#192 phase 3): the hash-consed builder from assertions and the untrusted structural-hashing hints `compact` checks; `dag::flatten`, the untrusted twin of the kernel's `flatten_tree` (the differential over every corpus since TR-073). |
 | `crates/ordeal/src/blast/` | The phase-2 per-rule bridge (`mod.rs`: run a rule on a reference arena, replay it into `aig::Aig` through `Aig::and`) — since phase 3 a test harness, not the production path: one-line per-op-family entry points for the evaluator differentials (`arith`, `bitwise`, `muldiv`, `shift`, `structural` — no rule bodies) + the Kani proof harnesses (`proofs.rs`). |
 | `crates/ordeal/src/aig.rs` | And-Inverter Graph with structural sharing + const-folding (the gate-identity reference for `blast_kernel::compact`; test path since #192 phase 3). |
@@ -282,7 +287,7 @@ solver.
 | `crates/ordeal/src/lowering.rs` | The formerly derived ops (`bvnot bvneg bvrotl bvsdiv bvsrem`): constructors of the `BvTerm` variants (proven DAG nodes since #192 phase 5, lowered as nodes on every path since v0.28.0) and the core-fragment rewrite `expand_*`, kept only for the differential tests that compare the old rewrite against the proven nodes. |
 | `crates/ordeal/src/smtlib.rs` | Minimal SMT-LIB2 QF_BV front end (the `check` subcommand). |
 | `crates/ordeal/src/verus.rs` | Verus `by (bit_vector)` obligation extraction (the `verus` subcommand). |
-| `crates/ordeal/src/cert_bundle.rs` | `ordeal-cert/v1` bundle serialization (`cert-bundle` feature). |
+| `crates/ordeal/src/cert_bundle.rs` | `ordeal-cert/v1`..`v4` bundle serialization (`cert-bundle` feature = `ordeal-cert/json`): a re-export of `ordeal_cert::cert_bundle`, plus the solver-driven bundle tests. |
 | `crates/ordeal/src/bmc_corpus.rs` | BMC-shaped benchmark corpus (doc-hidden). |
 | `crates/ordeal/src/oracle.rs` | Z3 differential oracle (behind the `oracle` feature). |
 | `crates/ordeal/src/lib.rs` | Public API surface and re-exports. |

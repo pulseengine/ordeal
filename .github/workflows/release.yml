@@ -179,9 +179,22 @@ jobs:
         if: matrix.cross
         run: cross build --release --target ${{ matrix.target }} -p ordeal
 
+      # TR-075 / #277: the standalone re-checker, built in its OWN cargo
+      # invocation — building it together with ordeal would unify
+      # ordeal-cert's `json` feature into the ordeal binary.
+      - name: Build ordeal-recheck (native)
+        if: ${{ !matrix.cross }}
+        run: cargo build --release --target ${{ matrix.target }} -p ordeal-recheck
+
+      - name: Build ordeal-recheck (cross)
+        if: matrix.cross
+        run: cross build --release --target ${{ matrix.target }} -p ordeal-recheck
+
       - name: Strip binary
         if: ${{ !matrix.cross }}
-        run: strip "target/${{ matrix.target }}/release/ordeal" 2>/dev/null || true
+        run: |
+          strip "target/${{ matrix.target }}/release/ordeal" 2>/dev/null || true
+          strip "target/${{ matrix.target }}/release/ordeal-recheck" 2>/dev/null || true
 
       # The binary that ships must report the version being tagged (#120;
       # the varve#38 lesson — a v0.14.0 release once shipped a binary
@@ -206,6 +219,17 @@ jobs:
           printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' \
             | "$BIN" check - | head -1 | grep -qx unsat
           echo "::notice::'$GOT' matches the tag; certified-unsat smoke OK"
+          # TR-075: ordeal-recheck reports the tag and re-checks the
+          # committed real-solver bundles (v3 unsat + sat), so its deepest
+          # exercised path is the trusted recheck, not `--version`.
+          RBIN="target/${TARGET}/release/ordeal-recheck"
+          RGOT=$("$RBIN" --version)
+          if [ "$RGOT" != "ordeal-recheck ${VERSION#v}" ]; then
+            echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
+            exit 1
+          fi
+          "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          echo "::notice::'$RGOT' matches the tag; fixture recheck smoke OK"
 
       # #135: the cross MUSL leg is static, so it executes under qemu-user —
       # same assert + smoke as the native legs (recipe proven per-PR by the
@@ -233,6 +257,14 @@ jobs:
           printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' \
             | qemu-aarch64 "$BIN" check - | head -1 | grep -qx unsat
           echo "::notice::'$GOT' matches the tag under qemu; certified-unsat smoke OK"
+          RBIN="target/${TARGET}/release/ordeal-recheck"
+          RGOT=$(qemu-aarch64 "$RBIN" --version)
+          if [ "$RGOT" != "ordeal-recheck ${VERSION#v}" ]; then
+            echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
+            exit 1
+          fi
+          qemu-aarch64 "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          echo "::notice::'$RGOT' matches the tag under qemu; fixture recheck smoke OK"
 
       - name: Package archive
         env:
@@ -253,11 +285,21 @@ jobs:
           cp README.md LICENSE staging/
           tar -czf "$ARCHIVE" -C staging .
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+          # TR-075: the re-checker ships as its own archive (an auditor
+          # downloads it without the solver).
+          RECHECK_ARCHIVE="ordeal-recheck-${VERSION}-${TARGET}.tar.gz"
+          mkdir -p staging-recheck
+          cp "target/${TARGET}/release/ordeal-recheck" staging-recheck/
+          cp README.md LICENSE staging-recheck/
+          tar -czf "$RECHECK_ARCHIVE" -C staging-recheck .
+          echo "RECHECK_ARCHIVE=$RECHECK_ARCHIVE" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: binary-${{ matrix.target }}
-          path: ${{ env.ARCHIVE }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.RECHECK_ARCHIVE }}
           retention-days: 7
 
   # ── Create the GitHub Release: checksums + provenance ─────────────────
@@ -287,6 +329,17 @@ jobs:
           b=$(sha256sum target/b/wasm32-wasip2/release/ordeal.wasm | cut -d' ' -f1)
           echo "wasm sha256: $a / $b"
           test "$a" = "$b" || { echo "::error::wasm component is not reproducible"; exit 1; }
+      # TR-075: the ordeal-recheck component, same discipline (its own cargo
+      # invocation: no feature unification into ordeal.wasm).
+      - name: Build ordeal-recheck twice, require identical bytes
+        run: |
+          set -euo pipefail
+          cargo build --release -p ordeal-recheck --target wasm32-wasip2 --target-dir target/ra
+          cargo build --release -p ordeal-recheck --target wasm32-wasip2 --target-dir target/rb
+          a=$(sha256sum target/ra/wasm32-wasip2/release/ordeal-recheck.wasm | cut -d' ' -f1)
+          b=$(sha256sum target/rb/wasm32-wasip2/release/ordeal-recheck.wasm | cut -d' ' -f1)
+          echo "ordeal-recheck wasm sha256: $a / $b"
+          test "$a" = "$b" || { echo "::error::ordeal-recheck wasm component is not reproducible"; exit 1; }
       - name: Build native (release) for the differential
         run: cargo build --release -p ordeal
       - name: Install wasmtime
@@ -298,6 +351,20 @@ jobs:
           scripts/wasm_native_differential.sh \
             target/release/ordeal \
             wasmtime run --dir . target/a/wasm32-wasip2/release/ordeal.wasm
+      - name: ordeal-recheck component — tag version, recheck smoke, native differential
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
+          cargo build --release -p ordeal-recheck
+          W="wasmtime run --dir . target/ra/wasm32-wasip2/release/ordeal-recheck.wasm"
+          GOT=$($W --version)
+          test "$GOT" = "ordeal-recheck ${VERSION#v}" || { echo "::error::ordeal-recheck component says '$GOT', tag demands 'ordeal-recheck ${VERSION#v}'"; exit 1; }
+          F="crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json"
+          $W --format json $F > recheck-wasm.json
+          target/release/ordeal-recheck --format json $F > recheck-native.json
+          cmp recheck-wasm.json recheck-native.json
       - name: Stage the component
         env:
           INPUT_TAG: ${{ inputs.tag }}
@@ -306,6 +373,7 @@ jobs:
           VERSION="${INPUT_TAG:-${GITHUB_REF#refs/tags/}}"
           mkdir -p wasm-out
           cp target/a/wasm32-wasip2/release/ordeal.wasm "wasm-out/ordeal-${VERSION}-wasm32-wasip2.wasm"
+          cp target/ra/wasm32-wasip2/release/ordeal-recheck.wasm "wasm-out/ordeal-recheck-${VERSION}-wasm32-wasip2.wasm"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: wasm-component
@@ -405,6 +473,59 @@ jobs:
             --version "$BARE" --doc-version 1 \
             --asserted-at "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+      # ── Tools from the pinned varve layer: rivet + wsc (#278 / TR-076) ──
+      # varve is installed the verified way (cosign on its signed sums
+      # before install.sh runs; see scripts/install_varve.sh), so cosign is
+      # installed first. rivet (release body, below) and wsc (wasm signing,
+      # next) both come from the layer pinned in varve.toml, verified
+      # against the realm root, never from a version string in this file.
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: 'v2.4.1'
+
+      - name: Install the pinned varve layer (rivet, wsc)
+        env:
+          VARVE_VERSION: v0.38.0
+        run: |
+          bash scripts/install_varve.sh
+          ~/.varve/bin/varve run rivet --version
+          ~/.varve/bin/varve run wsc --version
+
+      # ── wsc keyless signatures on the wasm components (#278 / TR-076) ──
+      # Each reproducible component X.wasm is published unchanged (its bytes
+      # are the ones the reproducibility and wasm<->native gates ran on) and
+      # next to it X.signed.wasm: the same module with a sigil signature
+      # section embedded by `wsc sign --keyless` (ephemeral key, Fulcio
+      # certificate for this workflow's OIDC identity, Rekor entry). Placed
+      # BEFORE the checksum step so the signed files are in the cosign-signed
+      # sums and the SLSA provenance too. Two self-checks fail the release:
+      # `wsc verify` must accept each signed file for exactly this workflow
+      # ref, and `wsc detach` must give back the published bytes, so the
+      # signature covers the reproducible module and nothing else.
+      #   wsc verify --keyless -i ordeal-vX.Y.Z-wasm32-wasip2.signed.wasm \
+      #     --cert-identity https://github.com/pulseengine/ordeal/.github/workflows/release.yml@refs/tags/vX.Y.Z \
+      #     --cert-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Sign the wasm components with wsc (keyless)
+        run: |
+          set -euo pipefail
+          ID="https://github.com/${GITHUB_WORKFLOW_REF}"
+          ISS="https://token.actions.githubusercontent.com"
+          WSC=$(~/.varve/bin/varve which wsc | head -1)
+          n=0
+          for w in release-assets/*-wasm32-wasip2.wasm; do
+            s="${w%.wasm}.signed.wasm"
+            "$WSC" sign --keyless --expected-issuer "$ISS" -i "$w" -o "$s" >/dev/null
+            "$WSC" verify --keyless --cert-identity "$ID" --cert-oidc-issuer "$ISS" -i "$s"
+            "$WSC" detach -i "$s" -o "$s.detached" -S "$s.sig" >/dev/null
+            cmp "$w" "$s.detached"
+            rm -f "$s.detached" "$s.sig"
+            echo "::notice::wsc keyless-signed $(basename "$s") for $ID"
+            n=$((n+1))
+          done
+          test "$n" = 2 || { echo "::error::expected 2 wasm components to sign, signed $n"; exit 1; }
+          ls -la release-assets/
+
       - name: Generate SHA256 checksums
         run: |
           set -euo pipefail
@@ -428,11 +549,6 @@ jobs:
       #       'https://token.actions.githubusercontent.com' \
       #     --bundle SHA256SUMS.txt.cosign.bundle \
       #     SHA256SUMS.txt
-      - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-        with:
-          cosign-release: 'v2.4.1'
-
       - name: Sign SHA256SUMS with cosign (keyless OIDC)
         run: |
           set -euo pipefail
@@ -463,22 +579,8 @@ jobs:
       # cut time; (2) `rivet release notes`, computed from the artifact
       # store and commit trailers, so the delivered scope, withheld scope,
       # and verification-evidence gaps cannot drift from the release-scope
-      # query; (3) a pointer to CHANGELOG.md for prose. rivet itself is a
-      # cosign-verified release download (its sums are keyless-signed by
-      # rivet's own release workflow), never a floating install.
-      - name: Install rivet from the pinned varve layer (varve.toml)
-        # rivet comes from the layer pinned in varve.toml (realm pulseengine,
-        # trust root in varve-realms.toml), verified by varve against the
-        # realm root — not from a version string in this file. varve itself
-        # is installed the verified way (cosign on its signed sums before
-        # install.sh runs); see scripts/install_varve.sh. cosign was
-        # installed above for the checksum signing.
-        env:
-          VARVE_VERSION: v0.38.0
-        run: |
-          bash scripts/install_varve.sh
-          ~/.varve/bin/varve run rivet --version
-
+      # query; (3) a pointer to CHANGELOG.md for prose. rivet comes from
+      # the pinned varve layer installed above, never a floating install.
       - name: Compose the release body
         env:
           INPUT_TAG: ${{ inputs.tag }}

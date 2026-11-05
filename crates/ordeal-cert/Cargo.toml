@@ -1,0 +1,27 @@
+[package]
+name = "ordeal-cert"
+description = "Ordeal's certificate types, their trusted re-checks and the ordeal-cert/v1..v4 bundle codec — no solver in the dependency closure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[lib]
+name = "ordeal_cert"
+path = "src/lib.rs"
+
+[dependencies]
+# The trusted checker every `recheck` calls (TR-075). This crate must never
+# depend on the `ordeal` solver: it is what `ordeal-recheck` is built from,
+# and scripts/recheck_closure.sh gates that closure in CI.
+ordeal-lrat = { path = "../ordeal-lrat", version = "=0.35.0" }
+
+# The `ordeal-cert/v1..v4` JSON envelope. Optional: without `json` the crate
+# is dependency-free beyond ordeal-lrat (the default `ordeal` build enables
+# no features here).
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+
+[features]
+json = ["dep:serde", "dep:serde_json"]

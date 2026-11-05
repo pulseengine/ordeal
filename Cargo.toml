@@ -1,6 +1,20 @@
 [workspace]
 resolver = "2"
-members = ["crates/ordeal", "crates/ordeal-lrat"]
+members = [
+    "crates/ordeal",
+    "crates/ordeal-cert",
+    "crates/ordeal-lrat",
+    "crates/ordeal-recheck",
+]
+# TR-075: ordeal-recheck is a workspace member but NOT a default member. It
+# enables ordeal-cert's `json` feature, and cargo unifies features across the
+# packages of one build — so a bare `cargo build` with it in would link the
+# serde envelope into the `ordeal` binary, which is then no longer the
+# artifact the release ships (`-p ordeal`). Bare `cargo build` / the
+# reproducibility and wasm gates therefore build exactly what they always
+# did; ordeal-recheck is built with `-p ordeal-recheck` (release.yml, CI) and
+# covered by every `--workspace` / `--all` command.
+default-members = ["crates/ordeal", "crates/ordeal-cert", "crates/ordeal-lrat"]
 
 [workspace.package]
 version = "0.35.0"
