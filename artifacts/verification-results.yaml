@@ -3324,3 +3324,31 @@ artifacts:
         target: VER-086
       - type: part-of-execution
         target: VE-069
+
+  - id: VE-070
+    type: verification-execution
+    title: Aeneas String probe run on two toolchains with a control (VER-080)
+    status: implemented
+    description: "Local runs on 2026-11-05: pinned (nix-built charon 0.1.218 / aeneas 9dd45ec): BLOCKED, 3 String axioms; latest release bundle nightly-2026.11.05-c2d2343 (charon 0.1.308): BLOCKED, the same 3; control without String operations on the pinned toolchain: UNLOCKED, 0 axioms. A from-source nix build of Aeneas main 4acbb6d was attempted first and failed twice on disk space (it fetches a full nightly rustc-dev), which is why the latest point is the prebuilt release."
+    fields:
+      environment: macOS arm64; rustup nightly-2026-09-17 (rustc-dev) for the bundle
+      executor: local
+      timestamp: 2026-11-05 22:02:13+00:00
+      version: aeneas 9dd45ec and nightly-2026.11.05-c2d2343
+    links:
+      - type: traces-to
+        target: TR-080
+
+  - id: VV-144
+    type: verification-verdict
+    title: VER-080 pass — the A2 blocker holds on both toolchains and the probe can report the other answer
+    status: implemented
+    description: BLOCKED with the same three String axioms on the pinned and the latest Aeneas; UNLOCKED on the String-free control.
+    fields:
+      evidence: "scripts/aeneas_string_probe.sh (pinned: BLOCKED; nightly-2026.11.05-c2d2343: BLOCKED; control: UNLOCKED)"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-080
+      - type: part-of-execution
+        target: VE-070

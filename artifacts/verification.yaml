@@ -1701,3 +1701,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-086
+
+  - id: VER-080
+    type: sw-verification
+    title: "Aeneas String probe: BLOCKED on the pinned and the latest Aeneas, UNLOCKED on the String-free control (TR-080)"
+    status: implemented
+    release: v0.37.0
+    description: "scripts/aeneas_string_probe.sh on lean/probe/string_names.rs. Pinned Charon 0.1.218 / Aeneas 9dd45ec (nix, lean/toolchain-pins.env): axioms alloc.string.String.as_bytes, alloc.string.String.Insts.CoreCmpPartialEqString.eq, alloc.string.String.len, BLOCKED. Latest prebuilt release Charon 0.1.308 / Aeneas nightly-2026.11.05-c2d2343 (macos-aarch64 bundle, RUSTUP_TOOLCHAIN=nightly-2026-09-17 with rustc-dev): the same three axioms, BLOCKED. Negative control: the probe file with ==, len and as_bytes replaced by String-free expressions gives no axiom and UNLOCKED on the pinned toolchain; file restored byte for byte (cmp). The probe also fails (exit 1) if either tool fails or the translation lacks name_eq, so a broken toolchain is not read as an answer."
+    tags: [aeneas, probe, negative-control]
+    fields:
+      coverage: the three String operations a name table needs, on the pinned and the latest Aeneas; a String-free control
+      method: automated-test
+      steps: "run: scripts/aeneas_string_probe.sh <charon> <aeneas> for the pinned toolchain and the latest Aeneas release bundle"
+    links:
+      - type: verifies
+        target: TR-080

@@ -335,6 +335,30 @@ impls leave the type's definition site. Recorded as the follow-up that a
 pinned Aeneas with a `String` model (or a maintainer decision to supply
 one) unlocks; not recommended now.
 
+#### (A2) re-measured, 2026-11-05 (#282, TR-080)
+
+The spike B2 shape is now a committed probe, `lean/probe/string_names.rs`,
+run by `scripts/aeneas_string_probe.sh <charon> <aeneas>`. It was run against
+two toolchains:
+
+| Aeneas | Charon | String axioms |
+|---|---|---|
+| `9dd45ec` (the pin, 2026-07-01) | 0.1.218 | `String.as_bytes`, `String.Insts.CoreCmpPartialEqString.eq`, `String.len` |
+| `nightly-2026.11.05-c2d2343` (prebuilt release) | 0.1.308 | the same three |
+
+Negative control: the same file with no String operation gives no axiom, and
+the probe prints UNLOCKED. Upstream `main`'s library declares
+`alloc::string::String` as an opaque type and models no operation on it
+(`backends/lean/Aeneas/Std/Alloc/String.lean`, last changed be86ab0 on
+2026-10-16). So (A2) stays refused by the zero-axiom gate, and `mirror.rs`
+stays: a trusted 1:1 copy, bijection-tested.
+
+Re-run the probe on every Charon/Aeneas bump. If it prints UNLOCKED, re-open
+#282. The other way to unlock (A2) is a hand-written `String.eq` model under
+a set-equality gate, which is what mbrotli/mzstd do for the std functions
+Aeneas does not cover (`FunsExternal.lean`). That would add a new kind of
+trusted item, so it is a maintainer decision and not taken here.
+
 ### Leaves the trust base
 
 `dag::flatten` / `DagBuilder::new(false)` (N1, N3, N4, N5), the width
