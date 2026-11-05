@@ -15,9 +15,15 @@
 //! certificate-checked and must never guess at a construct it did not model.
 //!
 //! - **Commands:** `set-logic` (accepted/ignored), `declare-const` /
-//!   `declare-fun name () (_ BitVec N)`, `assert`, `check-sat`, `get-model`,
-//!   `get-value` (accepted, prints the model), `exit`; `set-info` /
-//!   `set-option` are ignored.
+//!   `declare-fun name () S` with `S` a `(_ BitVec N)` or `Bool`, `assert`,
+//!   `check-sat`, `get-model`, `get-value` (accepted, prints the model),
+//!   `exit`; `set-info` / `set-option` are ignored.
+//! - **Symbols:** `|x|` and `x` are one symbol (SMT-LIB 2.6 §3.1): a quoted
+//!   symbol whose content is a simple, non-reserved symbol is read as its
+//!   bare spelling; any other quoted symbol keeps its bars. A `Bool` name is
+//!   never a bitvector, and redeclaring a name at another sort is an error;
+//!   an identical redeclaration is tolerated (concatenated logs, #139), which
+//!   is the one place this reader is laxer than SMT-LIB (#294).
 //! - **Literals:** `(_ bvN W)`, `#xHEX`, `#bBIN` → [`BvTerm::Const`]; a
 //!   declared name → [`BvTerm::Var`].
 //! - **Bitvector ops:** `bvadd bvsub bvmul bvand bvor bvxor` (n-ary,
@@ -106,6 +112,35 @@ fn as_atom(s: &Sexp) -> Option<&str> {
     }
 }
 
+/// The canonical spelling of a `|...|` token (#294): its bare content when
+/// that is a simple symbol and not a reserved word, else the token as read.
+fn canonical_quoted(tok: String) -> String {
+    let inner = match tok.strip_prefix('|').and_then(|t| t.strip_suffix('|')) {
+        Some(i) => i,
+        None => return tok, // unterminated: left as read, refused later
+    };
+    const RESERVED: &[&str] = &[
+        "_",
+        "!",
+        "as",
+        "let",
+        "exists",
+        "forall",
+        "match",
+        "par",
+        "BINARY",
+        "DECIMAL",
+        "HEXADECIMAL",
+        "NUMERAL",
+        "STRING",
+    ];
+    let simple_char = |c: char| c.is_ascii_alphanumeric() || "~!@$%^&*_-+=<>.?/".contains(c);
+    let simple = inner.chars().next().is_some_and(|c| !c.is_ascii_digit())
+        && inner.chars().all(simple_char)
+        && !RESERVED.contains(&inner);
+    if simple { inner.to_string() } else { tok }
+}
+
 /// Split raw source into s-expression tokens: `(`, `)`, `|quoted|` symbols, and
 /// bare atoms. Whitespace separates; `;` starts a line comment.
 fn tokenize(src: &str) -> Vec<String> {
@@ -129,8 +164,12 @@ fn tokenize(src: &str) -> Vec<String> {
                 toks.push(c.to_string());
             }
             '|' => {
-                // A `|...|` quoted symbol keeps its bars so it stays a single
-                // atom even if it contains spaces.
+                // A `|...|` quoted symbol. SMT-LIB 2.6 §3.1: `|x|` and `x`
+                // are the same symbol, so a quoted symbol whose content is a
+                // simple, non-reserved symbol is canonicalized to its bare
+                // spelling (#294). Any other content keeps its bars, so it
+                // stays one atom (spaces) and can never be read as a literal
+                // (`|#x01|`) or a reserved word (`|let|`).
                 chars.next();
                 let mut s = String::from("|");
                 for c in chars.by_ref() {
@@ -139,7 +178,7 @@ fn tokenize(src: &str) -> Vec<String> {
                         break;
                     }
                 }
-                toks.push(s);
+                toks.push(canonical_quoted(s));
             }
             _ => {
                 // A bare atom runs until whitespace, a paren, or a comment.
@@ -296,6 +335,13 @@ impl Ctx {
             let value = u128::from_str_radix(bin, 2)
                 .map_err(|_| SmtError::Parse(format!("binary literal too wide: '{a}'")))?;
             return Ok(const_bv(value, width));
+        }
+        if self.bool_decls.contains(a) {
+            // A `Bool` is not a bitvector (Z3: "Sorts (_ BitVec 1) and Bool
+            // are incompatible"), even though it is held as a BV1 (#294).
+            return Err(SmtError::Parse(format!(
+                "sort mismatch: Bool '{a}' used as a bitvector"
+            )));
         }
         match self.decls.get(a) {
             Some(&width) => Ok(BvTerm::Var {
@@ -779,6 +825,23 @@ pub type WitnessOutcome = (
     Vec<(String, u32)>,
 );
 
+/// Record `name`'s sort as `Bool` or bitvector, refusing a redeclaration at
+/// the other sort: `Bool` and `(_ BitVec 1)` are both held at width 1, so
+/// the width check alone cannot tell them apart (#294).
+fn declare_sort(ctx: &mut Ctx, name: &str, is_bool: bool) -> Result<(), SmtError> {
+    if ctx.decls.contains_key(name) && ctx.bool_decls.contains(name) != is_bool {
+        return Err(SmtError::Solver(format!(
+            "redeclaration of '{name}' at another sort ({} after {})",
+            if is_bool { "Bool" } else { "a bitvector" },
+            if is_bool { "a bitvector" } else { "Bool" }
+        )));
+    }
+    if is_bool {
+        ctx.bool_decls.insert(name.to_string());
+    }
+    Ok(())
+}
+
 /// Shared reader loop: parse and execute the script, running `check` at
 /// each `check-sat`. Returns the last check's result and the declarations.
 #[allow(clippy::type_complexity)] // (last-verdict, declarations) pair; a generic alias obscures more than it helps
@@ -831,9 +894,7 @@ fn run_script<R>(
                         "redeclaration of '{name}' at width {width} (previously {prev})"
                     )));
                 }
-                if as_atom(sort) == Some("Bool") {
-                    ctx.bool_decls.insert(name.clone());
-                }
+                declare_sort(&mut ctx, &name, as_atom(sort) == Some("Bool"))?;
                 ctx.decls.insert(name.clone(), width);
                 declared.push((name, width));
             }
@@ -855,7 +916,8 @@ fn run_script<R>(
                         ));
                     }
                 }
-                let width = parse_sort(item(items, 3, "declare-fun")?)?;
+                let sort = item(items, 3, "declare-fun")?;
+                let width = parse_sort(sort)?;
                 if let Some(&prev) = ctx.decls.get(&name)
                     && prev != width
                 {
@@ -863,6 +925,7 @@ fn run_script<R>(
                         "redeclaration of '{name}' at width {width} (previously {prev})"
                     )));
                 }
+                declare_sort(&mut ctx, &name, as_atom(sort) == Some("Bool"))?;
                 ctx.decls.insert(name.clone(), width);
                 declared.push((name, width));
             }
@@ -1236,5 +1299,81 @@ mod tests {
             (assert (= x y))
             (check-sat)";
         assert!(matches!(solve_str(src), Err(SmtError::Parse(_))));
+    }
+
+    // #294: the reader against SMT-LIB 2.6 (found by the #281 design note,
+    // reproduced against Z3). Each row pins the SMT-LIB-correct outcome.
+    fn verdict_of(src: &str) -> Result<Option<CheckResult>, SmtError> {
+        solve_str(src).map(|o| o.result)
+    }
+
+    // rivet: verifies VER-086
+    #[test]
+    fn quoted_and_bare_spellings_are_one_symbol() {
+        // `|x|` and `x` are the same symbol (SMT-LIB 2.6 §3.1): x = 1 and
+        // x = 2 together are unsat, whichever spelling each assert uses.
+        let src = "(set-logic QF_BV)(declare-const x (_ BitVec 8))(assert (= |x| #x01))(assert (= x #x02))(check-sat)";
+        assert!(
+            matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))),
+            "{:?}",
+            verdict_of(src).map(|r| r.map(|_| ()))
+        );
+        let src = "(set-logic QF_BV)(declare-const |y| (_ BitVec 8))(assert (= y #x01))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Sat(_)))));
+        // The canonical (bare) name is what the model reports.
+        let o = solve_str(src).expect("solves");
+        assert_eq!(o.declared, vec![("y".to_string(), 8)]);
+    }
+
+    // rivet: verifies VER-086
+    #[test]
+    fn a_quoted_symbol_that_is_not_simple_stays_a_symbol() {
+        // `|#x01|` is a symbol, never the literal #x01; `|a b|` is one name.
+        let src = "(set-logic QF_BV)(declare-const |#x01| (_ BitVec 8))(assert (distinct |#x01| #x01))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Sat(_)))));
+        let src = "(set-logic QF_BV)(declare-const |a b| (_ BitVec 8))(assert (= |a b| #x07))(assert (distinct |a b| #x07))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))));
+        // An unknown quoted symbol is still refused.
+        let src = "(set-logic QF_BV)(declare-const |#x01| (_ BitVec 8))(assert (= |#x02| #x01))(check-sat)";
+        assert!(verdict_of(src).is_err());
+    }
+
+    // rivet: verifies VER-086
+    #[test]
+    fn a_bool_is_not_a_bitvector() {
+        // Z3: "Sorts (_ BitVec 1) and Bool are incompatible".
+        let src = "(set-logic QF_BV)(declare-const b Bool)(declare-const x (_ BitVec 1))(assert (= x b))(check-sat)";
+        assert!(verdict_of(src).is_err());
+        let src =
+            "(set-logic QF_BV)(declare-const b Bool)(assert (= (bvadd b #b1) #b0))(check-sat)";
+        assert!(verdict_of(src).is_err());
+        // A Bool used as a Bool still works.
+        let src = "(set-logic QF_BV)(declare-const b Bool)(assert b)(assert (not b))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))));
+    }
+
+    // rivet: verifies VER-086
+    #[test]
+    fn nullary_declare_fun_of_sort_bool_is_a_bool() {
+        let src = "(set-logic QF_BV)(declare-fun p () Bool)(assert p)(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Sat(_)))));
+        let src = "(set-logic QF_BV)(declare-fun p () Bool)(assert p)(assert (not p))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))));
+    }
+
+    // rivet: verifies VER-086
+    #[test]
+    fn redeclaration_at_another_sort_of_the_same_width_is_an_error() {
+        // Bool and (_ BitVec 1) share width 1 internally but are different sorts.
+        for src in [
+            "(set-logic QF_BV)(declare-const b Bool)(declare-const b (_ BitVec 1))(check-sat)",
+            "(set-logic QF_BV)(declare-const b (_ BitVec 1))(declare-fun b () Bool)(check-sat)",
+        ] {
+            assert!(verdict_of(src).is_err(), "{src}");
+        }
+        // The two spellings of one symbol are one declaration (identical
+        // redeclaration stays tolerated, as for concatenated logs, #139).
+        let src = "(set-logic QF_BV)(declare-const x (_ BitVec 8))(declare-const |x| (_ BitVec 8))(assert (= x #x01))(assert (= |x| #x02))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))));
     }
 }
