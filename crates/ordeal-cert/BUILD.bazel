@@ -1,0 +1,45 @@
+"""
+ordeal-cert — the certificate data types, their trusted re-checks and (with
+the `json` feature) the ordeal-cert/v1..v4 bundle codec (TR-075).
+
+Never depends on the solver: it is what the standalone `ordeal-recheck`
+binary is built from. Two variants, mirroring the two cargo feature sets:
+  * :ordeal-cert       — no features; ordeal-lrat only (what the solver's
+                         default build links, so ordeal stays dependency-free)
+  * :ordeal-cert-json  — the `json` feature (serde envelope), for
+                         ordeal-recheck and ordeal's cert-bundle feature
+"""
+
+load("@rules_rust//rust:defs.bzl", "rust_library", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+rust_library(
+    name = "ordeal-cert",
+    srcs = glob(["src/**/*.rs"]),
+    crate_name = "ordeal_cert",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    # The trusted checker only — never the solver.
+    deps = ["//crates/ordeal-lrat"],
+)
+
+rust_library(
+    name = "ordeal-cert-json",
+    srcs = glob(["src/**/*.rs"]),
+    crate_features = ["json"],
+    crate_name = "ordeal_cert",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    deps = [
+        "//crates/ordeal-lrat",
+        "@crates//:serde",
+        "@crates//:serde_json",
+    ],
+)
+
+rust_test(
+    name = "ordeal-cert-test",
+    crate = ":ordeal-cert",
+    edition = "2024",
+)

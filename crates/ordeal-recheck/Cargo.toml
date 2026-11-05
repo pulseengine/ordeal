@@ -1,0 +1,29 @@
+[package]
+name = "ordeal-recheck"
+description = "Standalone re-checker for ordeal-cert/v1..v4 certificate bundles — the trusted ordeal-lrat checks with no solver in the dependency closure"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "ordeal-recheck"
+path = "src/main.rs"
+
+[dependencies]
+# The decoder + recheck, and through it the trusted ordeal-lrat. NEVER the
+# `ordeal` solver (TR-075): scripts/recheck_closure.sh fails CI if a crate
+# named `ordeal` appears in this crate's normal dependency tree.
+ordeal-cert = { path = "../ordeal-cert", version = "=0.35.0", features = ["json"] }
+
+# The integration tests produce their bundles with the REAL solver. Dev-only:
+# dev-dependencies are not in the binary's closure (`cargo tree -e normal`,
+# which is what the closure gate reads), and never ship. NO features on the
+# ordeal dev-dependency: `cert-bundle` here would be unified into every
+# `cargo test --workspace` build of ordeal's own tests (the emitters are
+# reached through ordeal-cert's `json`, enabled above, instead).
+[dev-dependencies]
+ordeal = { path = "../ordeal" }
+serde_json = "1"
+ordeal-lrat = { path = "../ordeal-lrat" }

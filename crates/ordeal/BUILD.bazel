@@ -43,6 +43,11 @@ rust_library(
         # z3 oracle) attach here gated by crate_features:
         #   "@crates//:z3",  # behind the `oracle` cargo feature (native only)
         "//crates/ordeal-lrat",
+        # TR-075: the certificate types + their trusted re-checks, extracted
+        # so ordeal-recheck builds without the solver. No features (the
+        # cert-bundle/json variant is //crates/ordeal-cert:ordeal-cert-json),
+        # so still zero external dependencies.
+        "//crates/ordeal-cert",
     ],
 )
 

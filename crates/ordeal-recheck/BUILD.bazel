@@ -1,0 +1,29 @@
+"""
+ordeal-recheck — the standalone re-checker for ordeal-cert/v1..v4 bundles
+(TR-075). Built from ordeal-cert (json) and, through it, the trusted
+ordeal-lrat — NEVER from the solver; scripts/recheck_closure.sh gates the
+cargo closure in CI.
+
+The integration tests (tests/recheck_cli.rs) produce their bundles with the
+real solver, a Cargo dev-dependency; Bazel's rust_test has no Cargo
+dev-deps, so only the binary's own unit tests are wired here and the
+integration suite runs on the cargo path (the required Test job).
+"""
+
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+
+package(default_visibility = ["//visibility:public"])
+
+rust_binary(
+    name = "ordeal-recheck",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    edition = "2024",
+    deps = ["//crates/ordeal-cert:ordeal-cert-json"],
+)
+
+rust_test(
+    name = "ordeal-recheck-test",
+    crate = ":ordeal-recheck",
+    edition = "2024",
+)
