@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **SMT-LIB reader conformance** (TR-086, #294). Four disagreements with
+  SMT-LIB 2.6 and Z3, none of which could give a wrong `unsat`:
+  - `|x|` and `x` are now one symbol. Before, a script that declared `x`
+    and used `|x|` was refused, and declaring both made two variables.
+  - A `Bool` used as a bitvector is a sort error. Before, it was accepted
+    as a BV1 and answered.
+  - A nullary `declare-fun` of sort `Bool` is accepted.
+  - Redeclaring a name at another sort of the same width (`Bool` vs
+    `(_ BitVec 1)`) is an error.
+
+  A quoted symbol that is not a simple symbol (`|#x01|`, `|a b|`, `|let|`)
+  keeps its bars, so it is never read as a literal or a keyword. Identical
+  redeclaration is still tolerated (#139). Model names are unchanged for
+  every script that does not quote.
+
 ## [0.36.0] - 2026-11-05
 
 ### Added

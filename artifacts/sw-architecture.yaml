@@ -304,6 +304,8 @@ artifacts:
 
       - type: allocated-from
         target: FEAT-009
+      - type: allocated-from
+        target: TR-086
   - id: ARC-011
     type: sw-arch-component
     title: ordeal-evidence (portable certificate, ordeal-cert/v1..v4 bundles, SAT witness, in-tree SHA-256; the ordeal-cert crate and the ordeal-recheck re-checker)

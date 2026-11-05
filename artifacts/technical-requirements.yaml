@@ -2098,6 +2098,24 @@ artifacts:
       - type: traces-to
         target: TR-046
 
+  - id: TR-086
+    type: sw-req
+    title: The SMT-LIB reader treats |x| and x as one symbol, keeps Bool and bitvector sorts apart, and accepts a nullary declare-fun of sort Bool
+    status: implemented
+    release: v0.37.0
+    description: "Four disagreements between the SMT-LIB reader (crates/ordeal/src/smtlib.rs) and SMT-LIB 2.6 / Z3, found by the #281 design note (docs/design/query-echo.md section 1): a quoted symbol kept its bars, so |x| and x were two names; a Bool name was accepted as a BV1 term; declare-fun of sort Bool did not register a boolean; a redeclaration at another sort of the same width (Bool vs (_ BitVec 1)) was accepted. Requirement: a quoted symbol whose content is a simple, non-reserved symbol is read as its bare spelling and any other quoted symbol keeps its bars (never a literal or keyword); a Bool used as a bitvector is a sort error; declare-fun name () Bool declares a boolean; a redeclaration at another sort is an error. Identical redeclaration stays tolerated (#139), the one remaining place the reader is laxer than SMT-LIB. None of the four could give a wrong unsat. Effect: behaviour. Phase E0 of the #281 design. Issue #294."
+    tags: [smtlib, front-end, conformance]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: Regression tests in smtlib::tests pin the SMT-LIB-correct outcome for each of the four inputs (unsat for |x| plus x, sort error for Bool as BV, sat/unsat for declare-fun Bool, error for a cross-sort redeclaration) and that a non-simple quoted symbol stays a symbol; the full workspace suite stays green.
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-010
+
   - id: TR-080
     type: sw-req
     title: The A2 blocker (Aeneas has no String model) is measured by a committed probe on the pinned and the latest Aeneas, and mirror.rs is kept for that recorded reason

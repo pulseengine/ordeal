@@ -3297,6 +3297,34 @@ artifacts:
       - type: part-of-execution
         target: VE-068
 
+  - id: VE-069
+    type: verification-execution
+    title: SMT-LIB reader conformance verified (VER-086)
+    status: implemented
+    description: "Local run on branch docs/v0.37.0-query-echo-design: cargo test -p ordeal --lib smtlib::tests 27 passed (the 4 behaviour tests were 4 failed before the fix); cargo test --workspace 347 passed, 0 failed; cargo test --workspace --features ordeal/cert-bundle,ordeal/cadical,ordeal/oracle (Z3 via LIBRARY_PATH=/opt/homebrew/lib) 406 passed, 0 failed; cargo fmt --check and clippy --workspace --all-targets -D warnings clean. The release binary against Z3 5.1.0 on the four #294 scripts: |x|/x unsat (Z3 unsat); Bool as BV1 sort error (Z3 sort error); declare-fun Bool sat (Z3 sat); x plus |x| declared accepted as one variable (Z3: redeclaration error, the retained #139 tolerance)."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew)
+      executor: local
+      timestamp: 2026-11-05 21:43:03+00:00
+      version: 6912b6f
+    links:
+      - type: traces-to
+        target: TR-086
+
+  - id: VV-143
+    type: verification-verdict
+    title: "VER-086 pass — the reader gives the SMT-LIB outcome on every #294 input"
+    status: implemented
+    description: All five smtlib conformance tests pass; the four behaviour tests were red before the fix.
+    fields:
+      evidence: cargo test -p ordeal --lib smtlib::tests (27 passed)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-086
+      - type: part-of-execution
+        target: VE-069
+
   - id: VE-070
     type: verification-execution
     title: Aeneas String probe run on two toolchains with a control (VER-080)

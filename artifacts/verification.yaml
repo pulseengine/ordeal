@@ -1687,6 +1687,21 @@ artifacts:
       - type: verifies
         target: TR-078
 
+  - id: VER-086
+    type: sw-verification
+    title: "SMT-LIB reader conformance: the four #294 inputs and the non-simple quoted symbol pinned to their SMT-LIB outcomes (TR-086)"
+    status: implemented
+    release: v0.37.0
+    description: "crates/ordeal/src/smtlib.rs tests: quoted_and_bare_spellings_are_one_symbol (x = 1 via |x| and x = 2 via x is unsat; |y| declared, y used is sat, model name y); a_quoted_symbol_that_is_not_simple_stays_a_symbol (|#x01| is a symbol distinct from the literal; |a b| one name; an undeclared quoted symbol refused); a_bool_is_not_a_bitvector (Bool in = with a BV1 and in bvadd are errors; Bool used as Bool still answers); nullary_declare_fun_of_sort_bool_is_a_bool (sat and unsat); redeclaration_at_another_sort_of_the_same_width_is_an_error (Bool then BV1 and BV1 then declare-fun Bool both error; x and |x| at the same sort are one variable). The four tests that encode a changed behaviour were seen red before the fix (4 failed, 23 passed) and green after."
+    tags: [smtlib, front-end, regression]
+    fields:
+      coverage: "every row of #294 plus the non-simple quoted symbol and the identical-redeclaration tolerance"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests"
+    links:
+      - type: verifies
+        target: TR-086
+
   - id: VER-080
     type: sw-verification
     title: "Aeneas String probe: BLOCKED on the pinned and the latest Aeneas, UNLOCKED on the String-free control (TR-080)"
