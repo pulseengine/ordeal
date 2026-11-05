@@ -1671,3 +1671,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-076
+
+  - id: VER-078
+    type: sw-verification
+    title: Kani tiers measured and complete; a workflow_dispatch run with every WIDE harness and the verdict job green; the verdict logic red on real and synthetic failures (TR-078)
+    status: implemented
+    release: v0.36.0
+    description: "bash scripts/kani_tiers.sh check: inventory 82, fast 25, heavy 1, wide 16, unscheduled 40, PASS (every harness in exactly one tier; each UNSCHEDULED entry carries its measured reason, including add_32/sub_32/xor_64/ite_64 which lost the hosted runner mid-solve and udiv_8/urem_8 with an 8-bit reference: 3294 s / past 3600 s). workflow_dispatch run 42050560685 of kani.yml on 5cb8a5a (ubuntu-latest): harness coverage, fast tier (21 min), heavy mul_8 (7 min), all 16 WIDE jobs (0-5 min each) and the Kani verdict job SUCCESS, run conclusion success. Verdict-job negative controls (the job's gh api + jq filter run locally): run 42002290201 attempt 2 (four failed wide jobs) exit 1; a synthetic list with one cancelled tier job exit 1; an empty job list exit 1; a synthetic all-success/skipped list exit 0."
+    tags: [kani, tiers, ci, gate-potency, negative-control]
+    fields:
+      coverage: every Kani harness in exactly one tier with a measured reason; every WIDE harness proven on the hosted runner; the run conclusion fails on any failed or cancelled tier job and on a run with no tier job
+      method: automated-test
+      steps: "run: bash scripts/kani_tiers.sh check && gh workflow run kani.yml --ref <branch>"
+    links:
+      - type: verifies
+        target: TR-078

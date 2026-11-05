@@ -3268,3 +3268,31 @@ artifacts:
         target: VER-076
       - type: part-of-execution
         target: VE-067
+
+  - id: VE-068
+    type: verification-execution
+    title: Kani re-tier and verdict job verified (VER-078)
+    status: implemented
+    description: "workflow_dispatch run 42050560685 of kani.yml on feat/v0.36.0-kani-wide at 5cb8a5a: 20 jobs, every one success, run conclusion success; WIDE: xor_32 and_32 or_32 and_64 or_64 sext_16_16 zext_16_16 extract_32_mid sext_32_32 zext_32_32 extract_64_hi concat_16_16 ite_32 eq_32 concat_32_32 ne_32; Kani verdict (every tier job succeeded) success at 16:38:20Z. Local: bash scripts/kani_tiers.sh check PASS (82 = 25 + 1 + 16 + 40). The verdict filter replayed locally on run 42002290201 attempt 2 gave exit 1, and on synthetic cancelled / empty / all-pass lists 1 / 1 / 0."
+    fields:
+      environment: GitHub-hosted ubuntu-latest (ubuntu-26.04), Kani from kani.yml; local macOS arm64 for the tier check and verdict controls
+      executor: ci
+      timestamp: 2026-11-05 16:43:49+00:00
+      version: 5cb8a5a
+    links:
+      - type: traces-to
+        target: TR-078
+
+  - id: VV-142
+    type: verification-verdict
+    title: VER-078 pass — every WIDE harness proven on CI and the Kani run now reports a failed proof job
+    status: implemented
+    description: Dispatch 42050560685 all 20 jobs success including the verdict job; the verdict logic exits 1 on the real four-failure run and on cancelled/empty lists.
+    fields:
+      evidence: gh run view 42050560685 (conclusion success); bash scripts/kani_tiers.sh check (PASS)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-078
+      - type: part-of-execution
+        target: VE-068
