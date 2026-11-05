@@ -3184,3 +3184,31 @@ artifacts:
         target: VER-074
       - type: part-of-execution
         target: VE-064
+
+  - id: VE-066
+    type: verification-execution
+    title: The ordeal-lrat MC/DC ratchet verified (VER-077)
+    status: implemented
+    description: "Independent re-run by the orchestrating session of bash scripts/mcdc_gate.sh on branch feat/v0.36.0-mcdc (73b1603): 286 rows, witness 0.45.0 from varve layer 2026.10.23; ordeal-lrat files 257 decisions / 235 not full / gap 932 / dead 571 / proved 350, equal to mcdc/baseline.txt, exit 0, 4m36s. Negative control: the 50 single-line run_row_sliver_reject_* rows deleted from mcdc/ordeal-lrat/src/rows.rs, gate exit 1 (sliver_kernel.rs not-full 42 -> 46, proved 38 -> 18), file restored with git checkout, sha256 5fcebbe707741ce33c91aefbf1eb9d806ee53c4128aeb33e3e9406f87159c45c before and after. The authoring agent's second control (an uncovered branch in a scratch copy of check_sat, never crates/) gave exit 1 with kernel.rs gap 371 -> 374. CI: the mcdc.yml job of PR #288 passed on ubuntu (first Linux run)."
+    fields:
+      environment: macOS arm64 local, rustc 1.99.1, witness 0.45.0 (varve layer 2026.10.23); and ubuntu-latest via mcdc.yml
+      executor: local
+      timestamp: 2026-11-05 07:58:23+00:00
+      version: 73b1603
+    links:
+      - type: traces-to
+        target: TR-077
+
+  - id: VV-140
+    type: verification-verdict
+    title: VER-077 pass — the MC/DC ratchet holds on the tree and turns red when checker coverage drops
+    status: implemented
+    description: Gate exit 0 with numbers equal to the baseline; removing 50 sliver reject rows gives exit 1 naming src/sliver_kernel.rs; restored byte for byte.
+    fields:
+      evidence: bash scripts/mcdc_gate.sh (exit 0; control exit 1)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-077
+      - type: part-of-execution
+        target: VE-066

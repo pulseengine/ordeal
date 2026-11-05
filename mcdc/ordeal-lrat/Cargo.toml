@@ -1,0 +1,32 @@
+# MC/DC row harness for the trusted checker crate `ordeal-lrat` (issue #279).
+#
+# Standalone on purpose: its own `[workspace]`, NOT a member of the root
+# workspace, so root `cargo` commands never see it and the checker crate
+# itself stays dependency-free. Built for wasm32-wasip1 by
+# `scripts/mcdc_gate.sh`; every no-arg `run_row_*` export is one test
+# driver that `witness` invokes. Rows drive the checker and assert nothing
+# about coverage; the native test only pins that each row returns the
+# outcome its name claims, so a row cannot silently stop exercising what it
+# says it does.
+[package]
+name = "ordeal-lrat-mcdc"
+version = "0.0.0"
+edition = "2024"
+publish = false
+license = "Apache-2.0"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/rows.rs"
+
+[dependencies]
+ordeal-lrat = { path = "../../crates/ordeal-lrat" }
+
+[workspace]
+
+# opt-level = 1 + debug = 2: the shape the spike proved gives witness
+# per-decision DWARF without the inliner folding decisions away.
+[profile.release]
+opt-level = 1
+debug = 2
+overflow-checks = true
