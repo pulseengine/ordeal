@@ -1627,6 +1627,21 @@ artifacts:
       - type: verifies
         target: TR-074
 
+  - id: VER-077
+    type: sw-verification
+    title: MC/DC ratchet over ordeal-lrat — gate on the pristine tree, two negative controls restored byte for byte, the CI workflow (TR-077)
+    status: implemented
+    release: v0.36.0
+    description: "bash scripts/mcdc_gate.sh on the tree: 286 rows, witness 0.45.0; ordeal-lrat files 257 decisions, 22 full MC/DC, gap 932, dead 571, proved 350; equal to mcdc/baseline.txt, exit 0 (macOS arm64 locally, 4m36s; Linux in the mcdc.yml job of PR #288). Negative controls: (1) the 50 single-line run_row_sliver_reject_* rows removed: exit 1, src/sliver_kernel.rs not-full 42 -> 46, proved 38 -> 18; rows.rs restored, sha256 5fcebbe7...c45c before and after; (2) an uncovered branch added to check_sat in a scratch copy of the checker (MCDC_ROOT, never crates/): exit 1, src/kernel.rs gap 371 -> 374."
+    tags: [mcdc, witness, gate, negative-control]
+    fields:
+      coverage: every trusted ordeal-lrat entry point driven by accept and reject rows; the ratchet per checker file on not-full decisions, gap+dead conditions and proved conditions; vacuity guards (no checker decisions, row-count mismatch, trace overflow)
+      method: automated-test
+      steps: "run: bash scripts/mcdc_gate.sh"
+    links:
+      - type: verifies
+        target: TR-077
+
   - id: VER-075
     type: sw-verification
     title: ordeal-recheck accepts every v1-v4 solver bundle and rejects each mutant by the recheck; solver-free closure gated and negative-controlled; bundles byte-identical across the extraction (TR-075)

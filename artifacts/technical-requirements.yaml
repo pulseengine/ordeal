@@ -2016,6 +2016,24 @@ artifacts:
       - type: traces-to
         target: TR-035
 
+  - id: TR-077
+    type: sw-req
+    title: witness MC/DC truth table for ordeal-lrat's checker decisions as release evidence, ratcheted in CI
+    status: implemented
+    release: v0.36.0
+    description: "Tracked in #279 (sub-issue of #232). Feature-loop step 5 (witness MC/DC on the Wasm artifact) had been N/A for every ordeal feature. Requirement: a standalone harness crate (mcdc/ordeal-lrat, its own workspace) drives every trusted ordeal-lrat entry point with accept and reject rows; witness (pinned varve layer) instruments the wasm32-wasip1 build and reconstructs MC/DC; scripts/mcdc_gate.sh keeps the checker's own decisions and fails when, per checker file, decisions without full MC/DC or uncovered (gap+dead) conditions rise or proved conditions fall against mcdc/baseline.txt, or when the measurement is vacuous (no checker decisions, row count differs from the harness, trace buffer overflow). The truth table is uploaded as CI evidence. This is confidence evidence: the checker's behaviour does not change."
+    tags: [mcdc, witness, trusted-core, gate, negative-control, plan-2026-11-05]
+    fields:
+      effect: confidence
+      priority: should
+      req-type: functional
+      verification-criteria: bash scripts/mcdc_gate.sh exits 0 on the tree with numbers equal to mcdc/baseline.txt; removing harness rows or adding an uncovered branch to a scratch copy of the checker turns it red naming the file; the CI workflow mcdc.yml runs it and uploads the truth table.
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: allocated-to
+        target: ARC-014
+
   - id: TR-075
     type: sw-req
     title: "ordeal-recheck: standalone signed binary + wasm component that re-checks ordeal-cert bundles"
