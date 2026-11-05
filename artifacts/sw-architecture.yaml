@@ -419,3 +419,5 @@ artifacts:
         target: TR-058
       - type: allocated-from
         target: TR-074
+      - type: allocated-from
+        target: TR-077
