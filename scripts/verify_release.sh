@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # rivet: verifies VER-040
 # rivet: verifies VER-041
+# rivet: verifies VER-076
 # Post-release verification of an ordeal release on the PUBLISHED bytes —
 # release-execution step 6, made a script so the evidence for the
 # asset-level requirements (TR-033 cosign sums, TR-039 static musl assets,

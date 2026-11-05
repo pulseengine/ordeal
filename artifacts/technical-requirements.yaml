@@ -2019,7 +2019,7 @@ artifacts:
   - id: TR-077
     type: sw-req
     title: witness MC/DC truth table for ordeal-lrat's checker decisions as release evidence, ratcheted in CI
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "Tracked in #279 (sub-issue of #232). Feature-loop step 5 (witness MC/DC on the Wasm artifact) had been N/A for every ordeal feature. Requirement: a standalone harness crate (mcdc/ordeal-lrat, its own workspace) drives every trusted ordeal-lrat entry point with accept and reject rows; witness (pinned varve layer) instruments the wasm32-wasip1 build and reconstructs MC/DC; scripts/mcdc_gate.sh keeps the checker's own decisions and fails when, per checker file, decisions without full MC/DC or uncovered (gap+dead) conditions rise or proved conditions fall against mcdc/baseline.txt, or when the measurement is vacuous (no checker decisions, row count differs from the harness, trace buffer overflow). The truth table is uploaded as CI evidence. This is confidence evidence: the checker's behaviour does not change."
     tags: [mcdc, witness, trusted-core, gate, negative-control, plan-2026-11-05]
@@ -2037,7 +2037,7 @@ artifacts:
   - id: TR-075
     type: sw-req
     title: "ordeal-recheck: standalone signed binary + wasm component that re-checks ordeal-cert bundles"
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "Before v0.36.0 the certificate checker was only reachable as a library through the ordeal crate, so an auditor who wanted to re-check an ordeal-cert bundle had to build (and so take into their toolchain) the untrusted solver and its front ends. Requirement: ship ordeal-recheck, a standalone program that re-checks ordeal-cert/v1, v2, v3 and v4 bundles, UNSAT and SAT, whose normal dependency closure contains the trusted ordeal-lrat and the certificate decoder but NOT the solver: the certificate types, their recheck() methods and the bundle codec are extracted into a crate ordeal-cert (depending on ordeal-lrat, plus serde/serde_json only behind its json feature), ordeal re-exports every moved item at its existing path so downstream (loom, rivet, synth) compiles unchanged, and every recheck calls the same ordeal_lrat functions in the same way as before. ordeal-recheck auto-detects the format and verdict, prints accepted or rejected with the reason per file (--format text|json), exits 0 iff every bundle is accepted and 1 if any is rejected or malformed; --version / -V print ordeal-recheck <semver>, --help exits 0, an unknown flag prints the usage on stderr and exits 2 (the PulseEngine CLI conventions). It ships as a native release binary per release target and as a wasm32-wasip2 component, inside the cosign-signed SHA256SUMS with SLSA provenance like the other release assets, and is published to crates.io after ordeal-lrat, ordeal-cert and ordeal. The bundles ordeal emits are byte-identical across the extraction. Effect: behaviour (a new capability for auditors)."
     tags: [certificate, recheck, auditor, closure, wasm, release]
@@ -2059,7 +2059,7 @@ artifacts:
   - id: TR-076
     type: sw-req
     title: The wasm32-wasip2 components are wsc keyless-signed and the signature is verified on the published bytes
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "Before v0.36.0 the wasm32-wasip2 components (ordeal and ordeal-recheck) were covered only by the cosign-signed SHA256SUMS and SLSA provenance; nothing a varve / sigil consumer verifies with wsc was attached, and feature-loop step 6 (sign with wsc) had been N/A for every feature. Requirement: release.yml signs each component with wsc (sigil) from the pinned varve layer, keyless (ephemeral key, a Fulcio certificate for the release workflow's GitHub OIDC identity, a Rekor entry), publishing X.signed.wasm next to the unchanged reproducible X.wasm; the signing step fails the release unless wsc verify accepts each signed file for exactly the running workflow ref and wsc detach returns the published X.wasm byte for byte, so the signature covers the reproducible module and nothing else. The signed files are inside the cosign-signed SHA256SUMS and the SLSA provenance. scripts/verify_release.sh, from v0.36.0, checks on the published bytes that each signed file is listed in the sums, verifies with wsc for the release workflow identity (the tag ref, or main for a workflow_dispatch recovery), detaches to the published unsigned file, and is rejected after one flipped byte (negative control); a missing wsc is a FAIL, not a SKIP. Effect: behaviour (a varve / sigil consumer can verify the wasm components with wsc)."
     tags: [release, signing, wsc, sigil, wasm, supply-chain]
@@ -2081,7 +2081,7 @@ artifacts:
   - id: TR-078
     type: sw-req
     title: Every 32/64 Kani harness is measured and tiered by its measured cost, and the Kani run conclusion reports a failed proof job
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "Before v0.36.0, 38 Kani harnesses at widths 32/64 (shifters, comparators, structural rules, mux) sat in UNSCHEDULED with no timed run, and the run badge was green while add_32, sub_32 and xor_64 failed every nightly from 2026-10-02 to 2026-11-05 (job-level continue-on-error masks the run conclusion). Requirement: every harness has a timed local run under WIDE_CBMC (Verification Time, peak RSS or the crash/timeout) recorded in scripts/kani_tiers.sh; a harness is in WIDE only with a workflow_dispatch SUCCESS on ubuntu-latest, and one that loses the runner there moves to UNSCHEDULED with the measured reason; the width-8 divider records a measured attempt at a lighter harness shape; and kani.yml ends with a verdict job that fails the run when any tier job did not succeed, so a proof regression is visible on the run while Kani still does not gate merges. Effect: confidence (every rule is already proven at every width in Lean over the shipped code, #219)."
     tags: [kani, tiers, ci, gate-potency, confidence]

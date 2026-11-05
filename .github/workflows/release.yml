@@ -506,6 +506,7 @@ jobs:
       #   wsc verify --keyless -i ordeal-vX.Y.Z-wasm32-wasip2.signed.wasm \
       #     --cert-identity https://github.com/pulseengine/ordeal/.github/workflows/release.yml@refs/tags/vX.Y.Z \
       #     --cert-oidc-issuer https://token.actions.githubusercontent.com
+      # rivet: verifies VER-076
       - name: Sign the wasm components with wsc (keyless)
         run: |
           set -euo pipefail

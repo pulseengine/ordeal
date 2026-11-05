@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # rivet: verifies VER-043
+# rivet: verifies VER-078
 # The Kani harness tiers — defined ONCE here, consumed by
 # .github/workflows/kani.yml (TR-046 / issue #153).
 #

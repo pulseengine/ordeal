@@ -157,6 +157,7 @@ jobs:
   # the run's own job conclusions and fails if any tier job did not succeed,
   # so the nightly run goes red when a proof job does. It is not a required
   # check: merges are still not gated on Kani.
+  # rivet: verifies VER-078
   verdict:
     name: Kani verdict (every tier job succeeded)
     needs: [tiers, fast, heavy, wide]
