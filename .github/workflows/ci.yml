@@ -266,7 +266,7 @@ jobs:
   # and runs the CLI baseline tests.
   macos:
     name: macOS build + smoke
-    runs-on: macos-14
+    runs-on: macos-latest  # macos-14 retired 2026-11-05
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
