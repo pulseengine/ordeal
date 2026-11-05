@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# rivet: verifies VER-077
 # MC/DC ratchet for the trusted checker crate `ordeal-lrat` (issue #279).
 #
 #   scripts/mcdc_gate.sh [OUTDIR]        # default: target/mcdc-ordeal-lrat

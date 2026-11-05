@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-11-05
+
 ### Added
 
 - **`ordeal-recheck`, a standalone bundle re-checker with no solver in it**
@@ -36,6 +38,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dispatch). Published to crates.io in the order `ordeal-lrat` →
   `ordeal-cert` → `ordeal` → `ordeal-recheck`.
 
+- **Keyless-signed wasm components** (TR-076, #278). The release workflow
+  signs `ordeal-vX.Y.Z-wasm32-wasip2.wasm` and
+  `ordeal-recheck-vX.Y.Z-wasm32-wasip2.wasm` with `wsc sign --keyless`
+  (sigil, Sigstore keyless with the release workflow's GitHub OIDC
+  identity). It publishes each as `*.signed.wasm` next to the unsigned,
+  reproducible module, which is unchanged. Before upload the workflow
+  verifies each signature against the exact workflow identity and checks
+  that `wsc detach` returns the published `.wasm` byte for byte. The signed
+  files are listed in the cosign-signed `SHA256SUMS.txt`.
+  `scripts/verify_release.sh` repeats both checks on the published assets.
+  Its negative control is one flipped byte, which `wsc verify` must reject.
+- **MC/DC ratchet over the trusted checker** (TR-077, #279).
+  `scripts/mcdc_gate.sh` measures MC/DC over `ordeal-lrat` with witness
+  0.45.0 and compares the per-file numbers with `mcdc/baseline.txt`. A drop
+  in coverage fails the `mcdc.yml` job. Two negative controls were each
+  seen to turn the gate red: 50 sliver reject rows removed, and an
+  uncovered branch in a scratch copy of the checker.
+
 ### Changed
 
 - `ordeal` re-exports every moved item at its old path (`ordeal::Certificate`,
@@ -47,6 +67,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are byte-identical to 0.35.0's (26 corpus bundles compared with
   `diff -r`), and every recheck calls the same `ordeal_lrat` functions in the
   same way.
+- **Kani: the nightly run now reports a failed proof job** (TR-078, #280,
+  #169). Effect: confidence only. Every rule was already proven at every
+  width in Lean over the shipped code. From 2026-10-02 to 2026-11-05,
+  `add_32`, `sub_32` and `xor_64` failed on every nightly while the run
+  showed green: the tier jobs are `continue-on-error`, and the hosted runner
+  shut down mid-solve. A final verdict job now fails the run when any tier
+  job did not succeed, or when none ran. The 32/64 harnesses were measured:
+  16 run nightly in the wide tier (0-5 min each on ubuntu-latest), and
+  `add_32`, `sub_32`, `xor_64`, `ite_64` move to unscheduled with the
+  measured reason. Computing the width-8 divider's reference in 8 bits is
+  not the lever (`udiv_8` 3294 s, `urem_8` over 3600 s), so both stay
+  unscheduled. Kani is still not a required check.
+- Test harness: `cli_term` tolerates `EPIPE` when the solver exits before
+  reading all of a script, as `cli_baseline` already did.
 - **Portable `NO_IMAGE` spelling.** The "no image" sentinel in the term map
   and the ext block's map / read / call tables is `usize::MAX`. A 32-bit
   reader could not decode it as written by a 64-bit producer: the wasm32
@@ -2060,7 +2094,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.0
 [0.35.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.35.0
 [0.34.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.34.0
 [0.33.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.33.0

@@ -15,7 +15,7 @@ path = "src/main.rs"
 # The decoder + recheck, and through it the trusted ordeal-lrat. NEVER the
 # `ordeal` solver (TR-075): scripts/recheck_closure.sh fails CI if a crate
 # named `ordeal` appears in this crate's normal dependency tree.
-ordeal-cert = { path = "../ordeal-cert", version = "=0.35.0", features = ["json"] }
+ordeal-cert = { path = "../ordeal-cert", version = "=0.36.0", features = ["json"] }
 
 # The integration tests produce their bundles with the REAL solver. Dev-only:
 # dev-dependencies are not in the binary's closure (`cargo tree -e normal`,

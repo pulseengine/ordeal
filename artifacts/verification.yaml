@@ -1630,7 +1630,7 @@ artifacts:
   - id: VER-077
     type: sw-verification
     title: MC/DC ratchet over ordeal-lrat — gate on the pristine tree, two negative controls restored byte for byte, the CI workflow (TR-077)
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "bash scripts/mcdc_gate.sh on the tree: 286 rows, witness 0.45.0; ordeal-lrat files 257 decisions, 22 full MC/DC, gap 932, dead 571, proved 350; equal to mcdc/baseline.txt, exit 0 (macOS arm64 locally, 4m36s; Linux in the mcdc.yml job of PR #288). Negative controls: (1) the 50 single-line run_row_sliver_reject_* rows removed: exit 1, src/sliver_kernel.rs not-full 42 -> 46, proved 38 -> 18; rows.rs restored, sha256 5fcebbe7...c45c before and after; (2) an uncovered branch added to check_sat in a scratch copy of the checker (MCDC_ROOT, never crates/): exit 1, src/kernel.rs gap 371 -> 374."
     tags: [mcdc, witness, gate, negative-control]
@@ -1645,7 +1645,7 @@ artifacts:
   - id: VER-075
     type: sw-verification
     title: ordeal-recheck accepts every v1-v4 solver bundle and rejects each mutant by the recheck; solver-free closure gated and negative-controlled; bundles byte-identical across the extraction (TR-075)
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "crates/ordeal-recheck/tests/recheck_cli.rs drives the built ordeal-recheck binary on bundles produced by the real solver through ordeal's public API (tests/corpus/mod.rs; ordeal is a dev-dependency only): every_solver_bundle_is_accepted (26 corpus bundles, all eight ordeal-cert/v1..v4 x unsat/sat kinds, exit 0 singly and together, JSON report accepted=N rejected=0); every_mutated_bundle_is_rejected_by_the_recheck (53 mutants: flipped clause literal on every bundle, dropped LRAT empty-clause line on every UNSAT bundle, swapped query node on v2, swapped term node on v3/v4, swapped ext node on v4 UNSAT; each re-emitted through the ordeal-cert emitters so all hashes are consistent, each exit 1 with a reason starting recheck failed:); one_rejected_bundle_fails_the_run; tampered_malformed_and_witnessless_bundles_are_rejected (an un-rehashed literal flip is a content hash mismatch; garbage, ordeal-cert/v9, a missing file and the model-only v1 SAT shape exit 1); cli_conventions (--version / -V print ordeal-recheck 0.35.0 exit 0, --help exit 0, unknown flag / no bundle / bad --format exit 2 with the usage on stderr and nothing on stdout); committed_release_smoke_fixtures_are_accepted. Unit tests: ordeal-cert (a hand-built x and not-x LRAT certificate accepted and three tamperings rejected, node spelling round trip, SAT witness accept/reject; dev-dependency free for Bazel) and ordeal-recheck (JSON escaping, unknown format/verdict). Closure gate: bash scripts/recheck_closure.sh, a step of the required Test job, PASS; negative control: ordeal added as a normal dependency of crates/ordeal-recheck/Cargo.toml turns it red (exit 1, FAIL ordeal is in the closure), the manifest restored (sha256 cb93696a... before and after). Byte identity: emit_corpus run on the base commit 984a6f3 and on this tree, 26 bundles, diff -r empty. wasm: the CI wasip2 job builds the component and compares its JSON report on the committed fixtures with the native binary's byte for byte."
     tags: [certificate, recheck, closure, negative-control, wasm]
@@ -1660,7 +1660,7 @@ artifacts:
   - id: VER-076
     type: sw-verification
     title: "wsc keyless signatures on the wasm components: accepted for the release identity, detach to the published bytes, rejected for a wrong identity, a byte mismatch and a flipped byte (TR-076)"
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "scripts/verify_release.sh section 8 (from v0.36.0) on the published release: for ordeal-vX-wasm32-wasip2.signed.wasm and ordeal-recheck-vX-wasm32-wasip2.signed.wasm, listed in the cosign-signed SHA256SUMS; wsc verify --keyless --cert-identity https://github.com/pulseengine/ordeal/.github/workflows/release.yml@refs/tags/vX (or @refs/heads/main for a workflow_dispatch recovery) --cert-oidc-issuer https://token.actions.githubusercontent.com exit 0; wsc detach output cmp-equal to the published unsigned X.wasm; a copy with one flipped byte rejected (negative control); missing wsc is a FAIL. The release.yml signing step runs the same verify and detach comparison as self-checks and fails the release on either. Pre-tag evidence: the section-8 code run against a real keyless-signed wsc module (pulseengine/sigil v0.12.0 wsc-component.wasm and its detached form, staged under the ordeal asset names, identity pulseengine/sigil) - all 8 checks PASS; wrong repository identity -> FAIL on both verifies; unsigned file one byte different -> FAIL on detach equality; no wsc -> FAIL. Key-based wsc sign of the ordeal 0.35.0 wasm32-wasip2 component: verify exit 0, detach cmp-equal to the unsigned bytes, one flipped byte exit 1; the signed component runs under wasmtime (ordeal 0.35.0)."
     tags: [release, signing, wsc, negative-control, wasm]
@@ -1675,7 +1675,7 @@ artifacts:
   - id: VER-078
     type: sw-verification
     title: Kani tiers measured and complete; a workflow_dispatch run with every WIDE harness and the verdict job green; the verdict logic red on real and synthetic failures (TR-078)
-    status: implemented
+    status: verified
     release: v0.36.0
     description: "bash scripts/kani_tiers.sh check: inventory 82, fast 25, heavy 1, wide 16, unscheduled 40, PASS (every harness in exactly one tier; each UNSCHEDULED entry carries its measured reason, including add_32/sub_32/xor_64/ite_64 which lost the hosted runner mid-solve and udiv_8/urem_8 with an 8-bit reference: 3294 s / past 3600 s). workflow_dispatch run 42050560685 of kani.yml on 5cb8a5a (ubuntu-latest): harness coverage, fast tier (21 min), heavy mul_8 (7 min), all 16 WIDE jobs (0-5 min each) and the Kani verdict job SUCCESS, run conclusion success. Verdict-job negative controls (the job's gh api + jq filter run locally): run 42002290201 attempt 2 (four failed wide jobs) exit 1; a synthetic list with one cancelled tier job exit 1; an empty job list exit 1; a synthetic all-success/skipped list exit 0."
     tags: [kani, tiers, ci, gate-potency, negative-control]
