@@ -1656,3 +1656,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-075
+
+  - id: VER-076
+    type: sw-verification
+    title: "wsc keyless signatures on the wasm components: accepted for the release identity, detach to the published bytes, rejected for a wrong identity, a byte mismatch and a flipped byte (TR-076)"
+    status: implemented
+    release: v0.36.0
+    description: "scripts/verify_release.sh section 8 (from v0.36.0) on the published release: for ordeal-vX-wasm32-wasip2.signed.wasm and ordeal-recheck-vX-wasm32-wasip2.signed.wasm, listed in the cosign-signed SHA256SUMS; wsc verify --keyless --cert-identity https://github.com/pulseengine/ordeal/.github/workflows/release.yml@refs/tags/vX (or @refs/heads/main for a workflow_dispatch recovery) --cert-oidc-issuer https://token.actions.githubusercontent.com exit 0; wsc detach output cmp-equal to the published unsigned X.wasm; a copy with one flipped byte rejected (negative control); missing wsc is a FAIL. The release.yml signing step runs the same verify and detach comparison as self-checks and fails the release on either. Pre-tag evidence: the section-8 code run against a real keyless-signed wsc module (pulseengine/sigil v0.12.0 wsc-component.wasm and its detached form, staged under the ordeal asset names, identity pulseengine/sigil) - all 8 checks PASS; wrong repository identity -> FAIL on both verifies; unsigned file one byte different -> FAIL on detach equality; no wsc -> FAIL. Key-based wsc sign of the ordeal 0.35.0 wasm32-wasip2 component: verify exit 0, detach cmp-equal to the unsigned bytes, one flipped byte exit 1; the signed component runs under wasmtime (ordeal 0.35.0)."
+    tags: [release, signing, wsc, negative-control, wasm]
+    fields:
+      coverage: keyless verify for the exact workflow identity; identity mismatch rejected; detach equals the published reproducible bytes; one flipped byte rejected; missing verifier is a failure; in-CI self-checks in the signing step
+      method: automated-test
+      steps: "run: bash scripts/verify_release.sh vX.Y.Z (section 8) after the tag; pre-tag: the section-8 block sourced against staged keyless-signed modules, positive and three negative cases"
+    links:
+      - type: verifies
+        target: TR-076

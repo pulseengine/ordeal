@@ -3240,3 +3240,31 @@ artifacts:
         target: VER-075
       - type: part-of-execution
         target: VE-065
+
+  - id: VE-067
+    type: verification-execution
+    title: wsc keyless signing and verify_release section 8 exercised before the tag (VER-076)
+    status: implemented
+    description: "Local run on branch feat/v0.36.0-wsc-signing (base main ee79fc4), wsc-cli 0.11.0 from varve layer 2026.10.23 (sha256:af711b5d...). wsc verify --keyless on pulseengine/sigil v0.12.0 wsc-component.wasm: exit 0 for release.yml@refs/tags/v0.12.0; exit 1 (Identity mismatch) for @refs/heads/main and for another repository; exit 0 with no --cert-identity (so the script always passes one); one flipped byte -> exit 1 (No valid signatures). verify_release.sh section 8 sourced with REPO=pulseengine/sigil TAG=v0.12.0 against that module and its wsc-detached form staged as the two ordeal asset names: 8/8 PASS, fail=0; REPO=pulseengine/ordeal -> both verifies FAIL, fail=1; unsigned file with one appended byte -> FAIL signed module is not the published ... plus a signature, fail=1; WSC empty -> FAIL wsc not found, fail=1. Key-based: wsc sign -k on the ordeal 0.35.0 wasm32-wasip2 component -> verify exit 0, wsc detach output cmp-equal to the unsigned component, one flipped byte -> verify exit 1, signed component under wasmtime prints ordeal 0.35.0. bash -n scripts/verify_release.sh exit 0; release.yml parses as YAML. The keyless signing step itself runs only at the tag (it needs the workflow's OIDC token)."
+    fields:
+      environment: "note: macOS arm64, local, wsc-cli 0.11.0 (varve layer 2026.10.23), wasmtime, network to Rekor/Fulcio trust roots"
+      executor: local
+      timestamp: 2026-11-05 12:12:13+00:00
+      version: ee79fc4+wsc-signing
+    links:
+      - type: traces-to
+        target: TR-076
+
+  - id: VV-141
+    type: verification-verdict
+    title: VER-076 pass (pre-tag) - keyless verify bound to the exact identity, detach equals the published bytes, all three negative controls red
+    status: implemented
+    description: Executed pass as recorded in the linked execution.
+    fields:
+      evidence: see VE-067
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-076
+      - type: part-of-execution
+        target: VE-067

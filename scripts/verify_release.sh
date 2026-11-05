@@ -13,11 +13,22 @@
 # sums, the darwin binary's version and exit codes (2 on a bad flag, 1 on a
 # malformed bundle), the component's version, and the two new crates.
 #
+# From v0.36.0 on (TR-076) it also checks the wsc keyless signatures on
+# both wasm components: each X.signed.wasm is in the signed sums, `wsc
+# verify` accepts it for the release workflow's identity (the tag ref, or
+# main for a workflow_dispatch recovery run), `wsc detach` gives back the
+# published X.wasm byte for byte, and a copy with one flipped byte is
+# rejected (negative control, so a verifier that accepts anything fails).
+#
 # Every check prints PASS/FAIL; exits nonzero on any FAIL. Needs gh, cosign,
-# shasum, python3, tar, curl, network. The darwin-arm64 execution checks run
+# shasum, python3, tar, curl, network; from v0.36.0 also wsc (on PATH, or
+# from the varve layer pinned in this repo when run from its checkout). The darwin-arm64 execution checks run
 # only on an arm64 mac; elsewhere they are reported as SKIP.
 set -uo pipefail
 TAG="${1:?usage: $0 vX.Y.Z}"; BARE="${TAG#v}"; REPO=pulseengine/ordeal
+# wsc: on PATH, else the pinned varve layer (resolved here, before the cd,
+# because `varve` resolves the pin from the working directory).
+WSC=$(command -v wsc 2>/dev/null || { [ -x "$HOME/.varve/bin/varve" ] && "$HOME/.varve/bin/varve" which wsc 2>/dev/null | head -1; } || true)
 D="${TMPDIR:-/tmp}/ordeal-verify-$TAG"
 rm -rf "$D"; mkdir -p "$D"; cd "$D"
 fail=0; ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fail=1; }; skip() { echo "SKIP $1"; }
@@ -144,5 +155,30 @@ if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= 
     rmac/ordeal-recheck bogus.json >/dev/null 2>&1; [ $? = 1 ] && ok "ordeal-recheck rejects a malformed bundle (exit 1)" || bad "ordeal-recheck accepted or crashed on a malformed bundle"
   else skip "darwin-arm64 ordeal-recheck execution checks (host is $(uname -s)-$(uname -m))"; fi
 else skip "ordeal-recheck published from v0.36.0 on"; fi
+
+# 8. wsc keyless signatures on the wasm components (TR-076, from v0.36.0).
+if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 36, 0) else 1)"; then
+  ISS=https://token.actions.githubusercontent.com
+  WF="https://github.com/$REPO/.github/workflows/release.yml"
+  if [ -n "$WSC" ] && [ -x "$WSC" ]; then
+    for base in "ordeal-$TAG-wasm32-wasip2" "ordeal-recheck-$TAG-wasm32-wasip2"; do
+      sw="$base.signed.wasm"
+      [ -f "$sw" ] && grep -q " ./$sw\$" SHA256SUMS.txt && ok "listed in SHA256SUMS: $sw" || { bad "not listed in SHA256SUMS: $sw"; continue; }
+      who=""
+      for ref in "refs/tags/$TAG" "refs/heads/main"; do
+        "$WSC" verify --keyless --cert-identity "$WF@$ref" --cert-oidc-issuer "$ISS" -i "$sw" >/dev/null 2>&1 && { who="$ref"; break; }
+      done
+      [ -n "$who" ] && ok "wsc verify --keyless $sw (release.yml@$who)" || bad "wsc verify --keyless $sw"
+      "$WSC" detach -i "$sw" -o "$base.detached.wasm" -S "$base.sig" >/dev/null 2>&1 \
+        && cmp -s "$base.detached.wasm" "$base.wasm" \
+        && ok "wsc detach $sw == published $base.wasm" || bad "signed module is not the published $base.wasm plus a signature"
+      if [ -n "$who" ]; then
+        python3 -I -c "import sys; b = bytearray(open(sys.argv[1], 'rb').read()); b[-64] ^= 1; open(sys.argv[2], 'wb').write(b)" "$sw" "$base.tampered.wasm"
+        "$WSC" verify --keyless --cert-identity "$WF@$who" --cert-oidc-issuer "$ISS" -i "$base.tampered.wasm" >/dev/null 2>&1 \
+          && bad "negative control: wsc accepted a tampered $sw" || ok "negative control: wsc rejects $sw with one flipped byte"
+      fi
+    done
+  else bad "wsc not found (PATH or the pinned varve layer): wasm signatures not verified"; fi
+else skip "wsc wasm signatures published from v0.36.0 on"; fi
 
 echo "=== result: $([ $fail = 0 ] && echo ALL PASS || echo FAILURES PRESENT)"; exit $fail
