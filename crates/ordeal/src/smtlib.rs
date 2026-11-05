@@ -22,13 +22,14 @@
 //!   symbol whose content is a simple, non-reserved symbol is read as its
 //!   bare spelling; any other quoted symbol keeps its bars. A `Bool` name is
 //!   never a bitvector, and redeclaring a name at another sort is an error;
-//!   an identical redeclaration is tolerated (concatenated logs, #139), which
-//!   is the one place this reader is laxer than SMT-LIB (#294).
+//!   an identical redeclaration is tolerated (concatenated logs, #139), the
+//!   one place a script that changes the query is read more laxly than
+//!   SMT-LIB (#294); the terms of `get-value` are not read at all.
 //! - **Literals:** `(_ bvN W)`, `#xHEX`, `#bBIN` → [`BvTerm::Const`]; a
 //!   declared name → [`BvTerm::Var`].
-//! - **Bitvector ops:** `bvadd bvsub bvmul bvand bvor bvxor` (n-ary,
-//!   left-folded) and `concat` (n-ary); `bvudiv bvurem bvshl bvlshr bvashr`
-//!   (binary); `bvnot bvneg` (unary) and `bvsdiv bvsrem` (binary) — their
+//! - **Bitvector ops:** `bvadd bvmul bvand bvor bvxor` (n-ary,
+//!   left-folded) and `concat` (n-ary); `bvsub bvudiv bvurem bvshl bvlshr
+//!   bvashr` (binary); `bvnot bvneg` (unary) and `bvsdiv bvsrem` (binary) — their
 //!   own [`BvTerm`] constructs with proven rules since #192 phase 5 (the
 //!   default `check` path rewrites them into the core first,
 //!   [`crate::lowering::expand_bv`], so its certificates are unchanged);
@@ -57,6 +58,68 @@
 use crate::eval::bv_sort;
 use crate::{BoolTerm, BvTerm, CheckResult, Solver, Sort};
 use std::collections::{HashMap, HashSet};
+
+// ─── Negative-control mutation hooks (#281 E0, test-only) ────────────────────
+//
+// The Z3 parser differential (`oracle::front`, TR-087) must be able to go red.
+// Each [`Mutation`] is a deliberate mistranslation of one desugaring, armed
+// per thread by that differential's negative-control tests and disarmed
+// after. The arming switch exists only in `cfg(all(test, feature = "oracle"))`
+// builds; everywhere else [`mutated`] is the constant `false`, so no
+// production build can carry an armed mutation.
+
+/// A deliberate reader mistranslation, for the differential's negative
+/// controls only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Mutation {
+    /// `bvslt` read as `Ult`.
+    SltAsUlt,
+    /// `rotate_left k` without reducing `k` mod the width.
+    RotlNoMod,
+    /// A chained bitvector `=` that drops its last pair.
+    ChainEqDropLast,
+    /// `=>` left-associated instead of right-associated.
+    ImpliesLeftAssoc,
+}
+
+#[cfg(all(test, feature = "oracle"))]
+pub(crate) mod mutation {
+    use super::Mutation;
+    use std::cell::Cell;
+
+    thread_local! {
+        static ARMED: Cell<Option<Mutation>> = const { Cell::new(None) };
+    }
+
+    /// Arm `m` on this thread (the reader then mistranslates on purpose).
+    pub(crate) fn arm(m: Mutation) {
+        ARMED.with(|a| a.set(Some(m)));
+    }
+
+    /// Disarm every mutation on this thread.
+    pub(crate) fn disarm() {
+        ARMED.with(|a| a.set(None));
+    }
+
+    pub(super) fn armed(m: Mutation) -> bool {
+        ARMED.with(|a| a.get() == Some(m))
+    }
+}
+
+/// Whether `m` is armed on this thread: always `false` outside the oracle
+/// feature's unit tests.
+#[inline(always)]
+fn mutated(m: Mutation) -> bool {
+    #[cfg(all(test, feature = "oracle"))]
+    {
+        mutation::armed(m)
+    }
+    #[cfg(not(all(test, feature = "oracle")))]
+    {
+        let _ = m;
+        false
+    }
+}
 
 /// Why reading or solving an SMT-LIB2 script failed.
 ///
@@ -355,9 +418,16 @@ impl Ctx {
     /// Parse an ordinary (non-indexed) bitvector operator application.
     fn parse_bv_op(&self, op: &str, args: &[Sexp]) -> Result<BvTerm, SmtError> {
         match op {
-            // n-ary, left-associative core ops.
+            // n-ary, left-associative core ops (as Z3 reads them).
             "bvadd" => self.fold_bv(op, args, |a, b| BvTerm::Add(Box::new(a), Box::new(b))),
-            "bvsub" => self.fold_bv(op, args, |a, b| BvTerm::Sub(Box::new(a), Box::new(b))),
+            // `bvsub` is BINARY in SMT-LIB's QF_BV ("(bvsub s t) abbreviates
+            // (bvadd s (bvneg t))") and in Z3 ("declared arity mismatches
+            // supplied arity"); reading it n-ary made `(bvsub x)` mean `x`
+            // (found by the parser differential, TR-087).
+            "bvsub" => {
+                let (a, b) = self.two_bv(op, args)?;
+                Ok(BvTerm::Sub(Box::new(a), Box::new(b)))
+            }
             "bvmul" => self.fold_bv(op, args, |a, b| BvTerm::Mul(Box::new(a), Box::new(b))),
             "bvand" => self.fold_bv(op, args, |a, b| BvTerm::And(Box::new(a), Box::new(b))),
             "bvor" => self.fold_bv(op, args, |a, b| BvTerm::Or(Box::new(a), Box::new(b))),
@@ -448,7 +518,7 @@ impl Ctx {
         let idx = |n: usize| -> Result<u32, SmtError> {
             op.get(n)
                 .and_then(as_atom)
-                .and_then(|s| s.parse::<u32>().ok())
+                .and_then(numeral::<u32>)
                 .ok_or_else(|| SmtError::Parse(format!("bad index {n} on '{name}'")))
         };
         let arg = |this: &Self| -> Result<BvTerm, SmtError> {
@@ -457,13 +527,37 @@ impl Ctx {
             }
             this.parse_bv(&items[1])
         };
+        // Exactly the operator's own indices: a surplus index used to be
+        // ignored (`((_ zero_extend 1 2) x)`; Z3: "invalid zero_extend
+        // application"; found by the parser differential, TR-087).
+        let want = if name == "extract" { 2 } else { 1 };
+        if matches!(
+            name,
+            "extract" | "zero_extend" | "sign_extend" | "rotate_left" | "rotate_right"
+        ) && op.len() != 2 + want
+        {
+            return Err(SmtError::Parse(format!(
+                "'{name}' takes {want} index(es), got {}",
+                op.len().saturating_sub(2)
+            )));
+        }
         match name {
             "extract" => {
                 let (hi, lo) = (idx(2)?, idx(3)?);
+                let x = arg(self)?;
+                // SMT-LIB: `w > hi >= lo` (Z3: "invalid extract
+                // application"). The solver already answered `unknown` on
+                // such a term; the reader now refuses it (TR-087).
+                let w = Self::width_of(&x)?;
+                if lo > hi || hi >= w {
+                    return Err(SmtError::Parse(format!(
+                        "extract {hi} {lo} of a {w}-bit term"
+                    )));
+                }
                 Ok(BvTerm::Extract {
                     hi,
                     lo,
-                    arg: Box::new(arg(self)?),
+                    arg: Box::new(x),
                 })
             }
             "zero_extend" => Ok(BvTerm::ZeroExt {
@@ -495,7 +589,11 @@ impl Ctx {
                 let k = idx(2)?;
                 let x = arg(self)?;
                 let w = Self::width_of(&x)?;
-                let k = (k as u128) % w as u128;
+                let k = if mutated(Mutation::RotlNoMod) {
+                    k as u128
+                } else {
+                    (k as u128) % w as u128
+                };
                 Ok(BvTerm::Rotl(Box::new(x), Box::new(const_bv(k, w))))
             }
             other => Err(SmtError::Unsupported(format!("indexed operator '{other}'"))),
@@ -563,13 +661,27 @@ impl Ctx {
                     // (=> a b c) == (=> a (=> b c)). Expressed with the core's
                     // existing Not/Or — no new operation enters the fragment.
                     "=>" => {
-                        if args.is_empty() {
-                            return Err(SmtError::Parse("'=>' needs arguments".into()));
+                        // At least two: `(=> p)` is not SMT-LIB (Z3: "Wrong
+                        // number of arguments (1)"); it used to read as `p`
+                        // (found by the parser differential, TR-087).
+                        if args.len() < 2 {
+                            return Err(SmtError::Parse("'=>' needs at least 2 arguments".into()));
                         }
                         let mut terms = args
                             .iter()
                             .map(|a| self.parse_bool(a))
                             .collect::<Result<Vec<_>, _>>()?;
+                        if mutated(Mutation::ImpliesLeftAssoc) {
+                            let mut it = terms.into_iter();
+                            let mut acc = it.next().expect("non-empty");
+                            for q in it {
+                                acc = BoolTerm::Or(
+                                    Box::new(BoolTerm::Not(Box::new(acc))),
+                                    Box::new(q),
+                                );
+                            }
+                            return Ok(acc);
+                        }
                         let mut acc = terms.pop().expect("non-empty");
                         while let Some(p) = terms.pop() {
                             acc = BoolTerm::Or(Box::new(BoolTerm::Not(Box::new(p))), Box::new(acc));
@@ -581,6 +693,7 @@ impl Ctx {
                     "bvule" => self.cmp(args, BoolTerm::Ule),
                     "bvugt" => self.cmp(args, BoolTerm::Ugt),
                     "bvuge" => self.cmp(args, BoolTerm::Uge),
+                    "bvslt" if mutated(Mutation::SltAsUlt) => self.cmp(args, BoolTerm::Ult),
                     "bvslt" => self.cmp(args, BoolTerm::Slt),
                     "bvsle" => self.cmp(args, BoolTerm::Sle),
                     "bvsgt" => self.cmp(args, BoolTerm::Sgt),
@@ -611,7 +724,12 @@ impl Ctx {
         }
         let eq = |a: &BvTerm, b: &BvTerm| BoolTerm::Eq(Box::new(a.clone()), Box::new(b.clone()));
         let mut acc = eq(&bvs[0], &bvs[1]);
-        for pair in bvs.windows(2).skip(1) {
+        let pairs = if mutated(Mutation::ChainEqDropLast) {
+            bvs.len().saturating_sub(2).max(1)
+        } else {
+            bvs.len() - 1
+        };
+        for pair in bvs.windows(2).take(pairs).skip(1) {
             acc = BoolTerm::And(Box::new(acc), Box::new(eq(&pair[0], &pair[1])));
         }
         Ok(acc)
@@ -721,7 +839,11 @@ fn const_bv(value: u128, width: u32) -> BvTerm {
 
 /// Parse a `(_ bvN W)` indexed constant.
 fn parse_indexed_const(items: &[Sexp]) -> Result<BvTerm, SmtError> {
-    // items = [_ , bvN, W]
+    // items = [_ , bvN, W], exactly: `(_ bv1 8 9)` used to ignore the `9`
+    // (Z3: "invalid bit-vector constant"; TR-087).
+    if items.len() != 3 {
+        return Err(SmtError::Parse("'(_ bvN W)' takes exactly N and W".into()));
+    }
     let name = items
         .get(1)
         .and_then(as_atom)
@@ -729,15 +851,28 @@ fn parse_indexed_const(items: &[Sexp]) -> Result<BvTerm, SmtError> {
     let digits = name
         .strip_prefix("bv")
         .ok_or_else(|| SmtError::Unsupported(format!("indexed identifier '(_ {name} ...)'")))?;
-    let value = digits
-        .parse::<u128>()
-        .map_err(|_| SmtError::Parse(format!("bad bitvector constant '{name}'")))?;
+    let value = numeral::<u128>(digits)
+        .ok_or_else(|| SmtError::Parse(format!("bad bitvector constant '{name}'")))?;
     let width = items
         .get(2)
         .and_then(as_atom)
-        .and_then(|s| s.parse::<u32>().ok())
+        .and_then(numeral::<u32>)
         .ok_or_else(|| SmtError::Parse("missing width in '(_ bvN W)'".into()))?;
+    if width == 0 {
+        return Err(SmtError::Parse(
+            "'(_ bvN 0)': a bitvector width is at least 1".into(),
+        ));
+    }
     Ok(const_bv(value, width))
+}
+
+/// An SMT-LIB numeral: ASCII digits only. Rust's `parse` also takes a
+/// leading `+` (`bv+5`), which SMT-LIB and Z3 do not (TR-087).
+fn numeral<T: std::str::FromStr>(s: &str) -> Option<T> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    s.parse().ok()
 }
 
 /// Parse a `(_ BitVec N)` sort, returning its width.
@@ -747,8 +882,11 @@ fn parse_sort(s: &Sexp) -> Result<u32, SmtError> {
         && as_atom(&items[0]) == Some("_")
         && as_atom(&items[1]) == Some("BitVec")
     {
+        // A width is at least 1 (Z3: "bit-vector size must be greater than
+        // zero"); `(_ BitVec 0)` used to be accepted (TR-087).
         return as_atom(&items[2])
-            .and_then(|w| w.parse::<u32>().ok())
+            .and_then(numeral::<u32>)
+            .filter(|&w| w > 0)
             .ok_or_else(|| SmtError::Parse("bad BitVec width".into()));
     }
     // `Bool` is admitted as a 1-bit variable (see `Ctx::bool_decls`): the core
@@ -849,6 +987,48 @@ fn run_script<R>(
     input: &str,
     check: impl Fn(&Solver) -> R,
 ) -> Result<(Option<R>, Vec<(String, u32)>), SmtError> {
+    run_script_full(input, check).map(|r| (r.result, r.declared))
+}
+
+/// Everything one reader run produced: [`run_script`]'s pair plus the
+/// assertions of the whole script (through `exit` or the end) and the
+/// `Bool`-declared names.
+struct ScriptRun<R> {
+    result: Option<R>,
+    declared: Vec<(String, u32)>,
+    assertions: Vec<BoolTerm>,
+    bool_names: Vec<String>,
+}
+
+/// What the reader made of a whole script, without solving (#281 E0): the
+/// input of the Z3 parser differential (`oracle::front`, TR-087). Untrusted
+/// and read-only — no verdict path consumes it.
+#[derive(Clone, Debug)]
+pub struct ScriptReading {
+    /// Every asserted term, one per `assert` command, in script order, up to
+    /// `exit` or the end of the script (not only up to a `check-sat`).
+    pub assertions: Vec<BoolTerm>,
+    /// Every declaration as read, in order, repeats included (an identical
+    /// redeclaration appears twice, #139).
+    pub declared: Vec<(String, u32)>,
+    /// The `Bool`-declared names: each is held as a BV1 variable of the same
+    /// name, read as `name = #b1` in boolean position (`Ctx::bool_decls`).
+    pub bool_names: Vec<String>,
+}
+
+/// Read a whole script with the same reader as [`solve_str`] and return what
+/// it made of it, without solving. See [`ScriptReading`].
+pub fn read_script(input: &str) -> Result<ScriptReading, SmtError> {
+    let r = run_script_full(input, |_| ())?;
+    Ok(ScriptReading {
+        assertions: r.assertions,
+        declared: r.declared,
+        bool_names: r.bool_names,
+    })
+}
+
+/// The reader loop behind [`run_script`] and [`read_script`].
+fn run_script_full<R>(input: &str, check: impl Fn(&Solver) -> R) -> Result<ScriptRun<R>, SmtError> {
     let toks = tokenize(input);
     let sexps = parse_sexps(&toks)?;
 
@@ -930,6 +1110,15 @@ fn run_script<R>(
                 declared.push((name, width));
             }
             "assert" => {
+                // Exactly one term: `(assert true false)` used to drop the
+                // `false` (Z3: "invalid assert command, ')' expected";
+                // found by the parser differential, TR-087).
+                if items.len() != 2 {
+                    return Err(SmtError::Parse(format!(
+                        "assert takes exactly one term, got {}",
+                        items.len() - 1
+                    )));
+                }
                 let term = ctx.parse_bool(item(items, 1, "assert")?)?;
                 solver.assert(term);
             }
@@ -949,7 +1138,14 @@ fn run_script<R>(
         }
     }
 
-    Ok((result, declared))
+    let mut bool_names: Vec<String> = ctx.bool_decls.into_iter().collect();
+    bool_names.sort();
+    Ok(ScriptRun {
+        result,
+        declared,
+        assertions: solver.assertions().to_vec(),
+        bool_names,
+    })
 }
 
 /// Fetch command argument `n`, or a parse error naming the command.
@@ -1375,5 +1571,54 @@ mod tests {
         // redeclaration stays tolerated, as for concatenated logs, #139).
         let src = "(set-logic QF_BV)(declare-const x (_ BitVec 8))(declare-const |x| (_ BitVec 8))(assert (= x #x01))(assert (= |x| #x02))(check-sat)";
         assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))));
+    }
+
+    // TR-087: scripts the reader accepted and Z3 refuses, found by the Z3
+    // parser differential (`oracle::front`). Each is now refused, as SMT-LIB
+    // and Z3 do; the valid neighbour of each still reads.
+    // rivet: verifies VER-087
+    #[test]
+    fn scripts_z3_refuses_are_refused() {
+        let pre = "(set-logic QF_BV)(declare-const x (_ BitVec 8))(declare-const p Bool)";
+        for bad in [
+            // bvsub is binary; `(bvsub x)` used to read as `x`.
+            "(assert (= (bvsub x) x))",
+            "(assert (= (bvsub x x x) x))",
+            // `=>` takes at least two arguments; `(=> p)` used to read as `p`.
+            "(assert (=> p))",
+            // extract needs w > hi >= lo.
+            "(assert (= ((_ extract 3 5) x) ((_ extract 3 5) x)))",
+            "(assert (= ((_ extract 8 1) x) ((_ extract 8 1) x)))",
+            // a bitvector width is at least 1.
+            "(declare-const z (_ BitVec 0))",
+            "(assert (= ((_ zero_extend 8) (_ bv0 0)) x))",
+            // numerals are digits only (Rust's `parse` takes a leading `+`).
+            "(assert (= x (_ bv+5 8)))",
+            "(declare-const z (_ BitVec +8))",
+            "(assert (= ((_ extract +3 0) x) #x0))",
+            // no surplus: an assert term, an operator index, a constant part
+            // used to be dropped silently.
+            "(assert true false)",
+            "(assert (= ((_ zero_extend 1 2) x) ((_ zero_extend 1) x)))",
+            "(assert (= ((_ extract 3 0 1) x) #x0))",
+            "(assert (= ((_ rotate_left 1 1) x) x))",
+            "(assert (= (_ bv1 8 9) x))",
+        ] {
+            let src = format!("{pre}{bad}(check-sat)");
+            assert!(verdict_of(&src).is_err(), "{src}");
+        }
+        for good in [
+            "(assert (= (bvsub x #x01) #x00))",
+            "(assert (=> p (= x #x01)))",
+            "(assert (= ((_ extract 7 4) x) #x1))",
+            "(assert (= x (_ bv5 8)))",
+            "(assert (= (bvadd x) x))",
+        ] {
+            let src = format!("{pre}{good}(check-sat)");
+            assert!(
+                matches!(verdict_of(&src), Ok(Some(CheckResult::Sat(_)))),
+                "{src}"
+            );
+        }
     }
 }

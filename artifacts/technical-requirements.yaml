@@ -2135,3 +2135,21 @@ artifacts:
         target: ARC-006
       - type: traces-to
         target: TR-073
+
+  - id: TR-087
+    type: sw-req
+    title: The SMT-LIB front end is differentially tested against Z3's parser per assertion, blocking in CI
+    status: implemented
+    release: v0.37.0
+    description: "Before #281 E0 no test handed SMT-LIB text to Z3's parser: oracle::to_z3 translates ordeal's own BoolTerm, so the Z3 oracle checked the engine, never the reader (docs/design/query-echo.md section 1, steps Q2-Q9). Requirement: the front leg of the parser differential (design note section 6) reads every repository .smt2 file (Verus logs through verus::extract) and a seeded text generator (oracle::gen_smtlib_text: n-ary ops, chained =, n-ary distinct, =>, Bool constants, true/false, rotate_* with k >= w and k >= 2^w, all three literal forms with (_ bvN W) values >= 2^W, simple and non-simple quoted symbols, comments) with Z3's parser (Solver::from_string, error code via z3-sys) and with smtlib::read_script; for each assertion k Z3 decides A_Z3[k] xor A_ord[k], with each Bool name linked to the BV1 ordeal holds it as. Outcome classes: agree; disagree (fails, Z3's witness printed); ordeal refuses / Z3 accepts (listed, not a failure); Z3 refuses / ordeal accepts (fails unless on the reviewed allow-list, whose one entry is the #139 identical-redeclaration tolerance); both refuse. A tally is printed every run and a run that compared nothing fails. Four test-only reader mutations (bvslt read as Ult, rotate_left without mod w, chained = dropping its last pair, => left-associated) must each turn the leg red. It runs in its own blocking CI job, split from the continue-on-error Z3 Oracle job (maintainer decision Q6); 10^5 generated scripts run nightly. Not trusted, not on any verdict path. The reader now refuses what the leg found it accepting and Z3 refuses (none could give a wrong unsat): n-ary or unary bvsub, unary =>, an assert with two terms, a surplus operator index or constant part, an extract outside w > hi >= lo, a zero width, a numeral with a leading +. Effect: confidence. Issue #281 phase E0."
+    tags: [smtlib, front-end, oracle, differential, confidence]
+    fields:
+      effect: confidence
+      priority: must
+      req-type: constraint
+      verification-criteria: "cargo test -p ordeal --features oracle --release --lib oracle::front::tests passes: 0 disagree and 0 unallowed Z3 refusals over every repository .smt2 file and 10^4 generated scripts, every generated script compared; each of the four armed mutations yields at least one disagree and the same scripts agree once disarmed; one fixture per outcome class is classified as expected; the CI job is not continue-on-error."
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010

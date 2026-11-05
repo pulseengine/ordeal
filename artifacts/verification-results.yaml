@@ -3352,3 +3352,31 @@ artifacts:
         target: VER-080
       - type: part-of-execution
         target: VE-070
+
+  - id: VE-071
+    type: verification-execution
+    title: Z3 parser differential front leg run (VER-087)
+    status: implemented
+    description: "Local run on branch worktree-agent-a147cfa4c1c980a8b (based on 64a9d7e): cargo test -p ordeal --features oracle --release --lib oracle::front::tests: 5 passed, 1 ignored, 18.0 s. Repository files: 27 .smt2 files (2 Verus logs via verus::extract), 26 compared (41 assertions), agree 26, disagree 0, ordeal-refuses 0, Z3-refuses 0, allow-listed 0, both refuse 1 (fuzz/seeds/smtlib/regression_redeclare_width.smt2). Generated: 10^4 scripts, seed 0x0281E0F0, 19996 assertions, agree 10000, every other class 0, ~18-21 s. Negative controls over 1000 scripts: SltAsUlt 190 disagree, RotlNoMod 67, ChainEqDropLast 133, ImpliesLeftAssoc 178; every one agrees again once disarmed. The ignored 10^5 run (seed 0x0281E0F1): 100000 agree, 199984 assertions, 183 s. Before the reader fixes the generator run failed with Z3-refuses/ordeal-accepts on n-ary bvsub (arity mismatch); hand probes against the Z3 CLI found the other accepted-invalid inputs (unary bvsub and =>, assert with two terms, surplus indices, bad extract, zero width, + numerals), now refused. cargo test --workspace and with ordeal/oracle,cadical,cert-bundle green; fmt, clippy (both feature sets), claim_check 63/63, citation gate PASS with and without oracle."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew), LIBRARY_PATH=/opt/homebrew/lib
+      executor: local
+      timestamp: 2026-11-05 23:15:09+00:00
+      version: 64a9d7e + worktree-agent-a147cfa4c1c980a8b
+    links:
+      - type: traces-to
+        target: TR-087
+
+  - id: VV-145
+    type: verification-verdict
+    title: "VER-087 pass: Z3's parser and ordeal's reader agree per assertion on 27 files and 10^4 scripts; all four controls go red"
+    status: implemented
+    description: 0 disagree and 0 unallowed Z3 refusals over the repository files and 10^4 generated scripts (10^5 locally too); SltAsUlt, RotlNoMod, ChainEqDropLast and ImpliesLeftAssoc each produce disagreements and clear when disarmed.
+    fields:
+      evidence: cargo test -p ordeal --features oracle --release --lib oracle::front::tests (5 passed)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-087
+      - type: part-of-execution
+        target: VE-071

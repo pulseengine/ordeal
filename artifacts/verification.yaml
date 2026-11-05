@@ -1716,3 +1716,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-080
+
+  - id: VER-087
+    type: sw-verification
+    title: "Z3 parser differential, front leg: every repository .smt2 file and 10^4 generated scripts agree per assertion; four reader mutations each turn it red (TR-087)"
+    status: implemented
+    release: v0.37.0
+    description: "crates/ordeal/src/oracle_front.rs tests (feature oracle): front_leg_agrees_on_every_repository_smt2_file (27 files, Verus logs via verus::extract; passes only with 0 disagree, 0 unallowed Z3 refusals and >0 compared); front_leg_agrees_on_generated_scripts (gen_smtlib_text, seed 0x0281E0F0, 10^4 scripts, all compared); generator_covers_the_desugared_syntax; every_front_negative_control_turns_the_leg_red (SltAsUlt, RotlNoMod, ChainEqDropLast, ImpliesLeftAssoc each armed via smtlib::mutation, a cfg(all(test, feature = oracle)) switch, give >=1 disagree over 1000 scripts, then agree once disarmed); harness_classifies_one_fixture_per_outcome_class (agree, disagree with witness, assertion-count mismatch, ordeal refuses, Z3 refuses failing the run, the #139 allow-list entry, both refuse, an all-refused run failing). Plus the reader fixes the differential found, pinned in smtlib::tests::scripts_z3_refuses_are_refused. Run in the blocking CI job SMT-LIB parser differential (Z3); the 10^5 run (front_leg_agrees_on_1e5_generated_scripts, ignored) in nightly-exhaustive.yml."
+    tags: [smtlib, front-end, oracle, differential, negative-control]
+    fields:
+      coverage: the 27 repository .smt2 files, 10^4 generated scripts in the reader's desugared syntax, four reader mutations, every outcome class
+      method: automated-test
+      steps: "run: cargo test -p ordeal --features oracle --release --lib oracle::front::tests"
+    links:
+      - type: verifies
+        target: TR-087

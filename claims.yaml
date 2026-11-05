@@ -453,7 +453,8 @@ claims:
     text: "behind the off-by-default `oracle` feature"
     evidence:
       - kind: count-min
-        pattern: '^oracle = \["dep:z3"\]$'
+        # z3-sys rides along for the parser differential's error code (TR-087).
+        pattern: '^oracle = \["dep:z3"(, "dep:z3-sys")?\]$'
         glob: crates/ordeal/Cargo.toml
         min: 1
       - kind: count-max            # never in the default feature set
@@ -479,6 +480,10 @@ claims:
           - Bazel build (optional)
           - Z3 Oracle (optional)
           - varve layer pin resolves (pinned rivet validates the graph)
+          # Not continue-on-error (a red differential fails the run, #281
+          # decision Q6), but not yet a required context: adding it to
+          # branch protection is a settings change for the maintainer.
+          - SMT-LIB parser differential (Z3)
       - kind: count-min            # the claim gate runs inside the required Test job
         pattern: 'python3 scripts/claim_check\.py claims\.yaml'
         glob: .github/workflows/ci.yml

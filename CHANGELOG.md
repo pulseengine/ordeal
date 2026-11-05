@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The Z3 parser differential, front leg** (TR-087, #281 phase E0). The
+  first test that hands SMT-LIB *text* to Z3's own parser: until now the Z3
+  oracle translated ordeal's trees, so it checked the engine and never the
+  reader. `oracle::front` (feature `oracle`) reads a script with
+  `Solver::from_string` and with the new `smtlib::read_script`, and for each
+  assertion asks Z3 whether the two readings differ (`A_Z3[k] xor A_ord[k]`,
+  with each `Bool` name linked to the BV1 ordeal holds it as). Classes:
+  agree, disagree (fails, with Z3's witness), ordeal refuses / Z3 accepts
+  (listed), Z3 refuses / ordeal accepts (fails unless on a one-entry
+  allow-list: the #139 identical redeclaration), both refuse. A tally is
+  printed on every run, and a run that compared nothing fails. Sources: the
+  27 repository `.smt2` files and a new seeded text generator
+  (`oracle::gen_smtlib_text`) for the syntax the reader desugars. Four
+  test-only reader mutations (`bvslt` as `Ult`, `rotate_left` without
+  `mod w`, a chained `=` dropping its last pair, `=>` left-associated) each
+  turn it red. It runs in a new **blocking** CI job, "SMT-LIB parser
+  differential (Z3)", split from the `continue-on-error` oracle job; 10^5
+  generated scripts run nightly. The `oracle` feature now also names
+  `z3-sys` (already `z3`'s own dependency, same version) to read Z3's error
+  code. The default build is unchanged and dependency-free.
+
 ### Fixed
+
+- **SMT-LIB scripts Z3 refuses are refused** (TR-087). Found by the front
+  leg; each accepted an invalid script, none could give a wrong `unsat`, and
+  two dropped part of the input:
+  - `bvsub` is binary. `(bvsub x)` read as `x`, `(bvsub x y z)` was folded.
+  - `=>` needs two arguments. `(=> p)` read as `p`.
+  - `(assert t u)` is an error. The `u` was dropped.
+  - A surplus index (`((_ zero_extend 1 2) x)`) or constant part
+    (`(_ bv1 8 9)`) is an error. It was ignored.
+  - `extract` needs `w > hi >= lo`. A bad one was read and the solver then
+    answered `unknown`.
+  - A bitvector width is at least 1 (`(_ BitVec 0)`, `(_ bv0 0)`).
+  - Numerals are digits only. A leading `+` (`(_ bv+5 8)`) was accepted.
 
 - **SMT-LIB reader conformance** (TR-086, #294). Four disagreements with
   SMT-LIB 2.6 and Z3, none of which could give a wrong `unsat`:

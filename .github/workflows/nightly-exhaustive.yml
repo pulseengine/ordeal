@@ -32,3 +32,27 @@ jobs:
           # exactly the vacuous gate #187 is about.
           echo "$out" | grep -q 'test result: ok. 1 passed' \
             || { echo "::error::expected exactly 1 exhaustive test to pass"; exit 1; }
+
+  # The SMT-LIB parser differential's long run (#281 E0, TR-087): 10^5
+  # generated scripts through Z3's parser and ordeal's reader (per-PR CI
+  # runs 10^4 in the blocking "SMT-LIB parser differential" job).
+  parser-differential-1e5:
+    name: SMT-LIB parser differential, 10^5 scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: parser-differential
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
+      - name: Front leg, 10^5 generated scripts
+        run: |
+          set -euo pipefail
+          out="$(cargo test -p ordeal --features oracle --release --lib front_leg_agrees_on_1e5_generated_scripts -- --ignored --nocapture 2>&1)" \
+            || { echo "$out"; exit 1; }
+          echo "$out" | grep -E '^(front leg:|[0-9]+ generated)'
+          echo "$out" | grep -q 'test result: ok. 1 passed' \
+            || { echo "::error::expected exactly 1 front-leg test to pass"; exit 1; }
