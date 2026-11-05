@@ -404,6 +404,22 @@ no parser anywhere in the trusted crate. Then **E3**, with the trust
 sentence conditional on the consumer's comparison, the only honest
 reading.
 
+## Decisions (maintainer, 2026-11-05)
+
+- **Q1 → T2.** The echo prints the bundle's `term` / `ext` node lists, and
+  `ordeal-recheck` re-derives it byte for byte.
+- **Q3 → on by default from v5.** Every bundle carries the echo from the
+  release that ships `ordeal-cert/v5`; v5 becomes the default format there
+  (v1..v4 stay readable). Consumers (rivet, gale) must accept v5 when they
+  upgrade, so that release's notes and consuming-ordeal.md say so.
+- **Q6 → blocking, its own job.** The parser differential moves out of the
+  `continue-on-error` Z3 Oracle job into a job that fails CI, with a rivet
+  verdict the release gate requires.
+- **Q5 → ship `echo-check`** under the `oracle` feature, so the consumer's
+  comparison is one command.
+- **Q4 (quoted symbols)** follows SMT-LIB 2.6 without asking: fixed in E0
+  (#294).
+
 ## 10. Open questions for the maintainer
 
 1. Print the bundle's `term` / `ext` (T2, recommended) or the `TBool` tree (T1)?
