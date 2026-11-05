@@ -2055,3 +2055,25 @@ artifacts:
         target: ARC-011
       - type: traces-to
         target: TR-025
+
+  - id: TR-076
+    type: sw-req
+    title: The wasm32-wasip2 components are wsc keyless-signed and the signature is verified on the published bytes
+    status: implemented
+    release: v0.36.0
+    description: "Before v0.36.0 the wasm32-wasip2 components (ordeal and ordeal-recheck) were covered only by the cosign-signed SHA256SUMS and SLSA provenance; nothing a varve / sigil consumer verifies with wsc was attached, and feature-loop step 6 (sign with wsc) had been N/A for every feature. Requirement: release.yml signs each component with wsc (sigil) from the pinned varve layer, keyless (ephemeral key, a Fulcio certificate for the release workflow's GitHub OIDC identity, a Rekor entry), publishing X.signed.wasm next to the unchanged reproducible X.wasm; the signing step fails the release unless wsc verify accepts each signed file for exactly the running workflow ref and wsc detach returns the published X.wasm byte for byte, so the signature covers the reproducible module and nothing else. The signed files are inside the cosign-signed SHA256SUMS and the SLSA provenance. scripts/verify_release.sh, from v0.36.0, checks on the published bytes that each signed file is listed in the sums, verifies with wsc for the release workflow identity (the tag ref, or main for a workflow_dispatch recovery), detaches to the published unsigned file, and is rejected after one flipped byte (negative control); a missing wsc is a FAIL, not a SKIP. Effect: behaviour (a varve / sigil consumer can verify the wasm components with wsc)."
+    tags: [release, signing, wsc, sigil, wasm, supply-chain]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: "Local: the verify_release.sh section-8 logic run against a real keyless-signed wsc module (pulseengine/sigil v0.12.0 wsc-component.wasm, staged under the ordeal asset names) passes all checks; the same run fails for a wrong repository identity, for an unsigned file that differs from the detached module by one byte, and with no wsc. Key-based wsc sign of the ordeal component: verify exit 0, detach equal to the unsigned bytes, one flipped byte exit 1. At the tag: the release.yml signing step's self-checks pass and scripts/verify_release.sh vX.Y.Z reports the section-8 checks PASS on the published assets."
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: traces-to
+        target: TR-033
+      - type: traces-to
+        target: TR-075
+      - type: allocated-to
+        target: ARC-013

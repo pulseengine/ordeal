@@ -385,6 +385,8 @@ artifacts:
         target: TR-053
       - type: allocated-from
         target: TR-055
+      - type: allocated-from
+        target: TR-076
   - id: ARC-014
     type: sw-arch-component
     title: ordeal-verification-infrastructure (Lean regeneration, Kani tiers, fuzzing, differentials, gates)
