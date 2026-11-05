@@ -33,6 +33,9 @@
 //!   queries covering every operation in the fragment.
 //! - [`differential_check`] — the entry point the engine wires up: run both
 //!   the engine and Z3 and report any [`Disagreement`].
+//! - [`front`] — the one piece that reads TEXT: Z3's SMT-LIB parser against
+//!   ordeal's reader, per assertion (#281 E0), with the seeded text
+//!   generator [`gen_smtlib_text`].
 
 #![cfg(not(target_family = "wasm"))]
 
@@ -42,6 +45,13 @@ use crate::term::{BoolTerm, BvTerm, Sort};
 use std::collections::BTreeMap;
 use z3::ast::{Array, Ast, BV, Bool};
 use z3::{FuncDecl, Params, SatResult, Solver, Sort as Z3Sort};
+
+/// The Z3 parser differential's front leg (#281 E0, TR-087): Z3's SMT-LIB
+/// parser against ordeal's reader, per assertion, plus the seeded text
+/// generator [`gen_smtlib_text`].
+#[path = "oracle_front.rs"]
+pub mod front;
+pub use front::gen_smtlib_text;
 
 // ─── Translation: closed fragment → Z3 ──────────────────────────────────────
 

@@ -593,6 +593,40 @@ jobs:
           CITATION_FEATURES: ordeal/cert-bundle,ordeal/cadical,ordeal/oracle
         run: scripts/check_verification_citations.sh
 
+  # ── SMT-LIB parser differential (BLOCKING, TR-087 / VER-087) ──────────
+  # Split out of the continue-on-error oracle job above by the maintainer's
+  # #281 decision (Q6): a red differential fails CI. The front leg hands
+  # every repository .smt2 file and 10^4 generated scripts to Z3's own
+  # parser and to ordeal's reader, and decides `A_Z3[k] xor A_ord[k]` per
+  # assertion; four armed reader mutations must each turn it red. Only
+  # this module runs here (`oracle::front::tests`); the 10^5 run is
+  # nightly-exhaustive.yml. Not continue-on-error: an install failure is
+  # red too, rather than a silent pass.
+  parser-differential:
+    name: SMT-LIB parser differential (Z3)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: parser-differential
+      - name: Install Z3
+        run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
+      - name: Front leg (VER-087)
+        run: |
+          set -euo pipefail
+          z3 --version
+          out="$(cargo test -p ordeal --features oracle --release --lib oracle::front::tests -- --nocapture 2>&1)" \
+            || { echo "$out"; exit 1; }
+          # The tallies and the negative controls, printed on every run.
+          echo "$out" | grep -E '^(front leg:|control |[0-9]+ (files|generated))|^  FAIL'
+          echo "$out" | tail -3
+          # No vacuous pass: the filter must have matched all five tests.
+          echo "$out" | grep -q 'test result: ok. 5 passed' \
+            || { echo "::error::expected the 5 front-leg tests to pass"; exit 1; }
+
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
   # change, not first at release time: install varve the verified way,
   # install and verify the pinned layer against the realm root, then run the

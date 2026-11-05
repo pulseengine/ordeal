@@ -66,6 +66,17 @@ The default build is intentionally Z3-free: ordeal is a self-contained solver.
 The optional `oracle` feature cross-checks ordeal's answers against Z3 and is
 run as a non-blocking CI job.
 
+The SMT-LIB parser differential (`oracle::front`, TR-087) hands every
+repository `.smt2` file and 10^4 generated scripts to Z3's parser and to
+ordeal's reader. It runs in its own job, `SMT-LIB parser differential (Z3)`,
+which is not `continue-on-error`, so a disagreement turns the CI run red.
+It is not yet one of the required checks below (that is a branch-protection
+setting). Run it locally with:
+
+```bash
+cargo test -p ordeal --features oracle --release --lib oracle::front::tests -- --nocapture
+```
+
 ## Pull Request Process
 
 1. Fork the repository.
