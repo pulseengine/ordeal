@@ -1478,7 +1478,14 @@ fn ext_node_from_json(v: &serde_json::Value) -> Result<ordeal_lrat::ExtNode, Bun
     let op = arr.first().and_then(|o| o.as_str()).ok_or_else(malformed)?;
     let args = arr[1..]
         .iter()
-        .map(|a| a.as_u64().map(|x| x as usize).ok_or_else(malformed))
+        // Checked, never `as usize`: on a 32-bit target (the wasm re-checker)
+        // a truncating cast would make native and wasm readers decode
+        // different ext nodes from the same bundle (a parser differential).
+        .map(|a| {
+            a.as_u64()
+                .and_then(|x| usize::try_from(x).ok())
+                .ok_or_else(malformed)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     ext_node_from_op(op, &args).ok_or_else(|| {
         BundleError::Unsupported(format!("ext node operation {op} with {} args", args.len()))
@@ -2004,5 +2011,30 @@ mod wire_indices {
                     .ok_or_else(|| D::Error::custom(format!("index {x} does not fit usize")))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod ext_arg_width_tests {
+    use super::ext_node_from_json;
+
+    /// An ext-node argument above `u32::MAX` must never wrap: a 64-bit
+    /// reader keeps it exactly, a 32-bit (wasm) reader rejects the bundle as
+    /// malformed. Either way native and wasm never decode different nodes.
+    #[test]
+    fn ext_arg_above_u32_max_is_kept_or_rejected_never_truncated() {
+        let big = u64::from(u32::MAX) + 2;
+        let v = serde_json::json!(["select", big, 0, 0, 0]);
+        let r = ext_node_from_json(&v);
+        #[cfg(target_pointer_width = "64")]
+        assert!(
+            matches!(r, Ok(ordeal_lrat::ExtNode::Select(a, 0, 0, 0)) if a as u64 == big),
+            "64-bit reader must keep the argument exactly"
+        );
+        #[cfg(not(target_pointer_width = "64"))]
+        assert!(
+            matches!(r, Err(super::BundleError::Malformed(_))),
+            "32-bit reader must reject, not truncate"
+        );
     }
 }

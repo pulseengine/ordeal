@@ -183,7 +183,17 @@ fn recheck(json: &str, format: &str, verdict: &str) -> Result<(), String> {
     }
     match (format, verdict) {
         ("ordeal-cert/v1", "unsat") => checked(decode(Certificate::from_cert_v1(json))?.recheck()),
-        ("ordeal-cert/v1", "sat") => checked(decode(SatCertificate::from_cert_v1(json))?.recheck()),
+        ("ordeal-cert/v1", "sat") => {
+            let cert = SatCertificate::from_cert_v1(json).map_err(|e| {
+                // `model_to_cert_v1` writes a model-only v1 SAT bundle with no
+                // `witness` block: there is nothing to re-check, by design.
+                format!(
+                    "{e} (a model-only v1 SAT bundle carries no witness block and is not \
+                     independently re-checkable)"
+                )
+            })?;
+            checked(cert.recheck())
+        }
         ("ordeal-cert/v2", "unsat") => {
             checked(decode(QueryCertificate::from_cert_v2(json))?.recheck())
         }
