@@ -2097,3 +2097,23 @@ artifacts:
         target: ARC-014
       - type: traces-to
         target: TR-046
+
+  - id: TR-080
+    type: sw-req
+    title: The A2 blocker (Aeneas has no String model) is measured by a committed probe on the pinned and the latest Aeneas, and mirror.rs is kept for that recorded reason
+    status: implemented
+    release: v0.37.0
+    description: "crates/ordeal/src/mirror.rs copies BoolTerm / ExtBoolTerm into the kernel's TBv / TBool / TArray / TArgs, the last trusted step between constructor calls and the flattener proofs (TR-073, option A1). Option A2 (the kernel consumes term.rs directly, nothing copied) needs String equality/length/bytes in the Aeneas model. Requirement: the blocker is measured, not asserted, by a committed probe (lean/probe/string_names.rs, scripts/aeneas_string_probe.sh) that reports BLOCKED or UNLOCKED for a given Charon/Aeneas, with a negative control; the measured result names the revisions tested and is recorded in docs/design/flattener-proof.md; mirror.rs stays until the probe reports UNLOCKED on the pinned toolchain or the maintainer chooses a hand-written String model. Effect: confidence. Issue #282."
+    tags: [aeneas, lean, trusted-base, mirror, confidence]
+    fields:
+      effect: confidence
+      priority: should
+      req-type: constraint
+      verification-criteria: The probe reports BLOCKED with the three String axioms on the pinned Aeneas 9dd45ec and on the latest prebuilt nightly-2026.11.05-c2d2343; the same probe with the String operations removed reports UNLOCKED; the result and revisions are in docs/design/flattener-proof.md.
+    links:
+      - type: derives-from
+        target: SYS-003
+      - type: allocated-to
+        target: ARC-006
+      - type: traces-to
+        target: TR-073
