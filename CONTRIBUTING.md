@@ -69,9 +69,8 @@ run as a non-blocking CI job.
 The SMT-LIB parser differential (`oracle::front`, TR-087) hands every
 repository `.smt2` file and 10^4 generated scripts to Z3's parser and to
 ordeal's reader. It runs in its own job, `SMT-LIB parser differential (Z3)`,
-which is not `continue-on-error`, so a disagreement turns the CI run red.
-It is not yet one of the required checks below (that is a branch-protection
-setting). Run it locally with:
+which is not `continue-on-error` and is one of the required checks below,
+so a disagreement blocks the merge. Run it locally with:
 
 ```bash
 cargo test -p ordeal --features oracle --release --lib oracle::front::tests -- --nocapture
@@ -95,6 +94,7 @@ cargo test -p ordeal --features oracle --release --lib oracle::front::tests -- -
    - `Reproducible build`
    - `Lean model + soundness proof`
    - `CaDiCaL backend (cadical feature)`
+   - `SMT-LIB parser differential (Z3)`
 
    `claims.yaml` checks this list against the job names in `ci.yml`, so a
    job added to the workflow must be listed here or waived there.
