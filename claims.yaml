@@ -466,7 +466,7 @@ claims:
   - id: CONTRIB-REQUIRED-CHECKS
     doc: CONTRIBUTING.md
     text: "The checks branch protection requires on `main`"
-    # The required list (branch protection, read 2026-11-04 via the GitHub
+    # The required list (branch protection, read 2026-11-07 via the GitHub
     # API) against the job names in ci.yml. Advisory jobs are waived here —
     # printed every run. A job added to ci.yml must be listed or waived.
     evidence:
@@ -480,10 +480,6 @@ claims:
           - Bazel build (optional)
           - Z3 Oracle (optional)
           - varve layer pin resolves (pinned rivet validates the graph)
-          # Not continue-on-error (a red differential fails the run, #281
-          # decision Q6), but not yet a required context: adding it to
-          # branch protection is a settings change for the maintainer.
-          - SMT-LIB parser differential (Z3)
       - kind: count-min            # the claim gate runs inside the required Test job
         pattern: 'python3 scripts/claim_check\.py claims\.yaml'
         glob: .github/workflows/ci.yml
