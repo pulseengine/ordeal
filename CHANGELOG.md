@@ -7,7 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.1] - 2026-11-10
+
+This release exists so that ordeal has a release signed from its own tag.
+v0.36.0's tag-push run (42092397312) was cancelled because GitHub retired
+the macos-14 image, and v0.36.0 was rebuilt by `workflow_dispatch` from
+main, so its `SHA256SUMS.txt` is signed as `release.yml@refs/heads/main`.
+varve v0.47.0 pins an upstream's cosign identity to
+`release.yml@refs/tags/<tag>` and refuses that. v0.36.1 is built by the
+tag-push run. It is not a pure re-release: `release.yml` only builds a tag
+on main with green CI, so it carries main's changes since v0.36.0, listed
+below. From now on a failed tag run is answered by fixing main and cutting
+the next patch tag, never by rebuilding the old tag from main.
+
 ### Added
+
+- **The Aeneas String probe** (TR-080, #282). `lean/probe/string_names.rs`
+  and `scripts/aeneas_string_probe.sh` run term.rs's shape with `String`
+  names through Aeneas and print BLOCKED or UNLOCKED. It is BLOCKED on the
+  pinned Aeneas (9dd45ec) and on the latest prebuilt
+  (nightly-2026.11.05-c2d2343): `as_bytes`, `PartialEq::eq` and `len` become
+  axioms. A String-free control prints UNLOCKED. `mirror.rs` stays, for that
+  recorded reason (docs/design/flattener-proof.md).
 
 - **The Z3 parser differential, front leg** (TR-087, #281 phase E0). The
   first test that hands SMT-LIB *text* to Z3's own parser: until now the Z3
