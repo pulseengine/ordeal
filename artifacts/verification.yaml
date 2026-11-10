@@ -1690,8 +1690,8 @@ artifacts:
   - id: VER-086
     type: sw-verification
     title: "SMT-LIB reader conformance: the four #294 inputs and the non-simple quoted symbol pinned to their SMT-LIB outcomes (TR-086)"
-    status: implemented
-    release: v0.37.0
+    status: verified
+    release: v0.36.1
     description: "crates/ordeal/src/smtlib.rs tests: quoted_and_bare_spellings_are_one_symbol (x = 1 via |x| and x = 2 via x is unsat; |y| declared, y used is sat, model name y); a_quoted_symbol_that_is_not_simple_stays_a_symbol (|#x01| is a symbol distinct from the literal; |a b| one name; an undeclared quoted symbol refused); a_bool_is_not_a_bitvector (Bool in = with a BV1 and in bvadd are errors; Bool used as Bool still answers); nullary_declare_fun_of_sort_bool_is_a_bool (sat and unsat); redeclaration_at_another_sort_of_the_same_width_is_an_error (Bool then BV1 and BV1 then declare-fun Bool both error; x and |x| at the same sort are one variable). The four tests that encode a changed behaviour were seen red before the fix (4 failed, 23 passed) and green after."
     tags: [smtlib, front-end, regression]
     fields:
@@ -1705,8 +1705,8 @@ artifacts:
   - id: VER-080
     type: sw-verification
     title: "Aeneas String probe: BLOCKED on the pinned and the latest Aeneas, UNLOCKED on the String-free control (TR-080)"
-    status: implemented
-    release: v0.37.0
+    status: verified
+    release: v0.36.1
     description: "scripts/aeneas_string_probe.sh on lean/probe/string_names.rs. Pinned Charon 0.1.218 / Aeneas 9dd45ec (nix, lean/toolchain-pins.env): axioms alloc.string.String.as_bytes, alloc.string.String.Insts.CoreCmpPartialEqString.eq, alloc.string.String.len, BLOCKED. Latest prebuilt release Charon 0.1.308 / Aeneas nightly-2026.11.05-c2d2343 (macos-aarch64 bundle, RUSTUP_TOOLCHAIN=nightly-2026-09-17 with rustc-dev): the same three axioms, BLOCKED. Negative control: the probe file with ==, len and as_bytes replaced by String-free expressions gives no axiom and UNLOCKED on the pinned toolchain; file restored byte for byte (cmp). The probe also fails (exit 1) if either tool fails or the translation lacks name_eq, so a broken toolchain is not read as an answer."
     tags: [aeneas, probe, negative-control]
     fields:
@@ -1720,8 +1720,8 @@ artifacts:
   - id: VER-087
     type: sw-verification
     title: "Z3 parser differential, front leg: every repository .smt2 file and 10^4 generated scripts agree per assertion; four reader mutations each turn it red (TR-087)"
-    status: implemented
-    release: v0.37.0
+    status: verified
+    release: v0.36.1
     description: "crates/ordeal/src/oracle_front.rs tests (feature oracle): front_leg_agrees_on_every_repository_smt2_file (27 files, Verus logs via verus::extract; passes only with 0 disagree, 0 unallowed Z3 refusals and >0 compared); front_leg_agrees_on_generated_scripts (gen_smtlib_text, seed 0x0281E0F0, 10^4 scripts, all compared); generator_covers_the_desugared_syntax; every_front_negative_control_turns_the_leg_red (SltAsUlt, RotlNoMod, ChainEqDropLast, ImpliesLeftAssoc each armed via smtlib::mutation, a cfg(all(test, feature = oracle)) switch, give >=1 disagree over 1000 scripts, then agree once disarmed); harness_classifies_one_fixture_per_outcome_class (agree, disagree with witness, assertion-count mismatch, ordeal refuses, Z3 refuses failing the run, the #139 allow-list entry, both refuse, an all-refused run failing). Plus the reader fixes the differential found, pinned in smtlib::tests::scripts_z3_refuses_are_refused. Run in the blocking CI job SMT-LIB parser differential (Z3); the 10^5 run (front_leg_agrees_on_1e5_generated_scripts, ignored) in nightly-exhaustive.yml."
     tags: [smtlib, front-end, oracle, differential, negative-control]
     fields:

@@ -2101,8 +2101,8 @@ artifacts:
   - id: TR-086
     type: sw-req
     title: The SMT-LIB reader treats |x| and x as one symbol, keeps Bool and bitvector sorts apart, and accepts a nullary declare-fun of sort Bool
-    status: implemented
-    release: v0.37.0
+    status: verified
+    release: v0.36.1
     description: "Four disagreements between the SMT-LIB reader (crates/ordeal/src/smtlib.rs) and SMT-LIB 2.6 / Z3, found by the #281 design note (docs/design/query-echo.md section 1): a quoted symbol kept its bars, so |x| and x were two names; a Bool name was accepted as a BV1 term; declare-fun of sort Bool did not register a boolean; a redeclaration at another sort of the same width (Bool vs (_ BitVec 1)) was accepted. Requirement: a quoted symbol whose content is a simple, non-reserved symbol is read as its bare spelling and any other quoted symbol keeps its bars (never a literal or keyword); a Bool used as a bitvector is a sort error; declare-fun name () Bool declares a boolean; a redeclaration at another sort is an error. Identical redeclaration stays tolerated (#139), the one remaining place the reader is laxer than SMT-LIB. None of the four could give a wrong unsat. Effect: behaviour. Phase E0 of the #281 design. Issue #294."
     tags: [smtlib, front-end, conformance]
     fields:
@@ -2119,8 +2119,8 @@ artifacts:
   - id: TR-080
     type: sw-req
     title: The A2 blocker (Aeneas has no String model) is measured by a committed probe on the pinned and the latest Aeneas, and mirror.rs is kept for that recorded reason
-    status: implemented
-    release: v0.37.0
+    status: verified
+    release: v0.36.1
     description: "crates/ordeal/src/mirror.rs copies BoolTerm / ExtBoolTerm into the kernel's TBv / TBool / TArray / TArgs, the last trusted step between constructor calls and the flattener proofs (TR-073, option A1). Option A2 (the kernel consumes term.rs directly, nothing copied) needs String equality/length/bytes in the Aeneas model. Requirement: the blocker is measured, not asserted, by a committed probe (lean/probe/string_names.rs, scripts/aeneas_string_probe.sh) that reports BLOCKED or UNLOCKED for a given Charon/Aeneas, with a negative control; the measured result names the revisions tested and is recorded in docs/design/flattener-proof.md; mirror.rs stays until the probe reports UNLOCKED on the pinned toolchain or the maintainer chooses a hand-written String model. Effect: confidence. Issue #282."
     tags: [aeneas, lean, trusted-base, mirror, confidence]
     fields:
@@ -2139,8 +2139,8 @@ artifacts:
   - id: TR-087
     type: sw-req
     title: The SMT-LIB front end is differentially tested against Z3's parser per assertion, blocking in CI
-    status: implemented
-    release: v0.37.0
+    status: verified
+    release: v0.36.1
     description: "Before #281 E0 no test handed SMT-LIB text to Z3's parser: oracle::to_z3 translates ordeal's own BoolTerm, so the Z3 oracle checked the engine, never the reader (docs/design/query-echo.md section 1, steps Q2-Q9). Requirement: the front leg of the parser differential (design note section 6) reads every repository .smt2 file (Verus logs through verus::extract) and a seeded text generator (oracle::gen_smtlib_text: n-ary ops, chained =, n-ary distinct, =>, Bool constants, true/false, rotate_* with k >= w and k >= 2^w, all three literal forms with (_ bvN W) values >= 2^W, simple and non-simple quoted symbols, comments) with Z3's parser (Solver::from_string, error code via z3-sys) and with smtlib::read_script; for each assertion k Z3 decides A_Z3[k] xor A_ord[k], with each Bool name linked to the BV1 ordeal holds it as. Outcome classes: agree; disagree (fails, Z3's witness printed); ordeal refuses / Z3 accepts (listed, not a failure); Z3 refuses / ordeal accepts (fails unless on the reviewed allow-list, whose one entry is the #139 identical-redeclaration tolerance); both refuse. A tally is printed every run and a run that compared nothing fails. Four test-only reader mutations (bvslt read as Ult, rotate_left without mod w, chained = dropping its last pair, => left-associated) must each turn the leg red. It runs in its own blocking CI job, split from the continue-on-error Z3 Oracle job (maintainer decision Q6); 10^5 generated scripts run nightly. Not trusted, not on any verdict path. The reader now refuses what the leg found it accepting and Z3 refuses (none could give a wrong unsat): n-ary or unary bvsub, unary =>, an assert with two terms, a surplus operator index or constant part, an extract outside w > hi >= lo, a zero width, a numeral with a leading +. Effect: confidence. Issue #281 phase E0."
     tags: [smtlib, front-end, oracle, differential, confidence]
     fields:
