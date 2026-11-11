@@ -73,7 +73,7 @@ jobs:
       # the gate into its own job, cosign had been installed earlier in the
       # same job for checksum signing.
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: 'v2.4.1'
 
@@ -456,7 +456,7 @@ jobs:
       # BEFORE the checksum step so its digest is cosign-signed with
       # everything else. Re-issues after release are handled by
       # vex-reissue.yml and never touch these signed sums.
-      - uses: taiki-e/install-action@1919c4a95903d2c33e4a221102edca87309fc14b # v2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
           tool: cargo-audit@0.22.2
 
@@ -480,7 +480,7 @@ jobs:
       # next) both come from the layer pinned in varve.toml, verified
       # against the realm root, never from a version string in this file.
       - name: Install cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: 'v2.4.1'
 
