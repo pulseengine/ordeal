@@ -30,6 +30,33 @@ test -d "$CORPUS" || { echo "corpus dir missing: $CORPUS" >&2; exit 2; }
 
 fail=0
 checked=0
+
+# Agreement alone is not enough: two binaries that fail the same way agree
+# byte for byte. Every fixture is named for its verdict (sat_* / unsat_*),
+# so each invocation must also exit 0 and print that verdict: the plain
+# text answer's first line, or the JSON report's "verdict" field.
+expect_ok() { # <label> <expected verdict> <mode> <exit> <stdout>
+  local label="$1" want="$2" mode="$3" code="$4" out="$5" got
+  if [ "$code" != 0 ]; then
+    echo "WRONG   $label: exit $code, expected 0 with verdict $want"; return 1
+  fi
+  if [ "$mode" = json ]; then
+    got=$(printf '%s' "$out" | sed -n 's/.*"verdict":"\([a-z]*\)".*/\1/p' | head -1)
+  else
+    got=$(printf '%s\n' "$out" | head -1)
+  fi
+  if [ "$got" != "$want" ]; then
+    echo "WRONG   $label: verdict '${got}', expected '$want'"; return 1
+  fi
+}
+
+want_of() { # sat_foo.smt2 -> sat, unsat_foo.smt2 -> unsat
+  case "$(basename "$1")" in
+    sat_*) echo sat ;;
+    unsat_*) echo unsat ;;
+    *) echo "fixture $(basename "$1") is not named sat_* or unsat_*" >&2; exit 2 ;;
+  esac
+}
 for f in "$CORPUS"/*.smt2; do
   for mode in text json; do
     if [ "$mode" = json ]; then
@@ -51,6 +78,8 @@ for f in "$CORPUS"/*.smt2; do
     else
       echo "AGREE   $(basename "$f") [$mode] (exit $n_code)"
     fi
+    expect_ok "$(basename "$f") [$mode] native" "$(want_of "$f")" "$mode" "$n_code" "$n_out" || fail=1
+    expect_ok "$(basename "$f") [$mode] wasm" "$(want_of "$f")" "$mode" "$w_code" "$w_out" || fail=1
   done
 done
 
@@ -70,9 +99,12 @@ if [ "$n_code" != "$w_code" ] || [ "$n_out" != "$w_out" ]; then
 else
   echo "AGREE   file-mode probe (exit $n_code)"
 fi
+expect_ok "file-mode probe native" "$(want_of "$probe")" text "$n_code" "$n_out" || fail=1
+expect_ok "file-mode probe wasm" "$(want_of "$probe")" text "$w_code" "$w_out" || fail=1
 
 if [ "$fail" -ne 0 ]; then
   echo "wasm/native differential: DIVERGENCE FOUND across $checked invocations" >&2
   exit 1
 fi
-echo "wasm/native differential: $checked invocations, byte-identical"
+[ "$checked" -gt 0 ] || { echo "wasm/native differential: compared nothing" >&2; exit 1; }
+echo "wasm/native differential: $checked invocations, byte-identical, each the fixture's expected verdict"
