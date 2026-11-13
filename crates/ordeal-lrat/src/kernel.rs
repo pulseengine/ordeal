@@ -52,6 +52,13 @@ pub mod sliver_kernel;
 #[path = "term_kernel.rs"]
 pub mod term_kernel;
 
+/// The certified query echo (issue #281, E1): the node lists a certificate
+/// is about, printed back as an SMT-LIB script. The same translation
+/// unit; the SMT-LIB model is `lean/EchoSpec.lean`, the proofs
+/// `lean/Echo.lean`.
+#[path = "echo_kernel.rs"]
+pub mod echo_kernel;
+
 use blast_kernel::{DagNode, Lit, aig_new, compact, encode, eval_lit, map_word, simulate, tseitin};
 
 /// One already-parsed certificate step.

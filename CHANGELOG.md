@@ -24,6 +24,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   desugar to the core connectives, so the closed op set is unchanged. Mixed
   sorts are still a sort error. Before, these were refused (exit 2) on
   scripts Z3 reads.
+- **The echo printer and its proof** (#281, phase E1). `ordeal_lrat::echo_term`
+  and `echo_ext` (`crates/ordeal-lrat/src/echo_kernel.rs`, in the trusted
+  crate's one translation unit) print the `ordeal-term/v1` term or the
+  `ordeal-ext/v1` extended query a certificate is about as an SMT-LIB 2.6
+  script: names always quoted, constants `#b` and exactly `w` digits most
+  significant first, one symbol per `DagNode` arm, indexed rotates for a
+  constant amount, arrays as nested `store` chains. A refusal (`EchoError`)
+  is never a verdict. `lean/EchoSpec.lean` is the explicit SMT-LIB model
+  (a specification, not proven equal to the standard) and `lean/Echo.lean`
+  proves the printer against it: `lex_render`, `echo_term_sound` /
+  `echo_ext_sound` (the printed script is satisfied by an interpretation
+  exactly when the node list's roots are) and `echo_unsat_sound` /
+  `echo_ext_unsat_sound` (composed with the term and sliver capstones), all
+  pinned in `AxiomCheck.lean`. Nothing calls the printer yet: bundle format
+  v5, the recheck rows and the CLI flag are phase E2, and the trusted base
+  is unchanged.
 
 ### Fixed
 

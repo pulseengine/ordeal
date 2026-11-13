@@ -375,6 +375,16 @@ list against the directory, both ways.
   `sliver_verdicts_exclusive`. Default target.
 - `TreeFlatten.lean` — `flatten_tree_sound` and the six tree capstones.
   Default target.
+- `EchoSpec.lean` — the SMT-LIB model the certified query echo is proven
+  against (issue #281, E1): S-expressions and their text (`render`), the
+  reader (`lex`), interpretations and the value of a term (`den`),
+  `ScriptSat` / `TextSat`. A specification, validated against Z3, not
+  proven equal to the standard; no theorems. Default target.
+- `Echo.lean` — the printer `kernel::echo_kernel` against that model:
+  `lex_render`, `echo_term_sound` / `echo_ext_sound` (the printed script
+  is satisfied exactly when the node list's roots are),
+  `echo_unsat_sound` / `echo_ext_unsat_sound` (composed with the term and
+  sliver capstones) and their text forms. Default target.
 - `AxiomCheck.lean` — the `#guard_msgs`-pinned `#print axioms` of every
   capstone (the axiom gate). Default target.
 - `DiffCheck.lean` — the TR-035 dual-mechanisation differential

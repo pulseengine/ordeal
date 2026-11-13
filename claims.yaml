@@ -710,16 +710,16 @@ claims:
 
   - id: FV-ONE-TRANSLATION-UNIT
     doc: docs/formal-verification.md
-    text: "the trusted crate is one translation unit (`kernel.rs` and its three `#[path]` submodules)"
+    text: "the trusted crate is one translation unit (`kernel.rs` and its four `#[path]` submodules)"
     evidence:
       - kind: count-min
         pattern: '^#\[path = "[a-z_]+\.rs"\]$'
         glob: crates/ordeal-lrat/src/kernel.rs
-        min: 3
-      - kind: count-max            # exactly three — a fourth would make the sentence false
+        min: 4
+      - kind: count-max            # exactly four — a fifth would make the sentence false
         pattern: '^#\[path = "[a-z_]+\.rs"\]$'
         glob: crates/ordeal-lrat/src/kernel.rs
-        max: 3
+        max: 4
 
   - id: FV-NO-AXIOM-IN-MODEL-GATE
     doc: docs/formal-verification.md

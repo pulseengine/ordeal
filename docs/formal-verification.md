@@ -94,7 +94,7 @@ these would have to fail:
    package pins the Aeneas support library to the same revision). Aeneas is
    a research translator and is **not itself verified end to end**; we
    trust it. Mitigations: the trusted crate is one translation unit
-   (`kernel.rs` and its three `#[path]` submodules) written in the
+   (`kernel.rs` and its four `#[path]` submodules) written in the
    Aeneas-friendly fragment, the model is regenerated rather than
    hand-written, Aeneas models Rust scalar (`i32`/`usize`) semantics
    including bounds, and the TR-035 differential (below) runs the checker
@@ -660,6 +660,67 @@ congruence root) is fixed by masking at the lowering
 (`sliver::masked_bv`, `as_const`, memo keys) — the kernel and the DAG
 builder are unchanged and raw, so the blocks stay byte-identical.
 
+### The certified query echo: the printer and its proof (issue #281, phase E1)
+
+`crates/ordeal-lrat/src/echo_kernel.rs` (`kernel::echo_kernel`, a `#[path]`
+submodule of `kernel.rs`, so one translation unit with the rest) prints
+the node lists a certificate is about back as an SMT-LIB 2.6 script:
+`echo_term` for a `term` block (`ordeal-term/v1`) and `echo_ext` for an
+`ext` block (`ordeal-ext/v1`), each with its name tables. It has no
+`String`, `str` or `fmt` (each becomes an `axiom` under the pinned
+Aeneas): bytes go into a `Vec<u8>`, names come from byte arenas. A name is
+always quoted; a constant is `#b` and exactly `w` digits, most significant
+first; there is one symbol per `DagNode` arm; a rotate is the indexed form
+for a constant amount. It refuses (`EchoError`, never a verdict) a list
+that is not well formed, a name SMT-LIB cannot quote or that is a reserved
+word or collides with another name, a sort mismatch between formulas and
+bitvector terms, a rotate by a term, an operator node shared by two
+parents, and a function called at two signatures.
+
+`lean/EchoSpec.lean` is the SMT-LIB model the printer is proven against:
+S-expressions and their text (`render`), a reader (`lex`),
+interpretations of the declared symbols (`Interp`), the value of a term
+(`den`, one arm per symbol, the `BitVec` operations `dagNodeVal` uses) and
+script satisfaction (`ScriptSat`: commands read in order; a declaration
+fresh, well sorted, allowed by the logic and not a reserved word; an
+assertion well sorted and true). **That model is a specification: a
+transcription of the standard, to be validated against Z3 by the echo leg
+of the parser differential, not proven equal to SMT-LIB.**
+`lean/Echo.lean` proves, `sorry`-free and axiom-clean (pinned in
+`AxiomCheck.lean`):
+
+```lean
+theorem lex_render (cs : List SExp) (h : PrintableL cs) : lex (renderScript cs) = some cs
+
+theorem echo_term_sound … (h : echo_term t tbits troots names name_start name_len var_node var_width
+      = ok (Ok out)) :
+    ∃ cs, out.val = renderScript cs ∧ PrintableL cs ∧
+      ∀ I : Interp, ScriptSat I cs ↔ ∀ k (hk : k < troots.val.length),
+        dagBool (layoutOf I (t.val.map .Core) names.val name_start.val name_len.val var_node.val)
+          tbits.val t.val (troots.val[k]).val = true
+
+theorem echo_unsat_sound … (he : echo_term … = ok (Ok out))
+    (ht : check_term_dag t tbits troots map ns bits roots = ok (Ok ()))
+    (hq : check_query ns bits roots hints steps = ok (Ok cnf)) :
+    ∃ cs, out.val = renderScript cs ∧ PrintableL cs ∧ ∀ I : Interp, ¬ ScriptSat I cs
+```
+
+and the `ext` twins `echo_ext_sound` (against `ExtSat` under the
+assignment, array and function interpretations read off `I` through the
+tables) and `echo_ext_unsat_sound` (composed with
+`check_sliver_unsat_sound`), each with a form over the bytes
+(`echo_term_text_sound`, `echo_text_unsat`, `echo_ext_text_sound`,
+`echo_ext_text_unsat`: `TextSat I out.val`, the text read by `lex`). The
+walk over node indices is a `partial_fixpoint` definition proved by strong
+induction on the index (operands are earlier nodes, by `ext_wf`), one case
+per `DagNode` arm.
+
+Phase E1 is the printer and its proof only: no bundle carries an echo and
+no entry point calls the printer yet, so **the trusted base below is
+unchanged**. Bundle format `ordeal-cert/v5`, the `ordeal-recheck` rows and
+the conditional trust sentence are phases E2 and E3 of
+`docs/design/query-echo.md`.
+
 **The trusted base after TR-073 — the canonical statement.** This sentence
 is the single source every other document carries verbatim (`README.md`,
 `ARCHITECTURE.md`, `AGENTS.md`, `lean/README.md`,
@@ -836,12 +897,14 @@ lake env lean Sound.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 lake env lean SatWitness.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 lake env lean QueryCheck.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 lake env lean TreeFlatten.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
+lake env lean Echo.lean 2>&1 | grep -c "declaration uses 'sorry'"   # expect 0
 echo 'import Sound
 import SatWitness
 import QueryCheck
 import TermCheck
 import SliverCheck
 import TreeFlatten
+import Echo
 #print axioms kernel.spec.lrat_check_sound
 #print axioms kernel.spec.pure_check_sound
 #print axioms kernel.spec.kernel_refines_pure
@@ -868,7 +931,16 @@ import TreeFlatten
 #print axioms kernel.spec.tree_verdicts_exclusive
 #print axioms kernel.spec.ext_tree_unsat_sound
 #print axioms kernel.spec.ext_tree_model_sound
-#print axioms kernel.spec.ext_tree_verdicts_exclusive' > /tmp/ax.lean
+#print axioms kernel.spec.ext_tree_verdicts_exclusive
+#print axioms kernel.spec.lex_render
+#print axioms kernel.spec.echo_term_sound
+#print axioms kernel.spec.echo_term_text_sound
+#print axioms kernel.spec.echo_unsat_sound
+#print axioms kernel.spec.echo_text_unsat
+#print axioms kernel.spec.echo_ext_sound
+#print axioms kernel.spec.echo_ext_text_sound
+#print axioms kernel.spec.echo_ext_unsat_sound
+#print axioms kernel.spec.echo_ext_text_unsat' > /tmp/ax.lean
 lake env lean /tmp/ax.lean          # inspect the axiom lists (three standard axioms each)
 lake build AxiomCheck               # the pinned lists, as a gate
 grep -c '^axiom' Kernel.lean        # expect 0 (CI-gated)

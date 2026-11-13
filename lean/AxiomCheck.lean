@@ -33,6 +33,7 @@ import QueryCheck
 import TermCheck
 import SliverCheck
 import TreeFlatten
+import Echo
 
 -- The checker soundness chain (Sound.lean).
 /-- info: 'kernel.spec.lrat_check_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
@@ -289,3 +290,48 @@ import TreeFlatten
 /-- info: 'kernel.spec.ext_tree_verdicts_exclusive' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms kernel.spec.ext_tree_verdicts_exclusive
+
+-- Issue #281, phase E1 (Echo.lean): the certified query echo. The reader
+-- reads a printed script back (`lex_render`); the printed script is
+-- satisfied by an SMT-LIB interpretation exactly when the node list's roots
+-- are (`echo_term_sound`, `echo_ext_sound`, and their `_text_` forms over
+-- the bytes); composed with the unchanged term and sliver capstones, an
+-- accepted `unsat` certificate makes the echoed script unsatisfiable
+-- (`echo_unsat_sound`, `echo_ext_unsat_sound`, and their text forms). The
+-- SMT-LIB model they are stated against is EchoSpec.lean — a
+-- specification, validated against Z3, not proven equal to the standard.
+/-- info: 'kernel.spec.lex_render' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.lex_render
+
+/-- info: 'kernel.spec.echo_term_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_term_sound
+
+/-- info: 'kernel.spec.echo_term_text_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_term_text_sound
+
+/-- info: 'kernel.spec.echo_unsat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_unsat_sound
+
+/-- info: 'kernel.spec.echo_text_unsat' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_text_unsat
+
+/-- info: 'kernel.spec.echo_ext_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_ext_sound
+
+/-- info: 'kernel.spec.echo_ext_text_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_ext_text_sound
+
+/-- info: 'kernel.spec.echo_ext_unsat_sound' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_ext_unsat_sound
+
+/-- info: 'kernel.spec.echo_ext_text_unsat' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_ext_text_unsat

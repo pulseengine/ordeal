@@ -145,6 +145,22 @@ lean_lib «Sound» {}
 -- axiom-clean (pinned in AxiomCheck.lean).
 @[default_target] lean_lib «TreeFlatten» {}
 
+-- Issue #281, phase E1: the certified query echo. `EchoSpec` is the
+-- SPECIFICATION — a small explicit model of the SMT-LIB the printer emits
+-- (S-expressions, their text, a reader, interpretations, the value of a
+-- term, `ScriptSat`), a transcription of the standard, not proven equal
+-- to it. `Echo` proves the kernel's printer (`kernel.echo_kernel`)
+-- against it: `lex_render` (the reader reads the printed text back),
+-- `echo_ext_sound` / `echo_term_sound` (the printed script is satisfied
+-- by an interpretation exactly when the node list's roots are true under
+-- the assignment and interpretations read off it), and the capstones
+-- composed with the unchanged term and sliver theorems,
+-- `echo_unsat_sound` / `echo_ext_unsat_sound` (an accepted `unsat`
+-- certificate makes the echoed text unsatisfiable). `sorry`-free,
+-- axiom-clean (pinned in AxiomCheck.lean).
+@[default_target] lean_lib «EchoSpec» {}
+@[default_target] lean_lib «Echo» {}
+
 -- TR-044 (VER-039): soundness of the SAT-witness checker (TR-038) over the
 -- same Kernel model and the same semantics as Sound.lean —
 -- `check_sat_sound` (accept ⟹ the witness satisfies the ACTUAL cnf),

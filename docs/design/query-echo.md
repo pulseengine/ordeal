@@ -287,6 +287,55 @@ checks that operands are earlier nodes, as `dag_wf` does, so it is
 validated by the echo leg (§6), not proven; `docs/formal-verification.md`
 must say so in one sentence.
 
+### Addendum: E1 as built (2026-11-13)
+
+`crates/ordeal-lrat/src/echo_kernel.rs`, `lean/EchoSpec.lean` and
+`lean/Echo.lean` ship the printer and its proof. The meaning of the
+theorems above is kept; the shapes moved where the proof asked for it:
+
+- **One printer.** `echo_term` lifts the closed list to an extended one
+  (`Core` nodes, no arrays, no functions) and calls `echo_ext`, so there
+  is one walk and one proof; `echo_term_sound` follows from
+  `echo_ext_sound` by `extSim_map_core`.
+- **One value function.** The model has `den : SExp → Option Val` with
+  `Val = bv | bool | arr` instead of the pair `denBv` / `denBool`: an
+  application's arguments are evaluated first and the head is applied to
+  their values, so the sorts are checked where SMT-LIB checks them.
+  `den` takes the signature of the declarations read so far, and
+  `ScriptSat` reads the commands in order (a declaration must be fresh,
+  well sorted, allowed by the logic and not a reserved word).
+- **Statements.** `Printable cs` is `PrintableL cs` (the script is a
+  list); `layoutOf` takes the interpretation first; the `ext` theorems
+  are stated against `ExtSat` under `layoutOf I …`, `arrsOf I …` and
+  `ufsOf I …`. Each theorem also has a form over the bytes
+  (`echo_*_text_sound`, `echo_*text_unsat`: `TextSat I out.val`, the text
+  read by `lex`), which is `lex_render` composed with the script form.
+  The equivalence is per interpretation, as sketched. That every
+  assignment of the node list is `layoutOf I` for some `I` on the nodes
+  the roots reach is not proven in E1 (it needs the names injective, which
+  the printer establishes, and a reachability argument, which it does
+  not have).
+- **Refusals §3 did not list.** A sort mismatch: `ext_wf` treats a
+  formula as a one-bit word, SMT-LIB does not, so the walk carries the
+  sort it expects and refuses the other (`EchoError::Sort`). A table
+  variable of width 0. A function no node calls (its arity is unknown).
+  A rotate of width above 65536 (the amount is reduced modulo the width
+  in `usize` arithmetic).
+- **A nullary call** prints as `|f|` and is declared
+  `(declare-fun |f| () (_ BitVec w))`; SMT-LIB has no `(|f|)`.
+- **The logic** is `QF_AUFBV` whenever the function table is not empty,
+  with or without arrays.
+- **The reserved list** is a superset of "printed vocabulary + reserved
+  words": it also has the Core and QF_BV symbols the printer never emits
+  (`true`, `false`, `=>`, `xor`, `Bool`, `bvnand`, `bvcomp`, `bvsmod`,
+  `repeat`, …), since `|true|` is the symbol `true` to a solver.
+- **The sharing guard** (`unshared`) is a resource guard with no theorem.
+  It counts every use in the list, reachable or not, and each root.
+- **Not in E1:** the echo leg of the differential (§6) and the size and
+  time measurement on the latency corpus. The lookups from a `Var` node
+  to its table entry and from a function to its first call are linear
+  scans; E2 should measure them before the echo is on by default.
+
 ## 6. The Z3 parser differential
 
 Three legs per script `S`, all in one test module behind `oracle`:
