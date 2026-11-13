@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ordeal check FILE --cert-out PATH`** (TR-092, #316). Writes the
+  `ordeal-cert/v3` bundle of the verdict (`unsat` or `sat`), the highest
+  format the API emits for a plain SMT-LIB query, for `ordeal-recheck`. The
+  CLI spells the same JSON as `TermCertificate::to_cert_v3` /
+  `TermSatCertificate::to_cert_v3` without serde, so the default build stays
+  dependency-free; a test under `cert-bundle` compares the two. An `unknown`
+  verdict writes no file and exits 1. The help and the README now say the
+  `--format json` report is not a bundle. A test runs the real `ordeal` and
+  `ordeal-recheck`: exit 0, and exit 1 after one flipped byte.
+- **`distinct` and `ite` at sort Bool** (TR-089, #312). `(distinct b1 .. bn)`
+  over Bool is the pairwise conjunction of `(not (= bi bj))` and
+  `(ite c p q)` with Bool branches is `(or (and c p) (and (not c) q))`. Both
+  desugar to the core connectives, so the closed op set is unchanged. Mixed
+  sorts are still a sort error. Before, these were refused (exit 2) on
+  scripts Z3 reads.
+
+### Fixed
+
+- **String literals** (TR-088, #311). The reader read `"a ) b"` in a
+  `set-info` as a stray `)` and `"a;b"` as a comment, and refused the script
+  (exit 2). A `"..."` literal is now one token, `""` being an escaped quote;
+  an unterminated one is a parse error.
+- **Widths above 128 answer `unknown` in every form** (TR-090, #313). The
+  README said a width outside 1 to 128 is answered `unknown`, but a hex or
+  binary literal over 128 bits was a parse error, and `(_ bvN W)` or an
+  `extend`/`concat` result over 128 bits was a solver error. Each now
+  answers `unknown`, exit 0, like a declared 129-bit variable. A zero width
+  and an `extract` outside the width stay parse errors. The README sentence
+  is bound in `claims.yaml` to the test that covers each form.
+- **Reserved words cannot be declared** (TR-091, #315). `declare-fun` or
+  `declare-const` of `|let|`, `|_|` or any other reserved word, command name
+  or theory symbol the reader binds, bare or quoted, is now a parse error
+  (SMT-LIB 2.6 section 3.1). The list is the echo printer's, copied in. Z3
+  5.1.0 accepts `|let|`: the parser differential lists that as "ordeal
+  refuses / Z3 accepts", not a failure.
+- The parser differential's generator (`gen_smtlib_text`) now emits `set-info`
+  strings holding `)`, `(`, `;` and `""`, Bool `distinct` and `ite`, and
+  reserved-word declarations.
+
 ## [0.36.1] - 2026-11-10
 
 This release exists so that ordeal has a release signed from its own tag.

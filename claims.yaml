@@ -270,6 +270,23 @@ claims:
         glob: crates/ordeal/src/eval.rs
         min: 1
 
+  - id: README-WIDTH-UNKNOWN
+    doc: README.md
+    text: "A bit-width outside 1 to 128 is answered `unknown`."
+    evidence:
+      - kind: count-min            # TR-090: the test covers a declared, hex, binary, indexed, extend and concat width
+        pattern: 'fn wide_widths_answer_unknown_in_every_form'
+        glob: crates/ordeal/src/smtlib.rs
+        min: 1
+      - kind: count-min            # the reader maps a too-wide width to an Unknown-answering term, not an error
+        pattern: 'Err\(SmtError::TooWide\(_\)\) =>'
+        glob: crates/ordeal/src/smtlib.rs
+        min: 1
+      - kind: count-min            # and the malformed cases it must not swallow
+        pattern: 'fn malformed_widths_stay_parse_errors'
+        glob: crates/ordeal/src/smtlib.rs
+        min: 1
+
   - id: README-UNSUPPORTED-EXIT
     doc: README.md
     text: "Other constructs are rejected as `unsupported` (exit 2)"
