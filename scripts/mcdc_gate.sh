@@ -9,7 +9,9 @@
 # and the per-decision truth table into OUTDIR and compares per-file gap
 # counts with mcdc/baseline.txt (see scripts/mcdc_report.py). Non-zero exit
 # when a checker file's uncovered-decision or gap-condition count INCREASES,
-# or when the report is vacuous. A decrease prints an improvement note; the
+# when the report is vacuous, or when a checker source file has ZERO
+# decisions in the table and is not on the printed waiver list
+# (ZERO_DECISION_WAIVERS in scripts/mcdc_report.py; fail closed). A decrease prints an improvement note; the
 # baseline is updated by hand, never by this script.
 #
 # witness: $WITNESS, else the varve-pinned layer (`varve which witness`),

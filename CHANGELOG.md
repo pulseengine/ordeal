@@ -91,6 +91,25 @@ the next patch tag, never by rebuilding the old tag from main.
   axioms. A String-free control prints UNLOCKED. `mirror.rs` stays, for that
   recorded reason (docs/design/flattener-proof.md).
 
+- **The Z3 parser differential, echo leg** (#281, phase E1;
+  `crates/ordeal/src/oracle_echo.rs`, behind `oracle`, test code only).
+  Z3's parser reads the certified echo of every repository `.smt2` file,
+  of 10^4 generated scripts and of 1000 sliver queries, and decides
+  `S[k] xor E[k]` per assertion against the script it echoes: 0 disagree,
+  0 echoes refused by Z3. It runs in the blocking
+  `SMT-LIB parser differential (Z3)` job with the front leg, with three
+  text-mutation controls that must turn it red; the 10^5 run is nightly.
+  The leg found that the reader keeps non-simple quoted symbols with
+  their bars and the printer refuses such names (8490 of the 10^4
+  generated scripts, none of the repository files); see
+  `docs/design/query-echo.md`, "E1 as built", with the size and time
+  measurement (`echo_measurement`).
+- **MC/DC rows for the printer, and a gate that fails closed.** 58
+  `run_row_echo_*` rows in `mcdc/ordeal-lrat/src/rows.rs`;
+  `scripts/mcdc_report.py` now fails, naming the file, when a checker
+  source file has zero decisions in the table and is not in
+  `ZERO_DECISION_WAIVERS` (empty). `echo_kernel.rs` had been reported at
+  0 decisions with the gate green.
 - **The Z3 parser differential, front leg** (TR-087, #281 phase E0). The
   first test that hands SMT-LIB *text* to Z3's own parser: until now the Z3
   oracle translated ordeal's trees, so it checked the engine and never the

@@ -17,6 +17,9 @@ then compares current.txt with the baseline and exits non-zero if
   * the report is vacuous (no ordeal-lrat decisions, a checker source file
     that the baseline knows is missing, an unexpected row count, or the
     witness trace buffer overflowed), or
+  * a checker source file has ZERO decisions in the table and is not in
+    ZERO_DECISION_WAIVERS below (fail closed: a file no row reaches is
+    named, whether or not the baseline knows it), or
   * for any checker source file the number of decisions that are not full
     MC/DC, or of uncovered conditions (gap + dead: witness turns a gap into
     "dead" when the row that exercised it disappears, so gap alone is not
@@ -34,6 +37,13 @@ import re
 import sys
 
 HEADER = "# file decisions not_full gap_conditions dead_conditions proved_conditions"
+
+# Checker source files that may appear in the table with ZERO decisions,
+# each with its reason. Any other file with zero decisions fails the gate:
+# no row reaches it, so the table says nothing about it (#281: the printer
+# `echo_kernel.rs` passed with "0 decisions" until rows called it). Printed
+# on every run. Empty on purpose; an entry needs a reviewed reason.
+ZERO_DECISION_WAIVERS = {}
 
 
 def checker_file(path, names):
@@ -107,6 +117,23 @@ def main():
     total = sum(s["decisions"] for s in stats.values())
     if total == 0:
         errors.append("the report holds ZERO ordeal-lrat decisions (vacuous gate)")
+
+    # Fail closed: a checker file no row reaches is a failure by name.
+    if ZERO_DECISION_WAIVERS:
+        print("zero-decision waivers:")
+        for f, why in sorted(ZERO_DECISION_WAIVERS.items()):
+            print(f"  {f}: {why}")
+    else:
+        print("zero-decision waivers: none")
+    for f, s in stats.items():
+        if s["decisions"] == 0 and f not in ZERO_DECISION_WAIVERS:
+            errors.append(f"{f}: ZERO decisions in the table: no run_row_* reaches this checker file "
+                          f"(add rows to mcdc/ordeal-lrat/src/rows.rs, or a reviewed entry in ZERO_DECISION_WAIVERS)")
+    for f in sorted(ZERO_DECISION_WAIVERS):
+        if f not in stats:
+            errors.append(f"{f}: waived for zero decisions but not a checker source file (stale waiver)")
+        elif stats[f]["decisions"] > 0:
+            errors.append(f"{f}: waived for zero decisions but the table has {stats[f]['decisions']} (stale waiver)")
 
     os.makedirs(outdir, exist_ok=True)
     cur_lines = [HEADER]

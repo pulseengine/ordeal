@@ -350,10 +350,91 @@ theorems above is kept; the shapes moved where the proof asked for it:
   injective on printable scripts, and the text forms need no `cs`.
 - **The sharing guard** (`unshared`) is a resource guard with no theorem.
   It counts every use in the list, reachable or not, and each root.
-- **Not in E1:** the echo leg of the differential (§6) and the size and
-  time measurement on the latency corpus. The lookups from a `Var` node
-  to its table entry and from a function to its first call are linear
-  scans; E2 should measure them before the echo is on by default.
+- **The echo leg** (§6; `crates/ordeal/src/oracle_echo.rs`, tests
+  `oracle::echo::tests`, in the blocking `SMT-LIB parser differential`
+  job next to the front leg). Z3 parses the script `S` and the echo `E`
+  of ordeal's reading of `S`, flattened by the production calls
+  (`flatten_tree` over `mirror::of_bools`, `project_core`), and decides
+  `S[k] xor E[k]` per assertion under the `Bool` links. This compares
+  the echo with the original text as Z3 reads it, which is the
+  end-to-end comparison and implies §6's `E[k] xor A_ord[k]` given the
+  front leg. For `echo_ext` the original is the `ExtBoolTerm` tree
+  through `oracle::ext_bool_to_z3`. Run of 2026-11-13 (Z3 5.1.0):
+
+  | corpus | echoes compared | agree | disagree | Z3 refuses echo | printer refuses | not echoed |
+  |---|---:|---:|---:|---:|---|---:|
+  | 27 repository `.smt2` files | 26 (41 assertions) | 26 | 0 | 0 | 0 | 1 (both readers refuse the input) |
+  | 10^4 generated, names as read | 1510 (2444) | 1510 | 0 | 0 | 8490 `Name` | 0 |
+  | the same 8490, names reduced to content | 8490 (17552) | 8490 | 0 | 0 | 0 | 0 |
+  | 1000 sliver queries (`echo_ext`) | 751 (1371) | 751 | 0 | 0 | 249 `Rotate` | 0 |
+
+  Controls over 1000 generated scripts, each a rewrite of the printed
+  text before Z3 reads it: `bvslt`/`bvsle` swapped, 283 red; `#b`
+  literals LSB first, 511 red; the last assertion dropped, 1000 red;
+  the swap on 300 sliver queries, 67 red. The same scripts agree
+  without the rewrite.
+- **A reader/printer mismatch the leg found.** The reader keeps a
+  quoted symbol that is not a simple symbol with its bars (`|a b|`,
+  `|0v|`, `|v#0|`: `smtlib::canonical_quoted`, #294), so that spelling
+  is the name in the term and in the bundle. The printer refuses a
+  name containing `|`. On the production path every script with such a
+  symbol is therefore refused (`EchoError::Name`): 8490 of the 10^4
+  generated scripts, which quote on purpose, and none of the 27
+  repository files. The leg echoes those scripts a second time with
+  the names reduced to their content (the front leg's `rename_bool`)
+  to put the printer's quoting in front of Z3; that pass is not what
+  ordeal emits today. E2 has to choose: the reader stores the content
+  (E0's "strip `|…|` to its content", which changes the names in
+  existing bundles for such symbols), or the echo is absent for them.
+  The 249 `Rotate` refusals are rotates by a term amount (E4).
+- **Size and time** (`solver.rs`, `cnf_gap_measurement::echo_measurement`,
+  release build, medians of 9 runs; measured under `taskpolicy -b` on a
+  machine at load average ~50, so the absolute times are high and the
+  ratios are the reading). The latency corpus is trees, so it has no
+  input text; bytes against input text are from the echo leg.
+
+  | query | nodes | vars | echo bytes | flatten (µs) | `echo_term` (µs) | ns/node | `check_with_term` (µs) | `recheck` (µs) | echo/check | echo/recheck |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | srem_vc_32 | 7 | 2 | 176 | 3.6 | 1.5 | 220 | 24565.0 | 7009.8 | 0.0001 | 0.0002 |
+  | urem_vc_32 | 7 | 2 | 176 | 1.1 | 1.2 | 179 | 19450.9 | 5803.5 | 0.0001 | 0.0002 |
+  | layout_roundtrip_32 | 9 | 1 | 208 | 1.5 | 1.8 | 204 | 69.6 | 11.6 | 0.0264 | 0.1583 |
+  | trap_vc_32 | 12 | 1 | 279 | 1.9 | 2.0 | 167 | 75.4 | 18.2 | 0.0265 | 0.1101 |
+  | ult_cycle_64 | 6 | 3 | 207 | 1.0 | 1.4 | 229 | 11985.2 | 3795.2 | 0.0001 | 0.0004 |
+  | shl1_eq_add_64 | 5 | 1 | 179 | 1.3 | 1.2 | 233 | 182.0 | 52.7 | 0.0064 | 0.0221 |
+  | queue_overflow_k16 | 180 | 33 | 3916 | 27.4 | 18.4 | 102 | 43891.4 | 8876.8 | 0.0004 | 0.0021 |
+  | queue_overflow_k32 | 356 | 65 | 7820 | 58.2 | 43.1 | 121 | 252489.5 | 40497.2 | 0.0002 | 0.0011 |
+  | queue_overflow_k64 | 708 | 129 | 15628 | 211.5 | 150.3 | 212 | 3652711.6 | 375559.9 | 0.0000 | 0.0004 |
+  | deadlock_k24 | 1668 | 124 | 26940 | 500.9 | 210.6 | 126 | 52187.0 | 8337.2 | 0.0040 | 0.0253 |
+  | deadlock_k48 | 3324 | 244 | 54060 | 1078.9 | 631.4 | 190 | 111347.8 | 13933.4 | 0.0057 | 0.0453 |
+
+  Latency corpus (the first six rows; the median is the fourth of six):
+  echo 207 bytes median, 279 max; `echo_term` 1.5 µs median, 2.0 µs
+  max; against `check_with_term` 0.64% median, 2.65% max; against the
+  trusted `recheck` alone 2.2% median, 15.8% max (on a query whose
+  recheck takes 11.6 µs). The five bmc rows are there for scale: 16 to
+  36 bytes per node, and at most 4.5% of the recheck. Against input
+  text (echo leg): echo/input bytes median 1.16, max 1.74 over the 26
+  repository files (echo 187 bytes median, 3887 max); median 0.76, max
+  7.46 over the 1510 generated scripts echoed as read; median 1.31,
+  max 15.90 over the 8490 echoed with content names. The large ratios
+  are generated scripts where the reader desugars n-ary and chained
+  syntax into binary nodes.
+- **The linear scans do not dominate here.** The lookups from a `Var`
+  node to its table entry and from a function to its first call are
+  linear. Time per node is 100 to 230 ns across the table with no clean
+  trend; it rises with the variable count inside each bmc family (102,
+  121, 212 ns at 33, 65, 129 variables; 126, 190 ns at 124, 244), which
+  is what a variable scan would do, and this run is too noisy to
+  separate it from load. At 244 variables the whole echo is 4.5% of the
+  recheck and 0.6% of the check. Not optimised in E1; a query with
+  thousands of variables has not been measured.
+- **MC/DC rows.** `mcdc/ordeal-lrat/src/rows.rs` has 58 rows for the
+  printer (every `EchoError`, every operator class, the literals, the
+  names, arrays, functions, the nullary call); `echo_kernel.rs` is in
+  `mcdc/baseline.txt` at 72 decisions, 69 not full. Before them the
+  gate reported the file at 0 decisions and passed; it now fails for
+  any checker file with no decisions (`docs/mcdc.md`). The printer has
+  one literal form, `#b`; it never prints `#x`.
 
 ## 6. The Z3 parser differential
 

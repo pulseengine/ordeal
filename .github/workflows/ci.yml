@@ -608,8 +608,11 @@ jobs:
   # #281 decision (Q6): a red differential fails CI. The front leg hands
   # every repository .smt2 file and 10^4 generated scripts to Z3's own
   # parser and to ordeal's reader, and decides `A_Z3[k] xor A_ord[k]` per
-  # assertion; four armed reader mutations must each turn it red. Only
-  # this module runs here (`oracle::front::tests`); the 10^5 run is
+  # assertion; four armed reader mutations must each turn it red. The echo
+  # leg (#281 E1) prints the certified echo of the same scripts and of two
+  # sliver corpora and decides `A_Z3[k] xor E_Z3[k]`; three armed text
+  # mutations must each turn it red. Only these two modules run here
+  # (`oracle::front::tests`, `oracle::echo::tests`); the 10^5 runs are
   # nightly-exhaustive.yml. Not continue-on-error: an install failure is
   # red too, rather than a silent pass.
   parser-differential:
@@ -624,18 +627,19 @@ jobs:
           key: parser-differential
       - name: Install Z3
         run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
-      - name: Front leg (VER-087)
+      - name: Front leg (VER-087) and echo leg (#281 E1)
         run: |
           set -euo pipefail
           z3 --version
-          out="$(cargo test -p ordeal --features oracle --release --lib oracle::front::tests -- --nocapture 2>&1)" \
+          out="$(cargo test -p ordeal --features oracle --release --lib -- oracle::front::tests oracle::echo::tests --nocapture 2>&1)" \
             || { echo "$out"; exit 1; }
           # The tallies and the negative controls, printed on every run.
-          echo "$out" | grep -E '^(front leg:|control |[0-9]+ (files|generated))|^  FAIL'
+          echo "$out" | grep -E '^(front leg:|echo leg|echo size:|control |[0-9]+ (files|generated|sliver))|^  FAIL'
           echo "$out" | tail -3
-          # No vacuous pass: the filter must have matched all five tests.
-          echo "$out" | grep -q 'test result: ok. 5 passed' \
-            || { echo "::error::expected the 5 front-leg tests to pass"; exit 1; }
+          # No vacuous pass: the filters must have matched all ten tests
+          # (five front-leg, five echo-leg).
+          echo "$out" | grep -q 'test result: ok. 10 passed' \
+            || { echo "::error::expected the 5 front-leg and 5 echo-leg tests to pass"; exit 1; }
 
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
   # change, not first at release time: install varve the verified way,

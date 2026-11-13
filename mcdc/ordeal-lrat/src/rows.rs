@@ -10,10 +10,11 @@
 use ordeal_lrat::blast_kernel::{self, DagNode as N};
 use ordeal_lrat::kernel::{self, Step};
 use ordeal_lrat::{
-    ExtNode, FlatError, ModelError, QueryCheckError, QueryError, SatWitnessError, SliverCheckError,
-    TArgs, TArray, TBool, TBv, TermError, check, check_binding, check_input_value, check_query,
-    check_query_model, check_sat, check_sliver_lowering, check_term_dag, check_tree_model,
-    check_tree_model_ext, dag_nin, dag_wf, ext_wf, flatten_tree, project_core, var_offset,
+    EchoError, ExtNode, FlatError, ModelError, QueryCheckError, QueryError, SatWitnessError,
+    SliverCheckError, TArgs, TArray, TBool, TBv, TermError, check, check_binding,
+    check_input_value, check_query, check_query_model, check_sat, check_sliver_lowering,
+    check_term_dag, check_tree_model, check_tree_model_ext, dag_nin, dag_wf, echo_ext, echo_term,
+    ext_wf, flatten_tree, project_core, var_offset,
 };
 
 const NONE: usize = usize::MAX;
@@ -390,6 +391,60 @@ fn flat_err(t: TBool) -> Option<FlatError> {
 
 fn eq_t(a: Box<TBv>, b: Box<TBv>) -> TBool {
     TBool::Eq(a, b)
+}
+
+// ───────────── echo helpers (the certified printer, #281) ─────────────
+
+/// `echo_ext` of the trees' flattening.
+fn echo_trees(ts: &[TBool]) -> Result<Vec<u8>, EchoError> {
+    let f = flatten_tree(ts).expect("the row's trees flatten");
+    echo_ext(
+        &f.nodes, &f.bits, &f.side, &f.roots, &f.names, &f.name_start, &f.name_len, &f.var_node, &f.var_width,
+        &f.anames, &f.aname_start, &f.aname_len, &f.fnames, &f.fname_start, &f.fname_len, &f.func_width,
+    )
+}
+
+/// The printed script is exactly `want`.
+fn echo_is(ts: &[TBool], want: &str) -> bool {
+    echo_trees(ts).is_ok_and(|b| b == want.as_bytes())
+}
+
+/// The printer refuses the trees with `e`.
+fn echo_refuses(ts: &[TBool], e: EchoError) -> bool {
+    echo_trees(ts) == Err(e)
+}
+
+/// `echo_term` of a hand-built closed list with `(name, node, width)` variables.
+fn echo_dag(t: &[N], bits: &[bool], roots: &[usize], vars: &[(&str, usize, usize)]) -> Result<Vec<u8>, EchoError> {
+    let mut names: Vec<u8> = Vec::new();
+    let (mut start, mut len, mut node, mut width) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for (n, i, w) in vars {
+        start.push(names.len());
+        len.push(n.len());
+        names.extend_from_slice(n.as_bytes());
+        node.push(*i);
+        width.push(*w);
+    }
+    echo_term(t, bits, roots, &names, &start, &len, &node, &width)
+}
+
+/// `x <u 1` over a variable named `n`: the name-check vector.
+fn echo_named(n: &str) -> TBool {
+    TBool::Ult(var(n, 8), konst(1, 8))
+}
+
+fn echo_select(a: &str, i: &str) -> TBool {
+    eq_t(Box::new(TBv::Select(Box::new(TArray::Var(a.as_bytes().to_vec())), var(i, 32))), konst(0, 8))
+}
+
+fn echo_call0(f: &str) -> TBool {
+    eq_t(Box::new(TBv::Call(f.as_bytes().to_vec(), 8, Box::new(TArgs::Nil))), konst(0, 8))
+}
+
+/// `echo_ext` of a hand-built four-node list over one BV1 variable `x`,
+/// side table `[1]`, root 3, and the function table given.
+fn echo_call_list(nodes: &[ExtNode], fw: &[usize], fs: &[usize], fl: &[usize]) -> Result<Vec<u8>, EchoError> {
+    echo_ext(nodes, &[], &[1], &[3], b"x", &[0], &[1], &[0], &[1], b"", &[], &[], b"fg", fs, fl, fw)
 }
 
 rows! {
@@ -895,6 +950,256 @@ run_row_blast_capacity_checks => {
 run_row_blast_roots_and_widths_helpers => {
     kernel::roots_wf(&[8, 1, 1], &[1, 2]).is_ok() && kernel::roots_wf(&[8, 1], &[1, 0]).is_err()
         && kernel::roots_wf(&[8, 1], &[2]).is_err() && kernel::max_width(&[3, 9, 2]) == 9 && kernel::max_width(&[]) == 0
+}
+// ───────────── echo_term / echo_ext: the certified printer ─────────────
+run_row_echo_accept_core_script_and_empty_script => {
+    let t = eq_t(Box::new(TBv::Add(var("x", 8), konst(5, 8))), Box::new(TBv::Add(konst(5, 8), var("x", 8))));
+    echo_is(&[t], "(set-logic QF_BV)\n(declare-const |x| (_ BitVec 8))\n(assert (= (bvadd |x| #b00000101) (bvadd #b00000101 |x|)))\n(check-sat)\n")
+        && echo_is(&[], "(set-logic QF_BV)\n(check-sat)\n")
+}
+run_row_echo_accept_every_binary_word_operator => {
+    type Bin = fn(Box<TBv>, Box<TBv>) -> TBv;
+    let bins: [(Bin, &str); 13] = [
+        (TBv::Add, "bvadd"), (TBv::Sub, "bvsub"), (TBv::Mul, "bvmul"), (TBv::Udiv, "bvudiv"), (TBv::Urem, "bvurem"),
+        (TBv::And, "bvand"), (TBv::Or, "bvor"), (TBv::Xor, "bvxor"), (TBv::Shl, "bvshl"), (TBv::Lshr, "bvlshr"),
+        (TBv::Ashr, "bvashr"), (TBv::Sdiv, "bvsdiv"), (TBv::Srem, "bvsrem"),
+    ];
+    let mut ts = Vec::new();
+    let mut want = String::from("(set-logic QF_BV)\n(declare-const |x| (_ BitVec 12))\n(declare-const |y| (_ BitVec 12))\n");
+    for (mk, sym) in bins {
+        ts.push(eq_t(Box::new(mk(var("x", 12), var("y", 12))), var("x", 12)));
+        want.push_str(&format!("(assert (= ({sym} |x| |y|) |x|))\n"));
+    }
+    want.push_str("(check-sat)\n");
+    echo_is(&ts, &want)
+}
+run_row_echo_accept_every_comparison => {
+    type Cmp = fn(Box<TBv>, Box<TBv>) -> TBool;
+    let cmps: [(Cmp, &str); 10] = [
+        (TBool::Eq, "="), (TBool::Ne, "distinct"), (TBool::Ult, "bvult"), (TBool::Ule, "bvule"), (TBool::Ugt, "bvugt"),
+        (TBool::Uge, "bvuge"), (TBool::Slt, "bvslt"), (TBool::Sle, "bvsle"), (TBool::Sgt, "bvsgt"), (TBool::Sge, "bvsge"),
+    ];
+    let mut ts = Vec::new();
+    let mut want = String::from("(set-logic QF_BV)\n(declare-const |x| (_ BitVec 12))\n(declare-const |y| (_ BitVec 12))\n");
+    for (mk, sym) in cmps {
+        ts.push(mk(var("x", 12), var("y", 12)));
+        want.push_str(&format!("(assert ({sym} |x| |y|))\n"));
+    }
+    want.push_str("(check-sat)\n");
+    echo_is(&ts, &want)
+}
+run_row_echo_accept_boolean_connectives => {
+    let p = || Box::new(TBool::Ult(var("x", 8), var("y", 8)));
+    let t = TBool::Not(Box::new(TBool::And(Box::new(TBool::Or(p(), p())), p())));
+    echo_is(&[t], "(set-logic QF_BV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |y| (_ BitVec 8))\n(assert (not (and (or (bvult |x| |y|) (bvult |x| |y|)) (bvult |x| |y|))))\n(check-sat)\n")
+}
+run_row_echo_accept_unary_concat_extract_extend => {
+    let ts = [
+        eq_t(Box::new(TBv::Concat(Box::new(TBv::BvNot(var("x", 8))), Box::new(TBv::Neg(var("y", 8))))), var("z", 16)),
+        eq_t(Box::new(TBv::Extract(15, 8, var("z", 16))), Box::new(TBv::Extract(7, 0, Box::new(TBv::ZeroExt(100, var("x", 8)))))),
+        eq_t(Box::new(TBv::SignExt(8, var("x", 8))), var("z", 16)),
+    ];
+    echo_is(&ts, "(set-logic QF_BV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |y| (_ BitVec 8))\n(declare-const |z| (_ BitVec 16))\n(assert (= (concat (bvnot |x|) (bvneg |y|)) |z|))\n(assert (= ((_ extract 15 8) |z|) ((_ extract 7 0) ((_ zero_extend 100) |x|))))\n(assert (= ((_ sign_extend 8) |x|) |z|))\n(check-sat)\n")
+}
+run_row_echo_accept_ite => {
+    let p = Box::new(TBool::Ult(var("x", 8), var("y", 8)));
+    let t = eq_t(Box::new(TBv::Ite(p, var("x", 8), var("y", 8))), var("x", 8));
+    echo_is(&[t], "(set-logic QF_BV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |y| (_ BitVec 8))\n(assert (= (ite (bvult |x| |y|) |x| |y|) |x|))\n(check-sat)\n")
+}
+run_row_echo_accept_binary_literals_msb_first => {
+    // The printer has one literal form, `#b` with exactly `w` digits; it never prints `#x`.
+    let ts = [eq_t(var("a", 1), konst(1, 1)), eq_t(var("b", 8), konst(0x1FF, 8)), eq_t(var("c", 5), konst(6, 5)), eq_t(var("d", 128), konst(1u128 << 127, 128))];
+    let d = format!("#b1{}", "0".repeat(127));
+    let want = format!("(set-logic QF_BV)\n(declare-const |a| (_ BitVec 1))\n(declare-const |b| (_ BitVec 8))\n(declare-const |c| (_ BitVec 5))\n(declare-const |d| (_ BitVec 128))\n(assert (= |a| #b1))\n(assert (= |b| #b11111111))\n(assert (= |c| #b00110))\n(assert (= |d| {d}))\n(check-sat)\n");
+    echo_is(&ts, &want) && !want.contains("#x")
+}
+run_row_echo_accept_rotates_reduced_modulo_width => {
+    let ts = [
+        eq_t(Box::new(TBv::Rotr(var("x", 8), konst(11, 8))), var("x", 8)),
+        eq_t(Box::new(TBv::Rotl(var("y", 5), konst(7, 5))), var("y", 5)),
+        eq_t(Box::new(TBv::Rotl(var("x", 8), konst(0, 8))), var("x", 8)),
+        eq_t(Box::new(TBv::Rotr(var("z", 128), konst((1u128 << 100) + 5, 128))), var("z", 128)),
+    ];
+    echo_is(&ts, "(set-logic QF_BV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |y| (_ BitVec 5))\n(declare-const |z| (_ BitVec 128))\n(assert (= ((_ rotate_right 3) |x|) |x|))\n(assert (= ((_ rotate_left 2) |y|) |y|))\n(assert (= ((_ rotate_left 0) |x|) |x|))\n(assert (= ((_ rotate_right 5) |z|) |z|))\n(check-sat)\n")
+}
+run_row_echo_reject_rotate_by_a_variable => { echo_refuses(&[eq_t(Box::new(TBv::Rotr(var("x", 8), var("k", 8))), var("x", 8))], EchoError::Rotate) }
+run_row_echo_reject_rotate_left_by_an_operator => { echo_refuses(&[eq_t(Box::new(TBv::Rotl(var("x", 8), Box::new(TBv::Add(konst(1, 8), konst(2, 8))))), var("x", 8))], EchoError::Rotate) }
+run_row_echo_accept_array_store_chain => {
+    let chain = TArray::Store(Box::new(TArray::Store(Box::new(TArray::Var(b"m".to_vec())), var("i", 32), var("v", 8))), var("j", 32), var("u", 8));
+    let t = eq_t(Box::new(TBv::Select(Box::new(chain), var("k", 32))), konst(0, 8));
+    echo_is(&[t], "(set-logic QF_ABV)\n(declare-const |k| (_ BitVec 32))\n(declare-const |j| (_ BitVec 32))\n(declare-const |u| (_ BitVec 8))\n(declare-const |i| (_ BitVec 32))\n(declare-const |v| (_ BitVec 8))\n(declare-const |m| (Array (_ BitVec 32) (_ BitVec 8)))\n(assert (= (select (store (store |m| |i| |v|) |j| |u|) |k|) #b00000000))\n(check-sat)\n")
+}
+run_row_echo_accept_functions_nullary_call_and_array => {
+    let args = TArgs::Cons(var("x", 8), Box::new(TArgs::Cons(var("i", 32), Box::new(TArgs::Nil))));
+    let ts = [
+        eq_t(Box::new(TBv::Call(b"f".to_vec(), 16, Box::new(args))), Box::new(TBv::Call(b"g".to_vec(), 16, Box::new(TArgs::Nil)))),
+        eq_t(Box::new(TBv::Select(Box::new(TArray::Var(b"m".to_vec())), var("i", 32))), var("x", 8)),
+    ];
+    echo_is(&ts, "(set-logic QF_AUFBV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |i| (_ BitVec 32))\n(declare-const |m| (Array (_ BitVec 32) (_ BitVec 8)))\n(declare-fun |f| ((_ BitVec 8) (_ BitVec 32)) (_ BitVec 16))\n(declare-fun |g| () (_ BitVec 16))\n(assert (= (|f| |x| |i|) |g|))\n(assert (= (select |m| |i|) |x|))\n(check-sat)\n")
+}
+run_row_echo_accept_functions_without_arrays => {
+    let one = |a: Box<TBv>| Box::new(TArgs::Cons(a, Box::new(TArgs::Nil)));
+    let t = eq_t(Box::new(TBv::Call(b"f".to_vec(), 8, one(var("x", 8)))), Box::new(TBv::Call(b"f".to_vec(), 8, one(var("z", 8)))));
+    echo_is(&[t], "(set-logic QF_AUFBV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |z| (_ BitVec 8))\n(declare-fun |f| ((_ BitVec 8)) (_ BitVec 8))\n(assert (= (|f| |x|) (|f| |z|)))\n(check-sat)\n")
+}
+run_row_echo_accept_quoted_names => {
+    echo_is(&[TBool::Ult(var("%%location_label%%0", 8), var("cpu_id!", 8))], "(set-logic QF_BV)\n(declare-const |%%location_label%%0| (_ BitVec 8))\n(declare-const |cpu_id!| (_ BitVec 8))\n(assert (bvult |%%location_label%%0| |cpu_id!|))\n(check-sat)\n")
+        && echo_is(&[TBool::Ult(var("a b", 8), var("0(x)", 8))], "(set-logic QF_BV)\n(declare-const |a b| (_ BitVec 8))\n(declare-const |0(x)| (_ BitVec 8))\n(assert (bvult |a b| |0(x)|))\n(check-sat)\n")
+}
+run_row_echo_accept_names_near_the_refused_ones => {
+    ["x@", "x.y", "a.", "a@b", "bvnego1", "lambda_", "Let", "let_", "bvadd1", "assertion", "==", "~", " "].iter().all(|n| echo_trees(&[echo_named(n)]).is_ok())
+}
+run_row_echo_reject_empty_name => { echo_refuses(&[echo_named("")], EchoError::Name) }
+run_row_echo_reject_bar_and_backslash_in_name => { echo_refuses(&[echo_named("a|b")], EchoError::Name) && echo_refuses(&[echo_named("a\\b")], EchoError::Name) }
+run_row_echo_reject_control_and_non_ascii_bytes_in_name => {
+    ["tab\tx", "nl\nx", "del\x7f", "\u{e9}", "\x1f"].iter().all(|n| echo_refuses(&[echo_named(n)], EchoError::Name))
+}
+run_row_echo_reject_reserved_words => {
+    ["let", "_", "!", "par", "as", "forall", "exists", "match", "assert", "check-sat", "set-logic", "declare-fun", "declare-const", "get-model", "BINARY", "DECIMAL", "HEXADECIMAL", "NUMERAL", "STRING"]
+        .iter().all(|n| echo_refuses(&[echo_named(n)], EchoError::Name))
+}
+run_row_echo_reject_theory_symbols => {
+    ["true", "false", "not", "and", "or", "xor", "=>", "=", "distinct", "ite", "bvadd", "bvsle", "bvnand", "bvcomp", "bvsmod", "concat", "extract", "repeat", "rotate_left", "zero_extend", "select", "store", "Array", "BitVec", "Bool", "QF_BV"]
+        .iter().all(|n| echo_refuses(&[echo_named(n)], EchoError::Name))
+}
+run_row_echo_reject_smtlib_27_and_solver_builtin_names => {
+    ["bvnego", "bvuaddo", "bvsaddo", "bvumulo", "bvsmulo", "bvusubo", "bvssubo", "bvsdivo", "lambda", "define-const", "bvredor", "bvredand", "bv2int", "int2bv", "bv2nat", "nat2bv"]
+        .iter().all(|n| echo_refuses(&[echo_named(n)], EchoError::Name))
+}
+run_row_echo_reject_names_starting_with_at_or_dot => { ["@x", ".x", "@", ".", "@@", ".a.b"].iter().all(|n| echo_refuses(&[echo_named(n)], EchoError::Name)) }
+run_row_echo_reject_array_named_like_a_variable => { echo_refuses(&[echo_select("m", "m")], EchoError::Name) }
+run_row_echo_reject_function_named_like_a_variable => { echo_refuses(&[echo_named("f"), echo_call0("f")], EchoError::Name) }
+run_row_echo_reject_function_named_like_an_array => { echo_refuses(&[echo_select("m", "i"), echo_call0("m")], EchoError::Name) && echo_trees(&[echo_select("m", "i"), echo_call0("f")]).is_ok() }
+run_row_echo_reject_reserved_array_and_function_names => { echo_refuses(&[echo_select("store", "i")], EchoError::Name) && echo_refuses(&[echo_call0("@f")], EchoError::Name) && echo_refuses(&[echo_select("", "i")], EchoError::Name) }
+run_row_echo_reject_two_variables_with_one_name => {
+    let t = [N::Var(8), N::Var(8), N::Ult(0, 1)];
+    echo_dag(&t, &[], &[2], &[("x", 0, 8), ("x", 1, 8)]) == Err(EchoError::Name) && echo_dag(&t, &[], &[2], &[("x", 0, 8), ("y", 1, 8)]).is_ok()
+        && echo_dag(&t, &[], &[2], &[("xy", 0, 8), ("xz", 1, 8)]).is_ok()
+}
+run_row_echo_reject_name_range_outside_the_arena => {
+    let t = [N::Var(8), N::Var(8), N::Ult(0, 1)];
+    echo_term(&t, &[], &[2], b"xy", &[0, 1], &[1, 2], &[0, 1], &[8, 8]) == Err(EchoError::Name)
+        && echo_term(&t, &[], &[2], b"xy", &[0, 3], &[1, 0], &[0, 1], &[8, 8]) == Err(EchoError::Name)
+}
+run_row_echo_reject_word_where_a_formula_is_asserted => { echo_dag(&[N::Var(1), N::Var(1), N::Eq(0, 1)], &[], &[0], &[("x", 0, 1), ("y", 1, 1)]) == Err(EchoError::Sort) }
+run_row_echo_reject_formula_as_a_word_operand => {
+    let t = [N::Var(1), N::Var(1), N::Eq(0, 1), N::Add(2, 0), N::Eq(3, 1)];
+    echo_dag(&t, &[], &[4], &[("x", 0, 1), ("y", 1, 1)]) == Err(EchoError::Sort)
+}
+run_row_echo_reject_word_as_a_connective_operand => {
+    let vars = [("x", 0, 1), ("y", 1, 1)];
+    echo_dag(&[N::Var(1), N::Var(1), N::BoolAnd(0, 1)], &[], &[2], &vars) == Err(EchoError::Sort)
+        && echo_dag(&[N::Var(1), N::Var(1), N::BoolOr(0, 1)], &[], &[2], &vars) == Err(EchoError::Sort)
+        && echo_dag(&[N::Var(1), N::Not(0)], &[], &[1], &vars[..1]) == Err(EchoError::Sort)
+}
+run_row_echo_reject_word_as_an_ite_condition => {
+    let t = [N::Var(1), N::Var(1), N::Ite(0, 0, 1), N::Eq(2, 1)];
+    echo_dag(&t, &[], &[3], &[("x", 0, 1), ("y", 1, 1)]) == Err(EchoError::Sort)
+}
+run_row_echo_reject_formula_as_a_unary_or_structural_operand => {
+    let vars = [("x", 0, 1), ("y", 1, 1)];
+    let with = |op: N| echo_dag(&[N::Var(1), N::Var(1), N::Eq(0, 1), op, N::Eq(3, 1)], &[], &[4], &vars) == Err(EchoError::Sort);
+    with(N::BvNot(2)) && with(N::Neg(2)) && with(N::Extract(0, 0, 2)) && with(N::ZeroExt(2, 0)) && with(N::SignExt(2, 0))
+}
+run_row_echo_reject_formula_as_a_call_argument => {
+    let nodes = [ExtNode::Core(N::Var(1)), ExtNode::Core(N::Eq(0, 0)), ExtNode::Call(0, 1, 0, 1), ExtNode::Core(N::Eq(2, 0))];
+    echo_call_list(&nodes, &[1], &[0], &[1]) == Err(EchoError::Sort)
+}
+run_row_echo_reject_variable_missing_from_the_table => { echo_dag(&[N::Var(8), N::Var(8), N::Ult(0, 1)], &[], &[2], &[("x", 0, 8)]) == Err(EchoError::Var) }
+run_row_echo_reject_variable_at_another_width => { echo_dag(&[N::Var(8), N::Var(8), N::Ult(0, 1)], &[], &[2], &[("x", 0, 8), ("y", 1, 16)]) == Err(EchoError::Var) }
+run_row_echo_reject_table_variable_of_width_zero => { echo_dag(&[N::Var(8), N::Var(8), N::Ult(0, 1)], &[], &[2], &[("x", 0, 8), ("y", 1, 8), ("z", 7, 0)]) == Err(EchoError::Var) }
+run_row_echo_accept_table_variable_no_node_uses => {
+    echo_dag(&[N::Var(8), N::Var(8), N::Ult(0, 1)], &[], &[2], &[("x", 0, 8), ("y", 1, 8), ("z", 9, 4)])
+        .is_ok_and(|b| b == b"(set-logic QF_BV)\n(declare-const |x| (_ BitVec 8))\n(declare-const |y| (_ BitVec 8))\n(declare-const |z| (_ BitVec 4))\n(assert (bvult |x| |y|))\n(check-sat)\n")
+}
+run_row_echo_reject_forward_reference => { echo_dag(&[N::Var(8), N::Ult(0, 2), N::Var(8)], &[], &[1], &[("x", 0, 8), ("y", 1, 8)]) == Err(EchoError::Malformed) }
+run_row_echo_reject_operand_width_mismatch => { echo_dag(&[N::Var(8), N::Var(9), N::Ult(0, 1)], &[], &[2], &[("x", 0, 8), ("y", 1, 8)]) == Err(EchoError::Malformed) }
+run_row_echo_reject_root_outside_the_list => { echo_dag(&[N::Var(8), N::Var(8), N::Ult(0, 1)], &[], &[3], &[("x", 0, 8), ("y", 1, 8)]) == Err(EchoError::Malformed) }
+run_row_echo_reject_constant_outside_the_bit_table => { echo_dag(&[N::Var(8), N::Const(0, 8), N::Ult(0, 1)], &[true; 7], &[2], &[("x", 0, 8)]) == Err(EchoError::Malformed) }
+run_row_echo_reject_table_columns_of_different_lengths => {
+    let t = [N::Var(8), N::Var(8), N::Ult(0, 1)];
+    echo_term(&t, &[], &[2], b"xy", &[0, 1], &[1, 1], &[0, 1], &[8]) == Err(EchoError::Malformed)
+        && echo_term(&t, &[], &[2], b"xy", &[0, 1], &[1], &[0, 1], &[8, 8]) == Err(EchoError::Malformed)
+        && echo_term(&t, &[], &[2], b"xy", &[0], &[1, 1], &[0, 1], &[8, 8]) == Err(EchoError::Malformed)
+        && echo_term(&t, &[], &[2], b"xy", &[0, 1], &[1, 1], &[0], &[8, 8]) == Err(EchoError::Malformed)
+}
+run_row_echo_reject_call_outside_the_function_table => {
+    let nodes = [ExtNode::Core(N::Var(1)), ExtNode::Core(N::Var(1)), ExtNode::Call(0, 1, 0, 1), ExtNode::Core(N::Eq(2, 0))];
+    echo_call_list(&nodes, &[], &[], &[]) == Err(EchoError::Malformed)
+}
+run_row_echo_reject_select_outside_the_array_table => {
+    let nodes = [ExtNode::Core(N::Var(32)), ExtNode::Select(0, 0, 0, 0), ExtNode::Core(N::Const(0, 8)), ExtNode::Core(N::Eq(1, 2))];
+    echo_ext(&nodes, &[false; 8], &[], &[3], b"i", &[0], &[1], &[0], &[32], b"", &[], &[], b"", &[], &[], &[]) == Err(EchoError::Malformed)
+        && echo_ext(&nodes, &[false; 8], &[], &[3], b"i", &[0], &[1], &[0], &[32], b"m", &[0], &[1], b"", &[], &[], &[]).is_ok()
+        && echo_ext(&nodes, &[false; 8], &[], &[3], b"i", &[0], &[1], &[0], &[32], b"m", &[0], &[], b"", &[], &[], &[]) == Err(EchoError::Malformed)
+}
+run_row_echo_reject_operator_used_twice => {
+    let t = [N::Var(8), N::Var(8), N::Add(0, 1), N::Mul(2, 2), N::Eq(3, 0)];
+    echo_dag(&t, &[], &[4], &[("x", 0, 8), ("y", 1, 8)]) == Err(EchoError::Shared)
+}
+run_row_echo_reject_operator_shared_by_two_roots => {
+    let t = [N::Var(8), N::Var(8), N::Add(0, 1), N::Ult(2, 0), N::Ult(2, 1)];
+    echo_dag(&t, &[], &[3, 4], &[("x", 0, 8), ("y", 1, 8)]) == Err(EchoError::Shared)
+}
+run_row_echo_reject_node_asserted_twice => { echo_dag(&[N::Var(8), N::Var(8), N::Ult(0, 1)], &[], &[2, 2], &[("x", 0, 8), ("y", 1, 8)]) == Err(EchoError::Shared) }
+run_row_echo_accept_shared_leaves => {
+    let t = [N::Var(8), N::Const(0, 8), N::Add(0, 1), N::Add(1, 0), N::Eq(2, 3)];
+    echo_dag(&t, &[false; 8], &[4], &[("x", 0, 8)]).is_ok()
+}
+run_row_echo_reject_doubling_chain => {
+    let mut t = vec![N::Var(8)];
+    for i in 0..40 {
+        t.push(N::Add(i, i));
+    }
+    t.push(N::Eq(40, 0));
+    echo_dag(&t, &[], &[41], &[("x", 0, 8)]) == Err(EchoError::Shared)
+}
+run_row_echo_reject_select_index_read_twice => {
+    let nodes = [ExtNode::Core(N::Var(32)), ExtNode::Core(N::Add(0, 0)), ExtNode::Select(0, 1, 0, 0), ExtNode::Select(0, 1, 0, 0), ExtNode::Core(N::Eq(2, 3))];
+    echo_ext(&nodes, &[], &[], &[4], b"i", &[0], &[1], &[0], &[32], b"m", &[0], &[1], b"", &[], &[], &[]) == Err(EchoError::Shared)
+}
+run_row_echo_reject_stored_value_and_call_argument_used_twice => {
+    // One operator node as the stored value of two chains, then as the argument of two calls.
+    let stores = [ExtNode::Core(N::Var(32)), ExtNode::Core(N::Var(8)), ExtNode::Core(N::BvNot(1)), ExtNode::Select(0, 0, 0, 1), ExtNode::Select(0, 0, 0, 1), ExtNode::Core(N::Eq(3, 4))];
+    let calls = [ExtNode::Core(N::Var(8)), ExtNode::Core(N::BvNot(0)), ExtNode::Call(0, 8, 0, 1), ExtNode::Call(0, 8, 0, 1), ExtNode::Core(N::Eq(2, 3))];
+    echo_ext(&stores, &[], &[0, 2], &[5], b"iv", &[0, 1], &[1, 1], &[0, 1], &[32, 8], b"m", &[0], &[1], b"", &[], &[], &[]) == Err(EchoError::Shared)
+        && echo_ext(&calls, &[], &[1], &[4], b"v", &[0], &[1], &[0], &[8], b"", &[], &[], b"f", &[0], &[1], &[8]) == Err(EchoError::Shared)
+}
+run_row_echo_reject_function_at_two_arities => {
+    let call = |args: TArgs| Box::new(TBv::Call(b"f".to_vec(), 8, Box::new(args)));
+    let one = |a: Box<TBv>| TArgs::Cons(a, Box::new(TArgs::Nil));
+    let two = |a: Box<TBv>, b: Box<TBv>| TArgs::Cons(a, Box::new(TArgs::Cons(b, Box::new(TArgs::Nil))));
+    echo_refuses(&[eq_t(call(one(var("x", 8))), call(two(var("x", 8), var("x", 8))))], EchoError::Signature)
+}
+run_row_echo_reject_function_at_two_argument_widths => {
+    let call = |a: Box<TBv>| Box::new(TBv::Call(b"f".to_vec(), 8, Box::new(TArgs::Cons(a, Box::new(TArgs::Nil)))));
+    echo_refuses(&[eq_t(call(var("x", 8)), call(var("y", 16)))], EchoError::Signature)
+}
+run_row_echo_reject_function_result_width_not_the_tables => {
+    let nodes = [ExtNode::Core(N::Var(1)), ExtNode::Core(N::Var(1)), ExtNode::Call(0, 1, 0, 1), ExtNode::Core(N::Eq(2, 0))];
+    echo_call_list(&nodes, &[2], &[0], &[1]) == Err(EchoError::Signature)
+}
+run_row_echo_reject_function_no_node_calls => {
+    let nodes = [ExtNode::Core(N::Var(1)), ExtNode::Core(N::Var(1)), ExtNode::Call(0, 1, 0, 1), ExtNode::Core(N::Eq(2, 0))];
+    echo_call_list(&nodes, &[1, 1], &[0, 1], &[1, 1]) == Err(EchoError::Signature)
+}
+run_row_echo_term_is_echo_ext_of_the_lifted_list => {
+    let t = TBool::Ule(Box::new(TBv::Mul(var("x", 32), konst(3, 32))), Box::new(TBv::Lshr(var("y", 32), konst(1, 32))));
+    let f = flatten_tree(&[t]).expect("flattens");
+    let core = project_core(&f.nodes).expect("closed");
+    let a = echo_term(&core, &f.bits, &f.roots, &f.names, &f.name_start, &f.name_len, &f.var_node, &f.var_width);
+    let b = echo_ext(&f.nodes, &f.bits, &f.side, &f.roots, &f.names, &f.name_start, &f.name_len, &f.var_node, &f.var_width,
+        &f.anames, &f.aname_start, &f.aname_len, &f.fnames, &f.fname_start, &f.fname_len, &f.func_width);
+    a.is_ok() && a == b
+}
+run_row_echo_accept_wide_numerals => {
+    // Decimal numerals of one, two, three and five digits in the indices.
+    let ts = [
+        eq_t(Box::new(TBv::Extract(9, 0, var("w", 100))), var("t", 10)),
+        eq_t(Box::new(TBv::Extract(99, 90, var("w", 100))), var("t", 10)),
+        eq_t(Box::new(TBv::ZeroExt(118, var("t", 10))), var("u", 128)),
+    ];
+    echo_is(&ts, "(set-logic QF_BV)\n(declare-const |w| (_ BitVec 100))\n(declare-const |t| (_ BitVec 10))\n(declare-const |u| (_ BitVec 128))\n(assert (= ((_ extract 9 0) |w|) |t|))\n(assert (= ((_ extract 99 90) |w|) |t|))\n(assert (= ((_ zero_extend 118) |t|) |u|))\n(check-sat)\n")
 }
 }
 

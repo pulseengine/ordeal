@@ -36,6 +36,8 @@
 //! - [`front`] — the one piece that reads TEXT: Z3's SMT-LIB parser against
 //!   ordeal's reader, per assertion (#281 E0), with the seeded text
 //!   generator [`gen_smtlib_text`].
+//! - [`echo`] — Z3's parser on the certified echo of each script, per
+//!   assertion against the script itself (#281 E1).
 
 #![cfg(not(target_family = "wasm"))]
 
@@ -52,6 +54,12 @@ use z3::{FuncDecl, Params, SatResult, Solver, Sort as Z3Sort};
 #[path = "oracle_front.rs"]
 pub mod front;
 pub use front::gen_smtlib_text;
+
+/// The Z3 parser differential's echo leg (#281 E1): Z3's parser reads the
+/// certified echo (`ordeal_lrat::echo_term` / `echo_ext`), compared per
+/// assertion with the script it echoes.
+#[path = "oracle_echo.rs"]
+pub mod echo;
 
 // ─── Translation: closed fragment → Z3 ──────────────────────────────────────
 
