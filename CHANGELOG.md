@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Three gates that could pass having checked nothing** (found by an
+  external gate read). `scripts/wasm_native_differential.sh` (in the required
+  wasm build job and the release) scored two binaries that failed the same way
+  as agreeing: two stubs exiting 3 gave "21 invocations, byte-identical". Each
+  invocation must now also exit 0 with the verdict its fixture is named for.
+  `scripts/claim_check.py` passed a claim with no evidence predicate; it now
+  fails one ("checked against nothing"), with self-test cases. The release
+  gate `scripts/check_release_results.py` passed an empty or mistyped scope
+  (0 measures checked, exit 0) and exempted a whole measure when one of its
+  marker files was skip-listed; it now fails on 0 checked, and a measure is
+  exempt only when every file carrying its markers is skip-listed for it, so
+  VER-087 is now checked against its default-run markers.
 - **String literals** (TR-088, #311). The reader read `"a ) b"` in a
   `set-info` as a stray `)` and `"a;b"` as a comment, and refused the script
   (exit 2). A `"..."` literal is now one token, `""` being an escaped quote;

@@ -119,6 +119,11 @@ def check_claim(c, root):
     doc = doc_path.read_text(errors="ignore")
     doc_n = _norm(doc)
 
+    if not c.get("evidence"):
+        # A claim with no predicate is checked against nothing and would
+        # always "hold"; the text alone only says the doc contains itself.
+        fails.append("no evidence predicates: the claim is checked against nothing")
+
     text = c.get("text")
     if text and _norm(text) not in doc_n:
         fails.append(f'claim text not found in {c["doc"]}: "{_norm(text)}"')
@@ -279,6 +284,20 @@ def self_test():
         ok = got == expect_fail
         bad += not ok
         print(f"  [{'ok  ' if ok else 'FAIL'}] {name}")
+    # A claim with no predicate at all, with and without text: must fail.
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        (root / "doc.md").write_text("the claim text\n")
+        for name, claim in [
+            ("no evidence, id and doc only -> fails", {"id": "T", "doc": "doc.md"}),
+            ("no evidence, empty list -> fails", {"id": "T", "doc": "doc.md", "evidence": []}),
+            ("no evidence, text present -> fails",
+             {"id": "T", "doc": "doc.md", "text": "the claim text"}),
+        ]:
+            ok = bool(check_claim(claim, root))
+            bad += not ok
+            cases.append(name)
+            print(f"  [{'ok  ' if ok else 'FAIL'}] {name}")
     print(f"  {len(cases) - bad}/{len(cases)} cases hold")
     return 1 if bad else 0
 

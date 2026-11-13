@@ -27,13 +27,30 @@ for tc in ET.parse(xml_path).getroot().iter("testcase"):
     ok = not any(c.tag in ("failure", "error") for c in tc)
     results.setdefault(aid, []).append((tc.get("name"), ok))
 
-skipped_ids = set()
+# The skip list names (file, ID) pairs: markers in that file cannot run in
+# the default CI run. A measure is exempt only when EVERY file carrying a
+# `rivet: verifies <ID>` marker for it is skipped for that ID; a measure
+# with markers elsewhere still needs CI results from them, and a skipped ID
+# with no marker at all is not exempt (a stale entry exempts nothing).
+skipped_pairs = set()
 skip_file = root / "scripts" / "junit_to_rivet.skip"
 if skip_file.exists():
     for line in skip_file.read_text().splitlines():
         parts = line.split("#", 1)[0].split()
         if len(parts) == 2:
-            skipped_ids.add(parts[1])
+            skipped_pairs.add((parts[0], parts[1]))
+
+
+def marker_files(aid):
+    out = subprocess.run(
+        ["git", "grep", "-l", "-E", rf"rivet: verifies {aid}([^0-9]|$)", "--", "*.rs", "*.py", "*.sh"],
+        cwd=root, capture_output=True, text=True)
+    return set(out.stdout.split())
+
+
+def exempt(aid):
+    files = marker_files(aid)
+    return bool(files) and all((f, aid) in skipped_pairs for f in files)
 
 errors = []
 for aid, rs in sorted(results.items()):
@@ -50,7 +67,11 @@ for a in arts:
     if a.get("type") not in MEASURES:
         continue
     steps = str((a.get("fields") or {}).get("steps", ""))
-    if "cargo test" not in steps or a["id"] in skipped_ids:
+    if "cargo test" not in steps:
+        continue
+    if exempt(a["id"]):
+        print(f"skip  {a['id']}: every marker is in a skip-listed file "
+              f"({', '.join(sorted(marker_files(a['id'])))})")
         continue
     checked += 1
     rs = results.get(a["id"], [])
@@ -63,4 +84,10 @@ for a in arts:
 for e in errors:
     print(f"FAIL  {e}")
 print(f"{version}: {checked} in-scope measure(s) checked against CI results")
+if checked == 0:
+    # An empty or mistyped scope, or a scope whose every measure is skipped,
+    # checks nothing; that must not read as a pass.
+    print(f"FAIL  {version}: no in-scope measure was checked against CI results "
+          "(is the version right, and is anything in its rivet scope?)")
+    sys.exit(1)
 sys.exit(1 if errors else 0)
