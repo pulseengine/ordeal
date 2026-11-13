@@ -142,7 +142,7 @@ fn rename_bv(t: &BvTerm) -> BvTerm {
     }
 }
 
-fn rename_bool(t: &BoolTerm) -> BoolTerm {
+pub(super) fn rename_bool(t: &BoolTerm) -> BoolTerm {
     let v = |x: &BvTerm| Box::new(rename_bv(x));
     let p = |x: &BoolTerm| Box::new(rename_bool(x));
     match t {
@@ -164,7 +164,7 @@ fn rename_bool(t: &BoolTerm) -> BoolTerm {
 
 /// `b ⇔ (b₁ = #b1)` for every `Bool` name: Z3's `Bool` constant against the
 /// BV1 variable ordeal holds it as.
-fn bool_links(reading: &ScriptReading) -> Vec<Bool> {
+pub(super) fn bool_links(reading: &ScriptReading) -> Vec<Bool> {
     reading
         .bool_names
         .iter()
@@ -243,7 +243,7 @@ pub const Z3_REFUSES_ALLOW_LIST: &[AllowEntry] = &[AllowEntry {
 
 /// Per-check Z3 budget. The xors are near-identical formulas that Z3
 /// mostly simplifies to `false`; a timeout is reported, never passed.
-const CHECK_TIMEOUT_MS: u32 = 10_000;
+pub(super) const CHECK_TIMEOUT_MS: u32 = 10_000;
 
 /// Run the front leg on one script.
 pub fn front_leg(script: &str) -> FrontResult {
@@ -831,6 +831,50 @@ pub fn gen_smtlib_text(seed: u64, n: usize) -> Vec<String> {
     (0..n).map(|_| g.script()).collect()
 }
 
+/// Every `.smt2` file under `dir`, skipping build output and hidden dirs.
+#[cfg(test)]
+fn smt2_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        let name = e.file_name().to_string_lossy().into_owned();
+        if p.is_dir() {
+            if !name.starts_with('.') && name != "target" && name != "node_modules" {
+                smt2_files(&p, out);
+            }
+        } else if name.ends_with(".smt2") {
+            out.push(p);
+        }
+    }
+}
+
+/// Every repository `.smt2` file as a labelled script, for this leg and the
+/// echo leg. A Verus log is fed as the obligation `ordeal verus` reads.
+#[cfg(test)]
+pub(super) fn repository_scripts() -> Vec<(String, String)> {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut files = Vec::new();
+    smt2_files(&root, &mut files);
+    files.sort();
+    // 27 when written (design note §6): 10 differential fixtures, 3 Verus
+    // fixtures, 2 evidence/certs, 12 fuzz seeds.
+    assert!(files.len() >= 27, "found only {} .smt2 files", files.len());
+    let mut scripts = Vec::new();
+    for f in &files {
+        let text = std::fs::read_to_string(f).expect("readable .smt2");
+        let rel = f.strip_prefix(&root).unwrap_or(f).display().to_string();
+        if crate::verus::is_bitvector_query(&text) {
+            let ob = crate::verus::extract(&text).expect("Verus fixture extracts");
+            scripts.push((format!("{rel} (verus::extract)"), ob.script));
+        } else {
+            scripts.push((rel, text));
+        }
+    }
+    scripts
+}
+
 #[cfg(test)]
 mod tests {
     //! The front leg's gate (VER-087). Run alone with
@@ -839,7 +883,6 @@ mod tests {
 
     use super::*;
     use crate::smtlib::{Mutation, mutation};
-    use std::path::{Path, PathBuf};
     use std::time::Instant;
 
     /// Generated scripts per CI run: 10^4 take ~21 s in release with Z3
@@ -849,24 +892,6 @@ mod tests {
     /// (design note §6).
     const GEN_COUNT: usize = 10_000;
     const GEN_SEED: u64 = 0x0281_E0F0;
-
-    /// Every `.smt2` file under `dir`, skipping build output and hidden dirs.
-    fn smt2_files(dir: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in entries.flatten() {
-            let p = e.path();
-            let name = e.file_name().to_string_lossy().into_owned();
-            if p.is_dir() {
-                if !name.starts_with('.') && name != "target" && name != "node_modules" {
-                    smt2_files(&p, out);
-                }
-            } else if name.ends_with(".smt2") {
-                out.push(p);
-            }
-        }
-    }
 
     /// Disarms the mutation when dropped, so a failing control cannot leak
     /// an armed mutation into the next test on this thread.
@@ -886,30 +911,12 @@ mod tests {
     // rivet: verifies VER-087
     #[test]
     fn front_leg_agrees_on_every_repository_smt2_file() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let mut files = Vec::new();
-        smt2_files(&root, &mut files);
-        files.sort();
-        // 27 when written (design note §6): 10 differential fixtures, 3 Verus
-        // fixtures, 2 evidence/certs, 12 fuzz seeds.
-        assert!(files.len() >= 27, "found only {} .smt2 files", files.len());
-        let mut scripts = Vec::new();
-        for f in &files {
-            let text = std::fs::read_to_string(f).expect("readable .smt2");
-            let rel = f.strip_prefix(&root).unwrap_or(f).display().to_string();
-            // A Verus log is fed as the obligation `ordeal verus` reads.
-            if crate::verus::is_bitvector_query(&text) {
-                let ob = crate::verus::extract(&text).expect("Verus fixture extracts");
-                scripts.push((format!("{rel} (verus::extract)"), ob.script));
-            } else {
-                scripts.push((rel, text));
-            }
-        }
+        let scripts = repository_scripts();
         let t = Instant::now();
         let tally = run_front_leg(scripts.iter().map(|(l, s)| (l.clone(), s.as_str())));
         eprintln!(
             "{} files, {:.2?}\n{}",
-            files.len(),
+            scripts.len(),
             t.elapsed(),
             tally.report()
         );

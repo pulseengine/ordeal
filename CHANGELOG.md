@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   desugar to the core connectives, so the closed op set is unchanged. Mixed
   sorts are still a sort error. Before, these were refused (exit 2) on
   scripts Z3 reads.
+- **The echo printer and its proof** (#281, phase E1). `ordeal_lrat::echo_term`
+  and `echo_ext` (`crates/ordeal-lrat/src/echo_kernel.rs`, in the trusted
+  crate's one translation unit) print the `ordeal-term/v1` term or the
+  `ordeal-ext/v1` extended query a certificate is about as an SMT-LIB 2.6
+  script: names always quoted, constants `#b` and exactly `w` digits most
+  significant first, one symbol per `DagNode` arm, indexed rotates for a
+  constant amount, arrays as nested `store` chains. A refusal (`EchoError`)
+  is never a verdict. `lean/EchoSpec.lean` is the explicit SMT-LIB model
+  (a specification, not proven equal to the standard) and `lean/Echo.lean`
+  proves the printer against it: `lex_render`, `echo_term_sound` /
+  `echo_ext_sound` (the printed script is satisfied by an interpretation
+  exactly when the node list's roots are) and `echo_unsat_sound` /
+  `echo_ext_unsat_sound` (composed with the term and sliver capstones), and
+  `echo_term_well_sorted` / `echo_ext_well_sorted` (the printed script is
+  well formed under every interpretation, so the equivalence is never
+  vacuous), all pinned in `AxiomCheck.lean`. A declared name may not be a
+  reserved word, a theory symbol (SMT-LIB 2.7's included) or a common
+  solver builtin, and may not start with `@` or `.`. Nothing calls the printer yet: bundle format
+  v5, the recheck rows and the CLI flag are phase E2, and the trusted base
+  is unchanged.
 
 ### Fixed
 
@@ -71,6 +91,25 @@ the next patch tag, never by rebuilding the old tag from main.
   axioms. A String-free control prints UNLOCKED. `mirror.rs` stays, for that
   recorded reason (docs/design/flattener-proof.md).
 
+- **The Z3 parser differential, echo leg** (#281, phase E1;
+  `crates/ordeal/src/oracle_echo.rs`, behind `oracle`, test code only).
+  Z3's parser reads the certified echo of every repository `.smt2` file,
+  of 10^4 generated scripts and of 1000 sliver queries, and decides
+  `S[k] xor E[k]` per assertion against the script it echoes: 0 disagree,
+  0 echoes refused by Z3. It runs in the blocking
+  `SMT-LIB parser differential (Z3)` job with the front leg, with three
+  text-mutation controls that must turn it red; the 10^5 run is nightly.
+  The leg found that the reader keeps non-simple quoted symbols with
+  their bars and the printer refuses such names (8490 of the 10^4
+  generated scripts, none of the repository files); see
+  `docs/design/query-echo.md`, "E1 as built", with the size and time
+  measurement (`echo_measurement`).
+- **MC/DC rows for the printer, and a gate that fails closed.** 58
+  `run_row_echo_*` rows in `mcdc/ordeal-lrat/src/rows.rs`;
+  `scripts/mcdc_report.py` now fails, naming the file, when a checker
+  source file has zero decisions in the table and is not in
+  `ZERO_DECISION_WAIVERS` (empty). `echo_kernel.rs` had been reported at
+  0 decisions with the gate green.
 - **The Z3 parser differential, front leg** (TR-087, #281 phase E0). The
   first test that hands SMT-LIB *text* to Z3's own parser: until now the Z3
   oracle translated ordeal's trees, so it checked the engine and never the

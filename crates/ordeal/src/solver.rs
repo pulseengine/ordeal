@@ -2041,6 +2041,156 @@ mod cnf_gap_measurement {
         #[cfg(not(feature = "oracle"))]
         println!("\n(oracle corpus skipped: build with --features oracle)");
     }
+
+    fn median(mut ts: Vec<Duration>) -> Duration {
+        ts.sort();
+        ts[ts.len() / 2]
+    }
+
+    /// #281 E1 — size and time of the certified echo (`echo_term`) next to
+    /// the check it would ride with. A measurement, recorded in
+    /// docs/design/query-echo.md ("E1 as built"):
+    ///
+    ///   cargo test -p ordeal --release --lib echo_measurement -- --ignored --nocapture
+    ///
+    /// Per query: the term's nodes and variables (the trusted flattening,
+    /// as `QueryTermFlatten::flatten` calls it), the echo's bytes, and the
+    /// medians of the flattening, of `echo_term`, of `check_with_term`
+    /// (blast, solve, proof, every trusted gate) and of the certificate's
+    /// trusted `recheck` alone. The corpus is trees, so there is no input
+    /// text to compare the bytes with; the echo leg of the parser
+    /// differential prints that ratio for the `.smt2` scripts.
+    #[test]
+    #[ignore = "measurement, not a check: prints the #281 echo size/time table (release build)"]
+    fn echo_measurement() {
+        use crate::query::TermCheckResult;
+        let runs = 9;
+        let mut corpus = latency_corpus();
+        let latency = corpus.len();
+        for k in [16usize, 32, 64] {
+            corpus.push((
+                format!("queue_overflow_k{k}"),
+                crate::bmc_corpus::queue_overflow(k, k as u8),
+            ));
+        }
+        for k in [24usize, 48] {
+            corpus.push((
+                format!("deadlock_k{k}"),
+                crate::bmc_corpus::deadlock(k, false),
+            ));
+        }
+        println!(
+            "\n| query | verdict | nodes | vars | echo bytes | bytes/node | flatten (µs) | \
+             echo_term (µs) | ns/node | check_with_term (µs) | recheck (µs) | echo/check | \
+             echo/recheck |"
+        );
+        println!("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|");
+        // (echo bytes, echo time, echo/check, echo/recheck) per query.
+        type Row = (usize, Duration, f64, f64);
+        let mut rows: Vec<Row> = Vec::new();
+        for (i, (name, q)) in corpus.iter().enumerate() {
+            let flatten = || {
+                let flat = ordeal_lrat::flatten_tree(&crate::mirror::of_bools(q))
+                    .expect("corpus query flattens");
+                let nodes = ordeal_lrat::project_core(&flat.nodes).expect("closed");
+                (flat, nodes)
+            };
+            let t_flat = median(
+                (0..runs)
+                    .map(|_| {
+                        let t0 = Instant::now();
+                        std::hint::black_box(flatten());
+                        t0.elapsed()
+                    })
+                    .collect(),
+            );
+            let (flat, nodes) = flatten();
+            let echo = || {
+                ordeal_lrat::echo_term(
+                    &nodes,
+                    &flat.bits,
+                    &flat.roots,
+                    &flat.names,
+                    &flat.name_start,
+                    &flat.name_len,
+                    &flat.var_node,
+                    &flat.var_width,
+                )
+            };
+            let bytes = echo()
+                .unwrap_or_else(|e| panic!("{name}: the printer refused: {e:?}"))
+                .len();
+            let t_echo = median(
+                (0..runs)
+                    .map(|_| {
+                        let t0 = Instant::now();
+                        std::hint::black_box(echo().expect("echoed above"));
+                        t0.elapsed()
+                    })
+                    .collect(),
+            );
+            let mut s = Solver::new();
+            for a in q {
+                s.assert(a.clone());
+            }
+            let mut t_check = Vec::new();
+            let mut t_recheck = Vec::new();
+            let mut verdict = "unknown";
+            for _ in 0..runs {
+                let t0 = Instant::now();
+                let r = s.check_with_term();
+                t_check.push(t0.elapsed());
+                let t0 = Instant::now();
+                match &r {
+                    TermCheckResult::Unsat(c) => {
+                        c.recheck().expect("rechecks");
+                        verdict = "unsat";
+                    }
+                    TermCheckResult::Sat(c) => {
+                        c.recheck().expect("rechecks");
+                        verdict = "sat";
+                    }
+                    TermCheckResult::Unknown => {}
+                }
+                t_recheck.push(t0.elapsed());
+            }
+            let (t_check, t_recheck) = (median(t_check), median(t_recheck));
+            let over_check = t_echo.as_secs_f64() / t_check.as_secs_f64();
+            let over_recheck = t_echo.as_secs_f64() / t_recheck.as_secs_f64();
+            println!(
+                "| {name} | {verdict} | {} | {} | {bytes} | {:.1} | {} | {} | {:.0} | {} | {} | \
+                 {:.4} | {:.4} |",
+                nodes.len(),
+                flat.var_node.len(),
+                bytes as f64 / nodes.len() as f64,
+                fmt_us(t_flat),
+                fmt_us(t_echo),
+                t_echo.as_secs_f64() * 1e9 / nodes.len() as f64,
+                fmt_us(t_check),
+                fmt_us(t_recheck),
+                over_check,
+                over_recheck,
+            );
+            if i < latency {
+                rows.push((bytes, t_echo, over_check, over_recheck));
+            }
+        }
+        let n = rows.len();
+        let col = |f: &dyn Fn(&Row) -> f64| {
+            let mut v: Vec<f64> = rows.iter().map(f).collect();
+            v.sort_by(f64::total_cmp);
+            (v[n / 2], v[n - 1])
+        };
+        let (bm, bx) = col(&|r| r.0 as f64);
+        let (tm, tx) = col(&|r| r.1.as_secs_f64() * 1e6);
+        let (cm, cx) = col(&|r| r.2);
+        let (rm, rx) = col(&|r| r.3);
+        println!(
+            "\nlatency corpus ({n} queries): echo bytes median {bm:.0}, max {bx:.0}; \
+             echo_term median {tm:.1} µs, max {tx:.1} µs; echo/check_with_term median \
+             {cm:.4}, max {cx:.4}; echo/recheck median {rm:.4}, max {rx:.4}"
+        );
+    }
 }
 
 #[cfg(test)]

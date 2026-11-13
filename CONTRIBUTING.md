@@ -68,12 +68,14 @@ run as a non-blocking CI job.
 
 The SMT-LIB parser differential (`oracle::front`, TR-087) hands every
 repository `.smt2` file and 10^4 generated scripts to Z3's parser and to
-ordeal's reader. It runs in its own job, `SMT-LIB parser differential (Z3)`,
-which is not `continue-on-error` and is one of the required checks below,
-so a disagreement blocks the merge. Run it locally with:
+ordeal's reader. Its echo leg (`oracle::echo`, #281 E1) prints the certified
+echo of the same scripts and hands it to Z3's parser. Both run in one job,
+`SMT-LIB parser differential (Z3)`, which is not `continue-on-error` and is
+one of the required checks below, so a disagreement blocks the merge. Run
+them locally with:
 
 ```bash
-cargo test -p ordeal --features oracle --release --lib oracle::front::tests -- --nocapture
+cargo test -p ordeal --features oracle --release --lib -- oracle::front::tests oracle::echo::tests --nocapture
 ```
 
 ## Pull Request Process

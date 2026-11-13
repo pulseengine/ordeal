@@ -1806,3 +1806,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-092
+
+  - id: VER-079
+    type: sw-verification
+    title: "Query echo E1: Lean capstones axiom-clean over a byte-identical regen, five kernel mutations each break lake build, Z3 echo leg 0 disagree with armed controls, MC/DC rows (TR-079)"
+    status: verified
+    release: v0.37.0
+    description: "Formal: lake build of lean/Echo.lean and lean/EchoSpec.lean (no sorry, no native_decide) over a Kernel.lean that Charon/Aeneas at the pinned revisions regenerate byte-identically with 0 ^axiom; AxiomCheck prints only propext, Classical.choice, Quot.sound for the 13 echo pins. Negative controls: five single mutations of echo_kernel.rs, each regenerated (0 axioms) and run through a full lake build, each failing in a named theorem (push_name_ok, push_sym_ok, push_bits_loop_ok, entry_ok_ok, and a sort-check proof). Test: the echo leg hands every echo to Z3 and decides S[k] xor E[k] per assertion; four text rewrites of the echo (bvslt/bvsle, #b LSB-first, last assert dropped, ext bvslt/bvsle) each turn it red. MC/DC: run_row_echo_* rows reach echo_kernel.rs and scripts/mcdc_report.py fails on any checker file with zero decisions."
+    tags: [echo, lean, aeneas, mutation, oracle, differential, mcdc, negative-control]
+    fields:
+      coverage: the 13 pinned echo theorems; five kernel mutations; 27 repository .smt2 files, 10^4 generated scripts (1510 as read, 8490 with content names), 1000 sliver queries; 58 MC/DC rows over echo_kernel.rs
+      method: formal-verification
+      steps: "run: lean/regen.sh (or the nightly-2026.07.02 Aeneas bundle with the same commands) then cd lean && lake build && lake env lean AxiomCheck.lean; run: cargo test -p ordeal --features oracle --release --lib oracle::echo::tests; run: scripts/mcdc_gate.sh"
+    links:
+      - type: verifies
+        target: TR-079

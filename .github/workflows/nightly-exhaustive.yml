@@ -34,8 +34,9 @@ jobs:
             || { echo "::error::expected exactly 1 exhaustive test to pass"; exit 1; }
 
   # The SMT-LIB parser differential's long run (#281 E0, TR-087): 10^5
-  # generated scripts through Z3's parser and ordeal's reader (per-PR CI
-  # runs 10^4 in the blocking "SMT-LIB parser differential" job).
+  # generated scripts through Z3's parser and ordeal's reader, then their
+  # certified echoes through Z3's parser (#281 E1; per-PR CI runs 10^4 of
+  # each in the blocking "SMT-LIB parser differential" job).
   parser-differential-1e5:
     name: SMT-LIB parser differential, 10^5 scripts
     runs-on: ubuntu-latest
@@ -56,3 +57,11 @@ jobs:
           echo "$out" | grep -E '^(front leg:|[0-9]+ generated)'
           echo "$out" | grep -q 'test result: ok. 1 passed' \
             || { echo "::error::expected exactly 1 front-leg test to pass"; exit 1; }
+      - name: Echo leg, 10^5 generated scripts
+        run: |
+          set -euo pipefail
+          out="$(cargo test -p ordeal --features oracle --release --lib echo_leg_agrees_on_1e5_generated_scripts -- --ignored --nocapture 2>&1)" \
+            || { echo "$out"; exit 1; }
+          echo "$out" | grep -E '^(echo leg|echo size:|[0-9]+ generated)'
+          echo "$out" | grep -q 'test result: ok. 1 passed' \
+            || { echo "::error::expected exactly 1 echo-leg test to pass"; exit 1; }

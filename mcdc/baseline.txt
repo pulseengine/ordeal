@@ -3,7 +3,8 @@
 # Measured with witness 0.45.0, rustc 1.99.1 stable, wasm32-wasip1; a toolchain bump can move these.
 # file decisions not_full gap_conditions dead_conditions proved_conditions
 src/blast_kernel.rs 62 61 233 72 54
-src/kernel.rs 101 91 371 461 174
+src/echo_kernel.rs 72 69 631 356 234
+src/kernel.rs 101 91 370 461 175
 src/lib.rs 9 6 15 2 16
-src/sliver_kernel.rs 46 42 169 31 38
+src/sliver_kernel.rs 46 42 171 29 38
 src/term_kernel.rs 39 35 144 5 68

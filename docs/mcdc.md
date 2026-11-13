@@ -60,7 +60,12 @@ any `crates/ordeal-lrat/src/*.rs` file:
   these), or
 - the report is vacuous: zero ordeal-lrat decisions, a file the baseline knows
   has none, a different number of invoked rows than `rows.rs` defines, or a
-  witness trace-buffer overflow (rows would be lost silently).
+  witness trace-buffer overflow (rows would be lost silently), or
+- a checker source file has zero decisions in the table and is not in
+  `ZERO_DECISION_WAIVERS` (`scripts/mcdc_report.py`; empty, and printed on
+  every run). This fails closed for a file the baseline does not know yet:
+  the printer `echo_kernel.rs` (#281) was reported as `0 decisions` and
+  "MCDC GATE OK" until its rows were added, because no row called it.
 
 A decrease prints an `IMPROVEMENT` note. The baseline is updated **by hand**
 (copy `current.txt` over `mcdc/baseline.txt` in the commit that adds the
@@ -79,7 +84,9 @@ conditions +3, proved conditions -3).
 
 ## Numbers
 
-Rows: 286. Before (the 5-row spike, same summariser; its `src/lib.rs` row also
+Rows: 344 (286 when the gate landed; 58 for the printer `echo_kernel.rs`,
+#281, whose line is new, and which moved a few conditions of `kernel.rs` and
+`sliver_kernel.rs`). Before (the 5-row spike, same summariser; its `src/lib.rs` row also
 contains the spike harness's own decisions, so treat that line as an upper
 bound): `kernel.rs` 17 decisions / 0 full / 23 gap conditions, `lib.rs` 8 / 0 /
 15, the other three files not reached at all. After:
@@ -87,9 +94,10 @@ bound): `kernel.rs` 17 decisions / 0 full / 23 gap conditions, `lib.rs` 8 / 0 /
 | file | decisions | not full MC/DC | gap conds | dead conds | proved conds |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `src/blast_kernel.rs` | 62 | 61 | 233 | 72 | 54 |
-| `src/kernel.rs` | 101 | 91 | 371 | 461 | 174 |
+| `src/echo_kernel.rs` | 72 | 69 | 631 | 356 | 234 |
+| `src/kernel.rs` | 101 | 91 | 370 | 461 | 175 |
 | `src/lib.rs` | 9 | 6 | 15 | 2 | 16 |
-| `src/sliver_kernel.rs` | 46 | 42 | 169 | 31 | 38 |
+| `src/sliver_kernel.rs` | 46 | 42 | 171 | 29 | 38 |
 | `src/term_kernel.rs` | 39 | 35 | 144 | 5 | 68 |
 
 (`rollup.txt` uses witness's own per-file attribution and counts a few more

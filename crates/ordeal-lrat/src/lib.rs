@@ -437,6 +437,17 @@ pub use kernel::term_kernel::{
     flatten_tree, project_core,
 };
 
+/// The certified query echo (issue #281, E1): the `ordeal-term/v1` term
+/// ([`echo_term`]) or the `ordeal-ext/v1` extended query ([`echo_ext`])
+/// a certificate is about, printed back as an SMT-LIB 2.6 script by the
+/// trusted crate. Under the explicit SMT-LIB model of `lean/EchoSpec.lean`
+/// the printed script is satisfied exactly when the node list's roots are
+/// (`kernel.spec.echo_term_sound`, `echo_ext_sound`), so an accepted
+/// `unsat` certificate makes it unsatisfiable (`echo_unsat_sound`,
+/// `echo_ext_unsat_sound`, `lean/Echo.lean`). A refusal ([`EchoError`])
+/// is never a verdict. See [`kernel::echo_kernel`].
+pub use kernel::echo_kernel::{EchoError, echo_ext, echo_term};
+
 /// Why a query re-check ([`check_query`]) was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryCheckError {
