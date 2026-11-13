@@ -585,11 +585,25 @@ mod tests {
         );
         assert!(run.passes(), "{}", run.report());
         let (prod, content) = (&run.as_read, &run.content);
-        // The generator emits only scripts both sides read, so the
-        // production path either compares a script or refuses it for a
-        // name the reader kept with its bars...
-        assert_eq!(prod.not_echoed, 0, "{}", run.report());
-        assert_eq!(prod.compared() + prod.refused(), n, "{}", run.report());
+        // The generator emits only scripts the reader reads, except the
+        // marked reserved-word declarations (#315), which it refuses and so
+        // are not echoed; the production path either compares every other
+        // script or refuses it for a name the reader kept with its bars...
+        let reserved = scripts
+            .iter()
+            .filter(|s| s.contains(crate::oracle::front::RESERVED_DECL_MARK))
+            .count();
+        assert!(
+            reserved > 0,
+            "the generator emitted no reserved-word declaration"
+        );
+        assert_eq!(prod.not_echoed, reserved, "{}", run.report());
+        assert_eq!(
+            prod.compared() + prod.refused() + reserved,
+            n,
+            "{}",
+            run.report()
+        );
         assert_eq!(
             prod.refused(),
             prod.printer_refuses.get("Name").copied().unwrap_or(0),
@@ -604,7 +618,12 @@ mod tests {
             "{}",
             run.report()
         );
-        assert_eq!(prod.compared() + content.compared(), n, "{}", run.report());
+        assert_eq!(
+            prod.compared() + content.compared() + reserved,
+            n,
+            "{}",
+            run.report()
+        );
     }
 
     // rivet: verifies VER-079
