@@ -3470,3 +3470,33 @@ artifacts:
         target: VER-092
       - type: part-of-execution
         target: VE-072
+
+  - id: VE-073
+    type: verification-execution
+    title: "Query echo E1 run (VER-079): regen, lake build, axiom pins, mutations, Z3 echo leg, MC/DC"
+    status: implemented
+    release: v0.37.0
+    description: "Author run and independent clean-room run (separate worktrees under /Volumes/Home). Regen: Kernel.lean sha256 46089c48... at 69dcd03 and 3ae61410... at 178ca47, 0 ^axiom, each reproduced byte-identically in a separate regen. lake build: Build completed successfully (1736 jobs) at both commits. Mutations, each a full lake build after regen with 0 axioms, pristine source restored and its sha256 checked: at 69dcd03 quote-dropped fails Echo.lean:670, bvslt/bvsle 1844, #b LSB-first 572, collision 1396; at 178ca47 the same four fail at 674, 1914, 576, 1454 and the dropped Bool-position sort check fails at 3018. Echo leg (oracle::echo::tests, release): repository files 26 compared, 41 assertions, agree 26, disagree 0; generated 10^4: 1510 echoed as read agree 1510, 8490 refused by the printer (Name: non-simple quoted symbols keep their bars, #294) and agree 8490 with content names; 1000 sliver queries: 751 agree, 249 refused (Rotate by a term amount); Z3 refused 0 echoes; controls red: bvslt/bvsle 283/1000, #b LSB-first 511/1000, last assert dropped 1000/1000, ext bvslt/bvsle 67/300. MC/DC: 344 rows, echo_kernel.rs 72 decisions; the fail-closed check fails on the 178ca47 harness naming src/echo_kernel.rs. Size/time on the latency corpus: echo median 207 bytes, echo_term median 1.5 us, 0.64% of check_with_term."
+    fields:
+      environment: macOS arm64, Lean v4.30.0-rc2, Aeneas nightly-2026.07.02 (9dd45ecf) / Charon 40ee060a, rustc 1.99.1, Z3 5.1.0, witness 0.45.0
+      executor: local
+      timestamp: 2026-11-13 17:54:33+00:00
+      version: 771026c + feat/v0.37.0-echo-printer (69dcd03, 178ca47, e8e477e)
+    links:
+      - type: traces-to
+        target: TR-079
+
+  - id: VV-151
+    type: verification-verdict
+    title: "VER-079 pass: echo theorems axiom-clean over a byte-identical regen; five mutations break lake build; Z3 echo leg 0 disagree, controls red; MC/DC rows reach echo_kernel.rs"
+    status: implemented
+    release: v0.37.0
+    description: echo theorems axiom-clean over a byte-identical regen; five mutations break lake build; Z3 echo leg 0 disagree, controls red; MC/DC rows reach echo_kernel.rs
+    fields:
+      evidence: "VE-073: independent regen hashes and lake build at 69dcd03 and 178ca47; nine mutation builds red (4 + 5); echo leg tallies with 0 disagree and 0 Z3-refused; mcdc_gate OK with 72 echo decisions and the zero-decision control red"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-079
+      - type: part-of-execution
+        target: VE-073

@@ -554,6 +554,7 @@ mod tests {
         }
     }
 
+    // rivet: verifies VER-079
     #[test]
     fn echo_leg_agrees_on_every_repository_smt2_file() {
         let scripts = crate::oracle::front::repository_scripts();
@@ -606,6 +607,7 @@ mod tests {
         assert_eq!(prod.compared() + content.compared(), n, "{}", run.report());
     }
 
+    // rivet: verifies VER-079
     #[test]
     fn echo_leg_agrees_on_generated_scripts() {
         generated_run(GEN_SEED, GEN_COUNT);
@@ -620,6 +622,7 @@ mod tests {
 
     /// `echo_ext` over the two seeded sliver corpora (arrays, uninterpreted
     /// functions, every lifted operator).
+    // rivet: verifies VER-079
     #[test]
     fn echo_ext_leg_agrees_on_the_sliver_corpora() {
         let t = Instant::now();
@@ -656,6 +659,7 @@ mod tests {
 
     /// Each echo negative control turns the leg red, and the same queries
     /// agree without it.
+    // rivet: verifies VER-079
     #[test]
     fn every_echo_negative_control_turns_the_leg_red() {
         let scripts = gen_smtlib_text(GEN_SEED, 1_000);
@@ -705,6 +709,7 @@ mod tests {
     }
 
     /// One fixture per outcome class, for the harness itself.
+    // rivet: verifies VER-079
     #[test]
     fn echo_harness_classifies_one_fixture_per_outcome_class() {
         let agree = "(declare-const x (_ BitVec 8))(declare-const |p| Bool)\
