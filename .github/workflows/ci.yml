@@ -219,9 +219,19 @@ jobs:
   wasip2:
     name: Build (wasm32-wasip2)
     runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@stable
+      # Rust 1.100.0's wasm32-wasip2 std imports wasi:cli/exit@0.2.12
+      # `exit-with-code`, an @unstable WASI API: the component does not even
+      # instantiate on wasmtime 27 or 42 without `-S cli-exit-with-code=y`
+      # (measured 2026-11-13, PR #307 run 43370607269). Shipping that would
+      # break every consumer's runtime, so the wasm build stays on 1.99.1
+      # until a stable toolchain stops importing it (#309).
+      - uses: dtolnay/rust-toolchain@1.99.1
+        with:
+          targets: wasm32-wasip2
       - name: Add wasm32-wasip2 target
         run: rustup target add wasm32-wasip2
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
