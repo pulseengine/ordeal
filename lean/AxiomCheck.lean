@@ -335,3 +335,22 @@ import Echo
 /-- info: 'kernel.spec.echo_ext_text_unsat' depends on axioms: [propext, Classical.choice, Quot.sound] -/
 #guard_msgs in
 #print axioms kernel.spec.echo_ext_text_unsat
+
+-- The echoed script is WELL FORMED under every interpretation (`ScriptWF`:
+-- every declaration accepted, every assertion a well-sorted formula), so
+-- the equivalences above are never vacuous.
+/-- info: 'kernel.spec.echo_term_well_sorted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_term_well_sorted
+
+/-- info: 'kernel.spec.echo_term_text_well_sorted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_term_text_well_sorted
+
+/-- info: 'kernel.spec.echo_ext_well_sorted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_ext_well_sorted
+
+/-- info: 'kernel.spec.echo_ext_text_well_sorted' depends on axioms: [propext, Classical.choice, Quot.sound] -/
+#guard_msgs in
+#print axioms kernel.spec.echo_ext_text_well_sorted

@@ -672,8 +672,9 @@ Aeneas): bytes go into a `Vec<u8>`, names come from byte arenas. A name is
 always quoted; a constant is `#b` and exactly `w` digits, most significant
 first; there is one symbol per `DagNode` arm; a rotate is the indexed form
 for a constant amount. It refuses (`EchoError`, never a verdict) a list
-that is not well formed, a name SMT-LIB cannot quote or that is a reserved
-word or collides with another name, a sort mismatch between formulas and
+that is not well formed, a name SMT-LIB cannot quote, that starts with `@`
+or `.`, that is a reserved word, a theory symbol or a common solver
+builtin, or that collides with another name, a sort mismatch between formulas and
 bitvector terms, a rotate by a term, an operator node shared by two
 parents, and a function called at two signatures.
 
@@ -710,7 +711,23 @@ assignment, array and function interpretations read off `I` through the
 tables) and `echo_ext_unsat_sound` (composed with
 `check_sliver_unsat_sound`), each with a form over the bytes
 (`echo_term_text_sound`, `echo_text_unsat`, `echo_ext_text_sound`,
-`echo_ext_text_unsat`: `TextSat I out.val`, the text read by `lex`). The
+`echo_ext_text_unsat`: `TextSat I out.val`, the text read by `lex`).
+
+An equivalence between "satisfied" and "roots true" would also hold for
+a script that is not SMT-LIB at all whenever the roots are unsatisfiable:
+both sides are then false. So well-sortedness is exported on its own:
+
+```lean
+theorem echo_term_well_sorted … (h : echo_term … = ok (Ok out)) :
+    ∃ cs, out.val = renderScript cs ∧ PrintableL cs ∧ ∀ I : Interp, ScriptWF I cs
+theorem echo_term_text_well_sorted … : ∀ I : Interp, TextWF I out.val
+```
+
+and `echo_ext_well_sorted` / `echo_ext_text_well_sorted` likewise.
+`ScriptWF` is `ScriptSat` with "the assertion is true" replaced by "the
+assertion denotes some truth value": the logic is one of the three, every
+declaration is accepted by the model's rules, every assertion is a
+well-sorted formula under the declarations before it. The
 walk over node indices is a `partial_fixpoint` definition proved by strong
 induction on the index (operands are earlier nodes, by `ext_wf`), one case
 per `DagNode` arm.
@@ -940,7 +957,11 @@ import Echo
 #print axioms kernel.spec.echo_ext_sound
 #print axioms kernel.spec.echo_ext_text_sound
 #print axioms kernel.spec.echo_ext_unsat_sound
-#print axioms kernel.spec.echo_ext_text_unsat' > /tmp/ax.lean
+#print axioms kernel.spec.echo_ext_text_unsat
+#print axioms kernel.spec.echo_term_well_sorted
+#print axioms kernel.spec.echo_term_text_well_sorted
+#print axioms kernel.spec.echo_ext_well_sorted
+#print axioms kernel.spec.echo_ext_text_well_sorted' > /tmp/ax.lean
 lake env lean /tmp/ax.lean          # inspect the axiom lists (three standard axioms each)
 lake build AxiomCheck               # the pinned lists, as a gate
 grep -c '^axiom' Kernel.lean        # expect 0 (CI-gated)

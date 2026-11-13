@@ -17,6 +17,10 @@
      (`arrsOf`) and the function interpretation (`ufsOf`) read off that
      interpretation through the tables. `echo_ext_text_sound` /
      `echo_term_text_sound` are the same over the bytes (`TextSat`).
+   * `echo_ext_well_sorted` / `echo_term_well_sorted` (and the `_text_`
+     forms): that script is WELL FORMED under every interpretation
+     (`ScriptWF`) — every declaration accepted, every assertion a
+     well-sorted formula — so the equivalence above is never vacuous.
    * `echo_ext_unsat_sound` / `echo_unsat_sound` (and `echo_ext_text_unsat`
      / `echo_text_unsat`): composed with the UNCHANGED sliver and term
      capstones, an accepted `unsat` certificate makes the echoed script
@@ -32,7 +36,7 @@
    * The reader: `lex_sexp` / `parse_sexp` by structural recursion over
      the S-expression, then `lex_render`.
    * Names: `is_reserved` is the model's `reservedWords` (the kernel's
-     four tables are that list, by `rfl`); `table_ok` gives `EntryGood` —
+     five tables are that list, by `rfl`); `table_ok` gives `EntryGood` —
      every name in range, quotable, not reserved, distinct from every
      earlier name of its table and of the tables before it — hence
      `Good.names_distinct`: SMT-LIB's one namespace.
@@ -1095,6 +1099,17 @@ theorem textSat_render (I : Interp) (cs : List SExp) (h : PrintableL cs) :
   · intro hs
     exact ⟨cs, rfl, hs⟩
 
+theorem textWF_render (I : Interp) (cs : List SExp) (h : PrintableL cs) :
+    TextWF I (renderScript cs) ↔ ScriptWF I cs := by
+  unfold TextWF
+  rw [lex_render cs h]
+  constructor
+  · rintro ⟨cs', hcs, hs⟩
+    cases hcs
+    exact hs
+  · intro hs
+    exact ⟨cs, rfl, hs⟩
+
 /- ══════════════════ RESERVED WORDS ══════════════════ -/
 
 /-- A short byte string as a slice. -/
@@ -1175,6 +1190,12 @@ def resWords3 : List (Slice Std.U8) := [
   lw (bytes "bvult"), lw (bytes "bvule"), lw (bytes "bvugt"), lw (bytes "bvuge"),
   lw (bytes "bvslt"), lw (bytes "bvsle"), lw (bytes "bvsgt"), lw (bytes "bvsge")]
 
+def resWords4 : List (Slice Std.U8) := [
+  lw (bytes "bvnego"), lw (bytes "bvuaddo"), lw (bytes "bvsaddo"), lw (bytes "bvumulo"),
+  lw (bytes "bvsmulo"), lw (bytes "bvusubo"), lw (bytes "bvssubo"), lw (bytes "bvsdivo"),
+  lw (bytes "lambda"), lw (bytes "define-const"), lw (bytes "bvredor"), lw (bytes "bvredand"),
+  lw (bytes "bv2int"), lw (bytes "int2bv"), lw (bytes "bv2nat"), lw (bytes "nat2bv")]
+
 set_option maxRecDepth 100000 in
 theorem reserved_0_eq (a : Slice Std.U8) (s l : Std.Usize) :
     kernel.echo_kernel.reserved_0 a s l = anyWord a s l resWords0 := rfl
@@ -1192,9 +1213,14 @@ theorem reserved_3_eq (a : Slice Std.U8) (s l : Std.Usize) :
     kernel.echo_kernel.reserved_3 a s l = anyWord a s l resWords3 := rfl
 
 set_option maxRecDepth 100000 in
-/-- The model's list is the kernel's four tables, in order. -/
+theorem reserved_4_eq (a : Slice Std.U8) (s l : Std.Usize) :
+    kernel.echo_kernel.reserved_4 a s l = anyWord a s l resWords4 := rfl
+
+set_option maxRecDepth 100000 in
+/-- The model's list is the kernel's five tables, in order. -/
 theorem reservedWords_eq :
-    reservedWords = (resWords0 ++ resWords1 ++ resWords2 ++ resWords3).map (·.val) := rfl
+    reservedWords
+      = (resWords0 ++ resWords1 ++ resWords2 ++ resWords3 ++ resWords4).map (·.val) := rfl
 
 /-- **`is_reserved` is complete for the model's list**: a name it passes
     is not a reserved word or a theory symbol. -/
@@ -1215,23 +1241,49 @@ theorem is_reserved_ok {a : Slice Std.U8} {s l : Std.Usize} {r : Bool}
       split at h
       · cases h
       · rename_i hb2
-        rw [reserved_0_eq] at h0
-        rw [reserved_1_eq] at h1
-        rw [reserved_2_eq] at h2
-        rw [reserved_3_eq] at h
-        have k0 := anyWord_ok a s l hr _ _ h0 (by simpa using hb0)
-        have k1 := anyWord_ok a s l hr _ _ h1 (by simpa using hb1)
-        have k2 := anyWord_ok a s l hr _ _ h2 (by simpa using hb2)
-        have k3 := anyWord_ok a s l hr _ _ h rfl
-        rw [reservedWords_eq]
-        intro hmem
-        obtain ⟨w, hw, hwv⟩ := List.mem_map.mp hmem
-        simp only [List.mem_append] at hw
-        rcases hw with ((hw | hw) | hw) | hw
-        · exact k0 w hw hwv.symm
-        · exact k1 w hw hwv.symm
-        · exact k2 w hw hwv.symm
-        · exact k3 w hw hwv.symm
+        obtain ⟨b3, h3, h⟩ := bind_ok_inv h
+        split at h
+        · cases h
+        · rename_i hb3
+          rw [reserved_0_eq] at h0
+          rw [reserved_1_eq] at h1
+          rw [reserved_2_eq] at h2
+          rw [reserved_3_eq] at h3
+          rw [reserved_4_eq] at h
+          have k0 := anyWord_ok a s l hr _ _ h0 (by simpa using hb0)
+          have k1 := anyWord_ok a s l hr _ _ h1 (by simpa using hb1)
+          have k2 := anyWord_ok a s l hr _ _ h2 (by simpa using hb2)
+          have k3 := anyWord_ok a s l hr _ _ h3 (by simpa using hb3)
+          have k4 := anyWord_ok a s l hr _ _ h rfl
+          rw [reservedWords_eq]
+          intro hmem
+          obtain ⟨w, hw, hwv⟩ := List.mem_map.mp hmem
+          simp only [List.mem_append] at hw
+          rcases hw with (((hw | hw) | hw) | hw) | hw
+          · exact k0 w hw hwv.symm
+          · exact k1 w hw hwv.symm
+          · exact k2 w hw hwv.symm
+          · exact k3 w hw hwv.symm
+          · exact k4 w hw hwv.symm
+
+/-- `first_ok` accepts only a name whose first byte is neither `@` nor
+    `.` (the symbols SMT-LIB reserves for solvers). -/
+theorem first_ok_ok {arena : Slice Std.U8} {s : Std.Usize} {r : Bool}
+    (h : kernel.echo_kernel.first_ok arena s = ok r) (hr : r = true) :
+    arena.val.getD s.val 0#u8 ≠ cAt ∧ arena.val.getD s.val 0#u8 ≠ cDot := by
+  unfold kernel.echo_kernel.first_ok at h
+  (try dsimp only at h)
+  subst hr
+  split at h
+  · cases h
+  · obtain ⟨c, hc, h⟩ := bind_ok_inv h
+    obtain ⟨_, hcv⟩ := slice_index_ok hc
+    rw [← hcv 0#u8]
+    split at h
+    · rename_i h1
+      have h2 : (c != 46#u8) = true := by simpa using h
+      exact ⟨by simpa [cAt] using h1, by simpa [cDot] using h2⟩
+    · cases h
 
 /- ══════════════════ NAME TABLES ══════════════════ -/
 
@@ -1378,6 +1430,12 @@ theorem entry_ok_ok {arena : Slice Std.U8} {starts lens : Slice Std.Usize}
         split at h
         · rename_i hbt
           obtain ⟨hin, hq⟩ := bytes_ok_ok hb hbt
+          obtain ⟨bf, hbf, h⟩ := bind_ok_inv h
+          split at h
+          rotate_left
+          · cases h
+          rename_i hbft
+          obtain ⟨hf1, hf2⟩ := first_ok_ok hbf hbft
           obtain ⟨b1, hb1, h⟩ := bind_ok_inv h
           split at h
           · cases h
@@ -1408,7 +1466,19 @@ theorem entry_ok_ok {arena : Slice Std.U8} {starts lens : Slice Std.Usize}
                     exact hin
                   refine ⟨hks, hein, ?_, ?_, ?_, ?_⟩
                   · rw [hname]
-                    refine ⟨?_, hq, hres⟩
+                    have hl0' : l.val ≠ 0 := by
+                      intro h0
+                      exact hl0 (UScalar.eq_of_val_eq (by simpa using h0))
+                    have hh : (nameAt arena.val s.val l.val).head?
+                        = some (arena.val.getD s.val 0#u8) := by
+                      unfold nameAt
+                      rw [List.head?_take, if_neg hl0', List.head?_eq_getElem?, List.getElem?_drop,
+                        Nat.add_zero, List.getD_eq_getElem?_getD,
+                        List.getElem?_eq_getElem (by omega)]
+                      rfl
+                    refine ⟨?_, hq, hres,
+                      by rw [hh]; intro hc; exact hf1 (Option.some.inj hc),
+                      by rw [hh]; intro hc; exact hf2 (Option.some.inj hc)⟩
                     intro hc
                     have hlen' := nameAt_length arena.val s.val l.val hin
                     rw [hc] at hlen'
@@ -3885,6 +3955,93 @@ theorem scriptSat_iff (I : Interp) (logic : List Std.U8) (sg : Sig) (ts : List S
   · intro h
     exact ⟨by first | rfl | trivial, hl, hdecl.mpr (hass.mpr h)⟩
 
+/- ── the same three steps for `BodyWF`: well formed, satisfied or not ── -/
+
+theorem bodyWF_decl_step (I : Interp) (logic : List Std.U8) (sg : Sig) (n : List Std.U8)
+    (d : Decl) (rest : List SExp) (hrest : rest ≠ []) (hwf : DeclWF d) :
+    BodyWF I logic sg (declE (n, d) :: rest) ↔
+      (nameOk n ∧ sg.get n = none ∧ logicAllows logic d ∧ BodyWF I logic (sg ++ [(n, d)]) rest)
+      := by
+  rw [BodyWF]
+  · simp only [declOf_declE n d hwf, hrest, false_and, false_or, ne_eq, not_false_eq_true,
+      true_and]
+  · intro a t hc
+    cases d <;> simp [declE] at hc
+
+theorem bodyWF_assert_step (I : Interp) (logic : List Std.U8) (sg : Sig) (t : SExp)
+    (rest : List SExp) (hrest : rest ≠ []) :
+    BodyWF I logic sg (assertE t :: rest) ↔
+      ((∃ b, den I sg t = some (.bool b)) ∧ BodyWF I logic sg rest) := by
+  unfold assertE
+  rw [BodyWF]
+  simp only [declOf_assert', hrest, false_and, false_or, ne_eq, not_false_eq_true, true_and]
+
+theorem bodyWF_end (I : Interp) (logic : List Std.U8) (sg : Sig) :
+    BodyWF I logic sg [checkSatE] := by
+  rw [BodyWF]
+  · exact Or.inl ⟨rfl, rfl⟩
+  · intro a t hc
+    simp [checkSatE] at hc
+
+theorem bodyWF_decls (I : Interp) (logic : List Std.U8) : ∀ (ds sg0 : Sig) (rest : List SExp),
+    rest ≠ [] →
+    (∀ p ∈ ds, DeclWF p.2 ∧ nameOk p.1 ∧ logicAllows logic p.2) →
+    ((sg0 ++ ds).map Prod.fst).Pairwise (· ≠ ·) →
+    (BodyWF I logic sg0 (ds.map declE ++ rest) ↔ BodyWF I logic (sg0 ++ ds) rest)
+  | [], sg0, rest, _, _, _ => by simp
+  | (n, d) :: ds, sg0, rest, hrest, hd, hn => by
+    have hp := hd (n, d) (by simp)
+    have hne : ds.map declE ++ rest ≠ [] := by
+      intro hc
+      exact hrest (List.append_eq_nil_iff.mp hc).2
+    have hget : sg0.get n = none := by
+      apply Sig.get_none
+      intro p hp' hc
+      rw [List.map_append, List.pairwise_append] at hn
+      exact hn.2.2 p.1 (List.mem_map.mpr ⟨p, hp', rfl⟩) n (by simp) hc
+    have hn' : ((sg0 ++ [(n, d)] ++ ds).map Prod.fst).Pairwise (· ≠ ·) := by
+      rw [List.append_assoc]
+      exact hn
+    have ih := bodyWF_decls I logic ds (sg0 ++ [(n, d)]) rest hrest
+      (fun p hp' => hd p (by simp [hp'])) hn'
+    rw [List.append_assoc] at ih
+    rw [List.map_cons, List.cons_append, bodyWF_decl_step I logic sg0 n d _ hne hp.1, ih]
+    constructor
+    · intro h
+      exact h.2.2.2
+    · intro h
+      exact ⟨hp.2.1, hget, hp.2.2, h⟩
+
+theorem bodyWF_asserts (I : Interp) (logic : List Std.U8) (sg : Sig) : ∀ (ts : List SExp),
+    (BodyWF I logic sg (ts.map assertE ++ [checkSatE]) ↔
+      ∀ t ∈ ts, ∃ b, den I sg t = some (.bool b))
+  | [] => by
+    simp only [List.map_nil, List.nil_append, List.not_mem_nil, false_imp_iff, implies_true,
+      iff_true]
+    exact bodyWF_end I logic sg
+  | t :: ts => by
+    have hne : ts.map assertE ++ [checkSatE] ≠ [] := by simp
+    rw [List.map_cons, List.cons_append, bodyWF_assert_step I logic sg t _ hne,
+      bodyWF_asserts I logic sg ts]
+    simp
+
+/-- **A printed script is well formed exactly when each of its assertions
+    is a well-sorted formula under its signature** — given the
+    declarations are ones SMT-LIB accepts. -/
+theorem scriptWF_iff (I : Interp) (logic : List Std.U8) (sg : Sig) (ts : List SExp)
+    (hl : logic = bytes "QF_BV" ∨ logic = bytes "QF_ABV" ∨ logic = bytes "QF_AUFBV")
+    (hd : ∀ p ∈ sg, DeclWF p.2 ∧ nameOk p.1 ∧ logicAllows logic p.2)
+    (hn : (sg.map Prod.fst).Pairwise (· ≠ ·)) :
+    ScriptWF I (scriptOf logic sg ts) ↔ ∀ t ∈ ts, ∃ b, den I sg t = some (.bool b) := by
+  have hdecl := bodyWF_decls I logic sg [] (ts.map assertE ++ [checkSatE]) (by simp) hd hn
+  have hass := bodyWF_asserts I logic sg ts
+  simp only [scriptOf, setLogicE, ScriptWF]
+  constructor
+  · rintro ⟨_, _, hb⟩
+    exact hass.mp (hdecl.mp hb)
+  · intro h
+    exact ⟨by first | rfl | trivial, hl, hdecl.mpr (hass.mpr h)⟩
+
 /- ══════════════════ THE SCRIPT (kernel) ══════════════════ -/
 
 theorem render_declE_bv (n : List Std.U8) (w : Nat) :
@@ -4943,6 +5100,59 @@ theorem echo_ext_text_sound (e : Slice ExtNode) (ebits : Slice Bool)
   rw [hout, textSat_render I cs hp]
   exact hiff I
 
+/-- **THE ECHO IS WELL SORTED (extended queries)**: an accepted `echo_ext`
+    returned the text of a script the reader reads back and that is WELL
+    FORMED under every interpretation — its logic is one the model knows,
+    every declaration is accepted (a fresh, quotable, unreserved name at a
+    well-formed sort the logic allows), and every assertion is a
+    well-sorted formula under the declarations before it. So the
+    equivalence of `echo_ext_sound` is never vacuous: when the script is
+    not satisfied, it is because an assertion is FALSE, not because the
+    script is not a script. -/
+theorem echo_ext_well_sorted (e : Slice ExtNode) (ebits : Slice Bool)
+    (eside eroots : Slice Std.Usize)
+    (names : Slice Std.U8) (name_start name_len var_node var_width : Slice Std.Usize)
+    (anames : Slice Std.U8) (aname_start aname_len : Slice Std.Usize)
+    (fnames : Slice Std.U8) (fname_start fname_len func_width : Slice Std.Usize)
+    (out : alloc.vec.Vec Std.U8)
+    (h : kernel.echo_kernel.echo_ext e ebits eside eroots names name_start name_len var_node
+      var_width anames aname_start aname_len fnames fname_start fname_len func_width
+        = ok (core.result.Result.Ok out)) :
+    ∃ cs, out.val = renderScript cs ∧ PrintableL cs ∧ ∀ I : Interp, ScriptWF I cs := by
+  obtain ⟨ws, ts, H, hlen, hout, hden, hdwf⟩ := echo_ext_ok e ebits eside eroots names name_start
+    name_len var_node var_width anames aname_start aname_len fnames fname_start fname_len
+    func_width out h
+  (try dsimp only at H hout hden hdwf)
+  generalize hc : (⟨e, ebits, eside, ws, names, name_start, name_len, var_node, var_width,
+    anames, aname_start, aname_len, fnames, fname_start, fname_len, func_width⟩ : EchoIn) = c
+    at H hout hden hdwf
+  have hla := logic_allows c H
+  refine ⟨scriptOf (logicOf c) c.sg ts, hout,
+    printable_script c H ts (fun j hj => (hden j hj).1), fun I => ?_⟩
+  rw [scriptWF_iff I (logicOf c) c.sg ts hla.1
+    (fun p hp => ⟨hdwf p hp, (hla.2 p hp).1, (hla.2 p hp).2⟩) H.names_distinct]
+  intro t ht
+  obtain ⟨k, hk', rfl⟩ := List.mem_iff_getElem.mp ht
+  exact ⟨_, (hden k hk').2 I⟩
+
+/-- The same, for the text: it reads as a well-formed script. -/
+theorem echo_ext_text_well_sorted (e : Slice ExtNode) (ebits : Slice Bool)
+    (eside eroots : Slice Std.Usize)
+    (names : Slice Std.U8) (name_start name_len var_node var_width : Slice Std.Usize)
+    (anames : Slice Std.U8) (aname_start aname_len : Slice Std.Usize)
+    (fnames : Slice Std.U8) (fname_start fname_len func_width : Slice Std.Usize)
+    (out : alloc.vec.Vec Std.U8)
+    (h : kernel.echo_kernel.echo_ext e ebits eside eroots names name_start name_len var_node
+      var_width anames aname_start aname_len fnames fname_start fname_len func_width
+        = ok (core.result.Result.Ok out)) :
+    ∀ I : Interp, TextWF I out.val := by
+  obtain ⟨cs, hout, hp, hwf⟩ := echo_ext_well_sorted e ebits eside eroots names name_start
+    name_len var_node var_width anames aname_start aname_len fnames fname_start fname_len
+    func_width out h
+  intro I
+  rw [hout, textWF_render I cs hp]
+  exact hwf I
+
 /-- **THE UNSAT CAPSTONE (extended queries)**: an accepted echo, an
     accepted sliver check, an accepted term check and an accepted query
     re-check make the echoed script unsatisfiable — NO SMT-LIB
@@ -5084,6 +5294,34 @@ theorem echo_term_text_sound (t : Slice blast_kernel.DagNode) (tbits : Slice Boo
   intro I
   rw [hout, textSat_render I cs hp]
   exact hiff I
+
+/-- **THE ECHO IS WELL SORTED (terms)**: an accepted `echo_term` returned
+    the text of a script the reader reads back and that is well formed
+    under every interpretation (`echo_ext_well_sorted`, for a closed
+    list). -/
+theorem echo_term_well_sorted (t : Slice blast_kernel.DagNode) (tbits : Slice Bool)
+    (troots : Slice Std.Usize) (names : Slice Std.U8)
+    (name_start name_len var_node var_width : Slice Std.Usize) (out : alloc.vec.Vec Std.U8)
+    (h : kernel.echo_kernel.echo_term t tbits troots names name_start name_len var_node var_width
+      = ok (core.result.Result.Ok out)) :
+    ∃ cs, out.val = renderScript cs ∧ PrintableL cs ∧ ∀ I : Interp, ScriptWF I cs := by
+  unfold kernel.echo_kernel.echo_term at h
+  obtain ⟨nodes, hnodes, h⟩ := bind_ok_inv h
+  (try dsimp only at h)
+  exact echo_ext_well_sorted _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ out h
+
+/-- The same, for the text: it reads as a well-formed script. -/
+theorem echo_term_text_well_sorted (t : Slice blast_kernel.DagNode) (tbits : Slice Bool)
+    (troots : Slice Std.Usize) (names : Slice Std.U8)
+    (name_start name_len var_node var_width : Slice Std.Usize) (out : alloc.vec.Vec Std.U8)
+    (h : kernel.echo_kernel.echo_term t tbits troots names name_start name_len var_node var_width
+      = ok (core.result.Result.Ok out)) :
+    ∀ I : Interp, TextWF I out.val := by
+  obtain ⟨cs, hout, hp, hwf⟩ := echo_term_well_sorted t tbits troots names name_start name_len
+    var_node var_width out h
+  intro I
+  rw [hout, textWF_render I cs hp]
+  exact hwf I
 
 /-- **THE UNSAT CAPSTONE (terms)**: an accepted echo, an accepted term
     check and an accepted query re-check make the echoed script

@@ -32,7 +32,10 @@
      commands are read in order, a declaration must be fresh, well
      sorted, allowed by the logic and not a reserved word; an assertion
      must be well sorted under the declarations so far and true.
-   * `TextSat` — the same for a text: it lexes to a satisfied script. -/
+   * `TextSat` — the same for a text: it lexes to a satisfied script.
+   * `ScriptWF` / `TextWF` — the script is well formed whether or not it
+     is satisfied: the same reading with "the assertion is true" replaced
+     by "the assertion is a well-sorted formula". -/
 import BlasterDag
 
 open Aeneas Aeneas.Std
@@ -70,6 +73,8 @@ def cBar : U8 := 124#u8
 def cBsl : U8 := 92#u8
 def cHash : U8 := 35#u8
 def cB : U8 := 98#u8
+def cAt : U8 := 64#u8
+def cDot : U8 := 46#u8
 def c0 : U8 := 48#u8
 def c1 : U8 := 49#u8
 
@@ -372,8 +377,10 @@ end
 /-- The words a declared name may not be: SMT-LIB 2.6's reserved words
     (§3.1: the general ones, then the command names), then the symbols of
     the theories and logics a script is read in — Core, the logic names,
-    ArraysEx, FixedSizeBitVectors and QF_BV's extensions. `|w|` is the
-    symbol `w`, so quoting does not make these free. -/
+    ArraysEx, FixedSizeBitVectors and QF_BV's extensions — then SMT-LIB
+    2.7's additions (the overflow predicates, `lambda`, `define-const`)
+    and common solver builtins a declaration would clash with. `|w|` is
+    the symbol `w`, so quoting does not make these free. -/
 def reservedWords : List (List U8) := [
   bytes "!", bytes "_", bytes "as", bytes "BINARY", bytes "DECIMAL", bytes "exists",
   bytes "HEXADECIMAL", bytes "forall", bytes "let", bytes "match", bytes "NUMERAL", bytes "par",
@@ -395,14 +402,21 @@ def reservedWords : List (List U8) := [
   bytes "bvnor", bytes "bvxnor", bytes "bvcomp", bytes "bvadd", bytes "bvsub", bytes "bvmul",
   bytes "bvudiv", bytes "bvurem", bytes "bvsdiv", bytes "bvsrem", bytes "bvsmod", bytes "bvshl",
   bytes "bvlshr", bytes "bvashr", bytes "bvult", bytes "bvule", bytes "bvugt", bytes "bvuge",
-  bytes "bvslt", bytes "bvsle", bytes "bvsgt", bytes "bvsge"]
+  bytes "bvslt", bytes "bvsle", bytes "bvsgt", bytes "bvsge",
+  bytes "bvnego", bytes "bvuaddo", bytes "bvsaddo", bytes "bvumulo", bytes "bvsmulo",
+  bytes "bvusubo", bytes "bvssubo", bytes "bvsdivo", bytes "lambda", bytes "define-const",
+  bytes "bvredor", bytes "bvredand", bytes "bv2int", bytes "int2bv", bytes "bv2nat",
+  bytes "nat2bv"]
 
 /-- A byte of a quoted symbol: printable ASCII other than `|` and `\`. -/
 def quotable (c : U8) : Prop := 32 ≤ c.val ∧ c.val ≤ 126 ∧ c ≠ cBar ∧ c ≠ cBsl
 
 /-- A name a script may declare: non-empty, of quotable bytes, not a
-    reserved word or a theory symbol. -/
-def nameOk (n : List U8) : Prop := n ≠ [] ∧ (∀ c ∈ n, quotable c) ∧ n ∉ reservedWords
+    reserved word, a theory symbol or a solver builtin, and not starting
+    with `@` or `.` (SMT-LIB 2.6 §3.1 reserves those symbols for solvers). -/
+def nameOk (n : List U8) : Prop :=
+  n ≠ [] ∧ (∀ c ∈ n, quotable c) ∧ n ∉ reservedWords ∧
+    n.head? ≠ some cAt ∧ n.head? ≠ some cDot
 
 /-- The sort `(_ BitVec w)`, `w ≥ 1`. -/
 def bvSort : SExp → Option Nat
@@ -481,5 +495,38 @@ def ScriptSat (I : Interp) : List SExp → Prop
     script. -/
 def TextSat (I : Interp) (text : List U8) : Prop :=
   ∃ cs, lex text = some cs ∧ ScriptSat I cs
+
+/-- The body of a script is WELL FORMED: `BodySat` with "true" dropped.
+    A declaration is of a fresh, allowed name, as there; an assertion is
+    well sorted under the signature so far — it denotes SOME truth value;
+    the last command is `(check-sat)`. -/
+def BodyWF (I : Interp) (logic : List U8) : Sig → List SExp → Prop
+  | _, [] => False
+  | sg, c :: rest =>
+    (rest = [] ∧ c = .list [.sym (bytes "check-sat")]) ∨
+    (rest ≠ [] ∧
+      match declOf c with
+      | some (n, d) =>
+        nameOk n ∧ sg.get n = none ∧ logicAllows logic d ∧ BodyWF I logic (sg ++ [(n, d)]) rest
+      | none =>
+        match c with
+        | .list [.sym a, t] =>
+          a = bytes "assert" ∧ (∃ b, den I sg t = some (.bool b)) ∧ BodyWF I logic sg rest
+        | _ => False)
+
+/-- **A script is well formed**: it is a script of this model — the logic
+    is one of the three, every declaration is accepted, every assertion
+    is a well-sorted formula — whether or not the interpretation
+    satisfies it. -/
+def ScriptWF (I : Interp) : List SExp → Prop
+  | .list [.sym c, .sym logic] :: rest =>
+    c = bytes "set-logic" ∧
+      (logic = bytes "QF_BV" ∨ logic = bytes "QF_ABV" ∨ logic = bytes "QF_AUFBV") ∧
+      BodyWF I logic [] rest
+  | _ => False
+
+/-- **A text is well formed**: it reads as a well-formed script. -/
+def TextWF (I : Interp) (text : List U8) : Prop :=
+  ∃ cs, lex text = some cs ∧ ScriptWF I cs
 
 end kernel.spec.smt

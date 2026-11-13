@@ -36,8 +36,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   proves the printer against it: `lex_render`, `echo_term_sound` /
   `echo_ext_sound` (the printed script is satisfied by an interpretation
   exactly when the node list's roots are) and `echo_unsat_sound` /
-  `echo_ext_unsat_sound` (composed with the term and sliver capstones), all
-  pinned in `AxiomCheck.lean`. Nothing calls the printer yet: bundle format
+  `echo_ext_unsat_sound` (composed with the term and sliver capstones), and
+  `echo_term_well_sorted` / `echo_ext_well_sorted` (the printed script is
+  well formed under every interpretation, so the equivalence is never
+  vacuous), all pinned in `AxiomCheck.lean`. A declared name may not be a
+  reserved word, a theory symbol (SMT-LIB 2.7's included) or a common
+  solver builtin, and may not start with `@` or `.`. Nothing calls the printer yet: bundle format
   v5, the recheck rows and the CLI flag are phase E2, and the trusted base
   is unchanged.
 

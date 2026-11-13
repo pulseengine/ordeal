@@ -328,7 +328,26 @@ theorems above is kept; the shapes moved where the proof asked for it:
 - **The reserved list** is a superset of "printed vocabulary + reserved
   words": it also has the Core and QF_BV symbols the printer never emits
   (`true`, `false`, `=>`, `xor`, `Bool`, `bvnand`, `bvcomp`, `bvsmod`,
-  `repeat`, …), since `|true|` is the symbol `true` to a solver.
+  `repeat`, …), since `|true|` is the symbol `true` to a solver. It also
+  has SMT-LIB 2.7's additions (`bvnego`, `bvuaddo`, `bvsaddo`,
+  `bvumulo`, `bvsmulo`, `bvusubo`, `bvssubo`, `bvsdivo`, `lambda`,
+  `define-const`) and solver builtins a declaration would clash with
+  (`bvredor`, `bvredand`, `bv2int`, `int2bv`, `bv2nat`, `nat2bv`). A
+  name that starts with `@` or `.` is refused: SMT-LIB 2.6 §3.1
+  reserves those symbols for solvers.
+- **Well-sortedness is exported** (follow-up, 2026-11-13). For an
+  unsatisfiable list both sides of `ScriptSat I cs ↔ roots true` are
+  false, so that statement alone would also hold for an ill-sorted
+  script. `echo_term_well_sorted` / `echo_ext_well_sorted` say
+  `∃ cs, out.val = renderScript cs ∧ PrintableL cs ∧ ∀ I, ScriptWF I cs`,
+  and `echo_*_text_well_sorted` say `∀ I, TextWF I out.val`. `ScriptWF`
+  (EchoSpec.lean) is `ScriptSat` with "the assertion is true" replaced by
+  `∃ b, den I sg t = some (.bool b)`, `sg` the signature read so far:
+  the logic is one of the three, every declaration is a fresh,
+  quotable, unreserved name at a well-formed sort the logic allows,
+  every assertion is a well-sorted formula. The `cs` of the two
+  theorems is the same script: `lex_render` makes `renderScript`
+  injective on printable scripts, and the text forms need no `cs`.
 - **The sharing guard** (`unshared`) is a resource guard with no theorem.
   It counts every use in the list, reachable or not, and each root.
 - **Not in E1:** the echo leg of the differential (§6) and the size and

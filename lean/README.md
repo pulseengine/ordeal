@@ -383,6 +383,8 @@ list against the directory, both ways.
 - `Echo.lean` — the printer `kernel::echo_kernel` against that model:
   `lex_render`, `echo_term_sound` / `echo_ext_sound` (the printed script
   is satisfied exactly when the node list's roots are),
+  `echo_term_well_sorted` / `echo_ext_well_sorted` (that script is well
+  formed under every interpretation, so the equivalence is not vacuous),
   `echo_unsat_sound` / `echo_ext_unsat_sound` (composed with the term and
   sliver capstones) and their text forms. Default target.
 - `AxiomCheck.lean` — the `#guard_msgs`-pinned `#print axioms` of every

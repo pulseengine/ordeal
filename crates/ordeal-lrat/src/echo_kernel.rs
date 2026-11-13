@@ -39,7 +39,8 @@
 //! The printer is not on the verdict path: a refusal ([`EchoError`]) means
 //! "no echo", never a verdict. It refuses a list that is not well formed
 //! ([`ext_wf`]); a name that is empty, has a byte outside `0x20..=0x7E` or
-//! a `|` or `\`, equals a reserved word or a theory symbol
+//! a `|` or `\`, starts with `@` or `.` (reserved for solvers), equals a
+//! reserved word, a theory symbol or a common solver builtin
 //! ([`is_reserved`]) or collides with another name in any of the three
 //! tables (SMT-LIB has one namespace); a boolean node where a bitvector is
 //! expected or the reverse; a `Var` node the table does not name at its
@@ -71,8 +72,9 @@ pub enum EchoError {
     /// in length, a root is not a node, or a `select` / call names an
     /// array / function outside its table.
     Malformed,
-    /// A name is empty, has a byte SMT-LIB's quoted symbols exclude, is a
-    /// reserved word or a theory symbol, or collides with another name.
+    /// A name is empty, has a byte SMT-LIB's quoted symbols exclude, starts
+    /// with `@` or `.`, is a reserved word or a theory symbol, or collides
+    /// with another name.
     Name,
     /// A boolean node where a bitvector is expected, or the reverse.
     Sort,
@@ -213,7 +215,8 @@ fn push_sort(out: &mut Vec<u8>, w: usize) {
 // SMT-LIB 2.6 makes `|w|` and `w` the same symbol. The reserved words of
 // §3.1 (general and command names), then the symbols of the theories and
 // the logic the script is read in (Core, FixedSizeBitVectors, ArraysEx,
-// QF_BV's extensions) and the logic names. `lean/EchoSpec.lean` carries
+// QF_BV's extensions) and the logic names, then SMT-LIB 2.7's additions
+// and common solver builtins. `lean/EchoSpec.lean` carries
 // the same list (`reservedWords`); `is_reserved_ok` (`lean/Echo.lean`)
 // proves a name this function passes is not on it.
 
@@ -329,9 +332,45 @@ fn reserved_3(a: &[u8], s: usize, l: usize) -> bool {
         || word_is(a, s, l, b"bvsge")
 }
 
+/// SMT-LIB 2.7's additions (the overflow predicates, `lambda`,
+/// `define-const`) and solver builtins a declaration would clash with.
+fn reserved_4(a: &[u8], s: usize, l: usize) -> bool {
+    word_is(a, s, l, b"bvnego")
+        || word_is(a, s, l, b"bvuaddo")
+        || word_is(a, s, l, b"bvsaddo")
+        || word_is(a, s, l, b"bvumulo")
+        || word_is(a, s, l, b"bvsmulo")
+        || word_is(a, s, l, b"bvusubo")
+        || word_is(a, s, l, b"bvssubo")
+        || word_is(a, s, l, b"bvsdivo")
+        || word_is(a, s, l, b"lambda")
+        || word_is(a, s, l, b"define-const")
+        || word_is(a, s, l, b"bvredor")
+        || word_is(a, s, l, b"bvredand")
+        || word_is(a, s, l, b"bv2int")
+        || word_is(a, s, l, b"int2bv")
+        || word_is(a, s, l, b"bv2nat")
+        || word_is(a, s, l, b"nat2bv")
+}
+
 /// Is the name `a[s .. s + l]` a reserved word or a theory symbol?
 fn is_reserved(a: &[u8], s: usize, l: usize) -> bool {
-    reserved_0(a, s, l) || reserved_1(a, s, l) || reserved_2(a, s, l) || reserved_3(a, s, l)
+    reserved_0(a, s, l)
+        || reserved_1(a, s, l)
+        || reserved_2(a, s, l)
+        || reserved_3(a, s, l)
+        || reserved_4(a, s, l)
+}
+
+/// Does the name starting at `arena[s]` start with a byte other than `@`
+/// and `.`? SMT-LIB 2.6 section 3.1 reserves symbols that start with
+/// either for solvers. (`false` when `s` is outside the arena.)
+fn first_ok(arena: &[u8], s: usize) -> bool {
+    if s >= arena.len() {
+        return false;
+    }
+    let c = arena[s];
+    c != b'@' && c != b'.'
 }
 
 /* ══════════════════ NAME TABLES ══════════════════ */
@@ -358,8 +397,8 @@ fn table_has(
     found
 }
 
-/// Is entry `k` of the table a non-empty range of quotable bytes, not
-/// reserved, different from every earlier name of the table and from
+/// Is entry `k` of the table a non-empty range of quotable bytes that
+/// does not start with `@` or `.`, not reserved, different from every earlier name of the table and from
 /// every name of the two tables before it (`a1`, `a2`)?
 #[allow(clippy::too_many_arguments)] // the fragment has no structs to bundle them
 fn entry_ok(
@@ -383,6 +422,9 @@ fn entry_ok(
         return false;
     }
     if !bytes_ok(arena, s, l) {
+        return false;
+    }
+    if !first_ok(arena, s) {
         return false;
     }
     if is_reserved(arena, s, l) {
@@ -2275,6 +2317,34 @@ mod tests {
             "get-model",
         ] {
             assert_eq!(refusal(&[lt(bad)]), Some(EchoError::Name), "{bad:?}");
+        }
+        // SMT-LIB 2.7's additions and solver builtins.
+        for bad in [
+            "bvnego",
+            "bvuaddo",
+            "bvsaddo",
+            "bvumulo",
+            "bvsmulo",
+            "bvusubo",
+            "bvssubo",
+            "bvsdivo",
+            "lambda",
+            "define-const",
+            "bvredor",
+            "bvredand",
+            "bv2int",
+            "int2bv",
+            "bv2nat",
+            "nat2bv",
+        ] {
+            assert_eq!(refusal(&[lt(bad)]), Some(EchoError::Name), "{bad:?}");
+        }
+        // A leading `@` or `.` is reserved for solvers; elsewhere they are fine.
+        for bad in ["@x", ".x", "@", ".", "@@", ".a.b"] {
+            assert_eq!(refusal(&[lt(bad)]), Some(EchoError::Name), "{bad:?}");
+        }
+        for good in ["x@", "x.y", "a.", "a@b", "bvnego1", "lambda_"] {
+            assert_eq!(refusal(&[lt(good)]), None, "{good:?}");
         }
         // Near misses are names.
         for good in ["Let", "let_", "bvadd1", "x", "assertion", "=="] {
