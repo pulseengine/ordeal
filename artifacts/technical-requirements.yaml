@@ -2153,3 +2153,93 @@ artifacts:
         target: SYS-004
       - type: allocated-to
         target: ARC-010
+
+  - id: TR-088
+    type: sw-req
+    title: The SMT-LIB reader reads string literals as single tokens, in every place an attribute value may appear
+    status: verified
+    release: v0.37.0
+    description: "SMT-LIB 2.6 section 3.1: a string literal is a double quote, any printable characters, and a closing double quote, with two double quotes as the escape for one; (, ) and ; inside it are neither structure nor a comment. The tokenizer read set-info :source \"a ) b\" as a stray close paren and :notes \"a;b\" as a comment, a refusal (exit 2) on a script Z3 reads (issue #311). Requirement: tokenize reads a string literal as one token, the doubled quote being part of it; an unterminated string literal is a parse error; the parser differential generator (TR-087) emits set-info strings containing parens, a semicolon and doubled quotes. Never a wrong verdict, a refusal only. Effect: behaviour. Issue #311."
+    tags: [smtlib, front-end, conformance]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: smtlib::tests pin the verdict of the two repro scripts (sat, no parse error), a string holding (, ), ; and a doubled quote, a string at set-option and get-info positions, and the parse error for an unterminated string; the oracle front leg stays at 0 disagree with set-info strings in the generator; the full workspace suite stays green.
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010
+
+  - id: TR-089
+    type: sw-req
+    title: The SMT-LIB reader reads distinct and ite at sort Bool by desugaring them to Bool connectives
+    status: verified
+    release: v0.37.0
+    description: "SMT-LIB Core: distinct and ite are polymorphic, legal at sort Bool. The reader refused (distinct p q) over Bool (\"sort mismatch\") and (ite c p q) with Bool branches (\"unsupported: predicate ite\"), a refusal on scripts Z3 reads (issue #312). Requirement: (distinct b1 .. bn) over Bool is the pairwise conjunction of (not (= bi bj)), (ite c p q) with Bool branches is (or (and c p) (and (not c) q)); both are built from the existing core connectives, so the closed op set of term.rs (loom #246) is unchanged; the bitvector forms are unchanged; a mixed-sort distinct or ite stays a sort error; the parser differential generator emits both Bool forms. Effect: behaviour. Issue #312."
+    tags: [smtlib, front-end, missing-capability]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: smtlib::tests pin the verdicts of the two repro scripts (sat), an unsat n-ary Bool distinct (three Bools pairwise distinct), a Bool ite whose both branches are refuted, a nested ite under =, the unchanged bitvector distinct and ite, and the sort error for mixed sorts; the oracle front leg stays at 0 disagree with the Bool forms in the generator; the full workspace suite stays green.
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010
+
+  - id: TR-090
+    type: sw-req
+    title: A bit-width outside 1 to 128 answers unknown, whichever form carries it
+    status: verified
+    release: v0.37.0
+    description: "README: a bit-width outside 1 to 128 is answered unknown. A declared 129-bit variable did, but a hex or binary literal wider than 128 bits was a parse error, and a (_ bvN W) or extend/concat result wider than 128 reached a solver error, depending on the form (issue #313). Requirement: every width outside 1..128 - a declared sort, a #x or #b literal, an indexed (_ bvN W), a zero_extend/sign_extend result, a concat result - makes the reader answer unknown (exit 0), by leaving the offending assertion to a term the solver itself answers Unknown on, never by guessing; genuinely malformed input (a zero width, an extract outside the width, a non-numeral) stays a parse error. Unknown is sound by construction. The README sentence is bound in claims.yaml to the test that covers each form. Effect: behaviour. Issue #313."
+    tags: [smtlib, front-end, conformance, unknown]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: smtlib::tests::wide_widths_answer_unknown_in_every_form covers the declared, hex, binary, indexed-constant, extend and concat rows of the issue (each unknown), a zero width and an extract outside the width stay errors, and the claims.yaml entry for the README sentence binds to it; scripts/claim_check.py passes.
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010
+
+  - id: TR-091
+    type: sw-req
+    title: Declaring a reserved word or a theory symbol, bare or quoted, is a parse error
+    status: verified
+    release: v0.37.0
+    description: "SMT-LIB 2.6 section 3.1: |x| and x are one symbol when x is simple, so |let| is the reserved word let and |_| is the reserved word _. TR-086 (#294) reads |x| as x but a declare-fun of |let| or |_| was accepted (issue #315). Requirement: declare-const and declare-fun of a symbol that is, after unquoting, a reserved word (let _ ! as par forall exists match NUMERAL DECIMAL STRING BINARY HEXADECIMAL), a command name, a logic or sort name, or a symbol of Core / FixedSizeBitVectors the reader binds, is a parse error; the list is the one the echo printer refuses on output (ordeal-lrat echo_kernel reserved tables), copied into the reader, which does not depend on that crate. Z3 5.1.0 accepts |let|; that class (Z3 accepts, ordeal refuses) is incompleteness, listed by the differential and not a failure. Effect: behaviour. Issue #315."
+    tags: [smtlib, front-end, conformance]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: smtlib::tests pin the parse error for every reserved word, bare and quoted, at declare-fun and declare-const, the repro script, and that ordinary and non-simple quoted names still declare; the oracle front leg stays at 0 disagree and 0 unallowed Z3 refusals with reserved-word declarations in the generator; the full workspace suite stays green.
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010
+
+  - id: TR-092
+    type: sw-req
+    title: ordeal check --cert-out PATH writes the ordeal-cert bundle of the verdict, which ordeal-recheck accepts
+    status: verified
+    release: v0.37.0
+    description: "The --format json report of ordeal check is a verdict report, not an ordeal-cert bundle: ordeal-recheck rejects it (\"missing field format\"), and for a plain SMT-LIB query a bundle was reachable only through the Rust API (issue #316, #277). Requirement: ordeal check FILE --cert-out PATH writes the ordeal-cert/v3 bundle (the highest format the API emits for a plain query: TermCertificate::to_cert_v3 on unsat, TermSatCertificate::to_cert_v3 on sat) with no new dependency (the default build is serde-free, so the CLI spells the same JSON); ordeal-recheck PATH accepts it (exit 0) and rejects a copy with one byte flipped in a certified field (exit 1); an unknown verdict writes no file and exits 1; a missing PATH is a usage error (exit 2); the CLI help states that the --format json report is not a bundle. Effect: behaviour. Issue #316."
+    tags: [cli, cert-bundle, recheck, missing-capability]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: "An integration test runs the real ordeal and ordeal-recheck binaries: unsat and sat bundles are accepted (exit 0), a byte flipped in the CNF is rejected (exit 1), the unknown and usage-error cases behave as stated, and under the cert-bundle feature the CLI bundle equals the API to_cert_v3 bundle as JSON; the help text states the report is not a bundle."
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010

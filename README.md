@@ -109,7 +109,20 @@ for either answer:
 - the CNF and LRAT proof for `unsat`;
 - the satisfying assignment, with its bit map and hashes, for `sat`.
 
-Anyone can re-check that object without trusting the ordeal binary.
+Anyone can re-check that object without trusting the ordeal binary, with a checker of their own. It is a
+verdict report, **not** an `ordeal-cert` bundle, and `ordeal-recheck` rejects it (`missing field format`).
+
+`--cert-out PATH` writes the bundle: the `ordeal-cert/v3` file that `ordeal-recheck` re-checks with no solver in
+its build. It works with or without `--format json`, which then still prints the report.
+
+```sh
+$ ordeal check query.smt2 --cert-out query.cert.json
+unsat
+$ ordeal-recheck query.cert.json
+query.cert.json: accepted (ordeal-cert/v3, unsat)
+```
+
+An `unknown` verdict has nothing to certify: no file is written and the exit code is 1.
 
 ### Rust
 

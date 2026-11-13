@@ -258,6 +258,25 @@ fn classify(z3: Z3Reading, ord: Result<ScriptReading, smtlib::SmtError>) -> Fron
         compared,
         detail,
     };
+    // A width outside 1..=128 (#313): the reader answers `unknown` and holds
+    // a placeholder for the assertion, which is not a reading of the text.
+    // Incompleteness at worst (Z3 reads it), listed and not compared.
+    if let Ok(r) = &ord
+        && r.too_wide
+    {
+        return match z3 {
+            Z3Reading::Accepted(_) => result(
+                FrontClass::OrdealRefuses,
+                0,
+                "width above 128: answered unknown".into(),
+            ),
+            Z3Reading::Refused(z) => result(
+                FrontClass::BothRefuse,
+                0,
+                format!("Z3: {z}; ordeal: width above 128"),
+            ),
+        };
+    }
     let (z3_asserts, reading) = match (z3, ord) {
         (Z3Reading::Refused(z), Err(o)) => {
             return result(FrontClass::BothRefuse, 0, format!("Z3: {z}; ordeal: {o}"));
@@ -435,6 +454,40 @@ pub fn run_front_leg<'a>(scripts: impl IntoIterator<Item = (String, &'a str)>) -
 /// `k >= 2^w`.
 const GEN_WIDTHS: &[u32] = &[1, 3, 4, 5, 7, 8, 12, 16];
 
+/// One generated script in this many declares a reserved word (#315).
+const RESERVED_DECL_ONE_IN: u64 = 25;
+
+/// The comment that marks such a script, so a run can tell the scripts the
+/// reader must refuse from the ones it must read.
+pub const RESERVED_DECL_MARK: &str = "; reserved-word declaration";
+
+/// Reserved words and theory symbols the generator declares, bare or quoted.
+const RESERVED_DECL_WORDS: &[&str] = &[
+    "let",
+    "_",
+    "!",
+    "as",
+    "par",
+    "forall",
+    "exists",
+    "match",
+    "NUMERAL",
+    "DECIMAL",
+    "STRING",
+    "BINARY",
+    "HEXADECIMAL",
+    "assert",
+    "check-sat",
+    "ite",
+    "distinct",
+    "concat",
+    "bvadd",
+    "bvult",
+    "true",
+    "Bool",
+    "extract",
+];
+
 struct TextGen {
     rng: XorShift64,
     /// (base symbol, width, simple?) — a simple symbol may be spelled bare
@@ -607,7 +660,7 @@ impl TextGen {
         let choice = if leafy {
             self.below(4)
         } else {
-            4 + self.below(7)
+            4 + self.below(9)
         };
         let dd = d.saturating_sub(1);
         match choice {
@@ -639,6 +692,14 @@ impl TextGen {
             }
             8 => format!("(=> {})", self.bools_n(dd, 2, 4)),
             9 => format!("(= {})", self.bools_n(dd, 2, 3)),
+            // `distinct` and `ite` at sort Bool (#312).
+            11 => format!("(distinct {})", self.bools_n(dd, 2, 4)),
+            12 => format!(
+                "(ite {} {} {})",
+                self.boolean(dd),
+                self.boolean(dd),
+                self.boolean(dd)
+            ),
             _ => {
                 let w = self.width();
                 let op = *self.pick(&["bvslt", "bvsle", "bvsgt", "bvsge"]);
@@ -653,6 +714,20 @@ impl TextGen {
             .map(|_| self.boolean(d))
             .collect::<Vec<_>>()
             .join(" ")
+    }
+
+    /// A `set-info` whose value is a string literal holding what a naive
+    /// tokenizer breaks on: `)`, `(`, `;` and the `""` escape (#311).
+    fn set_info(&mut self) -> &'static str {
+        self.pick(&[
+            "(set-info :source \"a ) b\")\n",
+            "(set-info :notes \"a;b\")\n",
+            "(set-info :source \"say \"\"hi\"\" ( now\")\n",
+            "(set-info :source \"\")\n",
+            "(set-info :source \"x ) ; ( y\")(set-info :status unknown)\n",
+            "(set-info :smt-lib-version 2.6)\n",
+            "(set-option :print-success false)\n",
+        ])
     }
 
     fn comment(&mut self) -> &'static str {
@@ -670,6 +745,9 @@ impl TextGen {
         s.push_str(self.comment());
         if self.below(4) != 0 {
             s.push_str("(set-logic QF_BV)\n");
+        }
+        if self.below(3) == 0 {
+            s.push_str(self.set_info());
         }
         self.vars.clear();
         self.bools.clear();
@@ -690,6 +768,19 @@ impl TextGen {
             }
             s.push_str(self.comment());
             self.vars.push((base, w, simple));
+        }
+        // A declaration of a reserved word or theory symbol (#315): the
+        // reader refuses it. Z3 accepts some (`|let|`) and refuses others, so
+        // such a script is "ordeal refuses" or "both refuse", never compared;
+        // the marker lets the run account for every script not compared.
+        if self.below(RESERVED_DECL_ONE_IN) == 0 {
+            let word = *self.pick(RESERVED_DECL_WORDS);
+            let name = self.spell(word, true);
+            let w = self.width();
+            let _ = writeln!(
+                s,
+                "(declare-fun {name} () (_ BitVec {w})) {RESERVED_DECL_MARK}"
+            );
         }
         let nb = self.below(3);
         for i in 0..nb {
@@ -726,7 +817,10 @@ impl TextGen {
 /// `declare-fun`, `true` / `false`, `=` over booleans, `rotate_*` with
 /// `k >= w` (and `k >= 2^w` at small widths), all three literal forms with
 /// `(_ bvN W)` values `>= 2^W`, quoted symbols (simple ones spelled both
-/// ways, non-simple ones always quoted) and comments. [`super::gen_corpus`]
+/// ways, non-simple ones always quoted), comments, `set-info` / `set-option`
+/// string literals holding `)` `(` `;` and `""` (#311), `distinct` and `ite`
+/// at sort Bool (#312), and, in one script in 25, a declaration of a reserved
+/// word (#315, marked by [`RESERVED_DECL_MARK`]). [`super::gen_corpus`]
 /// prints nothing, so it cannot reach this syntax.
 pub fn gen_smtlib_text(seed: u64, n: usize) -> Vec<String> {
     let mut g = TextGen {
@@ -837,8 +931,21 @@ mod tests {
             tally.report()
         );
         assert!(tally.passes(), "{}", tally.report());
-        // The generator emits only scripts both sides should read.
-        assert_eq!(tally.compared(), n, "{}", tally.report());
+        // The generator emits only scripts both sides should read, except
+        // the marked reserved-word declarations (#315), which the reader
+        // refuses: every script not compared is exactly one of those.
+        let reserved = scripts
+            .iter()
+            .filter(|s| s.contains(RESERVED_DECL_MARK))
+            .count();
+        assert_eq!(tally.compared() + reserved, n, "{}", tally.report());
+        assert_eq!(
+            tally.ordeal_refuses + tally.both_refuse,
+            reserved,
+            "{}",
+            tally.report()
+        );
+        assert!(reserved > 0 || n < 100, "no reserved-word script in {n}");
     }
 
     // rivet: verifies VER-087
@@ -881,6 +988,19 @@ mod tests {
             "zero_extend",
             "sign_extend",
             "(extract",
+            // #311: string literals in set-info / set-option
+            "(set-info :source \"a ) b\")",
+            "(set-info :notes \"a;b\")",
+            "\"say \"\"hi\"\" ( now\"",
+            // #312: Bool distinct and Bool ite, as an assert's own head or
+            // an operand of a Bool connective (a bitvector term cannot be)
+            "(assert (ite ",
+            "(not (ite ",
+            "(distinct true",
+            "(distinct false",
+            "(distinct (not ",
+            // #315
+            RESERVED_DECL_MARK,
         ] {
             let needle = needle.replace("(extract", "(_ extract");
             assert!(all.contains(&needle), "generator never emits {needle:?}");
@@ -889,6 +1009,9 @@ mod tests {
         // control needs one): e.g. `rotate_left 9` on a 3-bit operand.
         let mut big = false;
         for s in gen_smtlib_text(GEN_SEED, 2_000) {
+            if s.contains(RESERVED_DECL_MARK) {
+                continue; // the reader refuses these on purpose (#315)
+            }
             let r = smtlib::read_script(&s).expect("generated scripts read");
             big |= r.declared.iter().any(|d| d.1 == 3 || d.1 == 5);
         }
@@ -957,6 +1080,29 @@ mod tests {
         short.assertions.clear();
         let r = classify(z3_read(agree), Ok(short));
         assert_eq!(r.class, FrontClass::Disagree, "{r:?}");
+
+        // #315: a reserved word declared as a quoted symbol. Z3 5.1.0
+        // accepts `|let|`; ordeal refuses it (SMT-LIB 2.6 section 3.1). That
+        // is incompleteness, listed and never a failure: the run passes.
+        let reserved = "(declare-fun |let| () (_ BitVec 8))(assert (= |let| #x01))(check-sat)";
+        let r = front_leg(reserved);
+        assert_eq!(r.class, FrontClass::OrdealRefuses, "{r:?}");
+        let mut t = FrontTally::default();
+        t.record("reserved", &r);
+        t.record("agree", &front_leg(agree));
+        assert!(t.passes(), "{}", t.report());
+        assert!(t.listed.iter().any(|l| l.contains("reserved")));
+        assert!(t.failures.is_empty());
+
+        // #313: a width above 128 is read as `unknown` with a placeholder
+        // assertion, so it is listed as incompleteness, never compared (and
+        // never a "disagree" on the placeholder).
+        let wide = "(declare-const x (_ BitVec 8))\
+                    (assert (= ((_ extract 7 0) (_ bv5 136)) x))(check-sat)";
+        assert!(smtlib::read_script(wide).expect("reads").too_wide);
+        let r = front_leg(wide);
+        assert_eq!(r.class, FrontClass::OrdealRefuses, "{r:?}");
+        assert!(r.detail.contains("width above 128"), "{r:?}");
 
         // ordeal refuses / Z3 accepts: an uninterpreted function.
         let uf = "(declare-fun f ((_ BitVec 8)) (_ BitVec 8))(declare-const x (_ BitVec 8))\

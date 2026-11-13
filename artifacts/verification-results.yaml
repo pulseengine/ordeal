@@ -3380,3 +3380,93 @@ artifacts:
         target: VER-087
       - type: part-of-execution
         target: VE-071
+
+  - id: VE-072
+    type: verification-execution
+    title: "Front-end fixes run (VER-088 to VER-092): string literals, Bool distinct/ite, widths, reserved words, --cert-out"
+    status: implemented
+    release: v0.37.0
+    description: "Local run on branch fix/v0.37.0-front-end (based on 0cf61be), shared-machine debug and release builds. cargo test --workspace --no-fail-fast exit 0; cargo test -p ordeal --features cert-bundle --test cli_cert_out 8 passed (includes cli_bundle_equals_the_api_bundle); cargo test -p ordeal --features oracle --release --lib oracle::front::tests 5 passed, 1 ignored, 216 s: repository files 26 compared (41 assertions) agree 26 disagree 0 both-refuse 1; generated 10^4 scripts, 9604 compared (19296 assertions) agree 9604 disagree 0, ordeal-refuses/Z3-accepts 327 (the reserved-word declarations Z3 accepts, listed), Z3-refuses/ordeal-accepts 0, both refuse 69; negative controls SltAsUlt 151, RotlNoMod 53, ChainEqDropLast 93, ImpliesLeftAssoc 130 disagree of 1000. The new tests fail on origin/main (smtlib::tests: 5 of 8 new tests fail, 3 pin unchanged behaviour; cli_cert_out: 6 of 7 fail). cargo fmt --check, cargo clippy --all-targets (default, oracle, cert-bundle) -D warnings, claim_check 64/64, recheck_closure PASS, rivet validate PASS."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew), LIBRARY_PATH=/opt/homebrew/lib
+      executor: local
+      timestamp: 2026-11-13 17:30:41+00:00
+      version: 0cf61be + fix/v0.37.0-front-end
+    links:
+      - type: traces-to
+        target: TR-088
+
+  - id: VV-146
+    type: verification-verdict
+    title: "VER-088 pass: string literals: the two repro scripts decide sat, strings holding parens, semicolon and doubled quotes are read, an unterminated string is a parse error"
+    status: implemented
+    release: v0.37.0
+    description: "string literals: the two repro scripts decide sat, strings holding parens, semicolon and doubled quotes are read, an unterminated string is a parse error"
+    fields:
+      evidence: cargo test -p ordeal --lib smtlib::tests (36 passed); fails on origin/main (string_literals_are_single_tokens, an_unterminated_string_literal_is_a_parse_error)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-088
+      - type: part-of-execution
+        target: VE-072
+
+  - id: VV-147
+    type: verification-verdict
+    title: "VER-089 pass: Bool distinct and ite desugar and agree with Z3; mixed sorts stay errors"
+    status: implemented
+    release: v0.37.0
+    description: Bool distinct and ite desugar and agree with Z3; mixed sorts stay errors
+    fields:
+      evidence: "smtlib::tests::bool_distinct_and_ite_desugar_to_connectives and mixed_sort_distinct_and_ite_are_still_sort_errors pass; the first fails on origin/main; the front leg generates both forms: 0 disagree over 9604 compared"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-089
+      - type: part-of-execution
+        target: VE-072
+
+  - id: VV-148
+    type: verification-verdict
+    title: "VER-090 pass: every width outside 1 to 128 answers unknown in all four solve entry points; malformed widths stay errors; the README sentence is claim-bound"
+    status: implemented
+    release: v0.37.0
+    description: every width outside 1 to 128 answers unknown in all four solve entry points; malformed widths stay errors; the README sentence is claim-bound
+    fields:
+      evidence: smtlib::tests::wide_widths_answer_unknown_in_every_form and malformed_widths_stay_parse_errors pass; the first fails on origin/main; claim_check README-WIDTH-UNKNOWN holds (64/64)
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-090
+      - type: part-of-execution
+        target: VE-072
+
+  - id: VV-149
+    type: verification-verdict
+    title: "VER-091 pass: reserved words and theory symbols cannot be declared, bare or quoted; ordinary names still declare"
+    status: implemented
+    release: v0.37.0
+    description: reserved words and theory symbols cannot be declared, bare or quoted; ordinary names still declare
+    fields:
+      evidence: "smtlib::tests::reserved_words_cannot_be_declared and ordinary_and_non_simple_quoted_names_still_declare pass; the first fails on origin/main; front leg: Z3 accepts many of them (listed ordeal-refuses 327), 0 disagree, 0 Z3-refuses/ordeal-accepts"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-091
+      - type: part-of-execution
+        target: VE-072
+
+  - id: VV-150
+    type: verification-verdict
+    title: "VER-092 pass: ordeal check --cert-out writes a v3 bundle the real ordeal-recheck accepts and rejects after a flipped byte"
+    status: implemented
+    release: v0.37.0
+    description: ordeal check --cert-out writes a v3 bundle the real ordeal-recheck accepts and rejects after a flipped byte
+    fields:
+      evidence: cargo test -p ordeal --test cli_cert_out (7 passed) and with --features cert-bundle (8 passed, JSON equal to to_cert_v3); 6 of 7 fail on origin/main
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-092
+      - type: part-of-execution
+        target: VE-072

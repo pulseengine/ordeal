@@ -1731,3 +1731,78 @@ artifacts:
     links:
       - type: verifies
         target: TR-087
+
+  - id: VER-088
+    type: sw-verification
+    title: "String literals are one token: the two repro scripts decide, a string with parens, semicolon and doubled quotes is read, an unterminated string is a parse error (TR-088)"
+    status: verified
+    release: v0.37.0
+    description: "crates/ordeal/src/smtlib.rs tests: string_literals_are_single_tokens (the #311 repros sat; strings at set-info, set-option and get-info positions; doubled-quote escape; a comment after a string still a comment) and an_unterminated_string_literal_is_a_parse_error. Differential: oracle_front gen_smtlib_text emits set-info strings with ) ; and doubled quotes (generator_covers_the_desugared_syntax) and the front leg stays at 0 disagree. Test fails on origin/main (parse error: unexpected close paren / unclosed open paren)."
+    tags: [smtlib, front-end, conformance]
+    fields:
+      coverage: "the two #311 repro scripts, strings holding ( ) ; and doubled quotes, an unterminated string, generated set-info strings"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests::string_literal; cargo test -p ordeal --lib smtlib::tests::an_unterminated"
+    links:
+      - type: verifies
+        target: TR-088
+
+  - id: VER-089
+    type: sw-verification
+    title: Bool distinct and ite desugar to Bool connectives and agree with Z3; mixed sorts stay errors (TR-089)
+    status: verified
+    release: v0.37.0
+    description: "crates/ordeal/src/smtlib.rs tests: bool_distinct_and_ite_desugar_to_connectives (the #312 repros sat, n-ary Bool distinct over three Bools unsat, Bool ite with refuted branches, ite under =, bitvector distinct and ite unchanged) and mixed_sort_distinct_and_ite_are_still_sort_errors. Differential: gen_smtlib_text emits Bool distinct and ite, so the front leg compares them against Z3 per assertion (0 disagree). Test fails on origin/main (sort mismatch / unsupported predicate ite)."
+    tags: [smtlib, front-end, missing-capability]
+    fields:
+      coverage: "the two #312 repro scripts, n-ary Bool distinct, nested Bool ite, mixed-sort refusals, generated Bool forms"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests::bool_distinct; cargo test -p ordeal --lib smtlib::tests::mixed_sort"
+    links:
+      - type: verifies
+        target: TR-089
+
+  - id: VER-090
+    type: sw-verification
+    title: Every width outside 1 to 128 answers unknown, in every form that can carry it; the README sentence is claim-bound to the test (TR-090)
+    status: verified
+    release: v0.37.0
+    description: "crates/ordeal/src/smtlib.rs tests: wide_widths_answer_unknown_in_every_form (declared 129 and 136 bit variables, a 136-bit hex literal, a 129-bit binary literal, (_ bvN 136), zero_extend to 129, concat to 200 bits, an absurd u32-overflowing width: each Ok(Some(Unknown)) through solve_str, solve_str_with_witness, solve_str_with_query and solve_str_with_term) and malformed_widths_stay_parse_errors (zero width, extract outside the width, a non-numeral width). claims.yaml binds the README sentence to the first. The ordeal binary prints unknown with exit 0 on each repro (wa..we, s3, s3b). Test fails on origin/main (parse error / solver error)."
+    tags: [smtlib, front-end, conformance, unknown]
+    fields:
+      coverage: "every row of the #313 table plus concat, extend and an overflowing width, through all four solve entry points; malformed widths stay errors"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests::wide_widths; cargo test -p ordeal --lib smtlib::tests::malformed_widths; python3 scripts/claim_check.py"
+    links:
+      - type: verifies
+        target: TR-090
+
+  - id: VER-091
+    type: sw-verification
+    title: Declaring a reserved word or theory symbol, bare or quoted, is a parse error; ordinary names still declare (TR-091)
+    status: verified
+    release: v0.37.0
+    description: "crates/ordeal/src/smtlib.rs tests: reserved_words_cannot_be_declared (the #315 repro; every RESERVED_SYMBOLS entry, bare and bar-quoted, at declare-fun and declare-const) and ordinary_and_non_simple_quoted_names_still_declare. Differential: gen_smtlib_text emits reserved-word declarations; Z3 accepts |let|, so that class (Z3 accepts, ordeal refuses) is listed as ordeal incompleteness and never a failure, while 0 disagree and 0 unallowed Z3 refusals still hold. Test fails on origin/main (sat with a model for |let| and |_|)."
+    tags: [smtlib, front-end, conformance]
+    fields:
+      coverage: "the #315 repro, every reserved word at both declaration commands, the differential with reserved-word declarations"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests::reserved_words; cargo test -p ordeal --features oracle --release --lib oracle::front::tests"
+    links:
+      - type: verifies
+        target: TR-091
+
+  - id: VER-092
+    type: sw-verification
+    title: ordeal check --cert-out writes a v3 bundle the real ordeal-recheck accepts, and rejects with a flipped byte (TR-092)
+    status: verified
+    release: v0.37.0
+    description: "crates/ordeal/tests/cli_cert_out.rs, with the real binaries: unsat_bundle_round_trips_through_ordeal_recheck (u.smt2: exit 0, accepted ordeal-cert/v3 unsat; one byte flipped in the CNF clauses: exit 1 rejected), sat_bundle_round_trips_through_ordeal_recheck, unknown_writes_no_bundle_and_exits_1, usage_errors_exit_2 (--cert-out without a path), the help text states the --format json report is not a bundle, the json report is rejected by ordeal-recheck, and under the cert-bundle feature cli_bundle_equals_the_api_bundle (JSON equality with to_cert_v3 for unsat and sat). Test fails on origin/main (unknown flag handling: the file is never written)."
+    tags: [cli, cert-bundle, recheck, missing-capability]
+    fields:
+      coverage: unsat and sat round trips, the byte-flip rejection, unknown and usage-error exits, the help text, API equality under cert-bundle
+      method: automated-test
+      steps: "run: cargo test -p ordeal --test cli_cert_out; cargo test -p ordeal --features cert-bundle --test cli_cert_out"
+    links:
+      - type: verifies
+        target: TR-092

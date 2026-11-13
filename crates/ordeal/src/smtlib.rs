@@ -38,6 +38,12 @@
 //!   `((_ rotate_right k) x)`, and `(ite c a b)` → [`BvTerm::Ite`].
 //! - **Predicates:** `= distinct bvult bvule bvugt bvuge bvslt bvsle bvsgt
 //!   bvsge` and the boolean connectives `not and or` (n-ary `and`/`or`).
+//!   `distinct` and `ite` are also read at sort `Bool` (#312), desugared to
+//!   those connectives.
+//! - **Strings:** `"..."` is one token, `""` an escaped quote (#311).
+//! - **Widths:** a width outside 1..=128 (declared, literal, indexed, an
+//!   `extend` or `concat` result) answers `unknown` (#313); a declared name
+//!   may not be a reserved word or theory symbol (#315).
 //!
 //! # The rotate-amount mismatch
 //!
@@ -135,6 +141,11 @@ pub enum SmtError {
     /// A construct the reader accepted but the solver rejected as ill-formed
     /// (e.g. an operand-width mismatch surfaced while sizing a term).
     Solver(String),
+    /// A bit-width outside 1..=128 met while reading (a literal, an indexed
+    /// width, an `extend`/`concat` result). Internal: the reader turns it
+    /// into an `Unknown` verdict (the README contract, #313) and no public
+    /// entry point returns it.
+    TooWide(String),
 }
 
 impl std::fmt::Display for SmtError {
@@ -143,6 +154,7 @@ impl std::fmt::Display for SmtError {
             SmtError::Parse(m) => write!(f, "parse error: {m}"),
             SmtError::Unsupported(m) => write!(f, "unsupported: {m}"),
             SmtError::Solver(m) => write!(f, "solver error: {m}"),
+            SmtError::TooWide(m) => write!(f, "unsupported width: {m}"),
         }
     }
 }
@@ -204,9 +216,10 @@ fn canonical_quoted(tok: String) -> String {
     if simple { inner.to_string() } else { tok }
 }
 
-/// Split raw source into s-expression tokens: `(`, `)`, `|quoted|` symbols, and
-/// bare atoms. Whitespace separates; `;` starts a line comment.
-fn tokenize(src: &str) -> Vec<String> {
+/// Split raw source into s-expression tokens: `(`, `)`, `|quoted|` symbols,
+/// `"string"` literals, and bare atoms. Whitespace separates; `;` starts a line
+/// comment (outside a string or a quoted symbol).
+fn tokenize(src: &str) -> Result<Vec<String>, SmtError> {
     let mut toks = Vec::new();
     let mut chars = src.chars().peekable();
     while let Some(&c) = chars.peek() {
@@ -225,6 +238,33 @@ fn tokenize(src: &str) -> Vec<String> {
             '(' | ')' => {
                 chars.next();
                 toks.push(c.to_string());
+            }
+            '"' => {
+                // An SMT-LIB string literal (§3.1, #311): one token up to the
+                // closing quote, `""` being an escaped quote. `(`, `)`, `;`
+                // and whitespace inside it are not structure or a comment.
+                // The token keeps its quotes, so it can never be read as a
+                // symbol or a literal of the term language.
+                chars.next();
+                let mut s = String::from("\"");
+                loop {
+                    match chars.next() {
+                        None => {
+                            return Err(SmtError::Parse("unterminated string literal".into()));
+                        }
+                        Some('"') => {
+                            s.push('"');
+                            if chars.peek() == Some(&'"') {
+                                chars.next();
+                                s.push('"');
+                            } else {
+                                break;
+                            }
+                        }
+                        Some(c) => s.push(c),
+                    }
+                }
+                toks.push(s);
             }
             '|' => {
                 // A `|...|` quoted symbol. SMT-LIB 2.6 §3.1: `|x|` and `x`
@@ -257,7 +297,7 @@ fn tokenize(src: &str) -> Vec<String> {
             }
         }
     }
-    toks
+    Ok(toks)
 }
 
 /// Parse a whole token stream into the sequence of top-level s-expressions
@@ -325,9 +365,12 @@ impl Ctx {
     /// sort error to [`SmtError::Solver`]. Used where a rule needs the width
     /// (the rotate-amount constant, the lowering helpers).
     fn width_of(t: &BvTerm) -> Result<u32, SmtError> {
-        bv_sort(t)
-            .map(|s| s.width)
-            .map_err(|e| SmtError::Solver(format!("ill-sorted subterm: {e:?}")))
+        bv_sort(t).map(|s| s.width).map_err(|e| match e {
+            crate::eval::EvalError::UnsupportedWidth(w) if w > 128 => {
+                SmtError::TooWide(format!("a {w}-bit term"))
+            }
+            e => SmtError::Solver(format!("ill-sorted subterm: {e:?}")),
+        })
     }
 
     /// Whether an s-expression is boolean-shaped, so `=` can tell `iff` from
@@ -337,6 +380,10 @@ impl Ctx {
     fn is_bool_sexp(&self, s: &Sexp) -> bool {
         match s {
             Sexp::Atom(a) => a == "true" || a == "false" || self.bool_decls.contains(a.as_str()),
+            // `(ite c p q)` is Bool when its branches are (#312).
+            Sexp::List(items) if items.first().and_then(as_atom) == Some("ite") => {
+                items.get(2).is_some_and(|b| self.is_bool_sexp(b))
+            }
             Sexp::List(items) => matches!(
                 items.first().and_then(as_atom),
                 Some(
@@ -385,18 +432,30 @@ impl Ctx {
             if hex.is_empty() || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
                 return Err(SmtError::Parse(format!("bad hex literal '{a}'")));
             }
+            if hex.len() > 32 {
+                return Err(SmtError::TooWide(format!(
+                    "a {}-bit hex literal",
+                    hex.len() * 4
+                )));
+            }
             let width = (hex.len() as u32) * 4;
             let value = u128::from_str_radix(hex, 16)
-                .map_err(|_| SmtError::Parse(format!("hex literal too wide: '{a}'")))?;
+                .map_err(|_| SmtError::Parse(format!("bad hex literal '{a}'")))?;
             return Ok(const_bv(value, width));
         }
         if let Some(bin) = a.strip_prefix("#b") {
             if bin.is_empty() || !bin.chars().all(|c| c == '0' || c == '1') {
                 return Err(SmtError::Parse(format!("bad binary literal '{a}'")));
             }
+            if bin.len() > 128 {
+                return Err(SmtError::TooWide(format!(
+                    "a {}-bit binary literal",
+                    bin.len()
+                )));
+            }
             let width = bin.len() as u32;
             let value = u128::from_str_radix(bin, 2)
-                .map_err(|_| SmtError::Parse(format!("binary literal too wide: '{a}'")))?;
+                .map_err(|_| SmtError::Parse(format!("bad binary literal '{a}'")))?;
             return Ok(const_bv(value, width));
         }
         if self.bool_decls.contains(a) {
@@ -432,7 +491,12 @@ impl Ctx {
             "bvand" => self.fold_bv(op, args, |a, b| BvTerm::And(Box::new(a), Box::new(b))),
             "bvor" => self.fold_bv(op, args, |a, b| BvTerm::Or(Box::new(a), Box::new(b))),
             "bvxor" => self.fold_bv(op, args, |a, b| BvTerm::Xor(Box::new(a), Box::new(b))),
-            "concat" => self.fold_bv(op, args, |a, b| BvTerm::Concat(Box::new(a), Box::new(b))),
+            "concat" => {
+                let t = self.fold_bv(op, args, |a, b| BvTerm::Concat(Box::new(a), Box::new(b)))?;
+                // An intermediate width above 128 answers `unknown` (#313).
+                Self::width_of(&t)?;
+                Ok(t)
+            }
 
             // Binary core ops.
             "bvudiv" => {
@@ -560,14 +624,29 @@ impl Ctx {
                     arg: Box::new(x),
                 })
             }
-            "zero_extend" => Ok(BvTerm::ZeroExt {
-                by: idx(2)?,
-                arg: Box::new(arg(self)?),
-            }),
-            "sign_extend" => Ok(BvTerm::SignExt {
-                by: idx(2)?,
-                arg: Box::new(arg(self)?),
-            }),
+            "zero_extend" | "sign_extend" => {
+                // The count may exceed u32 (saturated); the result width
+                // is checked here, in u64, before any `width + by`
+                // addition — above 128 it answers `unknown` (#313).
+                let by = op
+                    .get(2)
+                    .and_then(as_atom)
+                    .and_then(width_numeral)
+                    .ok_or_else(|| SmtError::Parse(format!("bad index 2 on '{name}'")))?;
+                let x = arg(self)?;
+                let w = Self::width_of(&x)?;
+                if u64::from(w) + u64::from(by) > 128 {
+                    return Err(SmtError::TooWide(format!(
+                        "'{name} {by}' of a {w}-bit term"
+                    )));
+                }
+                let arg = Box::new(x);
+                Ok(if name == "zero_extend" {
+                    BvTerm::ZeroExt { by, arg }
+                } else {
+                    BvTerm::SignExt { by, arg }
+                })
+            }
             "rotate_right" => {
                 // SMT-LIB's amount is a CONSTANT k; the core Rotr rotates by a
                 // term, so materialize it as a same-width constant — reduced
@@ -689,6 +768,28 @@ impl Ctx {
                         Ok(acc)
                     }
                     "distinct" => self.all_distinct(args),
+                    // `ite` at sort Bool (#312): `(or (and c p) (and (not c)
+                    // q))`, built from the core's connectives — no new
+                    // operation. A non-Bool branch is refused by
+                    // `parse_bool` itself (mixed sorts stay an error).
+                    "ite" => {
+                        if args.len() != 3 {
+                            return Err(SmtError::Parse(format!(
+                                "ite takes 3 args, got {}",
+                                args.len()
+                            )));
+                        }
+                        let c = self.parse_bool(&args[0])?;
+                        let p = self.parse_bool(&args[1])?;
+                        let q = self.parse_bool(&args[2])?;
+                        Ok(BoolTerm::Or(
+                            Box::new(BoolTerm::And(Box::new(c.clone()), Box::new(p))),
+                            Box::new(BoolTerm::And(
+                                Box::new(BoolTerm::Not(Box::new(c))),
+                                Box::new(q),
+                            )),
+                        ))
+                    }
                     "bvult" => self.cmp(args, BoolTerm::Ult),
                     "bvule" => self.cmp(args, BoolTerm::Ule),
                     "bvugt" => self.cmp(args, BoolTerm::Ugt),
@@ -737,6 +838,30 @@ impl Ctx {
 
     /// `(distinct a b c ...)` → conjunction of all pairwise disequalities.
     fn all_distinct(&self, args: &[Sexp]) -> Result<BoolTerm, SmtError> {
+        // `distinct` is polymorphic: over Bool it is the pairwise
+        // conjunction of `(not (= bi bj))` (#312).
+        if !args.is_empty() && args.iter().all(|a| self.is_bool_sexp(a)) {
+            if args.len() < 2 {
+                return Err(SmtError::Parse(
+                    "'distinct' needs at least 2 arguments".into(),
+                ));
+            }
+            let bs = args
+                .iter()
+                .map(|a| self.parse_bool(a))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut acc: Option<BoolTerm> = None;
+            for i in 0..bs.len() {
+                for j in (i + 1)..bs.len() {
+                    let ne = BoolTerm::Not(Box::new(iff(&bs[i], &bs[j])));
+                    acc = Some(match acc {
+                        None => ne,
+                        Some(prev) => BoolTerm::And(Box::new(prev), Box::new(ne)),
+                    });
+                }
+            }
+            return Ok(acc.expect("len >= 2 guarantees at least one pair"));
+        }
         let bvs = self.parse_bv_list(args)?;
         if bvs.len() < 2 {
             return Err(SmtError::Parse(
@@ -851,18 +976,24 @@ fn parse_indexed_const(items: &[Sexp]) -> Result<BvTerm, SmtError> {
     let digits = name
         .strip_prefix("bv")
         .ok_or_else(|| SmtError::Unsupported(format!("indexed identifier '(_ {name} ...)'")))?;
-    let value = numeral::<u128>(digits)
-        .ok_or_else(|| SmtError::Parse(format!("bad bitvector constant '{name}'")))?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(SmtError::Parse(format!("bad bitvector constant '{name}'")));
+    }
     let width = items
         .get(2)
         .and_then(as_atom)
-        .and_then(numeral::<u32>)
+        .and_then(width_numeral)
         .ok_or_else(|| SmtError::Parse("missing width in '(_ bvN W)'".into()))?;
     if width == 0 {
         return Err(SmtError::Parse(
             "'(_ bvN 0)': a bitvector width is at least 1".into(),
         ));
     }
+    if width > 128 {
+        return Err(SmtError::TooWide(format!("'(_ {name} {width})'")));
+    }
+    let value = numeral::<u128>(digits)
+        .ok_or_else(|| SmtError::Parse(format!("bad bitvector constant '{name}'")))?;
     Ok(const_bv(value, width))
 }
 
@@ -875,6 +1006,15 @@ fn numeral<T: std::str::FromStr>(s: &str) -> Option<T> {
     s.parse().ok()
 }
 
+/// A width numeral: ASCII digits, saturating at `u32::MAX` so that an absurd
+/// width is still "a width above 128" (`unknown`, #313) and not a parse error.
+fn width_numeral(s: &str) -> Option<u32> {
+    if s.is_empty() || !s.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    Some(s.parse().unwrap_or(u32::MAX))
+}
+
 /// Parse a `(_ BitVec N)` sort, returning its width.
 fn parse_sort(s: &Sexp) -> Result<u32, SmtError> {
     if let Sexp::List(items) = s
@@ -885,7 +1025,7 @@ fn parse_sort(s: &Sexp) -> Result<u32, SmtError> {
         // A width is at least 1 (Z3: "bit-vector size must be greater than
         // zero"); `(_ BitVec 0)` used to be accepted (TR-087).
         return as_atom(&items[2])
-            .and_then(numeral::<u32>)
+            .and_then(width_numeral)
             .filter(|&w| w > 0)
             .ok_or_else(|| SmtError::Parse("bad BitVec width".into()));
     }
@@ -998,6 +1138,7 @@ struct ScriptRun<R> {
     declared: Vec<(String, u32)>,
     assertions: Vec<BoolTerm>,
     bool_names: Vec<String>,
+    too_wide: bool,
 }
 
 /// What the reader made of a whole script, without solving (#281 E0): the
@@ -1014,6 +1155,11 @@ pub struct ScriptReading {
     /// The `Bool`-declared names: each is held as a BV1 variable of the same
     /// name, read as `name = #b1` in boolean position (`Ctx::bool_decls`).
     pub bool_names: Vec<String>,
+    /// Some assertion held a bit-width outside 1..=128 that the reader does
+    /// not model (#313). The solver answers `unknown` on such a script; the
+    /// assertion is read as an ill-sorted placeholder, so the tree is not a
+    /// reading of the text and a differential must not compare it.
+    pub too_wide: bool,
 }
 
 /// Read a whole script with the same reader as [`solve_str`] and return what
@@ -1024,12 +1170,13 @@ pub fn read_script(input: &str) -> Result<ScriptReading, SmtError> {
         assertions: r.assertions,
         declared: r.declared,
         bool_names: r.bool_names,
+        too_wide: r.too_wide,
     })
 }
 
 /// The reader loop behind [`run_script`] and [`read_script`].
 fn run_script_full<R>(input: &str, check: impl Fn(&Solver) -> R) -> Result<ScriptRun<R>, SmtError> {
-    let toks = tokenize(input);
+    let toks = tokenize(input)?;
     let sexps = parse_sexps(&toks)?;
 
     let mut ctx = Ctx {
@@ -1039,6 +1186,7 @@ fn run_script_full<R>(input: &str, check: impl Fn(&Solver) -> R) -> Result<Scrip
     let mut declared: Vec<(String, u32)> = Vec::new();
     let mut solver = Solver::new();
     let mut result: Option<R> = None;
+    let mut too_wide = false;
 
     for s in &sexps {
         let items = match s {
@@ -1119,8 +1267,25 @@ fn run_script_full<R>(input: &str, check: impl Fn(&Solver) -> R) -> Result<Scrip
                         items.len() - 1
                     )));
                 }
-                let term = ctx.parse_bool(item(items, 1, "assert")?)?;
-                solver.assert(term);
+                match ctx.parse_bool(item(items, 1, "assert")?) {
+                    Ok(term) => solver.assert(term),
+                    // A width outside 1..=128 (#313): the README contract is
+                    // `unknown`. The assertion cannot be built, so a term the
+                    // solver itself answers `Unknown` on (a variable above
+                    // the width cap, the declared-129-bit path) stands in:
+                    // the verdict degrades to `Unknown` through the same
+                    // gate, never to a decided answer about a query the
+                    // reader did not build.
+                    Err(SmtError::TooWide(_)) => {
+                        too_wide = true;
+                        let v = BvTerm::Var {
+                            name: "|too wide|".into(),
+                            sort: Sort::new(129),
+                        };
+                        solver.assert(BoolTerm::Eq(Box::new(v.clone()), Box::new(v)));
+                    }
+                    Err(e) => return Err(e),
+                }
             }
             "check-sat" => {
                 result = Some(check(&solver));
@@ -1145,6 +1310,7 @@ fn run_script_full<R>(input: &str, check: impl Fn(&Solver) -> R) -> Result<Scrip
         declared,
         assertions: solver.assertions().to_vec(),
         bool_names,
+        too_wide,
     })
 }
 
@@ -1155,11 +1321,149 @@ fn item<'a>(items: &'a [Sexp], n: usize, cmd: &str) -> Result<&'a Sexp, SmtError
         .ok_or_else(|| SmtError::Parse(format!("'{cmd}' is missing an argument")))
 }
 
-/// Read a declaration's name atom.
+/// Every symbol a declaration may not take (#315): the reserved words and
+/// command names of SMT-LIB 2.6 §3.1, the symbols of Core and
+/// FixedSizeBitVectors (and the QF_BV extensions), the logic and sort names,
+/// SMT-LIB 2.7's additions, and common solver builtins. Matched after
+/// unquoting, because `|w|` and `w` are one symbol. Reference: the echo
+/// printer's list (`ordeal-lrat`, `reservedWords`), mirrored here by hand —
+/// the reader does not depend on that crate.
+const RESERVED_SYMBOLS: &[&str] = &[
+    // reserved words
+    "!",
+    "_",
+    "as",
+    "BINARY",
+    "DECIMAL",
+    "exists",
+    "HEXADECIMAL",
+    "forall",
+    "let",
+    "match",
+    "NUMERAL",
+    "par",
+    "STRING",
+    // command names
+    "assert",
+    "check-sat",
+    "check-sat-assuming",
+    "declare-const",
+    "declare-datatype",
+    "declare-datatypes",
+    "declare-fun",
+    "declare-sort",
+    "define-fun",
+    "define-fun-rec",
+    "define-funs-rec",
+    "define-sort",
+    "echo",
+    "exit",
+    "get-assertions",
+    "get-assignment",
+    "get-info",
+    "get-model",
+    "get-option",
+    "get-proof",
+    "get-unsat-assumptions",
+    "get-unsat-core",
+    "get-value",
+    "pop",
+    "push",
+    "reset",
+    "reset-assertions",
+    "set-info",
+    "set-logic",
+    "set-option",
+    // Core, logic and sort names
+    "Bool",
+    "true",
+    "false",
+    "not",
+    "=>",
+    "and",
+    "or",
+    "xor",
+    "=",
+    "distinct",
+    "ite",
+    "QF_BV",
+    "QF_ABV",
+    "QF_AUFBV",
+    "Array",
+    "select",
+    "store",
+    "BitVec",
+    // FixedSizeBitVectors and QF_BV extensions
+    "concat",
+    "extract",
+    "repeat",
+    "zero_extend",
+    "sign_extend",
+    "rotate_left",
+    "rotate_right",
+    "bvnot",
+    "bvneg",
+    "bvand",
+    "bvor",
+    "bvxor",
+    "bvnand",
+    "bvnor",
+    "bvxnor",
+    "bvcomp",
+    "bvadd",
+    "bvsub",
+    "bvmul",
+    "bvudiv",
+    "bvurem",
+    "bvsdiv",
+    "bvsrem",
+    "bvsmod",
+    "bvshl",
+    "bvlshr",
+    "bvashr",
+    "bvult",
+    "bvule",
+    "bvugt",
+    "bvuge",
+    "bvslt",
+    "bvsle",
+    "bvsgt",
+    "bvsge",
+    // SMT-LIB 2.7 and solver builtins
+    "bvnego",
+    "bvuaddo",
+    "bvsaddo",
+    "bvumulo",
+    "bvsmulo",
+    "bvusubo",
+    "bvssubo",
+    "bvsdivo",
+    "lambda",
+    "define-const",
+    "bvredor",
+    "bvredand",
+    "bv2int",
+    "int2bv",
+    "bv2nat",
+    "nat2bv",
+];
+
+/// Read a declaration's name atom; a reserved word or theory symbol, bare or
+/// quoted, is refused (#315).
 fn decl_name(items: &[Sexp], n: usize) -> Result<String, SmtError> {
-    as_atom(item(items, n, "declaration")?)
+    let name = as_atom(item(items, n, "declaration")?)
         .map(str::to_string)
-        .ok_or_else(|| SmtError::Parse("declaration name must be a symbol".into()))
+        .ok_or_else(|| SmtError::Parse("declaration name must be a symbol".into()))?;
+    let bare = name
+        .strip_prefix('|')
+        .and_then(|t| t.strip_suffix('|'))
+        .unwrap_or(&name);
+    if RESERVED_SYMBOLS.contains(&bare) {
+        return Err(SmtError::Parse(format!(
+            "'{bare}' is a reserved word or theory symbol and cannot be declared"
+        )));
+    }
+    Ok(name)
 }
 
 /// `a <-> b`, expressed with the core's Not/Or/And — no new operation.
@@ -1619,6 +1923,343 @@ mod tests {
                 matches!(verdict_of(&src), Ok(Some(CheckResult::Sat(_)))),
                 "{src}"
             );
+        }
+    }
+
+    // ── #311: string literals ────────────────────────────────────────────
+
+    fn is_sat(src: &str) -> bool {
+        matches!(verdict_of(src), Ok(Some(CheckResult::Sat(_))))
+    }
+
+    // rivet: verifies VER-088
+    #[test]
+    fn string_literals_are_single_tokens() {
+        let body = "(declare-fun x () (_ BitVec 8))(assert (= x #x01))(check-sat)";
+        for info in [
+            // the two #311 repros
+            r#"(set-info :source "a ) b")"#,
+            r#"(set-info :notes "a;b")"#,
+            // an opening paren, a doubled quote, an empty string
+            r#"(set-info :source "a ( b")"#,
+            r#"(set-info :source "say ""hi"") now")"#,
+            r#"(set-info :source "")"#,
+            r#"(set-info :source """")"#,
+            // a string is a value of any attribute, and of set-option
+            r#"(set-option :regular-output-channel "out;)")"#,
+            r#"(set-info :status sat)(set-info :source "x ) ; ( y")"#,
+            // a quoted symbol still holds a semicolon and a double quote
+            r#"(set-info :source |a ; " b|)"#,
+        ] {
+            let src = format!("(set-logic QF_BV){info}{body}");
+            assert!(is_sat(&src), "{src}: {:?}", verdict_of(&src).err());
+        }
+        // A comment after a string is still a comment, and a string does not
+        // swallow the rest of the script.
+        let src = format!("(set-logic QF_BV)(set-info :source \"a\") ; comment )\n{body}");
+        assert!(is_sat(&src));
+        // The string is data: the script it sits in is read as before.
+        let src = "(set-logic QF_BV)(set-info :source \"a ) b\")(declare-fun x () (_ BitVec 8))\
+                   (assert (= x #x01))(assert (= x #x02))(check-sat)";
+        assert!(matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_)))));
+    }
+
+    // rivet: verifies VER-088
+    #[test]
+    fn an_unterminated_string_literal_is_a_parse_error() {
+        for src in [
+            "(set-logic QF_BV)(set-info :source \"a ) b)(check-sat)",
+            "(set-info :source \"never closed",
+            // `""` is an escaped quote, so this string is still open
+            "(set-info :source \"a\"\")(check-sat)",
+        ] {
+            assert!(
+                matches!(verdict_of(src), Err(SmtError::Parse(m)) if m.contains("unterminated")),
+                "{src}"
+            );
+        }
+    }
+
+    // ── #312: Bool distinct and ite ──────────────────────────────────────
+
+    // rivet: verifies VER-089
+    #[test]
+    fn bool_distinct_and_ite_desugar_to_connectives() {
+        let pre = "(set-logic QF_BV)(declare-fun c () Bool)(declare-fun p () Bool)\
+                   (declare-fun q () Bool)(declare-fun r () Bool)";
+        // The two #312 repros are sat.
+        assert!(is_sat(&format!("{pre}(assert (distinct p q))(check-sat)")));
+        assert!(is_sat(&format!("{pre}(assert (ite c p q))(check-sat)")));
+        let unsat = |body: &str| {
+            let src = format!("{pre}{body}(check-sat)");
+            matches!(verdict_of(&src), Ok(Some(CheckResult::Unsat(_))))
+        };
+        // distinct is the negation of = at two arguments ...
+        assert!(unsat("(assert (distinct p q))(assert (= p q))"));
+        assert!(unsat("(assert (distinct p p))"));
+        // ... and pairwise at three: only two values exist.
+        assert!(unsat("(assert (distinct p q r))"));
+        assert!(is_sat(&format!(
+            "{pre}(assert (distinct p q))(assert p)(check-sat)"
+        )));
+        // ite c p q: c selects p, else q.
+        assert!(unsat("(assert (ite c p q))(assert c)(assert (not p))"));
+        assert!(unsat(
+            "(assert (ite c p q))(assert (not c))(assert (not q))"
+        ));
+        assert!(unsat("(assert (not (ite c p p)))(assert p)"));
+        // a Bool ite is a Bool term: under =, distinct, not, and nested
+        assert!(unsat("(assert (distinct (ite c p q) (ite c p q)))"));
+        assert!(unsat("(assert (not (= (ite c p q) (ite (not c) q p))))"));
+        assert!(unsat(
+            "(assert (ite c (ite p q r) r))(assert c)(assert p)(assert (not q))"
+        ));
+        // distinct over Bool comparisons
+        assert!(unsat(
+            "(declare-fun x () (_ BitVec 4))(assert (distinct (bvult x x) false))"
+        ));
+        // the bitvector forms are unchanged
+        let bv = "(set-logic QF_BV)(declare-fun x () (_ BitVec 8))(declare-fun y () (_ BitVec 8))";
+        for (body, want_unsat) in [
+            ("(assert (distinct x y))(assert (= x y))", true),
+            ("(assert (distinct x x))", true),
+            ("(assert (distinct x y))", false),
+            ("(assert (= (ite (= x y) x y) y))", false),
+            (
+                "(assert (distinct (ite (bvult x y) x y) (ite (bvult x y) x y)))",
+                true,
+            ),
+        ] {
+            let src = format!("{bv}{body}(check-sat)");
+            let r = verdict_of(&src);
+            assert!(
+                if want_unsat {
+                    matches!(r, Ok(Some(CheckResult::Unsat(_))))
+                } else {
+                    matches!(r, Ok(Some(CheckResult::Sat(_))))
+                },
+                "{src}: {r:?}"
+            );
+        }
+    }
+
+    // rivet: verifies VER-089
+    #[test]
+    fn mixed_sort_distinct_and_ite_are_still_sort_errors() {
+        let pre = "(set-logic QF_BV)(declare-fun p () Bool)(declare-fun q () Bool)\
+                   (declare-fun x () (_ BitVec 8))";
+        for bad in [
+            "(assert (distinct p x))",
+            "(assert (distinct x p))",
+            "(assert (ite p p x))",
+            "(assert (ite p x p))",
+            "(assert (ite x p q))",
+            "(assert (distinct p))",
+            "(assert (ite p q))",
+            "(assert (= x (ite p p q)))",
+            "(assert (= p (ite p x x)))",
+        ] {
+            let src = format!("{pre}{bad}(check-sat)");
+            assert!(verdict_of(&src).is_err(), "{src}");
+        }
+    }
+
+    // ── #313: widths outside 1..128 ──────────────────────────────────────
+
+    /// Each entry of `solve_str*` that a script can reach, as a verdict name.
+    fn verdicts_everywhere(src: &str) -> Vec<String> {
+        use crate::query::{QueryCheckResult, TermCheckResult};
+        use crate::witness::WitnessCheckResult;
+        let name = |r: Result<&str, SmtError>| match r {
+            Ok(v) => v.to_string(),
+            Err(e) => format!("error: {e}"),
+        };
+        vec![
+            name(solve_str(src).map(|o| match o.result {
+                Some(CheckResult::Unknown) => "unknown",
+                Some(CheckResult::Sat(_)) => "sat",
+                Some(CheckResult::Unsat(_)) => "unsat",
+                None => "none",
+            })),
+            name(solve_str_with_witness(src).map(|(r, _)| match r {
+                Some(WitnessCheckResult::Unknown) => "unknown",
+                Some(WitnessCheckResult::Sat(_)) => "sat",
+                Some(WitnessCheckResult::Unsat(_)) => "unsat",
+                None => "none",
+            })),
+            name(solve_str_with_query(src).map(|(r, _)| match r {
+                Some(QueryCheckResult::Unknown) => "unknown",
+                Some(QueryCheckResult::Sat(_)) => "sat",
+                Some(QueryCheckResult::Unsat(_)) => "unsat",
+                None => "none",
+            })),
+            name(solve_str_with_term(src).map(|(r, _)| match r {
+                Some(TermCheckResult::Unknown) => "unknown",
+                Some(TermCheckResult::Sat(_)) => "sat",
+                Some(TermCheckResult::Unsat(_)) => "unsat",
+                None => "none",
+            })),
+        ]
+    }
+
+    // rivet: verifies VER-090
+    #[test]
+    fn wide_widths_answer_unknown_in_every_form() {
+        let hex136 = format!("#x{}1", "0".repeat(33));
+        let hex_wide = format!("#x{}", "1".repeat(34));
+        let bin129 = format!("#b{}", "1".repeat(129));
+        let pre =
+            "(set-logic QF_BV)(declare-fun x () (_ BitVec 8))(declare-fun y () (_ BitVec 64))";
+        let bodies: Vec<(&str, String)> = vec![
+            ("declared 129", "(declare-fun w () (_ BitVec 129))(assert (= w w))".into()),
+            ("declared 136", "(declare-fun w () (_ BitVec 136))(assert (= w (_ bv1 136)))".into()),
+            ("declared 129 and extracted", "(declare-fun w () (_ BitVec 129))(assert (= ((_ extract 7 0) w) x))".into()),
+            ("declared absurd", "(declare-fun w () (_ BitVec 99999999999999))(assert (= w w))".into()),
+            ("136-bit hex literal", format!("(declare-fun w () (_ BitVec 136))(assert (= w {hex136}))")),
+            ("hex literal under extract (#313 wa)", format!("(assert (= ((_ extract 7 0) {hex_wide}) x))")),
+            ("129-bit binary under extract (#313 wc)", format!("(assert (= ((_ extract 7 0) {bin129}) x))")),
+            ("(_ bv5 136) under extract (#313 wb)", "(assert (= ((_ extract 7 0) (_ bv5 136)) x))".into()),
+            ("(_ bv1 129)", "(declare-fun w () (_ BitVec 129))(assert (= w (_ bv1 129)))".into()),
+            ("(_ bvN absurd)", "(assert (= x (_ bv1 99999999999999)))".into()),
+            ("(_ bv<huge> 200)", format!("(assert (= x (_ bv{} 200)))", "9".repeat(60))),
+            ("zero_extend to 129 (#313 we)", "(assert (= ((_ zero_extend 65) y) (_ bv1 129)))".into()),
+            ("zero_extend to 129, nothing else wide", "(assert (= ((_ zero_extend 65) y) ((_ zero_extend 65) y)))".into()),
+            ("sign_extend to 200", "(assert (= ((_ sign_extend 192) x) ((_ sign_extend 192) x)))".into()),
+            ("sign_extend count beyond u32", "(assert (= ((_ sign_extend 99999999999999) x) x))".into()),
+            ("concat to 128+64", "(declare-fun a () (_ BitVec 128))(assert (= ((_ extract 7 0) (concat a y)) x))".into()),
+            ("concat to 200", "(declare-fun a () (_ BitVec 100))(assert (= (concat a a) (concat a a)))".into()),
+            ("wide under rotate", "(declare-fun w () (_ BitVec 129))(assert (= ((_ rotate_left 3) w) w))".into()),
+            ("wide in a later assert", "(assert (= x x))(assert (= ((_ extract 7 0) (_ bv5 136)) x))".into()),
+            ("wide beside a refutable assert", "(assert (= x #x01))(assert (= x #x02))(assert (= ((_ extract 7 0) (_ bv5 136)) x))".into()),
+        ];
+        for (what, body) in &bodies {
+            let src = format!("{pre}{body}(check-sat)");
+            let v = verdicts_everywhere(&src);
+            assert!(
+                v.iter().all(|r| r == "unknown"),
+                "{what}: every entry point must answer unknown, got {v:?}\n{src}"
+            );
+        }
+        // Widths at the edge of the range are decided, not unknown.
+        let at_edge = format!(
+            "(set-logic QF_BV)(declare-fun w () (_ BitVec 128))(assert (= w #x{}))(check-sat)",
+            "1".repeat(32)
+        );
+        assert!(is_sat(&at_edge), "128 bits is in range");
+        let at_edge = format!(
+            "(set-logic QF_BV)(declare-fun w () (_ BitVec 128))\
+             (assert (= ((_ zero_extend 0) w) #b{}))(check-sat)",
+            "1".repeat(128)
+        );
+        assert!(is_sat(&at_edge), "a 128-bit binary literal is in range");
+    }
+
+    // rivet: verifies VER-090
+    #[test]
+    fn malformed_widths_stay_parse_errors() {
+        let pre = "(set-logic QF_BV)(declare-fun x () (_ BitVec 8))";
+        for bad in [
+            // a zero width
+            "(declare-fun z () (_ BitVec 0))",
+            "(assert (= x ((_ zero_extend 0) (_ bv0 0))))",
+            // an extract outside the width
+            "(assert (= ((_ extract 8 0) x) x))",
+            "(assert (= ((_ extract 3 5) x) x))",
+            // not numerals
+            "(assert (= x (_ bv1 +8)))",
+            "(declare-fun z () (_ BitVec 8x))",
+            "(declare-fun z () (_ BitVec -8))",
+            "(assert (= ((_ zero_extend x) x) x))",
+            // malformed hex and binary, short or wide
+            "(assert (= x #x))",
+            "(assert (= x #b))",
+            "(assert (= x #xg1))",
+            "(assert (= x #b102))",
+            "(assert (= x #x11111111111111111111111111111111111g))",
+        ] {
+            let src = format!("{pre}{bad}(check-sat)");
+            assert!(
+                matches!(verdict_of(&src), Err(SmtError::Parse(_))),
+                "{src}: {:?}",
+                verdict_of(&src).map(|_| ())
+            );
+        }
+    }
+
+    // ── #315: reserved words ─────────────────────────────────────────────
+
+    // rivet: verifies VER-091
+    #[test]
+    fn reserved_words_cannot_be_declared() {
+        // the #315 repro
+        let repro = "(set-logic QF_BV)(declare-fun |let| () (_ BitVec 8))\
+                     (declare-fun |_| () (_ BitVec 8))(assert (= |let| |_|))(check-sat)";
+        assert!(matches!(verdict_of(repro), Err(SmtError::Parse(_))));
+        for w in RESERVED_SYMBOLS {
+            for spelling in [(*w).to_string(), format!("|{w}|")] {
+                for decl in [
+                    format!("(declare-fun {spelling} () (_ BitVec 8))"),
+                    format!("(declare-const {spelling} (_ BitVec 8))"),
+                    format!("(declare-fun {spelling} () Bool)"),
+                ] {
+                    let src = format!("(set-logic QF_BV){decl}(check-sat)");
+                    assert!(
+                        matches!(verdict_of(&src), Err(SmtError::Parse(_))),
+                        "{src}: {:?}",
+                        verdict_of(&src).map(|_| ())
+                    );
+                }
+            }
+        }
+        // the words the issue names are all on the list
+        for w in [
+            "let",
+            "_",
+            "!",
+            "as",
+            "par",
+            "forall",
+            "exists",
+            "match",
+            "NUMERAL",
+            "DECIMAL",
+            "STRING",
+            "BINARY",
+            "HEXADECIMAL",
+            "assert",
+            "check-sat",
+            "bvadd",
+            "concat",
+            "ite",
+            "distinct",
+            "extract",
+        ] {
+            assert!(RESERVED_SYMBOLS.contains(&w), "{w}");
+        }
+    }
+
+    // rivet: verifies VER-091
+    #[test]
+    fn ordinary_and_non_simple_quoted_names_still_declare() {
+        for name in [
+            "x",
+            "|x|",
+            "|a b|",
+            "|let x|",
+            "|#x01|",
+            "lets",
+            "let1",
+            "_x",
+            "bv5",
+            "bvadd1",
+            "|;|",
+            "Bool1",
+            "%%location_label%%0",
+        ] {
+            let src = format!(
+                "(set-logic QF_BV)(declare-fun {name} () (_ BitVec 8))(assert (= {name} #x01))(check-sat)"
+            );
+            assert!(is_sat(&src), "{src}: {:?}", verdict_of(&src).err());
         }
     }
 }
