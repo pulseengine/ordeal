@@ -12,8 +12,10 @@ head.repo is null) falls to the hosted runner. Rejected:
   - a plain self-hosted label (list or string);
   - the fail-open form `head.repo.fork && 'ubuntu-latest' || [...]`, which
     picks self-hosted whenever .fork is not true, including a null head.repo;
-  - any self-hosted job in a workflow triggered by pull_request_target, where
-    `event_name != 'pull_request'` is true for fork PRs;
+  - any self-hosted job in a workflow with a trigger outside TRUSTED. The
+    expression trusts every event that is not `pull_request`, so a trigger a
+    fork can cause under another name (pull_request_target, workflow_run,
+    issue_comment, pull_request_review*, ...) would reach the runner;
   - no self-hosted job at all, so the check never passes having compared
     nothing (delete it if ordeal stops using self-hosted runners).
 """
@@ -28,9 +30,14 @@ FORM = re.compile(
     r"github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && "
     r"fromJSON\('\[[^\]]*\"self-hosted\"[^\]]*\]'\) \|\| 'ubuntu-latest' \}\}$"
 )
+# Triggers only a maintainer or this repository's own branches can cause,
+# plus pull_request, which the expression itself sends to a hosted runner
+# unless the head repository is this one.
+TRUSTED = {"push", "pull_request", "schedule", "workflow_dispatch", "merge_group"}
 root = pathlib.Path(__file__).resolve().parent.parent
 bad, seen = {}, []
-for wf in sorted((root / ".github" / "workflows").glob("*.yml")):
+wfdir = root / ".github" / "workflows"
+for wf in sorted([*wfdir.glob("*.yml"), *wfdir.glob("*.yaml")]):
     doc = yaml.safe_load(wf.read_text()) or {}
     on = doc.get(True, doc.get("on")) or {}
     events = set(on) if isinstance(on, (dict, list)) else {on}
@@ -41,8 +48,9 @@ for wf in sorted((root / ".github" / "workflows").glob("*.yml")):
             continue
         where = f"{wf.name}:{job}"
         seen.append(where)
-        if "pull_request_target" in events:
-            bad[where] = "workflow runs on pull_request_target"
+        untrusted = sorted(str(e) for e in events - TRUSTED)
+        if untrusted:
+            bad[where] = f"workflow trigger(s) outside the allowlist: {', '.join(untrusted)}"
         elif isinstance(ro, list) or not FORM.match(text.strip()):
             bad[where] = "runs-on is not the fail-closed same-repo form"
 for w in seen:
