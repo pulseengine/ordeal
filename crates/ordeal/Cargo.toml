@@ -23,14 +23,14 @@ path = "src/main.rs"
 # wasip2-clean). The solver depends on the checker to validate certificates;
 # the checker never depends on the solver (the trust boundary, enforced by
 # ordeal-lrat's empty dependency table).
-ordeal-lrat = { path = "../ordeal-lrat", version = "=0.36.1" }
+ordeal-lrat = { path = "../ordeal-lrat", version = "=0.37.0" }
 
 # The certificate data types, their trusted re-checks and the
 # `ordeal-cert/v1..v4` bundle codec (TR-075): extracted so `ordeal-recheck`
 # is built without the solver. In-workspace and dependency-free beyond
 # ordeal-lrat with no features on, so the default build stays free of
 # third-party deps. Everything is re-exported at its old `ordeal::` path.
-ordeal-cert = { path = "../ordeal-cert", version = "=0.36.1", default-features = false }
+ordeal-cert = { path = "../ordeal-cert", version = "=0.37.0", default-features = false }
 # (sha256 is in-tree — crates/ordeal-cert/src/sha256.rs — so the witness
 # hashes ship in the dependency-free default binary; #162 / TR-045.)
 

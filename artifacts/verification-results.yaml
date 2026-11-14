@@ -3385,7 +3385,6 @@ artifacts:
     type: verification-execution
     title: "Front-end fixes run (VER-088 to VER-092): string literals, Bool distinct/ite, widths, reserved words, --cert-out"
     status: implemented
-    release: v0.37.0
     description: "Local run on branch fix/v0.37.0-front-end (based on 0cf61be), shared-machine debug and release builds. cargo test --workspace --no-fail-fast exit 0; cargo test -p ordeal --features cert-bundle --test cli_cert_out 8 passed (includes cli_bundle_equals_the_api_bundle); cargo test -p ordeal --features oracle --release --lib oracle::front::tests 5 passed, 1 ignored, 216 s: repository files 26 compared (41 assertions) agree 26 disagree 0 both-refuse 1; generated 10^4 scripts, 9604 compared (19296 assertions) agree 9604 disagree 0, ordeal-refuses/Z3-accepts 327 (the reserved-word declarations Z3 accepts, listed), Z3-refuses/ordeal-accepts 0, both refuse 69; negative controls SltAsUlt 151, RotlNoMod 53, ChainEqDropLast 93, ImpliesLeftAssoc 130 disagree of 1000. The new tests fail on origin/main (smtlib::tests: 5 of 8 new tests fail, 3 pin unchanged behaviour; cli_cert_out: 6 of 7 fail). cargo fmt --check, cargo clippy --all-targets (default, oracle, cert-bundle) -D warnings, claim_check 64/64, recheck_closure PASS, rivet validate PASS."
     fields:
       environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew), LIBRARY_PATH=/opt/homebrew/lib
@@ -3400,7 +3399,6 @@ artifacts:
     type: verification-verdict
     title: "VER-088 pass: string literals: the two repro scripts decide sat, strings holding parens, semicolon and doubled quotes are read, an unterminated string is a parse error"
     status: implemented
-    release: v0.37.0
     description: "string literals: the two repro scripts decide sat, strings holding parens, semicolon and doubled quotes are read, an unterminated string is a parse error"
     fields:
       evidence: cargo test -p ordeal --lib smtlib::tests (36 passed); fails on origin/main (string_literals_are_single_tokens, an_unterminated_string_literal_is_a_parse_error)
@@ -3415,7 +3413,6 @@ artifacts:
     type: verification-verdict
     title: "VER-089 pass: Bool distinct and ite desugar and agree with Z3; mixed sorts stay errors"
     status: implemented
-    release: v0.37.0
     description: Bool distinct and ite desugar and agree with Z3; mixed sorts stay errors
     fields:
       evidence: "smtlib::tests::bool_distinct_and_ite_desugar_to_connectives and mixed_sort_distinct_and_ite_are_still_sort_errors pass; the first fails on origin/main; the front leg generates both forms: 0 disagree over 9604 compared"
@@ -3430,7 +3427,6 @@ artifacts:
     type: verification-verdict
     title: "VER-090 pass: every width outside 1 to 128 answers unknown in all four solve entry points; malformed widths stay errors; the README sentence is claim-bound"
     status: implemented
-    release: v0.37.0
     description: every width outside 1 to 128 answers unknown in all four solve entry points; malformed widths stay errors; the README sentence is claim-bound
     fields:
       evidence: smtlib::tests::wide_widths_answer_unknown_in_every_form and malformed_widths_stay_parse_errors pass; the first fails on origin/main; claim_check README-WIDTH-UNKNOWN holds (64/64)
@@ -3445,7 +3441,6 @@ artifacts:
     type: verification-verdict
     title: "VER-091 pass: reserved words and theory symbols cannot be declared, bare or quoted; ordinary names still declare"
     status: implemented
-    release: v0.37.0
     description: reserved words and theory symbols cannot be declared, bare or quoted; ordinary names still declare
     fields:
       evidence: "smtlib::tests::reserved_words_cannot_be_declared and ordinary_and_non_simple_quoted_names_still_declare pass; the first fails on origin/main; front leg: Z3 accepts many of them (listed ordeal-refuses 327), 0 disagree, 0 Z3-refuses/ordeal-accepts"
@@ -3460,7 +3455,6 @@ artifacts:
     type: verification-verdict
     title: "VER-092 pass: ordeal check --cert-out writes a v3 bundle the real ordeal-recheck accepts and rejects after a flipped byte"
     status: implemented
-    release: v0.37.0
     description: ordeal check --cert-out writes a v3 bundle the real ordeal-recheck accepts and rejects after a flipped byte
     fields:
       evidence: cargo test -p ordeal --test cli_cert_out (7 passed) and with --features cert-bundle (8 passed, JSON equal to to_cert_v3); 6 of 7 fail on origin/main
@@ -3475,7 +3469,6 @@ artifacts:
     type: verification-execution
     title: "Query echo E1 run (VER-079): regen, lake build, axiom pins, mutations, Z3 echo leg, MC/DC"
     status: implemented
-    release: v0.37.0
     description: "Author run and independent clean-room run (separate worktrees under /Volumes/Home). Regen: Kernel.lean sha256 46089c48... at 69dcd03 and 3ae61410... at 178ca47, 0 ^axiom, each reproduced byte-identically in a separate regen. lake build: Build completed successfully (1736 jobs) at both commits. Mutations, each a full lake build after regen with 0 axioms, pristine source restored and its sha256 checked: at 69dcd03 quote-dropped fails Echo.lean:670, bvslt/bvsle 1844, #b LSB-first 572, collision 1396; at 178ca47 the same four fail at 674, 1914, 576, 1454 and the dropped Bool-position sort check fails at 3018. Echo leg (oracle::echo::tests, release): repository files 26 compared, 41 assertions, agree 26, disagree 0; generated 10^4: 1510 echoed as read agree 1510, 8490 refused by the printer (Name: non-simple quoted symbols keep their bars, #294) and agree 8490 with content names; 1000 sliver queries: 751 agree, 249 refused (Rotate by a term amount); Z3 refused 0 echoes; controls red: bvslt/bvsle 283/1000, #b LSB-first 511/1000, last assert dropped 1000/1000, ext bvslt/bvsle 67/300. MC/DC: 344 rows, echo_kernel.rs 72 decisions; the fail-closed check fails on the 178ca47 harness naming src/echo_kernel.rs. Size/time on the latency corpus: echo median 207 bytes, echo_term median 1.5 us, 0.64% of check_with_term."
     fields:
       environment: macOS arm64, Lean v4.30.0-rc2, Aeneas nightly-2026.07.02 (9dd45ecf) / Charon 40ee060a, rustc 1.99.1, Z3 5.1.0, witness 0.45.0
@@ -3490,7 +3483,6 @@ artifacts:
     type: verification-verdict
     title: "VER-079 pass: echo theorems axiom-clean over a byte-identical regen; five mutations break lake build; Z3 echo leg 0 disagree, controls red; MC/DC rows reach echo_kernel.rs"
     status: implemented
-    release: v0.37.0
     description: echo theorems axiom-clean over a byte-identical regen; five mutations break lake build; Z3 echo leg 0 disagree, controls red; MC/DC rows reach echo_kernel.rs
     fields:
       evidence: "VE-073: independent regen hashes and lake build at 69dcd03 and 178ca47; nine mutation builds red (4 + 5); echo leg tallies with 0 disagree and 0 Z3-refused; mcdc_gate OK with 72 echo decisions and the zero-decision control red"

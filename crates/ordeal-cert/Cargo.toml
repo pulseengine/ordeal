@@ -15,7 +15,7 @@ path = "src/lib.rs"
 # The trusted checker every `recheck` calls (TR-075). This crate must never
 # depend on the `ordeal` solver: it is what `ordeal-recheck` is built from,
 # and scripts/recheck_closure.sh gates that closure in CI.
-ordeal-lrat = { path = "../ordeal-lrat", version = "=0.36.1" }
+ordeal-lrat = { path = "../ordeal-lrat", version = "=0.37.0" }
 
 # The `ordeal-cert/v1..v4` JSON envelope. Optional: without `json` the crate
 # is dependency-free beyond ordeal-lrat (the default `ordeal` build enables

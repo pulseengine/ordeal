@@ -783,14 +783,14 @@ claims:
   # ── docs/consuming-ordeal.md ──────────────────────────────────────────────
   - id: CONS-DEP-VERSION
     doc: docs/consuming-ordeal.md
-    text: 'ordeal = "0.36"'
+    text: 'ordeal = "0.37"'
     epoch: >-
       The workspace version. A release bump makes this red until the
       dependency line is bumped with it (the doc must name the version that
       carries the API it describes).
     evidence:
       - kind: count-min
-        pattern: '^version = "0\.36\.\d+"$'
+        pattern: '^version = "0\.37\.\d+"$'
         glob: Cargo.toml
         min: 1
 
