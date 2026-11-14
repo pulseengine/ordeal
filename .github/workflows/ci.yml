@@ -119,7 +119,9 @@ jobs:
       - name: Check release workflow order
         run: python3 scripts/check_release_order.py
       - name: No fork PR reaches a self-hosted runner
-        run: python3 scripts/check_selfhosted_fork_guard.py
+        run: |
+          python3 scripts/check_selfhosted_fork_guard.py --self-test
+          python3 scripts/check_selfhosted_fork_guard.py
       # rivet: verifies VER-055
       # #189: the trusted checker is pinned exactly (=X.Y.Z) by the solver.
       - name: Check exact ordeal-lrat pin
