@@ -167,6 +167,14 @@ def self_test():
             "on": ["push"], "jobs": {"m": {"strategy": {"matrix": {"include": [{"os": "ubuntu-latest"}, {"os": "light"}]}},
                                            "runs-on": "${{ matrix.os }}", "steps": []},
                                      "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("contains() matrix guard with a [linux, light] runner -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push", "pull_request"],
+            "jobs": {"m": {"strategy": {"matrix": {"runner": ['["linux","light"]', '"ubuntu-latest"']}},
+                           "runs-on": "${{ (github.event_name != 'pull_request' || "
+                                      "github.event.pull_request.head.repo.full_name == github.repository || "
+                                      "!contains(matrix.runner, 'self-hosted')) && fromJSON(matrix.runner) || 'ubuntu-latest' }}",
+                           "steps": []},
+                     "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("runner from vars -> fails", "x.yml", yaml.safe_dump({
             "on": ["push"], "jobs": {"a": {"runs-on": "${{ vars.RUNNER }}", "steps": []},
                                      "b": {"runs-on": GOOD, "steps": []}}}), True),
