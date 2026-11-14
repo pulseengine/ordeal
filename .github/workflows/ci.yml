@@ -19,7 +19,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: [self-hosted, linux, x64, light]  # light job on our runners (hosted queue stalled, 2026-11-14)
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}  # light pool; fork PRs stay hosted (2026-11-14)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -118,6 +118,8 @@ jobs:
       # before the release gate job.
       - name: Check release workflow order
         run: python3 scripts/check_release_order.py
+      - name: No fork PR reaches a self-hosted runner
+        run: python3 scripts/check_selfhosted_fork_guard.py
       # rivet: verifies VER-055
       # #189: the trusted checker is pinned exactly (=X.Y.Z) by the solver.
       - name: Check exact ordeal-lrat pin
@@ -650,7 +652,7 @@ jobs:
   # the same pin).
   varve-pin:
     name: varve layer pin resolves (pinned rivet validates the graph)
-    runs-on: [self-hosted, linux, x64, light]  # light job on our runners (hosted queue stalled, 2026-11-14)
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}  # light pool; fork PRs stay hosted (2026-11-14)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
