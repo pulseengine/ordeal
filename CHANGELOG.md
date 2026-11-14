@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-11-14
+
+Two strands. The first phase of the certified query echo (#281, E1): a
+printer in the trusted crate that writes the term DAG ordeal decided back
+out as an SMT-LIB script, with a Lean proof that an accepted Unsat means no
+interpretation satisfies those bytes. Nothing calls the printer yet; the
+echo in the bundle (`ordeal-cert/v5`) and the third-party `echo-check` are
+#281's later phases. The second strand is the front-end findings of an
+external Z3 differential probe of 0.36.1 (#311, #312, #313, #315, #316),
+none of which gave a wrong verdict, and three gates that could pass having
+checked nothing. No existing verdict or bundle byte changes.
+
 ### Added
 
 - **`ordeal check FILE --cert-out PATH`** (TR-092, #316). Writes the
@@ -2260,7 +2272,9 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.37.0
+[0.36.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.1
 [0.36.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.0
 [0.35.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.35.0
 [0.34.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.34.0

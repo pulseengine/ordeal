@@ -17,7 +17,7 @@ members = [
 default-members = ["crates/ordeal", "crates/ordeal-cert", "crates/ordeal-lrat"]
 
 [workspace.package]
-version = "0.36.1"
+version = "0.37.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/pulseengine/ordeal"
