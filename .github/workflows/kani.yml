@@ -61,7 +61,7 @@ concurrency:
 jobs:
   tiers:
     name: Harness coverage (every proof is in a tier)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, light]  # light job on our runners (hosted queue stalled, 2026-11-14)
     timeout-minutes: 5
     outputs:
       wide: ${{ steps.wide.outputs.matrix }}
