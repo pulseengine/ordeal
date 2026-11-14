@@ -30,7 +30,7 @@ FORM = re.compile(
     r"github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && "
     r"fromJSON\('\[[^\]]*\"self-hosted\"[^\]]*\]'\) \|\| 'ubuntu-latest' \}\}$"
 )
-MATRIX_REF = re.compile(r"^\$\{\{\s*(fromJSON\()?matrix\.[A-Za-z0-9_-]+\)?\s*\}\}$")
+MATRIX_REF = re.compile(r"^\$\{\{\s*(fromJSON\()?matrix\.([A-Za-z0-9_-]+)\)?\s*\}\}$")
 # Triggers only a maintainer or this repository's own branches can cause,
 # plus pull_request, which the expression itself sends to a hosted runner
 # unless the head repository is this one.
@@ -51,47 +51,74 @@ def _strings(node, path=()):
         yield path, node
 
 
+HOSTED = re.compile(r"^(ubuntu|macos|windows)-[A-Za-z0-9._-]+$")
+
+
+def _runner_problem(spec):
+    """None if the job's runs-on is on the allowlist, else the reason.
+    Allowlist: a GitHub-hosted image name, the fail-closed form, or a plain
+    matrix.* reference whose every literal value is a hosted image. Labels
+    alone select self-hosted runners (`[linux, light]`, a bare `light`, a
+    `group:` map), so everything else fails, with or without the word
+    self-hosted."""
+    ro = spec.get("runs-on")
+    if isinstance(ro, str):
+        t = ro.strip()
+        if HOSTED.match(t) or FORM.match(t):
+            return None
+        m = MATRIX_REF.match(t)
+        if m:
+            matrix = (spec.get("strategy") or {}).get("matrix")
+            key = m.group(2)
+            if not isinstance(matrix, dict):
+                return f"runs-on is matrix.{key}, but the matrix is not a literal map"
+            vals = list(matrix.get(key) or []) if isinstance(matrix.get(key) or [], list) else [None]
+            vals += [inc[key] for inc in (matrix.get("include") or []) if isinstance(inc, dict) and key in inc]
+            odd = [v for v in vals if not (isinstance(v, str) and HOSTED.match(v))]
+            if not vals or odd:
+                return f"matrix.{key} has a value that is not a hosted image: {odd or 'none listed'}"
+            return None
+        if "${{" in t:
+            return "runs-on is computed at run time; only the fail-closed form or matrix.* is checkable"
+        return f"runs-on label {t!r} is not a hosted image (a custom label can select a self-hosted runner)"
+    return f"runs-on is a {type(ro).__name__} (label list or group map), which can select a self-hosted pool"
+
+
 def check(wfdir):
-    """Return (seen, bad). Every string mentioning `self-hosted` outside a
-    step's `run` script must be a job's own runs-on in the accepted form: a
-    self-hosted label in strategy.matrix, an input default, env or anywhere
-    else fails closed, because the check cannot follow how it reaches
-    runs-on. (A label in a repository variable, `vars.X`, is invisible to any
-    file check.)"""
+    """Return (seen, bad): seen lists the jobs that run on the self-hosted
+    pool through the fail-closed form; bad maps each failing job or string to
+    its reason. Two layers: every job's runs-on must be on the allowlist
+    (_runner_problem), and every string mentioning self-hosted outside job
+    steps must be a job's own runs-on in the fail-closed form, so a label in
+    a matrix, an input default or env fails. (A label in a repository
+    variable, `vars.X`, is invisible to a file check; such a runs-on is a
+    run-time expression and fails the first layer.)"""
     bad, seen = {}, []
     for wf in sorted([*wfdir.glob("*.yml"), *wfdir.glob("*.yaml")]):
         doc = yaml.safe_load(wf.read_text()) or {}
         on = doc.get(True, doc.get("on")) or {}
         events = set(on) if isinstance(on, (dict, list)) else {on}
         untrusted = sorted(str(e) for e in events - TRUSTED)
-        for path, text in _strings({k: v for k, v in doc.items() if k is not True and k != "on"} | {"on": on}):
+        jobs = doc.get("jobs") or {}
+        for job, spec in jobs.items():
+            if "runs-on" not in spec:
+                continue  # a reusable-workflow call; its jobs are checked in their own file
+            where = f"{wf.name}:{job}"
+            problem = _runner_problem(spec)
+            if problem:
+                bad[where] = problem
+            elif FORM.match(str(spec["runs-on"]).strip()):
+                seen.append(where)
+                if untrusted:
+                    bad[where] = f"workflow trigger(s) outside the allowlist: {', '.join(untrusted)}"
+        rest = {k: v for k, v in doc.items() if k is not True and k != "on"} | {"on": on}
+        for path, text in _strings(rest):
             if "self-hosted" not in text:
                 continue
-            is_runs_on = len(path) >= 3 and path[0] == "jobs" and path[2] == "runs-on"
-            where = f"{wf.name}:{path[1]}" if is_runs_on else f"{wf.name}:{'.'.join(map(str, path))}"
-            if where in seen:
+            if len(path) >= 3 and path[0] == "jobs" and path[2] == "runs-on" and FORM.match(text.strip()):
                 continue
-            seen.append(where)
-            ro = doc["jobs"][path[1]]["runs-on"] if is_runs_on else None
-            if not is_runs_on:
-                bad[where] = "self-hosted label outside a job's runs-on (matrix, input, env, ...): not checkable"
-            elif untrusted:
-                bad[where] = f"workflow trigger(s) outside the allowlist: {', '.join(untrusted)}"
-            elif isinstance(ro, list) or not FORM.match(str(ro).strip()):
-                bad[where] = "runs-on is not the fail-closed same-repo form"
-        # A runner computed at run time (needs outputs, inputs, vars, github)
-        # cannot be checked from the file: only the accepted form or a plain
-        # matrix reference (whose values the walk above checks) may be an
-        # expression.
-        for job, spec in (doc.get("jobs") or {}).items():
-            ro = spec.get("runs-on")
-            text = str(ro or "")
-            if "${{" not in text or FORM.match(text.strip()) or MATRIX_REF.match(text.strip()):
-                continue
-            where = f"{wf.name}:{job}"
-            if where not in seen:
-                seen.append(where)
-            bad[where] = "runs-on is computed at run time; only the fail-closed form or matrix.* is checkable"
+            bad[f"{wf.name}:{'.'.join(map(str, path))}"] = (
+                "self-hosted label outside a job's fail-closed runs-on (matrix, input, env, ...)")
     return seen, bad
 
 
@@ -127,6 +154,22 @@ def self_test():
         ("self-hosted label in an input default -> fails", "x.yml", yaml.safe_dump({
             "on": {"workflow_dispatch": {"inputs": {"r": {"default": "self-hosted"}}}},
             "jobs": {"a": {"runs-on": "${{ inputs.r }}", "steps": []}}}), True),
+        ("custom label list without the word -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"a": {"runs-on": ["linux", "light"], "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("bare custom label -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"a": {"runs-on": "light", "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("runner group map -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"a": {"runs-on": {"group": "ordeal-pool"}, "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("matrix value that is a custom label -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"m": {"strategy": {"matrix": {"include": [{"os": "ubuntu-latest"}, {"os": "light"}]}},
+                                           "runs-on": "${{ matrix.os }}", "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("runner from vars -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"a": {"runs-on": "${{ vars.RUNNER }}", "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("runner from a needs output -> fails", "x.yml", yaml.safe_dump({
             "on": ["push"],
             "jobs": {"pick": {"runs-on": "ubuntu-latest", "steps": [{"run": "echo r=x >> $GITHUB_OUTPUT"}]},
@@ -167,6 +210,8 @@ def main():
     seen, bad = check(root / ".github" / "workflows")
     for w in seen:
         print(f"FAIL  {w}: {bad[w]}" if w in bad else f"ok    {w}")
+    for w in sorted(set(bad) - set(seen)):
+        print(f"FAIL  {w}: {bad[w]}")
     if not seen:
         sys.exit("FAIL  no self-hosted job found: this check compared nothing")
     if bad:
