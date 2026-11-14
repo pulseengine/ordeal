@@ -19,7 +19,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}  # light pool; fork PRs stay hosted (2026-11-14)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -652,7 +652,7 @@ jobs:
   # the same pin).
   varve-pin:
     name: varve layer pin resolves (pinned rivet validates the graph)
-    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","linux","x64","light"]') }}  # light pool; fork PRs stay hosted (2026-11-14)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
