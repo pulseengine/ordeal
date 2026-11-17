@@ -19,7 +19,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -118,6 +118,10 @@ jobs:
       # before the release gate job.
       - name: Check release workflow order
         run: python3 scripts/check_release_order.py
+      - name: No fork PR reaches a self-hosted runner
+        run: |
+          python3 scripts/check_selfhosted_fork_guard.py --self-test
+          python3 scripts/check_selfhosted_fork_guard.py
       # rivet: verifies VER-055
       # #189: the trusted checker is pinned exactly (=X.Y.Z) by the solver.
       - name: Check exact ordeal-lrat pin
@@ -650,7 +654,7 @@ jobs:
   # the same pin).
   varve-pin:
     name: varve layer pin resolves (pinned rivet validates the graph)
-    runs-on: ubuntu-latest
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -658,6 +662,16 @@ jobs:
           # full history: the commit-trailer gate below walks the PR range
           fetch-depth: 0
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      # A fresh varve root per job. On the self-hosted pool ~/.varve persists
+      # across jobs and repositories, so another repo's newer layer on the
+      # same line left a higher anti-rollback mark, and varve 0.38.0 refused
+      # this pin as stale ("presents counter 26 but the 2026.10 line's
+      # high-water mark is 39"). RUNNER_TEMP is emptied after every job, as
+      # a hosted runner's home is.
+      - name: A fresh varve root for this job
+        run: |
+          echo "VARVE_ROOT=$RUNNER_TEMP/varve" >> "$GITHUB_ENV"
+          echo "VARVE_INSTALL_DIR=$RUNNER_TEMP/varve/bin" >> "$GITHUB_ENV"
       - name: Install varve (verified) and the pinned layer
         env:
           VARVE_VERSION: v0.38.0
@@ -665,9 +679,10 @@ jobs:
       - name: The pinned rivet is the one on PATH, and it validates the graph
         run: |
           set -euo pipefail
-          test "$(command -v rivet)" = "$HOME/.varve/shims/rivet"
+          case "$VARVE_ROOT" in "$RUNNER_TEMP"/*) ;; *) echo "VARVE_ROOT is not per-job: $VARVE_ROOT"; exit 1 ;; esac
+          test "$(command -v rivet)" = "$VARVE_ROOT/shims/rivet"
           rivet --version
-          ~/.varve/bin/varve status
+          "$VARVE_INSTALL_DIR/varve" status
           rivet validate
       # rivet: verifies VER-054
       # #188: every commit of the PR carries real artifact trailers or is

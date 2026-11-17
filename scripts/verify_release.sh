@@ -27,9 +27,16 @@
 # only on an arm64 mac; elsewhere they are reported as SKIP.
 set -uo pipefail
 TAG="${1:?usage: $0 vX.Y.Z}"; BARE="${TAG#v}"; REPO=pulseengine/ordeal
-# wsc: on PATH, else the pinned varve layer (resolved here, before the cd,
-# because `varve` resolves the pin from the working directory).
-WSC=$(command -v wsc 2>/dev/null || { [ -x "$HOME/.varve/bin/varve" ] && "$HOME/.varve/bin/varve" which wsc 2>/dev/null | head -1; } || true)
+# wsc: the pinned varve layer's binary first, resolved here, before the cd,
+# because `varve` resolves the pin from the working directory. A `wsc` on
+# PATH is used only if it is not a varve shim: a shim run from the download
+# directory below has no varve.toml above it and refuses ("no varve.toml
+# found"), which made every wsc check FAIL on v0.37.0's good signatures.
+WSC=$({ [ -x "$HOME/.varve/bin/varve" ] && "$HOME/.varve/bin/varve" which wsc 2>/dev/null | head -1; } || true)
+if [ -z "$WSC" ] || [ ! -x "$WSC" ]; then
+  WSC=$(command -v wsc 2>/dev/null || true)
+  case "$WSC" in */.varve/shims/*) WSC="" ;; esac
+fi
 D="${TMPDIR:-/tmp}/ordeal-verify-$TAG"
 rm -rf "$D"; mkdir -p "$D"; cd "$D"
 fail=0; ok() { echo "PASS $1"; }; bad() { echo "FAIL $1"; fail=1; }; skip() { echo "SKIP $1"; }
