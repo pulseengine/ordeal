@@ -441,8 +441,8 @@ mismatch. A block the fold never fires on keeps its `ordeal-dag/v1` /
 `v2` tag, bytes and hash. Bundles written by v0.37.0 and earlier never
 carry the hint, so v0.38.0 re-derives exactly the CNF they carry and
 accepts them as before. What changes for you: the certificate of a query
-the fold fires on (about half of the random differential corpus; none of
-the bench corpora) has a smaller CNF and a different proof than v0.37.0
+the fold fires on (35 % to 50 % of the random differential corpora; none
+of the bench corpora) has a smaller CNF and a different proof than v0.37.0
 wrote for the same query, so a pinned digest of such a certificate must
 be re-pinned.
 

@@ -61,7 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   v0.38.0 refuses such a block as an unsupported encoding. A query the fold
   never fires on — the latency and BMC bench corpora, every tracked
   `.smt2` file — keeps its bytes, tag and hash; on the random Z3
-  differential corpora it fires on about half of the queries. Bundles
+  differential corpora it fires on 35 % to 50 % of the queries. Bundles
   written by v0.37.0 and earlier never carry the request and are accepted
   as before: the trusted crate compacts them exactly as it did and
   re-derives the CNF they carry (two bundles written by the v0.37.0
@@ -80,9 +80,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`bvudiv` / `bvurem` by a constant power of two are decided** (TR-096,
   #314). `x udiv 2^64` against the high half of a 128-bit `x` did not
-  finish in 60 s; it now takes about 7 ms, certificate and trusted checks
-  included (release build), and the same holds for `urem` and for every
-  width and `k` measured. The restoring divider emits the mux `ge ? r : r`
+  finish in 60 s; it now takes under 10 ms, certificate and trusted checks
+  included (release build, measured 6.9 ms and 8.7 ms), and `urem` and
+  every other width and `k` measured stay under 11 ms. The restoring divider emits the mux `ge ? r : r`
   for every remainder bit below the divisor's set bit, `k·(w−k)` of them
   (4096 at `w = 128, k = 64`), and the compaction folded one level only, so
   the SAT core was left to prove them equal. The trusted

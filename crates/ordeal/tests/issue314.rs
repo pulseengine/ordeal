@@ -25,22 +25,26 @@ use ordeal::cnf::CnfFormula;
 use ordeal::dag::{DagBuilder, fold_hints, mux_fold_requests, strash_hints};
 use ordeal::query::{QUERY_ENCODING_V3, TermCheckResult};
 use ordeal::sat::{SatResult, SatSolver};
-use ordeal::{BoolTerm, BvTerm, Solver, Sort};
+use ordeal::{BoolTerm, BvTerm, CheckResult, Solver, Sort};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::{Duration, Instant};
 
 const ORDEAL: &str = env!("CARGO_BIN_EXE_ordeal");
 
-/// Wall-clock bound on ONE certified decision (lowering, search, proof,
-/// every trusted gate), in a debug build. Measured: at most 0.9 s
-/// (`w = 128, k = 64`, debug, 2026-11-18); without the fold the same query
-/// does not finish in 60 s in a release build.
+/// The bound on ONE decision: the deadline the SAT search gets, and the
+/// wall-clock time the bounded call may take. Measured 2026-11-18 (the
+/// `timings` table below): with the fold, at most 11 ms per certified
+/// decision in a release build, and this whole file — 28 such decisions
+/// and everything else — runs in under 5 s in a debug build. Without the
+/// fold the search for `w = 128, k = 64` and `w = 64, k = 32` does not
+/// finish in 60 s in a release build.
 const DECISION_BOUND: Duration = Duration::from_secs(20);
 
 /// The deadline of the control: what the SAT core gets on the CNF lowered
-/// WITHOUT the fold. Twenty times what the folded CNF needs for search at
-/// the control's sizes in a debug build.
+/// WITHOUT the fold. The folded CNF's search takes under 1 ms at the
+/// control's sizes and the unfolded one's does not finish in 60 s (release
+/// build), so 1.5 s separates the two by a wide margin in either build.
 const CONTROL_DEADLINE: Duration = Duration::from_millis(1500);
 
 fn var(name: &str, w: u32) -> BvTerm {
@@ -169,16 +173,24 @@ fn pow2_division_is_certified_unsat_inside_the_bound() {
             let q = query(urem, w, kk, kk);
             let mut s = Solver::new();
             s.assert(q.clone());
+            // The bound is enforced, not only measured: the search gets
+            // DECISION_BOUND and no more, so a lowering that cannot decide
+            // the query fails here in bounded time instead of hanging.
             let t0 = Instant::now();
-            let r = s.check_with_term();
+            let bounded = s.check_with_deadline(DECISION_BOUND.as_millis() as u64);
             let took = t0.elapsed();
-            let TermCheckResult::Unsat(cert) = r else {
-                panic!("{what}: expected a certified Unsat, got {r:?} after {took:?}");
-            };
+            assert!(
+                matches!(bounded, CheckResult::Unsat(_)),
+                "{what}: not decided inside {DECISION_BOUND:?} (took {took:?}): {bounded:?}"
+            );
             assert!(
                 took < DECISION_BOUND,
                 "{what}: decided, but in {took:?} (bound {DECISION_BOUND:?})"
             );
+            let r = s.check_with_term();
+            let TermCheckResult::Unsat(cert) = r else {
+                panic!("{what}: expected a certified Unsat, got {r:?}");
+            };
             cert.recheck()
                 .unwrap_or_else(|e| panic!("{what}: the certificate must re-check: {e}"));
             let fired = mux_fold_requests(&cert.query.query.hints);

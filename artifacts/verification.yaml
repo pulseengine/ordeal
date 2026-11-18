@@ -1842,7 +1842,7 @@ artifacts:
     title: "ordeal check --timeout-ms turns the slow #314 query into a prompt unknown in every output shape, and keeps decided verdicts (TR-093)"
     status: verified
     release: v0.38.0
-    description: "crates/ordeal/tests/cli_timeout.rs, with the real binary: bound_turns_a_slow_solve_into_unknown, bound_keeps_the_json_shape (plain, --with-query, --with-term), bound_with_cert_out_writes_nothing_and_exits_1, bound_does_not_change_a_decided_verdict, malformed_bound_is_a_usage_error, bound_no_longer_needed_for_issue_314_at_width_64. The slow query is 32-bit distributivity, a*(b+c) against a*b+a*c (undecided after 30 s); until TR-096 it was #314 at width 64, which the mux fold now decides in milliseconds and which is the decided leg."
+    description: "crates/ordeal/tests/cli_timeout.rs, with the real binary: bound_turns_a_slow_solve_into_unknown, bound_keeps_the_json_shape (plain, --with-query, --with-term), bound_with_cert_out_writes_nothing_and_exits_1, bound_does_not_change_a_decided_verdict, malformed_bound_is_a_usage_error, bound_no_longer_needed_for_issue_314_at_width_64. The slow query is 32-bit distributivity, a*(b+c) against a*b+a*c (undecided after 30 s); until v0.37.0 it was #314 at width 64, which the mux fold now decides in milliseconds and which is the decided leg."
     tags: [cli, liveness]
     fields:
       coverage: text, json, with-query, with-term and cert-out shapes under the bound; a decided verdict under the bound; malformed values
@@ -1884,7 +1884,7 @@ artifacts:
   - id: VER-096
     type: sw-verification
     title: The mux fold decides udiv/urem by 2^k inside a bound, is proven and exhaustively checked, and leaves v0.37.0 certificates re-checkable (TR-096)
-    status: implemented
+    status: verified
     release: v0.38.0
     description: "crates/ordeal/tests/issue314.rs: pow2_division_is_certified_unsat_inside_the_bound (14 width/k cases x udiv/urem incl. 128/64, fold count k*(w-k), certificate recheck, ordeal-dag/v3), without_the_fold_the_search_runs_into_the_deadline (the control: the v0.37.0 lowering of 64/32 and 128/64 hits the SAT deadline, the folded CNF is refuted inside it), near_misses_of_the_identity_stay_sat_at_odd_widths (widths 3/5/12/24, evaluator-confirmed models), a_v0_37_bundle_still_rechecks_and_a_new_one_is_tagged_v3 (real ordeal and ordeal-recheck; fixtures tests/fixtures/issue314/*.v0.37.0.cert.json written by the v0.37.0 release binary). crates/ordeal/src/dag.rs: mux_fold_carries_every_node_value_at_odd_widths (the statement of compact_sound exhaustively at widths 3 and 5, every constant divisor and a variable one, plus the Aig::and replay identity), fold_hints_are_strash_hints_plus_requests. crates/ordeal/src/solver.rs: v0_37_lowering_is_byte_identical_on_the_bench_corpora and (oracle) v0_37_lowering_is_byte_identical_on_the_oracle_corpora (the digests recorded in docs/design/query-cnf-gap.md). crates/ordeal/src/cert_bundle.rs (cert-bundle): v3_tag_marks_the_mux_fold_and_older_tags_must_not_carry_it. crates/ordeal/src/oracle.rs (oracle): mux_fold_differential_pow2_division_at_odd_widths against Z3. lean/BlasterCompact.lean: mux_fold_spec and the fold case of compact_and_spec, compact_sound unchanged and pinned in AxiomCheck.lean; mcdc/ordeal-lrat rows run_row_mux_fold_* and run_row_compact_fold_request_taken_and_declined."
     tags: [liveness, trusted, lowering]

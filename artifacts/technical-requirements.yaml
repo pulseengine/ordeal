@@ -2299,7 +2299,7 @@ artifacts:
       effect: behaviour
       priority: should
       req-type: functional
-      verification-criteria: "An integration test runs the real ordeal binary on a query the built-in search does not decide (32-bit distributivity; the width-64 #314 query until TR-096 decided it) with --timeout-ms 1000 and gets unknown within the bound plus slack in text, json, --with-query and --with-term shapes; with --cert-out it exits 1 and writes no file; a decided unsat query keeps its verdict under the flag; malformed values exit 2 with nothing on stdout."
+      verification-criteria: "An integration test runs the real ordeal binary on a query the built-in search does not decide (32-bit distributivity; the width-64 #314 query until the mux fold decided it) with --timeout-ms 1000 and gets unknown within the bound plus slack in text, json, --with-query and --with-term shapes; with --cert-out it exits 1 and writes no file; a decided unsat query keeps its verdict under the flag; malformed values exit 2 with nothing on stdout."
     links:
       - type: derives-from
         target: SYS-004
@@ -2349,7 +2349,7 @@ artifacts:
   - id: TR-096
     type: sw-req
     title: The trusted compaction folds a mux with equal arms, so bvudiv and bvurem by a constant 2^k are decided
-    status: implemented
+    status: verified
     release: v0.38.0
     description: "Issue #314: x udiv 2^64 against the high half of a 128-bit x did not finish in 60 s (Z3: instantly). Measured: all time is CDCL search. The restoring divider emits push_mux(ge, diff[m], rem[m]) with equal arms for every remainder bit below the divisor's lowest set bit, k*(w-k) muxes (ge ? r : r) for a divisor 2^k (4096 at w=128, k=64), and compact_and folded one level only, so the SAT core had to prove them equal. A rewrite of the division into a shift on the untrusted side was measured and rejected: check_term_dag refuses it (RootMismatch). Requirement: blast_kernel::compact_and folds !(g&r) & !(!g&r) to !r (mux_fold: both operands negated AND gates of the compacted arena sharing one stored operand, the other operands complementary). The fold is requested by the compaction hint usize::MAX (u64::MAX on the wire) and checked in the trusted crate before it is taken; a request that does not match is declined and a fresh gate pushed. lean/BlasterCompact.lean proves it (mux_fold_spec) as a case of compact_and_spec; the statement of compact_sound does not change, the generated model carries no axiom and no sorry is added. Compatibility: a hint list without requests is compacted exactly as up to v0.37.0, so every certificate written by v0.37.0 or earlier re-derives the CNF it carries and is accepted; a query whose hints carry a request is tagged ordeal-dag/v3 with recheck.min_version 0.38.0 so an older reader refuses it as unsupported instead of reporting a CNF mismatch; a v1- or v2-tagged block carrying a request is refused at parse. The production hints are dag::fold_hints (strash_hints plus the requests); AigOptions::V0_37 keeps the previous lowering. A query the fold never fires on keeps its bytes, tag and hash. Effect: behaviour (the certificates of queries the fold fires on change; verdicts do not, except that formerly undecided queries are decided). Issue #314; decision 20261117T222014-f9b2c2 (option fold)."
     tags: [liveness, trusted, lowering]
