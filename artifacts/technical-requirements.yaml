@@ -2305,3 +2305,21 @@ artifacts:
         target: SYS-004
       - type: allocated-to
         target: ARC-010
+
+  - id: TR-094
+    type: sw-req
+    title: A script with more than one check-sat is refused with exit 2 before anything is solved
+    status: verified
+    release: v0.38.0
+    description: "ordeal decided every assertion once and printed one answer for a script with several check-sat commands, so a consumer pairing answers with check-sats (SMT-LIB incremental reading, as Z3 answers) would pin that answer on the first one (issue #321: Z3 says sat then unsat, ordeal printed unsat once). Owner decision 20261117T185221-39efa9: refuse. Requirement: the reader counts check-sat commands before the first exit; more than one is SmtError::Unsupported (CLI exit 2, 'unsupported: more than one check-sat'), raised before any command runs, so nothing is solved. One check-sat, or a check-sat after exit, reads as before. The README states the one-query-per-script reading. Every answer printed before was correct for the script as a whole, so this is a reading fix, not a soundness fix. Effect: behaviour. Issue #321."
+    tags: [smtlib, front-end, cli]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: "A unit test refuses #321's two-check-sat script through solve_str and read_script with the message, answers a one-check-sat script and a script with a check-sat after exit; a planted control that disables the refusal makes the test fail."
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010

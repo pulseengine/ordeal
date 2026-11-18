@@ -456,9 +456,20 @@ jobs:
             exit 1
           fi
       - name: Install elan
+        # The pinned elan-init.sh still downloads the LATEST elan binary, so a
+        # release mid-upload broke main (elan v4.4.0, 2026-11-18: 404 nine
+        # seconds after publication). Install the pinned binary by digest.
+        env:
+          ELAN_VERSION: v4.2.4
+          ELAN_SHA256: 42b94d4244e8353142c456ec0e4ca6528fd898a6c604d4059f494e706e431f63
         run: |
-          curl -sSfL https://raw.githubusercontent.com/leanprover/elan/v4.2.4/elan-init.sh \
-            | sh -s -- -y --default-toolchain none
+          set -euo pipefail
+          d="$(mktemp -d)"
+          curl -sSfL -o "$d/elan.tgz" \
+            "https://github.com/leanprover/elan/releases/download/$ELAN_VERSION/elan-x86_64-unknown-linux-gnu.tar.gz"
+          echo "$ELAN_SHA256  $d/elan.tgz" | sha256sum -c -
+          tar -xzf "$d/elan.tgz" -C "$d"
+          "$d/elan-init" -y --default-toolchain none
           echo "$HOME/.elan/bin" >> "$GITHUB_PATH"
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:

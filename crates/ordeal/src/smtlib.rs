@@ -164,7 +164,7 @@ impl std::error::Error for SmtError {}
 /// The result of reading and solving a script.
 #[derive(Clone, Debug)]
 pub struct Outcome {
-    /// The verdict of the (last) `check-sat`, or `None` if the script had none.
+    /// The verdict of the script's one `check-sat`, or `None` if the script had none.
     pub result: Option<CheckResult>,
     /// Declared bitvector variables, in declaration order (name, width). Used
     /// to print a full model on `sat`.
@@ -1179,6 +1179,24 @@ fn run_script_full<R>(input: &str, check: impl Fn(&Solver) -> R) -> Result<Scrip
     let toks = tokenize(input)?;
     let sexps = parse_sexps(&toks)?;
 
+    // ordeal answers one query per script (#321): a second `check-sat`
+    // (before `exit`) would get no answer of its own, so the script is
+    // refused before anything is solved, instead of answering only the last.
+    let check_sats = sexps
+        .iter()
+        .map(|s| match s {
+            Sexp::List(items) => items.first().and_then(as_atom),
+            _ => None,
+        })
+        .take_while(|head| *head != Some("exit"))
+        .filter(|head| *head == Some("check-sat"))
+        .count();
+    if check_sats > 1 {
+        return Err(SmtError::Unsupported(format!(
+            "more than one check-sat ({check_sats}); ordeal reads one query per script"
+        )));
+    }
+
     let mut ctx = Ctx {
         decls: HashMap::new(),
         bool_decls: HashSet::new(),
@@ -1777,6 +1795,35 @@ mod tests {
             (assert (= (bvfoo x x) #x00))
             (check-sat)";
         assert!(matches!(solve_str(src), Err(SmtError::Unsupported(_))));
+    }
+
+    // rivet: verifies VER-094
+    #[test]
+    fn a_second_check_sat_is_refused_not_answered_once() {
+        // #321's script: Z3 answers sat then unsat; ordeal used to print one
+        // unsat for both. Now the whole script is refused before solving.
+        let two = "(set-logic QF_BV)(declare-fun x () (_ BitVec 4))
+            (assert (= x #x1))(check-sat)(assert (= x #x2))(check-sat)";
+        match solve_str(two) {
+            Err(SmtError::Unsupported(m)) => {
+                assert!(m.contains("more than one check-sat"), "{m}")
+            }
+            other => panic!("expected the refusal, got {other:?}"),
+        }
+        assert!(matches!(read_script(two), Err(SmtError::Unsupported(_))));
+        // One check-sat answers as before; a check-sat after `exit` is
+        // never read, so it does not count.
+        let one = "(declare-fun x () (_ BitVec 4))(assert (= x #x1))(check-sat)";
+        assert!(matches!(
+            solve_str(one).map(|o| o.result),
+            Ok(Some(CheckResult::Sat(_)))
+        ));
+        let after_exit =
+            "(declare-fun x () (_ BitVec 4))(assert (= x #x1))(check-sat)(exit)(check-sat)";
+        assert!(matches!(
+            solve_str(after_exit).map(|o| o.result),
+            Ok(Some(CheckResult::Sat(_)))
+        ));
     }
 
     #[test]

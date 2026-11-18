@@ -103,7 +103,11 @@ sat
 ((x #x0000002a))
 ```
 
-`--format json` prints one JSON object for the script's last `check-sat`. It carries the full evidence
+ordeal reads one query per script: a script with more than one `check-sat` before `exit` is
+refused with exit 2 (`unsupported: more than one check-sat`), before anything is solved. Incremental
+scripts that expect one answer per `check-sat` are out of scope (#321).
+
+`--format json` prints one JSON object for the script's `check-sat`. It carries the full evidence
 for either answer:
 
 - the CNF and LRAT proof for `unsat`;

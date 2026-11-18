@@ -3548,3 +3548,29 @@ artifacts:
         target: VER-093
       - type: part-of-execution
         target: VE-074
+
+  - id: VE-076
+    type: verification-execution
+    title: check-sat refusal run (VER-094)
+    status: implemented
+    fields:
+      environment: macOS arm64, debug build, nice -n 19
+      executor: local
+      timestamp: 2026-11-18 11:28:30+00:00
+      version: 2629ed5 + feat/321-refuse-second-check-sat
+    links:
+      - type: traces-to
+        target: TR-094
+
+  - id: VV-154
+    type: verification-verdict
+    title: "VER-094 pass: a second check-sat is refused before solving"
+    status: implemented
+    fields:
+      evidence: "cargo test -p ordeal --lib a_second_check_sat (1 passed); full cargo test -p ordeal exit 0; CLI on #321's script prints 'unsupported: more than one check-sat (2)' and exits 2; planted control (refusal disabled) failed the test"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-094
+      - type: part-of-execution
+        target: VE-076
