@@ -442,6 +442,124 @@ mod tests {
         }
     }
 
+    /// `x udiv 16 ≠ zero_extend_4(x[7:4])` at width 8 through
+    /// `check_with_query`: UNSAT, and the mux fold fires 16 times (#314).
+    fn a_folding_query_certificate() -> QueryCertificate {
+        use crate::{BoolTerm, BvTerm, QueryCheckResult, Sort};
+        let x = BvTerm::Var {
+            name: "x".into(),
+            sort: Sort::new(8),
+        };
+        let lhs = BvTerm::Udiv(
+            Box::new(x.clone()),
+            Box::new(BvTerm::Const {
+                value: 16,
+                sort: Sort::new(8),
+            }),
+        );
+        let rhs = BvTerm::ZeroExt {
+            by: 4,
+            arg: Box::new(BvTerm::Extract {
+                hi: 7,
+                lo: 4,
+                arg: Box::new(x),
+            }),
+        };
+        let mut s = Solver::new();
+        s.assert(BoolTerm::Ne(Box::new(lhs), Box::new(rhs)));
+        match s.check_with_query() {
+            QueryCheckResult::Unsat(c) => c,
+            other => panic!("expected Unsat with query, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-096
+    /// #314 at the bundle level. A certificate whose compaction used the
+    /// mux fold is tagged `ordeal-dag/v3` with `recheck.min_version`
+    /// 0.38.0, round-trips and re-checks. What a reader WITHOUT the fold
+    /// would make of it is reproduced by taking the fold requests out of
+    /// the hints (hash recomputed, so integrity passes; CNF and proof
+    /// untouched): the trusted crate then re-derives the v0.37.0 CNF, the
+    /// proof does not refute it, and the recheck fails — which is why the
+    /// tag changes and an old reader refuses the block as unsupported
+    /// instead. A block that declares `ordeal-dag/v1` or `/v2` but carries
+    /// a fold hint is refused at parse; a block tagged `ordeal-dag/v3`
+    /// without one is accepted under its declared tag.
+    #[test]
+    fn v3_tag_marks_the_mux_fold_and_older_tags_must_not_carry_it() {
+        let cert = a_folding_query_certificate();
+        assert!(cert.query.has_mux_fold());
+        assert_eq!(crate::dag::mux_fold_requests(&cert.query.hints), 16);
+        let json = cert.to_cert_v2(&attests());
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["query"]["encoding"], QUERY_ENCODING_V3);
+        assert_eq!(v["recheck"]["min_version"], "0.38.0");
+        assert!(
+            v["query"]["hints"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|h| h.as_u64() == Some(u64::MAX)),
+            "the fold hint is u64::MAX on the wire"
+        );
+        let round = QueryCertificate::from_cert_v2(&json).expect("a v3-tagged query block parses");
+        round.recheck().expect("and re-checks");
+        assert_eq!(round.certificate.query, cert.query);
+
+        // The control: the same bundle without the fold requests.
+        let mut no_fold = cert.query.clone();
+        for (i, h) in no_fold.hints.iter_mut().enumerate() {
+            if *h == MUX_FOLD_HINT {
+                *h = i; // "no sharing", as before v0.38.0
+            }
+        }
+        assert_eq!(no_fold.encoding(), QUERY_ENCODING);
+        let mut t = v.clone();
+        t["query"]["hints"] = serde_json::json!(no_fold.hints);
+        t["query"]["encoding"] = serde_json::Value::String(QUERY_ENCODING.into());
+        t["query"]["sha256"] = serde_json::Value::String(no_fold.sha256());
+        let bundle = QueryCertificate::from_cert_v2(&t.to_string())
+            .expect("consistent: the hash covers the new hints and tag");
+        assert_eq!(bundle.certificate.certificate.cnf, cert.certificate.cnf);
+        let r = bundle.recheck();
+        assert!(
+            matches!(
+                r,
+                Err(QueryRecheckError::Rejected(_) | QueryRecheckError::CnfMismatch)
+            ),
+            "without the fold the re-derived CNF is another one: {r:?}"
+        );
+        bundle
+            .certificate
+            .certificate
+            .recheck()
+            .expect("the untouched CNF/proof pair still re-checks at the CNF level");
+
+        // An older tag on a block with fold hints is a lie about the tag.
+        for tag in [QUERY_ENCODING, QUERY_ENCODING_V2] {
+            let mut t = v.clone();
+            t["query"]["encoding"] = serde_json::Value::String(tag.into());
+            t["query"]["sha256"] = serde_json::Value::String(cert.query.sha256_tagged(tag));
+            assert!(matches!(
+                QueryCertificate::from_cert_v2(&t.to_string()),
+                Err(BundleError::Malformed(m)) if m.contains("mux-fold hint")
+            ));
+        }
+        // A v3-tagged block WITHOUT a fold hint is fine under its tag.
+        let plain = a_query_certificate();
+        assert!(!plain.query.has_mux_fold());
+        let mut t: serde_json::Value = serde_json::from_str(&plain.to_cert_v2(&attests())).unwrap();
+        assert_eq!(t["query"]["encoding"], QUERY_ENCODING);
+        assert_eq!(t["recheck"]["min_version"], "0.27.0");
+        t["query"]["encoding"] = serde_json::Value::String(QUERY_ENCODING_V3.into());
+        t["query"]["sha256"] =
+            serde_json::Value::String(plain.query.sha256_tagged(QUERY_ENCODING_V3));
+        QueryCertificate::from_cert_v2(&t.to_string())
+            .expect("v3-tagged block without fold hints parses under its declared tag")
+            .recheck()
+            .expect("and re-checks");
+    }
+
     // rivet: verifies VER-064
     /// #192 phase 5 at the bundle level: a v2 bundle whose `query` block
     /// carries an `sdiv` node is tagged `ordeal-dag/v2` with
@@ -522,7 +640,7 @@ mod tests {
             .recheck()
             .expect("and re-checks");
         // An unknown tag is unsupported.
-        t["query"]["encoding"] = serde_json::Value::String("ordeal-dag/v3".into());
+        t["query"]["encoding"] = serde_json::Value::String("ordeal-dag/v4".into());
         assert!(matches!(
             QueryCertificate::from_cert_v2(&t.to_string()),
             Err(BundleError::Unsupported(_))

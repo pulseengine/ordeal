@@ -41,9 +41,24 @@ pub const QUERY_ENCODING: &str = "ordeal-dag/v1";
 /// phase 5). Readers from v0.28.0 on.
 pub const QUERY_ENCODING_V2: &str = "ordeal-dag/v2";
 
+/// The `query.encoding` value of a DAG whose compaction hints ask for the
+/// mux fold ([`MUX_FOLD_HINT`], issue #314): the node kinds of
+/// `ordeal-dag/v2`, compacted with `blast_kernel::mux_fold`. Readers from
+/// v0.38.0 on. An older reader has no such fold — it would push a gate
+/// where this lowering folded one away and re-derive a different CNF — so
+/// it must refuse the block by its tag rather than report a mismatch.
+pub const QUERY_ENCODING_V3: &str = "ordeal-dag/v3";
+
+/// The compaction hint that asks the trusted `blast_kernel::compact` for
+/// its checked two-level fold of a mux with equal arms (issue #314). It
+/// names no source node: where the fold does not apply it means "no
+/// sharing". Spelled `u64::MAX` on the wire on every target
+/// ([`wire_usize`]). No release up to v0.37.0 ever wrote it.
+pub const MUX_FOLD_HINT: usize = usize::MAX;
+
 /// Is `encoding` one this reader decodes?
 pub fn encoding_supported(encoding: &str) -> bool {
-    encoding == QUERY_ENCODING || encoding == QUERY_ENCODING_V2
+    encoding == QUERY_ENCODING || encoding == QUERY_ENCODING_V2 || encoding == QUERY_ENCODING_V3
 }
 
 /// The lowered query: exactly the inputs the proven lowering (and the
@@ -344,7 +359,12 @@ pub fn unwire_usize(x: u64) -> Option<usize> {
     if x == u64::MAX {
         Some(NO_IMAGE)
     } else {
-        usize::try_from(x).ok()
+        // A plain index that happens to equal this target's `usize::MAX`
+        // (only possible on a 32-bit target: 4294967295) is NOT the
+        // sentinel. Reading it as one would make a 32-bit reader see a
+        // "no image" entry or a mux-fold request ([`MUX_FOLD_HINT`]) that
+        // a 64-bit reader does not, so it is refused as malformed.
+        usize::try_from(x).ok().filter(|&v| v != usize::MAX)
     }
 }
 
@@ -355,13 +375,35 @@ impl QueryDag {
         self.nodes.iter().any(node_is_derived)
     }
 
+    /// Do the compaction hints ask for the mux fold ([`MUX_FOLD_HINT`],
+    /// issue #314)? Then the CNF is the one a reader derives WITH the
+    /// fold, and only a reader from v0.38.0 on can re-derive it.
+    #[must_use]
+    pub fn has_mux_fold(&self) -> bool {
+        self.hints.contains(&MUX_FOLD_HINT)
+    }
+
+    /// The `recheck.min_version` a bundle carrying this DAG names: `floor`
+    /// (the bundle format's own first reader), raised to `0.38.0` when a
+    /// hint asks for the mux fold — the first release whose trusted crate
+    /// can re-derive that CNF.
+    #[must_use]
+    pub fn min_reader_version(&self, floor: &'static str) -> &'static str {
+        if self.has_mux_fold() { "0.38.0" } else { floor }
+    }
+
     /// The encoding tag this DAG is emitted under: the lowest one that can
     /// express it — [`QUERY_ENCODING`] (`ordeal-dag/v1`, readable by
     /// v0.27.0) unless a derived-op node is present, then
-    /// [`QUERY_ENCODING_V2`].
+    /// [`QUERY_ENCODING_V2`]; and [`QUERY_ENCODING_V3`] whenever a hint
+    /// asks for the mux fold, with or without derived-op nodes. A query
+    /// the fold never fires on keeps the tag, the bytes and the hash it
+    /// had before v0.38.0.
     #[must_use]
     pub fn encoding(&self) -> &'static str {
-        if self.has_derived() {
+        if self.has_mux_fold() {
+            QUERY_ENCODING_V3
+        } else if self.has_derived() {
             QUERY_ENCODING_V2
         } else {
             QUERY_ENCODING

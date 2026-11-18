@@ -93,6 +93,29 @@ fn hints_for(ns: &[N], bits: &[bool], roots: &[usize]) -> Vec<usize> {
     hints
 }
 
+/// The negation of a literal.
+fn nl(l: blast_kernel::Lit) -> blast_kernel::Lit {
+    blast_kernel::lit_not(l)
+}
+
+/// The arena the `mux_fold` rows probe: inputs `g`, `r`, `s` and the gates
+/// `[0] g&r`, `[1] !g&r` (a mux with equal arms, `r` stored second),
+/// `[2] r&s`, `[3] r&!s` (`r` stored first), `[4] s&r`, and for the misses
+/// `[5] g` (an input), `[6] r`, `[7] r&g`.
+fn mux_arena() -> (blast_kernel::Aig, [blast_kernel::Lit; 8]) {
+    let mut a = blast_kernel::aig_new();
+    let g = blast_kernel::push_input(&mut a, 0);
+    let r = blast_kernel::push_input(&mut a, 1);
+    let s = blast_kernel::push_input(&mut a, 2);
+    let gr = blast_kernel::push_and(&mut a, g, r);
+    let ngr = blast_kernel::push_and(&mut a, nl(g), r);
+    let rs = blast_kernel::push_and(&mut a, r, s);
+    let rns = blast_kernel::push_and(&mut a, r, nl(s));
+    let sr = blast_kernel::push_and(&mut a, s, r);
+    let rg = blast_kernel::push_and(&mut a, r, g);
+    (a, [gr, ngr, rs, rns, sr, g, r, rg])
+}
+
 /// Run `check_query` over a DAG with no certificate: the DAG is encoded,
 /// compacted and Tseitin'd, then rejected for want of a refutation. Returns
 /// whether it got exactly that far.
@@ -582,6 +605,37 @@ run_row_check_query_constant_folds => {
     let ns = vec![N::Var(1), N::Const(0, 1), N::Const(1, 1), N::And(0, 1), N::And(0, 2), N::And(0, 0), N::BvNot(0), N::And(0, 6), N::Eq(3, 4), N::Eq(5, 7), N::BoolAnd(8, 9)];
     let bits = vec![false, true];
     encodes(&ns, &bits, &[10], &[])
+}
+
+// ═════════ mux_fold / compact_and's fold request (#314) ═════════
+run_row_mux_fold_hit_shared_second => { let (a, l) = mux_arena(); let (f, x) = blast_kernel::mux_fold(&a, nl(l[0]), nl(l[1])); f && blast_kernel::lit_eq(x, nl(l[6])) }
+run_row_mux_fold_hit_shared_first => { let (a, l) = mux_arena(); let (f, x) = blast_kernel::mux_fold(&a, nl(l[2]), nl(l[3])); f && blast_kernel::lit_eq(x, nl(l[6])) }
+run_row_mux_fold_miss_first_positive => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, l[0], nl(l[1])).0 }
+run_row_mux_fold_miss_second_positive => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), l[1]).0 }
+run_row_mux_fold_miss_first_out_of_range => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, blast_kernel::Lit { node: 99, neg: true }, nl(l[1])).0 }
+run_row_mux_fold_miss_second_out_of_range => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), blast_kernel::Lit { node: 99, neg: true }).0 }
+run_row_mux_fold_miss_first_is_constant => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, blast_kernel::lit_true(), nl(l[1])).0 }
+run_row_mux_fold_miss_first_is_input => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[5]), nl(l[1])).0 }
+run_row_mux_fold_miss_second_is_constant => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), blast_kernel::lit_true()).0 }
+run_row_mux_fold_miss_second_is_input => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), nl(l[5])).0 }
+run_row_mux_fold_miss_no_shared_operand => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), nl(l[2])).0 }
+run_row_mux_fold_miss_same_gate_twice => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), nl(l[0])).0 }
+run_row_mux_fold_miss_shared_second_other_not_complement => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[0]), nl(l[4])).0 }
+run_row_mux_fold_miss_shared_first_other_not_complement => { let (a, l) = mux_arena(); !blast_kernel::mux_fold(&a, nl(l[2]), nl(l[7])).0 }
+run_row_compact_fold_request_taken_and_declined => {
+    // x udiv 2 at width 2: the divider has one equal-arm mux. Asking for
+    // the fold on EVERY gate takes it where it applies and declines it
+    // elsewhere; the arena is smaller than without the request, and the
+    // root (`x udiv 2 = y`, satisfiable) still encodes.
+    let ns = vec![N::Var(2), N::Const(0, 2), N::Udiv(0, 1), N::Var(2), N::Eq(2, 3)];
+    let bits = cbits(2, 2);
+    let mut raw = blast_kernel::aig_new();
+    let _ = blast_kernel::encode(&mut raw, &ns, &bits, &[4]);
+    let ask = vec![usize::MAX; raw.nodes.len()];
+    let plain: Vec<usize> = (0..raw.nodes.len()).collect();
+    let (folded, _) = blast_kernel::compact(&raw, &ask);
+    let (unfolded, _) = blast_kernel::compact(&raw, &plain);
+    folded.nodes.len() < unfolded.nodes.len() && encodes(&ns, &bits, &[4], &ask) && encodes(&ns, &bits, &[4], &plain)
 }
 
 // ═════════ check_query_model / dag_nin ═════════

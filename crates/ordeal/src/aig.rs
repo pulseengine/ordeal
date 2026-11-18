@@ -103,14 +103,19 @@ pub struct AigOptions {
     pub fold: bool,
     /// Structural hashing: a repeated operand pair returns the existing gate.
     pub strash: bool,
+    /// The two-level fold of a mux with equal arms (issue #314, since
+    /// v0.38.0): `!(g & r) & !(!g & r) = !r`, so `g ? r : r` is `r`. Only
+    /// applied together with `fold`.
+    pub mux: bool,
 }
 
 impl Default for AigOptions {
-    /// The production setting: folding and hashing both on.
+    /// The production setting: folding, hashing and the mux fold all on.
     fn default() -> Self {
         AigOptions {
             fold: true,
             strash: true,
+            mux: true,
         }
     }
 }
@@ -121,11 +126,21 @@ impl AigOptions {
     pub const RAW: AigOptions = AigOptions {
         fold: false,
         strash: false,
+        mux: false,
     };
     /// Constant folding only, no gate sharing.
     pub const FOLD_ONLY: AigOptions = AigOptions {
         fold: true,
         strash: false,
+        mux: false,
+    };
+    /// Folding and hashing without the mux fold: the lowering of every
+    /// release up to v0.37.0, kept as the comparison point for #314 and
+    /// for re-deriving the CNF of a certificate written by those releases.
+    pub const V0_37: AigOptions = AigOptions {
+        fold: true,
+        strash: true,
+        mux: false,
     };
 }
 
@@ -196,6 +211,11 @@ impl Aig {
             if b == Lit::TRUE || a == b {
                 return a;
             }
+            if self.options.mux
+                && let Some(l) = self.mux_fold(a, b)
+            {
+                return l;
+            }
         }
         // Normalize operand order (the strash key; applied in every mode so
         // the stored gate never depends on the hashing setting).
@@ -212,6 +232,27 @@ impl Aig {
             self.strash.insert((x.raw(), y.raw()), lit);
         }
         lit
+    }
+
+    /// `blast_kernel::mux_fold` on this arena (issue #314): `a` and `b`
+    /// both negated AND gates sharing one stored operand `r`, the other
+    /// operands complementary — then `a & b = !r`.
+    fn mux_fold(&self, a: Lit, b: Lit) -> Option<Lit> {
+        if !a.is_complement() || !b.is_complement() {
+            return None;
+        }
+        let (Node::And(a0, a1), Node::And(b0, b1)) =
+            (&self.nodes[a.var() as usize], &self.nodes[b.var() as usize])
+        else {
+            return None;
+        };
+        if a0 == b0 && *a1 == b1.not() {
+            Some(a0.not())
+        } else if a1 == b1 && *a0 == b0.not() {
+            Some(a1.not())
+        } else {
+            None
+        }
     }
 
     /// OR via De Morgan.

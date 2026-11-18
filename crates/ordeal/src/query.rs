@@ -505,7 +505,26 @@ mod tests {
         assert_eq!(q2.sha256(), q2.sha256_tagged(QUERY_ENCODING_V2));
         assert_ne!(q2.sha256(), q2.sha256_tagged(QUERY_ENCODING));
         assert!(encoding_supported(QUERY_ENCODING) && encoding_supported(QUERY_ENCODING_V2));
-        assert!(!encoding_supported("ordeal-dag/v3"));
+        // #314: a hint that asks for the mux fold lifts the tag to
+        // ordeal-dag/v3, with or without derived-op nodes, and raises the
+        // reader a bundle names; without one nothing changes.
+        assert!(!q.has_mux_fold() && !q2.has_mux_fold());
+        assert_eq!(q.min_reader_version("0.27.0"), "0.27.0");
+        for base in [&q, &q2] {
+            let mut q3 = base.clone();
+            q3.hints = vec![0, MUX_FOLD_HINT];
+            assert!(q3.has_mux_fold());
+            assert_eq!(q3.encoding(), QUERY_ENCODING_V3);
+            assert!(q3.canonical_text().starts_with("ordeal-dag/v3\n"));
+            assert!(
+                q3.canonical_text()
+                    .ends_with("hints 0 18446744073709551615\n"),
+                "the fold hint is u64::MAX on every target"
+            );
+            assert_eq!(q3.min_reader_version("0.27.0"), "0.38.0");
+        }
+        assert!(encoding_supported(QUERY_ENCODING_V3));
+        assert!(!encoding_supported("ordeal-dag/v4"));
     }
 
     /// #192 phase 5: a query whose refutation rests on `bvsdiv`'s semantics,

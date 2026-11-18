@@ -165,7 +165,10 @@ theorem encode_sound (aig : Aig) (ns : Slice DagNode) (bits : Slice Bool)
 ```
 
 - `BlasterCompact.lean` — the folding + hashing pass preserves every
-  literal's simulation value, whatever the (untrusted, checked) hints say:
+  literal's simulation value, whatever the (untrusted, checked) hints say.
+  Since v0.38.0 (#314) one more fold is a case of `compact_and_spec`: when
+  a hint asks for it, `mux_fold` recognises `!(g&r) & !(!g&r)` and returns
+  `!r` (`mux_fold_spec`). The statement below did not change:
 
 ```lean
 theorem compact_sound (aig : Aig) (hints : Slice Std.Usize) (L : Nat)
@@ -359,7 +362,8 @@ list against the directory, both ways.
   Default target.
 - `BlasterDerived.lean` — the five formerly derived ops as proven rules.
   Default target.
-- `BlasterCompact.lean` — `compact_sound`. Default target.
+- `BlasterCompact.lean` — `compact_sound`, incl. the mux fold
+  (`mux_fold_spec`, #314). Default target.
 - `BlasterDag.lean` — the DAG semantics `dagSim` and `encode_sound`.
   Default target.
 - `BlasterCapstone.lean` — `dag_refuted`, `dag_refuted_raw`. Default

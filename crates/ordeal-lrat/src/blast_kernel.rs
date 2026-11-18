@@ -1199,12 +1199,69 @@ pub fn hint_matches(out: &Aig, cand: Lit, p: Lit, q: Lit) -> bool {
     }
 }
 
+/// The two-level fold of a mux with equal arms (issue #314): when `rx` and
+/// `ry` are both NEGATED literals of AND gates of `out` that share one
+/// stored operand `r` and whose other stored operands are complements of
+/// each other, `rx & ry` is `!(g & r) & !(!g & r) = !r`. Returns
+/// `(true, !r)` then, `(false, rx)` otherwise (the literal of a miss is
+/// never used). `push_mux(g, t, e)` is the negation of exactly this AND,
+/// so `g ? r : r` compacts to `r` — the identity restore step the
+/// restoring divider emits for every remainder bit below the divisor's
+/// lowest set bit. The check is structural and complete for the operand
+/// order `compact_and` stores (`lit_le`): `g` and `!g` are the same node,
+/// so `r` sits on the same side of both gates.
+pub fn mux_fold(out: &Aig, rx: Lit, ry: Lit) -> (bool, Lit) {
+    if !rx.neg || !ry.neg || rx.node >= out.nodes.len() || ry.node >= out.nodes.len() {
+        (false, rx)
+    } else {
+        match out.nodes[rx.node] {
+            Node::False => (false, rx),
+            Node::Input(_) => (false, rx),
+            Node::And(a0, a1) => match out.nodes[ry.node] {
+                Node::False => (false, rx),
+                Node::Input(_) => (false, rx),
+                Node::And(b0, b1) => {
+                    if lit_eq(a0, b0) && lit_eq(a1, lit_not(b1)) {
+                        (true, lit_not(a0))
+                    } else if lit_eq(a1, b1) && lit_eq(a0, lit_not(b0)) {
+                        (true, lit_not(a1))
+                    } else {
+                        (false, rx)
+                    }
+                }
+            },
+        }
+    }
+}
+
+/// The gate of one AND of the compaction pass, after every fold declined:
+/// the shipped `Aig::and`'s operand-order normalisation, then the hashing
+/// hint — `hint` names a SOURCE node whose mapped gate is claimed to have
+/// the same operands; it is checked, never trusted — and otherwise one
+/// fresh gate.
+pub fn compact_gate(out: &mut Aig, map: &[Lit], rx: Lit, ry: Lit, hint: usize) -> Lit {
+    let p = if lit_le(rx, ry) { rx } else { ry };
+    let q = if lit_le(rx, ry) { ry } else { rx };
+    if hint < map.len() && hint_matches(out, map[hint], p, q) {
+        map[hint]
+    } else {
+        push_and(out, p, q)
+    }
+}
+
 /// One AND of the compaction pass over already-mapped operands: the
 /// shipped `Aig::and`'s constant folds (`x&0 = 0`, `x&!x = 0`, `1&x = x`,
-/// `x&1 = x`, `x&x = x`) in its order, then its operand-order
-/// normalisation, then the hashing hint — `hint` names a SOURCE node whose
-/// mapped gate is claimed to have the same operands; it is checked, never
-/// trusted — and otherwise one fresh gate.
+/// `x&1 = x`, `x&x = x`) in its order; then, only when the hint is the
+/// fold request `usize::MAX`, the two-level [`mux_fold`] (issue #314);
+/// then [`compact_gate`]: normalisation, the checked hashing hint, and
+/// otherwise one fresh gate.
+///
+/// The fold is REQUESTED by the hint and CHECKED here, like sharing: a
+/// request that does not match costs nothing (`usize::MAX` names no source
+/// node, so a fresh gate is pushed, as before #314), and a hint list that
+/// never requests it — every certificate written before v0.38.0 — is
+/// compacted exactly as it always was, so those certificates re-check
+/// against the CNF they were written for.
 pub fn compact_and(out: &mut Aig, map: &[Lit], rx: Lit, ry: Lit, hint: usize) -> Lit {
     if lit_eq(rx, lit_false()) || lit_eq(ry, lit_false()) || lit_eq(rx, lit_not(ry)) {
         lit_false()
@@ -1212,14 +1269,15 @@ pub fn compact_and(out: &mut Aig, map: &[Lit], rx: Lit, ry: Lit, hint: usize) ->
         ry
     } else if lit_eq(ry, lit_true()) || lit_eq(rx, ry) {
         rx
-    } else {
-        let p = if lit_le(rx, ry) { rx } else { ry };
-        let q = if lit_le(rx, ry) { ry } else { rx };
-        if hint < map.len() && hint_matches(out, map[hint], p, q) {
-            map[hint]
+    } else if hint == usize::MAX {
+        let (folds, folded) = mux_fold(out, rx, ry);
+        if folds {
+            folded
         } else {
-            push_and(out, p, q)
+            compact_gate(out, map, rx, ry, hint)
         }
+    } else {
+        compact_gate(out, map, rx, ry, hint)
     }
 }
 
@@ -1228,7 +1286,7 @@ pub fn compact_and(out: &mut Aig, map: &[Lit], rx: Lit, ry: Lit, hint: usize) ->
 /// numbering, folding every AND gate's constants and sharing gates through
 /// checked `hints` (`hints[i]` = an earlier source node whose compacted
 /// gate node `i` may reuse; `i` itself, or anything wrong, means "no
-/// sharing"). Returns the new arena and, for every source node, the
+/// sharing"; `usize::MAX` asks for the checked [`mux_fold`]). Returns the new arena and, for every source node, the
 /// literal of the new arena that carries its value. `lean/BlasterDag.lean`
 /// proves `compact_sound`: every source literal and its image simulate to
 /// the same value under every input assignment, whatever the hints say.

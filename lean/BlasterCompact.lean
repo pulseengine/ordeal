@@ -3,7 +3,10 @@
 
   `compact` rebuilds an append-only AIG into a fresh arena node by node:
   inputs keep their numbering, every AND gate is folded (`x&0`, `x&!x`,
-  `1&y`, `x&1`, `x&x`), operand-normalised (`lit_le`) and then either shared
+  `1&y`, `x&1`, `x&x`), then — only when its UNTRUSTED hint asks for it
+  (`usize::MAX`) and `mux_fold` confirms the shape — folded two levels deep
+  (`!(g&r) & !(!g&r) = !r`, a mux with equal arms, issue #314), otherwise
+  operand-normalised (`lit_le`) and then either shared
   with an existing gate of the new arena — when an UNTRUSTED hint, checked
   by `hint_matches`, names one with exactly the same operands — or pushed
   fresh. `compact_sound` proves that, whatever the hints say, every source
@@ -172,6 +175,176 @@ theorem hint_matches_spec (out : Aig) (cand p q : Lit) :
           rw [← hn, hcx, hcy]
         · simp
 
+/- ══════════════════ THE MUX FOLD (issue #314) ══════════════════ -/
+
+/-- The operands of an AND gate of a well-formed arena are in range. -/
+theorem and_ops_lt {ns : List Node} {L : Nat} (hwf : AigWF ns L)
+    (i : Nat) (hi : i < ns.length) (x y : Lit) (hnd : ns[i]'hi = Node.And x y) :
+    x.node.val < ns.length ∧ y.node.val < ns.length := by
+  have hNW := hwf i hi
+  rw [hnd] at hNW
+  simp only [NodeWF] at hNW
+  omega
+
+/-- A NEGATED literal of an AND gate carries the negated conjunction of the
+    gate's stored operands. -/
+theorem pEvalLit_neg_and {ns : List Node} {L : Nat} (hwf : AigWF ns L)
+    (inp : List Bool) (l : Lit) (hneg : l.neg = true) (hlt : l.node.val < ns.length)
+    (x y : Lit) (hnd : ns[l.node.val]'hlt = Node.And x y) :
+    pEvalLit (pSim inp ns) l
+      = !(pEvalLit (pSim inp ns) x && pEvalLit (pSim inp ns) y) := by
+  have hNW := hwf l.node.val hlt
+  rw [hnd] at hNW
+  simp only [NodeWF] at hNW
+  obtain ⟨hx, hy⟩ := hNW
+  have hl : pEvalLit (pSim inp ns) l = !((pSim inp ns).getD l.node.val false) := by
+    simp [pEvalLit, hneg]
+  rw [hl, pSim_getD_and inp ns l.node.val hlt x y hnd hx hy]
+
+/-- A mux with equal arms, the shared operand stored first:
+    `!(r & !g) & !(r & g) = !r`. -/
+theorem mux_bool_fst (g r : Bool) : (!r) = (!(r && !g) && !(r && g)) := by
+  cases g <;> cases r <;> rfl
+
+/-- A mux with equal arms, the shared operand stored second:
+    `!(!g & r) & !(g & r) = !r`. -/
+theorem mux_bool_snd (g r : Bool) : (!r) = (!(!g && r) && !(g && r)) := by
+  cases g <;> cases r <;> rfl
+
+/-- The postcondition of `mux_fold`: a reported fold is an in-range literal
+    that carries `rx && ry`. A miss promises nothing (its literal is unused). -/
+def MFPost (out : Aig) (rx ry : Lit) (r : Bool × Lit) : Prop :=
+  r.1 = true →
+    r.2.node.val < out.nodes.val.length ∧
+    ∀ inp : List Bool,
+      pEvalLit (pSim inp out.nodes.val) r.2
+        = (pEvalLit (pSim inp out.nodes.val) rx
+           && pEvalLit (pSim inp out.nodes.val) ry)
+
+/-- The fold with the shared operand stored first in both gates. -/
+theorem mux_fold_hit_fst (out : Aig) (rx ry a0 a1 b0 b1 : Lit) (L : Nat)
+    (hwf : AigWF out.nodes.val L)
+    (hrx : rx.neg = true) (hry : ry.neg = true)
+    (hxl : rx.node.val < out.nodes.val.length)
+    (hyl : ry.node.val < out.nodes.val.length)
+    (hnx : out.nodes.val[rx.node.val]'hxl = Node.And a0 a1)
+    (hny : out.nodes.val[ry.node.val]'hyl = Node.And b0 b1)
+    (h0 : a0 = b0) (h1 : a1 = { b1 with neg := !b1.neg }) :
+    MFPost out rx ry (true, { a0 with neg := !a0.neg }) := by
+  intro _
+  have hb := and_ops_lt hwf rx.node.val hxl a0 a1 hnx
+  refine ⟨hb.1, ?_⟩
+  intro inp
+  show pEvalLit (pSim inp out.nodes.val) { a0 with neg := !a0.neg } = _
+  rw [pEvalLit_not, pEvalLit_neg_and hwf inp rx hrx hxl a0 a1 hnx,
+    pEvalLit_neg_and hwf inp ry hry hyl b0 b1 hny, h1, pEvalLit_not, h0]
+  exact mux_bool_fst _ _
+
+/-- The fold with the shared operand stored second in both gates. -/
+theorem mux_fold_hit_snd (out : Aig) (rx ry a0 a1 b0 b1 : Lit) (L : Nat)
+    (hwf : AigWF out.nodes.val L)
+    (hrx : rx.neg = true) (hry : ry.neg = true)
+    (hxl : rx.node.val < out.nodes.val.length)
+    (hyl : ry.node.val < out.nodes.val.length)
+    (hnx : out.nodes.val[rx.node.val]'hxl = Node.And a0 a1)
+    (hny : out.nodes.val[ry.node.val]'hyl = Node.And b0 b1)
+    (h1 : a1 = b1) (h0 : a0 = { b0 with neg := !b0.neg }) :
+    MFPost out rx ry (true, { a1 with neg := !a1.neg }) := by
+  intro _
+  have hb := and_ops_lt hwf rx.node.val hxl a0 a1 hnx
+  refine ⟨hb.2, ?_⟩
+  intro inp
+  show pEvalLit (pSim inp out.nodes.val) { a1 with neg := !a1.neg } = _
+  rw [pEvalLit_not, pEvalLit_neg_and hwf inp rx hrx hxl a0 a1 hnx,
+    pEvalLit_neg_and hwf inp ry hry hyl b0 b1 hny, h0, pEvalLit_not, h1]
+  exact mux_bool_snd _ _
+
+/-- The second shape `mux_fold` tries (shared operand stored second), as it
+    appears on both sides of the first shape's test. -/
+theorem mux_fold_snd_spec (out : Aig) (rx ry a0 a1 b0 b1 : Lit) (L : Nat)
+    (hwf : AigWF out.nodes.val L)
+    (hrx : rx.neg = true) (hry : ry.neg = true)
+    (hxl : rx.node.val < out.nodes.val.length)
+    (hyl : ry.node.val < out.nodes.val.length)
+    (hnx : out.nodes.val[rx.node.val]'hxl = Node.And a0 a1)
+    (hny : out.nodes.val[ry.node.val]'hyl = Node.And b0 b1) :
+    (do
+      let b2 ← lit_eq a1 b1
+      if b2 = true then
+        let l ← lit_not b0
+        let b3 ← lit_eq a0 l
+        if b3 = true then
+          let l1 ← lit_not a1
+          ok (true, l1)
+        else ok (false, rx)
+      else ok (false, rx)) ⦃ r => MFPost out rx ry r ⦄ := by
+  step with (lit_eq_spec a1 b1) as ⟨b2, hb2⟩
+  split
+  · rename_i hb2t
+    step with (lit_not_spec b0) as ⟨l, hl⟩
+    step with (lit_eq_spec a0 l) as ⟨b3, hb3⟩
+    split
+    · rename_i hb3t
+      step with (lit_not_spec a1) as ⟨l1, hl1⟩
+      rw [hl1]
+      exact mux_fold_hit_snd out rx ry a0 a1 b0 b1 L hwf hrx hry hxl hyl hnx hny
+        (hb2.mp hb2t) (by rw [← hl]; exact hb3.mp hb3t)
+    · simp [WP.spec_ok, MFPost]
+  · simp [WP.spec_ok, MFPost]
+
+/-- `mux_fold` reports a fold only when the two operands are negated AND
+    gates of the arena sharing one stored operand `r` with complementary
+    other operands — and then the literal it returns, `!r`, is in range and
+    carries `rx && ry` under every input assignment. -/
+theorem mux_fold_spec (out : Aig) (rx ry : Lit) (L : Nat)
+    (hwf : AigWF out.nodes.val L) :
+    mux_fold out rx ry ⦃ r => MFPost out rx ry r ⦄ := by
+  unfold mux_fold
+  split
+  · rename_i hrx
+    split
+    · rename_i hry
+      dsimp only
+      split
+      · simp [WP.spec_ok, MFPost]
+      · rename_i hxge
+        split
+        · simp [WP.spec_ok, MFPost]
+        · rename_i hyge
+          have hxl : rx.node.val < out.nodes.val.length := by scalar_tac
+          have hyl : ry.node.val < out.nodes.val.length := by scalar_tac
+          step as ⟨n, hn⟩
+          cases n with
+          | False => simp [WP.spec_ok, MFPost]
+          | Input k => simp [WP.spec_ok, MFPost]
+          | And a0 a1 =>
+            dsimp only
+            step as ⟨n1, hn1⟩
+            cases n1 with
+            | False => simp [WP.spec_ok, MFPost]
+            | Input k => simp [WP.spec_ok, MFPost]
+            | And b0 b1 =>
+              dsimp only
+              have hnx : out.nodes.val[rx.node.val]'hxl = Node.And a0 a1 := hn.symm
+              have hny : out.nodes.val[ry.node.val]'hyl = Node.And b0 b1 := hn1.symm
+              step with (lit_eq_spec a0 b0) as ⟨b, hb⟩
+              split
+              · rename_i hbt
+                step with (lit_not_spec b1) as ⟨l, hl⟩
+                step with (lit_eq_spec a1 l) as ⟨b2, hb2⟩
+                split
+                · rename_i hb2t
+                  step with (lit_not_spec a0) as ⟨l1, hl1⟩
+                  rw [hl1]
+                  exact mux_fold_hit_fst out rx ry a0 a1 b0 b1 L hwf hrx hry hxl hyl
+                    hnx hny (hb.mp hbt) (by rw [← hl]; exact hb2.mp hb2t)
+                · exact mux_fold_snd_spec out rx ry a0 a1 b0 b1 L hwf hrx hry hxl hyl
+                    hnx hny
+              · exact mux_fold_snd_spec out rx ry a0 a1 b0 b1 L hwf hrx hry hxl hyl
+                  hnx hny
+    · simp [WP.spec_ok, MFPost]
+  · simp [WP.spec_ok, MFPost]
+
 /- ══════════════════ ONE AND OF THE COMPACTION ══════════════════ -/
 
 /-- The postcondition of `compact_and`: the arena only grows (by at most one
@@ -267,6 +440,24 @@ theorem compact_and_tail (out : Aig) (map : Slice Lit) (p q rx ry : Lit)
     · exact compact_and_push out p q rx ry L hwf hcap hp hq hpq
   · exact compact_and_push out p q rx ry L hwf hcap hp hq hpq
 
+/-- The gate of one AND once every fold declined: operand normalisation,
+    then the checked hint, else a fresh gate. -/
+theorem compact_gate_spec (out : Aig) (map : Slice Lit) (rx ry : Lit)
+    (hint : Std.Usize) (L : Nat)
+    (hwf : AigWF out.nodes.val L)
+    (hcap : out.nodes.val.length < Usize.max)
+    (hx : rx.node.val < out.nodes.val.length)
+    (hy : ry.node.val < out.nodes.val.length) :
+    compact_gate out map rx ry hint ⦃ r => CAPost out rx ry L r ⦄ := by
+  unfold compact_gate
+  step with (lit_le_spec rx ry) as ⟨b6⟩
+  -- The operand order: `(p, q)` is `(rx, ry)` or `(ry, rx)`.
+  by_cases hb6 : b6 = true
+  · simp only [hb6, ↓reduceIte, bind_tc_ok]
+    exact compact_and_tail out map rx ry rx ry hint L hwf hcap hx hy (Or.inl ⟨rfl, rfl⟩)
+  · simp only [hb6]
+    exact compact_and_tail out map ry rx rx ry hint L hwf hcap hy hx (Or.inr ⟨rfl, rfl⟩)
+
 theorem compact_and_spec (out : Aig) (map : Slice Lit) (rx ry : Lit)
     (hint : Std.Usize) (L : Nat)
     (hwf : AigWF out.nodes.val L)
@@ -345,13 +536,17 @@ theorem compact_and_spec (out : Aig) (map : Slice Lit) (rx ry : Lit)
     intro inp
     rw [hrx]
     simp
-  step with (lit_le_spec rx ry) as ⟨b6⟩
-  -- The operand order: `(p, q)` is `(rx, ry)` or `(ry, rx)`.
-  by_cases hb6 : b6 = true
-  · simp only [hb6, ↓reduceIte, bind_tc_ok]
-    exact compact_and_tail out map rx ry rx ry hint L hwf hcap hx hy (Or.inl ⟨rfl, rfl⟩)
-  · simp only [hb6]
-    exact compact_and_tail out map ry rx rx ry hint L hwf hcap hy hx (Or.inr ⟨rfl, rfl⟩)
+  -- No one-level fold applies. The two-level mux fold is tried only when
+  -- the hint asks for it, and is used only when `mux_fold` confirms it.
+  split
+  · step with (mux_fold_spec out rx ry L hwf) as ⟨folds, folded, hr⟩
+    split
+    · rename_i hf
+      obtain ⟨hlt, hval⟩ := hr hf
+      simp only [WP.spec_ok]
+      exact CAPost_same out rx ry folded L hwf hlt hval
+    · exact compact_gate_spec out map rx ry hint L hwf hcap hx hy
+  · exact compact_gate_spec out map rx ry hint L hwf hcap hx hy
 
 /- ══════════════════ THE COMPACTION LOOP ══════════════════ -/
 

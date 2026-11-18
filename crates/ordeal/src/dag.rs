@@ -10,9 +10,9 @@
 //! decides which node to create for which term (a wrong decision changes
 //! the question asked, which phase 4's certificate-carried DAG and the
 //! model self-check guard against, exactly as the old term walk was), and
-//! the hints only steer gate sharing — `compact` checks every hint and a
-//! wrong one costs a duplicate gate, never a wrong value
-//! (`lean/BlasterCompact.lean`, `compact_sound`).
+//! the hints only steer gate sharing and ask for the kernel's mux fold —
+//! `compact` checks every hint and a wrong one costs a duplicate gate,
+//! never a wrong value (`lean/BlasterCompact.lean`, `compact_sound`).
 //!
 //! # Why the shipped CNF is byte-identical to the term walk's
 //!
@@ -31,6 +31,14 @@
 //! pins that claim on every bench and oracle corpus; the
 //! `cnf_gap_digest` digests and the v0.25.0 CLI byte comparison in
 //! `docs/design/query-cnf-gap.md` pin it on the shipped bytes.
+//!
+//! That holds for [`strash_hints`], the lowering of every release up to
+//! v0.37.0 (`AigOptions::V0_37`). Since v0.38.0 (issue #314) production
+//! uses [`fold_hints`], which additionally asks for the kernel's
+//! `mux_fold`; on a query where it fires the CNF is smaller than the term
+//! walk's, and equal to the `Aig::and` replay with `AigOptions::mux` on.
+//! `solver::cnf_gap_measurement::v0_37_lowering_is_byte_identical_*`
+//! pins the old digests under the old hints.
 
 use crate::blast_kernel as k;
 use crate::eval::{self, EvalError};
@@ -329,6 +337,14 @@ impl DagBuilder {
     }
 }
 
+/// The hint that asks `blast_kernel::compact` for its checked two-level
+/// fold of a mux with equal arms (`blast_kernel::mux_fold`, issue #314).
+/// It names no source node, so on a gate where the fold does not apply —
+/// and for every reader older than v0.38.0 — it means "no sharing". A
+/// query whose hints carry it is tagged `ordeal-dag/v3`
+/// (`QueryDag::encoding`).
+pub const MUX_FOLD_HINT: usize = crate::query::MUX_FOLD_HINT;
+
 /// Structural-hashing hints for `blast_kernel::compact` (untrusted): for
 /// every node of the raw arena, the earlier node whose compacted gate it
 /// may share — itself when there is none. Computed by running the
@@ -337,25 +353,44 @@ impl DagBuilder {
 /// `compact` reproduces the gate sharing of the old `Aig::and` replay gate
 /// for gate. A hint is advice: `compact` checks each one against the gate
 /// it names and ignores a wrong one.
+///
+/// These hints never request the mux fold: they are the lowering of every
+/// release up to v0.37.0 (`AigOptions::V0_37`). The production lowering
+/// since v0.38.0 is [`fold_hints`].
 pub fn strash_hints(raw: &k::Aig) -> Vec<usize> {
+    hints_with(raw, false)
+}
+
+/// [`strash_hints`] plus the fold request [`MUX_FOLD_HINT`] on every gate
+/// where `blast_kernel::mux_fold` applies (issue #314): the production
+/// hints. The fold is tried before sharing, as `compact_and` tries it, so
+/// replaying these hints through `compact` reproduces this function's
+/// arena gate for gate.
+pub fn fold_hints(raw: &k::Aig) -> Vec<usize> {
+    hints_with(raw, true)
+}
+
+/// How many hints request the mux fold — on hints from [`fold_hints`],
+/// the number of gates `compact` folds away (every request there is one
+/// the kernel's check accepts).
+pub fn mux_fold_requests(hints: &[usize]) -> usize {
+    hints.iter().filter(|h| **h == MUX_FOLD_HINT).count()
+}
+
+fn hints_with(raw: &k::Aig, mux: bool) -> Vec<usize> {
     let n = raw.nodes.len();
     let mut hints: Vec<usize> = Vec::with_capacity(n);
     let mut map: Vec<k::Lit> = Vec::with_capacity(n);
-    let mut out_len = 1usize;
+    // The compacted arena as `compact` will build it: `mux_fold` reads the
+    // operands of the gates already there.
+    let mut out = k::aig_new();
     let mut table: HashMap<(usize, bool, usize, bool), usize> = HashMap::new();
     let f = k::lit_false();
     let t = k::lit_true();
     for (i, nd) in raw.nodes.iter().enumerate() {
         let (lit, hint) = match *nd {
             k::Node::False => (f, i),
-            k::Node::Input(_) => {
-                let l = k::Lit {
-                    node: out_len,
-                    neg: false,
-                };
-                out_len += 1;
-                (l, i)
-            }
+            k::Node::Input(j) => (k::push_input(&mut out, j), i),
             k::Node::And(x, y) => {
                 let (rx, ry) = (k::map_lit(&map, x), k::map_lit(&map, y));
                 if k::lit_eq(rx, f) || k::lit_eq(ry, f) || k::lit_eq(rx, k::lit_not(ry)) {
@@ -364,6 +399,8 @@ pub fn strash_hints(raw: &k::Aig) -> Vec<usize> {
                     (ry, i)
                 } else if k::lit_eq(ry, t) || k::lit_eq(rx, ry) {
                     (rx, i)
+                } else if mux && let (true, l) = k::mux_fold(&out, rx, ry) {
+                    (l, MUX_FOLD_HINT)
                 } else {
                     let (p, q) = if k::lit_le(rx, ry) {
                         (rx, ry)
@@ -375,12 +412,7 @@ pub fn strash_hints(raw: &k::Aig) -> Vec<usize> {
                         (map[j], j)
                     } else {
                         table.insert(key, i);
-                        let l = k::Lit {
-                            node: out_len,
-                            neg: false,
-                        };
-                        out_len += 1;
-                        (l, i)
+                        (k::push_and(&mut out, p, q), i)
                     }
                 }
             }
@@ -829,7 +861,8 @@ mod tests {
     /// `cnf::tseitin` on the replay, clause for clause.
     pub(crate) fn assert_compact_is_replay(raw: &k::Aig, outs: &[k::Lit], what: &str) {
         for (opts, hints) in [
-            (AigOptions::default(), strash_hints(raw)),
+            (AigOptions::default(), fold_hints(raw)),
+            (AigOptions::V0_37, strash_hints(raw)),
             (AigOptions::FOLD_ONLY, no_hints(raw)),
         ] {
             let (ref_aig, ref_map) = replay(raw, opts);
@@ -922,6 +955,133 @@ mod tests {
             "the raw arena holds the full circuits"
         );
         assert_compact_is_replay(&raw, &outs, "shared query");
+    }
+
+    /// `x udiv d` (or `urem`) compared with `y`, both `w` bits wide: a
+    /// query whose raw arena holds one full restoring divider.
+    fn div_query(urem: bool, w: u32, d: BvTerm) -> BoolTerm {
+        let x = var("x", w);
+        let lhs = if urem {
+            BvTerm::Urem(b(x), b(d))
+        } else {
+            BvTerm::Udiv(b(x), b(d))
+        };
+        BoolTerm::Eq(b(lhs), b(var("y", w)))
+    }
+
+    fn raw_of(q: &BoolTerm) -> (k::Aig, Vec<k::Lit>) {
+        let mut bld = DagBuilder::new(true);
+        bld.assert_root(&crate::canon::canonicalize_bool(q))
+            .unwrap();
+        let dag = bld.finish();
+        let mut raw = k::aig_new();
+        let (_, outs) = k::encode(&mut raw, &dag.nodes, &dag.bits, &dag.roots);
+        (raw, outs)
+    }
+
+    // rivet: verifies VER-096
+    /// #314, the fold's meaning, exhaustively: `compact` with the fold
+    /// hints carries EVERY raw node's value (the statement of
+    /// `compact_sound`, here over every input assignment), at the odd
+    /// widths 3 and 5 where the #182 class hid, for `udiv` and `urem` by
+    /// every constant and by a variable. The fold fires on every
+    /// power-of-two divisor, `k * (w - k)` times for `2^k` — the muxes
+    /// `ge ? r : r` of the remainder bits below the divisor's set bit —
+    /// and the arena it leaves is the `Aig::and` replay's, gate for gate.
+    #[test]
+    fn mux_fold_carries_every_node_value_at_odd_widths() {
+        let mut fired_total = 0usize;
+        let mut check = |q: &BoolTerm, n_in: u32, expect: Option<usize>, what: &str| {
+            let (raw, outs) = raw_of(q);
+            let hints = fold_hints(&raw);
+            let fired = mux_fold_requests(&hints);
+            if let Some(e) = expect {
+                assert_eq!(fired, e, "{what}: fold count");
+            }
+            fired_total += fired;
+            let (folded, map) = k::compact(&raw, &hints);
+            let (legacy, lmap) = k::compact(&raw, &strash_hints(&raw));
+            assert!(
+                legacy.nodes.len() - folded.nodes.len() >= fired,
+                "{what}: every fold removes at least its own gate"
+            );
+            for bits in 0u32..1 << n_in {
+                let inputs: Vec<bool> = (0..n_in).map(|j| bits >> j & 1 == 1).collect();
+                let v_raw = k::simulate(&raw, &inputs);
+                let v_new = k::simulate(&folded, &inputs);
+                let v_old = k::simulate(&legacy, &inputs);
+                for i in 0..raw.nodes.len() {
+                    assert_eq!(
+                        k::eval_lit(&v_new, map[i]),
+                        v_raw[i],
+                        "{what}: raw node {i} under inputs {bits:#b}"
+                    );
+                    assert_eq!(k::eval_lit(&v_old, lmap[i]), v_raw[i], "{what}: legacy");
+                }
+            }
+            assert_compact_is_replay(&raw, &outs, what);
+        };
+        for w in [3u32, 5] {
+            for d in 0..1u128 << w {
+                for urem in [false, true] {
+                    // The divisor is a constant: inputs are x and y.
+                    let expect = (d != 0 && d.is_power_of_two()).then(|| {
+                        let kk = d.trailing_zeros() as usize;
+                        kk * (w as usize - kk)
+                    });
+                    check(
+                        &div_query(urem, w, c(d, w)),
+                        2 * w,
+                        expect,
+                        &format!("w={w} d={d} urem={urem}"),
+                    );
+                }
+            }
+        }
+        // A variable divisor at width 3 (x, d, y: 9 inputs).
+        for urem in [false, true] {
+            check(
+                &div_query(urem, 3, var("d", 3)),
+                9,
+                None,
+                &format!("w=3 variable divisor urem={urem}"),
+            );
+        }
+        assert!(fired_total > 0, "the fold never fired: the test is vacuous");
+    }
+
+    // rivet: verifies VER-096
+    /// #314: `fold_hints` only ever ADDS the fold request to
+    /// `strash_hints`. Where the fold applies nowhere the two hint lists
+    /// are equal, so such a query keeps its `ordeal-dag/v1` / `v2` tag,
+    /// its CNF and its hash; and a fold request on a gate the fold does
+    /// not apply to is harmless — the kernel's own check declines it.
+    #[test]
+    fn fold_hints_are_strash_hints_plus_requests() {
+        let x = var("x", 8);
+        let y = var("y", 8);
+        let no_mux = BoolTerm::Ult(b(BvTerm::Add(b(x.clone()), b(y.clone()))), b(c(17, 8)));
+        let (raw, _) = raw_of(&no_mux);
+        assert_eq!(fold_hints(&raw), strash_hints(&raw));
+        assert_eq!(mux_fold_requests(&fold_hints(&raw)), 0);
+
+        let (raw, outs) = raw_of(&div_query(false, 8, c(16, 8)));
+        let (fold, plain) = (fold_hints(&raw), strash_hints(&raw));
+        assert_eq!(mux_fold_requests(&fold), 4 * 4);
+        assert_eq!(mux_fold_requests(&plain), 0);
+        // Requesting the fold EVERYWHERE: it is taken where the check
+        // passes and declined elsewhere, and no output changes.
+        let all = vec![MUX_FOLD_HINT; raw.nodes.len()];
+        let (a_all, m_all) = k::compact(&raw, &all);
+        let (a_ref, m_ref) = k::compact(&raw, &fold);
+        let (o_all, o_ref) = (k::map_word(&m_all, &outs), k::map_word(&m_ref, &outs));
+        for bits in 0u32..1 << 16 {
+            let inputs: Vec<bool> = (0..16).map(|j| bits >> j & 1 == 1).collect();
+            assert_eq!(
+                k::eval_lit(&k::simulate(&a_all, &inputs), o_all[0]),
+                k::eval_lit(&k::simulate(&a_ref, &inputs), o_ref[0]),
+            );
+        }
     }
 
     // rivet: verifies VER-061

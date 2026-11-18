@@ -27,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ordeal check --timeout-ms N` bounds the solve by wall-clock time; when it
   elapses the verdict is `unknown` in every output shape, and under
   `--cert-out` no file is written and the exit code is 1 (#314, TR-093). A
-  verdict reached in time is unchanged. This bounds the wait on queries such
-  as #314's 128-bit `bvudiv` by 2^64; it does not decide them.
+  verdict reached in time is unchanged. This bounds the wait on a query the
+  search does not decide; it does not decide it (#314's own query is
+  decided by the mux fold, see Fixed).
 - A performance and proof-size regression gate on real consumer queries
   (#283, TR-081). `crates/ordeal/tests/perf_corpus/` holds 26 real queries
   from gale (12, copied from `proofs/ordeal-bv`), synth (7, including the
@@ -52,6 +53,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ordeal check` refuses an unknown option or a second file with exit 2.
   Earlier releases ignored them, so a misspelled `--timeout-ms` ran
   unbounded.
+- **The certificate of a query the mux fold fires on is a different one**
+  (TR-096, #314; see Fixed). Its CNF is smaller and its proof shorter than
+  v0.37.0 wrote for the same query, its `query` block carries the fold
+  requests in `hints` (`18446744073709551615`) and is tagged
+  `ordeal-dag/v3` with `recheck.min_version` `0.38.0`. A reader older than
+  v0.38.0 refuses such a block as an unsupported encoding. A query the fold
+  never fires on — the latency and BMC bench corpora, every tracked
+  `.smt2` file — keeps its bytes, tag and hash; on the random Z3
+  differential corpora it fires on about half of the queries. Bundles
+  written by v0.37.0 and earlier never carry the request and are accepted
+  as before: the trusted crate compacts them exactly as it did and
+  re-derives the CNF they carry (two bundles written by the v0.37.0
+  release binary are committed as fixtures and re-checked in the test
+  suite). A consumer that pins the digest of a certificate must re-pin it
+  for the affected queries. `QueryDag::encoding` gains the `v3` case,
+  `QueryDag::has_mux_fold` / `min_reader_version`, `MUX_FOLD_HINT` and
+  `dag::fold_hints` are new, and `AigOptions` gains the field `mux`
+  (`AigOptions::V0_37` is the previous lowering).
+- A 32-bit reader (`ordeal-recheck` on wasm32) refuses the index
+  `4294967295` in a bundle as malformed. It used to read it as the "no
+  image" sentinel, which a 64-bit reader does not; no bundle ordeal writes
+  contains it.
+
+### Fixed
+
+- **`bvudiv` / `bvurem` by a constant power of two are decided** (TR-096,
+  #314). `x udiv 2^64` against the high half of a 128-bit `x` did not
+  finish in 60 s; it now takes about 7 ms, certificate and trusted checks
+  included (release build), and the same holds for `urem` and for every
+  width and `k` measured. The restoring divider emits the mux `ge ? r : r`
+  for every remainder bit below the divisor's set bit, `k·(w−k)` of them
+  (4096 at `w = 128, k = 64`), and the compaction folded one level only, so
+  the SAT core was left to prove them equal. The trusted
+  `blast_kernel::compact` now folds `!(g&r) & !(!g&r)` to `!r`
+  (`mux_fold`). The solver asks for the fold with a compaction hint and
+  the trusted crate checks the gate shape before folding, so the hint stays
+  untrusted advice; `lean/BlasterCompact.lean` proves the fold
+  (`mux_fold_spec`) as one more case of `compact_and_spec`, and the
+  statement of `compact_sound` is unchanged. The trusted base is
+  unchanged. A rewrite of the division into a shift on the solver side was
+  measured and rejected: the trusted term check refuses it
+  (`RootMismatch`).
 
 ## [0.37.0] - 2026-11-14
 

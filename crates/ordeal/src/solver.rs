@@ -51,7 +51,7 @@
 use crate::aig::AigOptions;
 use crate::blast_kernel as k;
 use crate::cnf::CnfFormula;
-use crate::dag::{DagBuilder, no_hints, strash_hints};
+use crate::dag::{DagBuilder, fold_hints, no_hints, strash_hints};
 use crate::eval::{self, Env, EvalError};
 use crate::sat::{SatResult, SatSolver};
 use crate::term::{BoolTerm, BvTerm};
@@ -1071,7 +1071,9 @@ impl Solver {
             Vec<Vec<k::Lit>>,
             Option<crate::query::QueryDag>,
         ) = if options.fold {
-            let hints = if options.strash {
+            let hints = if options.strash && options.mux {
+                fold_hints(&raw)
+            } else if options.strash {
                 strash_hints(&raw)
             } else {
                 no_hints(&raw)
@@ -1861,6 +1863,7 @@ mod cnf_gap_measurement {
             AigOptions {
                 fold: true,
                 strash: true,
+                mux: false,
             },
         ),
     ];
@@ -1936,6 +1939,25 @@ mod cnf_gap_measurement {
     /// `Nodes` line quantifies how the query-carrying path's CNF differs
     /// from the default path's over a corpus.
     fn digest_with(title: &str, corpus: &[Vec<BoolTerm>], derived: DerivedOps) {
+        let (clauses, sha) = digest_under(corpus, AigOptions::default(), derived);
+        println!("| {title} | {} | {clauses} | {sha} |", corpus.len());
+        // #314: the lowering of every release up to v0.37.0, re-derived
+        // by this build — the digests `docs/design/query-cnf-gap.md`
+        // records for v0.25.0 .. v0.37.0.
+        let (clauses, sha) = digest_under(corpus, AigOptions::V0_37, derived);
+        println!(
+            "| {title}, v0.37.0 lowering (no mux fold) | {} | {clauses} | {sha} |",
+            corpus.len()
+        );
+    }
+
+    /// The clause count and the SHA-256 of every CNF of a corpus under the
+    /// given lowering settings (`digest`'s byte layout).
+    fn digest_under(
+        corpus: &[Vec<BoolTerm>],
+        options: AigOptions,
+        derived: DerivedOps,
+    ) -> (u64, String) {
         let mut bytes: Vec<u8> = Vec::new();
         let mut clauses = 0u64;
         for q in corpus {
@@ -1944,7 +1966,7 @@ mod cnf_gap_measurement {
                 s.assert(a.clone());
             }
             let (_, cnf) = s
-                .lower_with(AigOptions::default(), derived)
+                .lower_with(options, derived)
                 .expect("corpus query must lower");
             bytes.extend_from_slice(&cnf.num_vars.to_le_bytes());
             for c in &cnf.clauses {
@@ -1955,12 +1977,85 @@ mod cnf_gap_measurement {
                 clauses += 1;
             }
         }
-        println!(
-            "| {title} | {} | {clauses} | {} |",
-            corpus.len(),
-            crate::sha256::sha256_hex(&bytes)
-        );
+        (clauses, crate::sha256::sha256_hex(&bytes))
     }
+
+    // rivet: verifies VER-096
+    /// #314: the v0.37.0 lowering is still in this build, byte for byte.
+    /// The CNFs of the latency and BMC corpora under `AigOptions::V0_37`
+    /// hash to the digests `docs/design/query-cnf-gap.md` records — with
+    /// the derived ops as nodes (production since v0.28.0) and rewritten
+    /// (v0.25.0 .. v0.27.0) — which is what a certificate written by any
+    /// release up to v0.37.0 is re-checked against. The fold fires on
+    /// neither corpus, so the production lowering hashes the same.
+    #[test]
+    fn v0_37_lowering_is_byte_identical_on_the_bench_corpora() {
+        let latency: Vec<Vec<BoolTerm>> = latency_corpus().into_iter().map(|(_, q)| q).collect();
+        let bmc: Vec<Vec<BoolTerm>> = [16usize, 32, 64]
+            .iter()
+            .map(|&k| crate::bmc_corpus::queue_overflow(k, k as u8))
+            .chain(
+                [24usize, 48]
+                    .iter()
+                    .map(|&k| crate::bmc_corpus::deadlock(k, false)),
+            )
+            .collect();
+        for options in [AigOptions::V0_37, AigOptions::default()] {
+            assert_eq!(
+                digest_under(&latency, options, DerivedOps::Nodes),
+                (112352, LATENCY_NODES.to_string()),
+                "{options:?}"
+            );
+            assert_eq!(
+                digest_under(&latency, options, DerivedOps::Rewrite),
+                (112352, LATENCY_REWRITE.to_string()),
+                "{options:?}"
+            );
+            assert_eq!(
+                digest_under(&bmc, options, DerivedOps::Nodes),
+                (86344, BMC.to_string()),
+                "{options:?}"
+            );
+        }
+    }
+
+    // rivet: verifies VER-096
+    /// The same pin on the Z3 differential corpora, where the fold DOES
+    /// fire (on 100 of 200 and 470 of 1000 queries): under
+    /// `AigOptions::V0_37` they hash to the recorded digests, and the
+    /// production lowering to others.
+    #[cfg(feature = "oracle")]
+    #[test]
+    fn v0_37_lowering_is_byte_identical_on_the_oracle_corpora() {
+        for (seed, n, clauses, sha) in [
+            (0x192u64, 200usize, 10272352u64, ORACLE_192),
+            (0xC0FFEE, 1000, 34117473, ORACLE_C0FFEE),
+        ] {
+            let corpus = crate::oracle::gen_corpus(seed, n);
+            assert_eq!(
+                digest_under(&corpus, AigOptions::V0_37, DerivedOps::Nodes),
+                (clauses, sha.to_string()),
+                "gen_corpus({seed:#x}, {n})"
+            );
+            let (c, s) = digest_under(&corpus, AigOptions::default(), DerivedOps::Nodes);
+            assert!(c < clauses && s != sha, "the fold fires on this corpus");
+        }
+    }
+
+    /// `docs/design/query-cnf-gap.md`: the latency corpus with the derived
+    /// ops as nodes — production since v0.28.0.
+    const LATENCY_NODES: &str = "7b35d569f722f36db0200c2ab541b6e82fb156ff4ccbb4fefc208d52118e1e84";
+    /// The latency corpus with the derived ops rewritten: v0.25.0 .. v0.27.0.
+    const LATENCY_REWRITE: &str =
+        "78aaa670cd461529af79ccf2c8ec780d88671f23f8a51aa75abd7bc311b620bb";
+    /// The BMC corpus (no derived op: one digest).
+    const BMC: &str = "5c14a69e452c4fbfb736c98dade24c06547968e06ec853194e8262a9e26826b5";
+    /// `oracle::gen_corpus(0x192, 200)`.
+    #[cfg(feature = "oracle")]
+    const ORACLE_192: &str = "a1d80de907c207a589d7fd1bb7b4a2d7751764776d85d75e6184d43e64e52597";
+    /// `oracle::gen_corpus(0xC0FFEE, 1000)`.
+    #[cfg(feature = "oracle")]
+    const ORACLE_C0FFEE: &str = "42d44115dec319b317cf34e64494b33f29404653a5cbabd4c8334c2b27570f7c";
 
     /// Issue #192 phase 2: the production CNF of every corpus query, as one
     /// digest per corpus. Run on the base commit and on the branch; equal
@@ -2000,6 +2095,209 @@ mod cnf_gap_measurement {
             digest(
                 "oracle::gen_corpus(0xC0FFEE, 1000)",
                 &crate::oracle::gen_corpus(0xC0FFEE, 1000),
+            );
+        }
+    }
+
+    /// `x udiv 2^k != zero_extend_k(x[w-1:k])` (`urem = false`) or
+    /// `x urem 2^k != zero_extend_(w-k)(x[k-1:0])`: valid identities, so
+    /// UNSAT. `udiv` at `w = 128, k = 64` is issue #314.
+    fn pow2_query(urem: bool, w: u32, k: u32) -> Vec<BoolTerm> {
+        let x = v("x", w);
+        let d = c(1u128 << k, w);
+        let (lhs, rhs) = if urem {
+            (
+                BvTerm::Urem(Box::new(x.clone()), Box::new(d)),
+                BvTerm::ZeroExt {
+                    by: w - k,
+                    arg: Box::new(BvTerm::Extract {
+                        hi: k - 1,
+                        lo: 0,
+                        arg: Box::new(x),
+                    }),
+                },
+            )
+        } else {
+            (
+                BvTerm::Udiv(Box::new(x.clone()), Box::new(d)),
+                BvTerm::ZeroExt {
+                    by: k,
+                    arg: Box::new(BvTerm::Extract {
+                        hi: w - 1,
+                        lo: k,
+                        arg: Box::new(x),
+                    }),
+                },
+            )
+        };
+        vec![BoolTerm::Ne(Box::new(lhs), Box::new(rhs))]
+    }
+
+    /// One row of the #314 fire-count table: over a corpus, how many
+    /// queries lower, on how many the mux fold fires and how often, and
+    /// the AND gates and clauses of the v0.37.0 lowering next to the
+    /// production one.
+    fn fire_row(title: &str, corpus: &[Vec<BoolTerm>]) {
+        let (mut lowered, mut hit, mut fires) = (0u64, 0u64, 0u64);
+        let (mut a0, mut a1, mut c0, mut c1) = (0u64, 0u64, 0u64, 0u64);
+        for q in corpus {
+            let mut s = Solver::new();
+            for a in q {
+                s.assert(a.clone());
+            }
+            let Some((old, old_cnf)) = s.lower_with(AigOptions::V0_37, DerivedOps::Nodes) else {
+                continue;
+            };
+            let (new, new_cnf) = s
+                .lower_with(AigOptions::default(), DerivedOps::Nodes)
+                .expect("lowers under both settings");
+            lowered += 1;
+            let hints = &new.query.as_ref().expect("compacted").hints;
+            let f = crate::dag::mux_fold_requests(hints) as u64;
+            // Every request `fold_hints` makes is one the trusted
+            // `compact` takes: the gate counts differ exactly when it
+            // fired, and never grow.
+            assert!(
+                new.num_ands() <= old.num_ands(),
+                "{title}: the fold added gates"
+            );
+            assert_eq!(f == 0, new_cnf.clauses == old_cnf.clauses, "{title}");
+            hit += u64::from(f > 0);
+            fires += f;
+            a0 += old.num_ands() as u64;
+            a1 += new.num_ands() as u64;
+            c0 += old_cnf.clauses.len() as u64;
+            c1 += new_cnf.clauses.len() as u64;
+        }
+        println!(
+            "| {title} | {} | {lowered} | {hit} | {fires} | {a0} | {a1} | {c0} | {c1} |",
+            corpus.len()
+        );
+    }
+
+    /// The assertions at the last `check-sat` of every `.smt2` file the
+    /// repository tracks under the given directories (non-recursive).
+    fn smt2_corpus(dirs: &[&str]) -> Vec<Vec<BoolTerm>> {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let mut out = Vec::new();
+        for d in dirs {
+            let mut files: Vec<_> = std::fs::read_dir(root.join(d))
+                .unwrap_or_else(|e| panic!("{d}: {e}"))
+                .map(|e| e.unwrap().path())
+                .filter(|p| p.extension().is_some_and(|x| x == "smt2"))
+                .collect();
+            files.sort();
+            for f in files {
+                let text = std::fs::read_to_string(&f).unwrap();
+                if let Ok((Some(q), _)) = crate::smtlib::assertions_at_check_sat(&text) {
+                    out.push(q);
+                }
+            }
+        }
+        out
+    }
+
+    /// Issue #314 — how often the mux fold fires, corpus by corpus, and
+    /// what it does to the gate and clause counts. A measurement:
+    ///
+    ///   cargo test -p ordeal --release --lib mux_fold_fire_counts -- --ignored --nocapture
+    ///
+    /// (`--features oracle` adds the Z3 differential corpora.) The
+    /// `fires` column is `dag::fold_hints`' request count — it does not
+    /// depend on the kernel honouring the request, so it is also the
+    /// "would fire" figure for a kernel without the fold.
+    #[test]
+    #[ignore = "measurement, not a check: prints the #314 mux-fold fire counts"]
+    fn mux_fold_fire_counts() {
+        println!(
+            "\n| corpus | queries | lowered | queries the fold fires on | fires | ANDs v0.37 | ANDs | clauses v0.37 | clauses |"
+        );
+        println!("|---|---:|---:|---:|---:|---:|---:|---:|---:|");
+        let latency: Vec<Vec<BoolTerm>> = latency_corpus().into_iter().map(|(_, q)| q).collect();
+        fire_row("benches/latency.rs corpus", &latency);
+        let bmc: Vec<Vec<BoolTerm>> = [16usize, 32, 64]
+            .iter()
+            .map(|&k| crate::bmc_corpus::queue_overflow(k, k as u8))
+            .chain(
+                [24usize, 48]
+                    .iter()
+                    .map(|&k| crate::bmc_corpus::deadlock(k, false)),
+            )
+            .collect();
+        fire_row("benches/bmc.rs corpus", &bmc);
+        fire_row(
+            "tracked .smt2 files (tests/fixtures, fixtures/differential, evidence/certs, fuzz/seeds/smtlib)",
+            &smt2_corpus(&[
+                "crates/ordeal/tests/fixtures",
+                "crates/ordeal/tests/fixtures/differential",
+                "evidence/certs",
+                "fuzz/seeds/smtlib",
+            ]),
+        );
+        #[cfg(feature = "oracle")]
+        {
+            use crate::oracle::{gen_corpus, gen_sliver_corpus, gen_sliver_lifted_corpus};
+            fire_row("oracle::gen_corpus(0x192, 200)", &gen_corpus(0x192, 200));
+            fire_row(
+                "oracle::gen_corpus(0xC0FFEE, 1000)",
+                &gen_corpus(0xC0FFEE, 1000),
+            );
+            fire_row(
+                "oracle::gen_corpus(0xC0FF_EE00_5EED_0001, 300) (the Z3 differential)",
+                &gen_corpus(0xC0FF_EE00_5EED_0001, 300),
+            );
+            let lower = |c: Vec<Vec<crate::sliver::ExtBoolTerm>>| -> Vec<Vec<BoolTerm>> {
+                c.iter()
+                    .filter_map(|q| crate::sliver::lower(q).ok())
+                    .collect()
+            };
+            fire_row(
+                "oracle::gen_sliver_corpus(0x5111_5EED_A55A_0001, 300), lowered",
+                &lower(gen_sliver_corpus(0x5111_5EED_A55A_0001, 300)),
+            );
+            fire_row(
+                "oracle::gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300), lowered",
+                &lower(gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300)),
+            );
+        }
+        #[cfg(not(feature = "oracle"))]
+        println!("(oracle corpora skipped: build with --features oracle)");
+        let mut sweep = Vec::new();
+        for w in [8u32, 16, 32, 64, 128] {
+            for k in [1, w / 2, w - 1] {
+                sweep.push(pow2_query(false, w, k));
+                sweep.push(pow2_query(true, w, k));
+            }
+        }
+        fire_row(
+            "#314 sweep: udiv/urem by 2^k, w in 8..128, k in {1, w/2, w-1}",
+            &sweep,
+        );
+        println!("\n| #314 query | fires | ANDs v0.37 | ANDs | clauses v0.37 | clauses |");
+        println!("|---|---:|---:|---:|---:|---:|");
+        for (urem, w, k) in [
+            (false, 128u32, 64u32),
+            (true, 128, 64),
+            (false, 64, 32),
+            (false, 128, 1),
+            (false, 128, 127),
+        ] {
+            let mut s = Solver::new();
+            for a in pow2_query(urem, w, k) {
+                s.assert(a);
+            }
+            let (old, oc) = s.lower_with(AigOptions::V0_37, DerivedOps::Nodes).unwrap();
+            let (new, nc) = s
+                .lower_with(AigOptions::default(), DerivedOps::Nodes)
+                .unwrap();
+            println!(
+                "| {} w={w} k={k} | {} | {} | {} | {} | {} |",
+                if urem { "urem" } else { "udiv" },
+                crate::dag::mux_fold_requests(&new.query.as_ref().unwrap().hints),
+                old.num_ands(),
+                new.num_ands(),
+                oc.clauses.len(),
+                nc.clauses.len()
             );
         }
     }

@@ -774,9 +774,12 @@ and rustc are assumed.
   `encode` builds the AIG from a `DagNode` list by calling the proven rule
   for every node (`encode_sound`, `lean/BlasterDag.lean`, against a DAG
   semantics defined directly over Lean `BitVec`); `compact` applies the
-  constant folding and structural hashing (`compact_sound`,
+  constant folding, structural hashing and, since v0.38.0, the two-level
+  fold of a mux with equal arms (`mux_fold`: `!(g&r) & !(!g&r) = !r`,
+  issue #314) (`compact_sound`,
   `lean/BlasterCompact.lean`, for any hints — the hints only steer
-  sharing and are checked); `tseitin` emits the CNF
+  sharing and ask for the mux fold, and both are checked); `tseitin`
+  emits the CNF
   (`tseitin_sat_preserving`, `lean/BlasterTseitin.lean`); and
   `dag_refuted` (`lean/BlasterCapstone.lean`) composes the three with
   `lrat_check_sound`:
@@ -848,8 +851,16 @@ and rustc are assumed.
   the 1:1 copy of the trees into the kernel's mirror type (`mirror.rs`,
   constructor for constructor, bijection-tested) and the front ends.
   `dag::strash_hints` is untrusted by design: it only reproduces the
-  sharing decisions of the old `Aig::and` strash so the shipped CNF stays
-  byte-identical, and `compact_sound` holds for any hints. The shipped
+  sharing decisions of the old `Aig::and` strash, and `compact_sound`
+  holds for any hints. Since v0.38.0 (TR-096, #314) the production hints
+  are `dag::fold_hints`: the same sharing plus a request for the trusted
+  `mux_fold` on every gate it applies to. The fold is in the trusted
+  crate and proven (`mux_fold_spec`, a case of `compact_and_spec`); the
+  request is untrusted and a wrong one is declined. A hint list without
+  requests — every certificate written up to v0.37.0 — is compacted as
+  before, so those certificates re-derive the CNF they carry; a query
+  the fold fires on has a smaller CNF than v0.37.0 produced and its
+  block is tagged `ordeal-dag/v3`. The shipped
   `cnf.rs` and `aig.rs` are no longer on the production path (they serve
   the per-family differentials and the gate-identity tests). Evidence for
   the two unproven pieces (the mirror copy and the front ends) is tests

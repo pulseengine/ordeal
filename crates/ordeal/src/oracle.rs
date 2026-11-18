@@ -1326,6 +1326,99 @@ mod tests {
         }
     }
 
+    // rivet: verifies VER-096
+    /// #314: the mux fold against Z3 where it fires most. `x op 2^k !=
+    /// shifted_j(x)` for `op` in `udiv` / `urem` — UNSAT exactly when
+    /// `j == k` — at the odd widths 3, 5, 12 and 24 (the #182 class hid at
+    /// non-power-of-two widths; the checker certifies the CNF the trusted
+    /// crate derives, and the fold is part of that derivation, so a fold
+    /// that changed a value would be a certified wrong `Unsat`). Every
+    /// verdict through `check_with_term` agrees with Z3, both verdicts
+    /// occur, and the fold fired on the way.
+    #[test]
+    fn mux_fold_differential_pow2_division_at_odd_widths() {
+        let shifted = |urem: bool, x: BvTerm, w: u32, j: u32| {
+            if urem {
+                BvTerm::ZeroExt {
+                    by: w - j,
+                    arg: Box::new(BvTerm::Extract {
+                        hi: j - 1,
+                        lo: 0,
+                        arg: Box::new(x),
+                    }),
+                }
+            } else {
+                BvTerm::ZeroExt {
+                    by: j,
+                    arg: Box::new(BvTerm::Extract {
+                        hi: w - 1,
+                        lo: j,
+                        arg: Box::new(x),
+                    }),
+                }
+            }
+        };
+        let (mut sats, mut unsats, mut fired, mut queries) = (0u32, 0u32, 0usize, 0u32);
+        for w in [3u32, 5, 12, 24] {
+            for k in 1..w {
+                for j in 1..w {
+                    // Width 24: the diagonal and its two neighbours each side.
+                    if w == 24 && j.abs_diff(k) > 2 {
+                        continue;
+                    }
+                    for urem in [false, true] {
+                        let x = BvTerm::Var {
+                            name: "x".into(),
+                            sort: Sort::new(w),
+                        };
+                        let d = BvTerm::Const {
+                            value: 1u128 << k,
+                            sort: Sort::new(w),
+                        };
+                        let lhs = if urem {
+                            BvTerm::Urem(Box::new(x.clone()), Box::new(d))
+                        } else {
+                            BvTerm::Udiv(Box::new(x.clone()), Box::new(d))
+                        };
+                        let q = vec![BoolTerm::Ne(
+                            Box::new(lhs),
+                            Box::new(shifted(urem, x, w, j)),
+                        )];
+                        queries += 1;
+                        if let Some(d) = differential_check(&q, ordeal_engine_with_term) {
+                            panic!(
+                                "w={w} k={k} j={j} urem={urem}: ordeal-vs-Z3 disagreement — {d:?}"
+                            );
+                        }
+                        let mut solver = crate::solver::Solver::new();
+                        solver.assert(q[0].clone());
+                        match solver.check_with_term() {
+                            crate::query::TermCheckResult::Unsat(c) => {
+                                assert_eq!(j, k, "Unsat off the diagonal");
+                                fired += crate::dag::mux_fold_requests(&c.query.query.hints);
+                                unsats += 1;
+                            }
+                            crate::query::TermCheckResult::Sat(c) => {
+                                assert_ne!(j, k, "the identity is Unsat");
+                                fired += crate::dag::mux_fold_requests(&c.query.query.hints);
+                                sats += 1;
+                            }
+                            crate::query::TermCheckResult::Unknown => {
+                                panic!("w={w} k={k} j={j} urem={urem}: Unknown")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        println!(
+            "mux-fold differential: {queries} queries, {unsats} unsat, {sats} sat, {fired} folds, 0 disagreements"
+        );
+        assert_eq!(unsats, 2 * (2 + 4 + 11 + 23));
+        assert!(sats > 300, "sat {sats}");
+        assert!(fired > 5000, "the fold fired {fired} times");
+    }
+
     // rivet: verifies VER-069
     /// #192 phase 7: the seeded corpus through `check_with_term` against Z3
     /// — every decided verdict agrees, every one passed the trusted

@@ -1,9 +1,12 @@
 // rivet: verifies VER-093
 //! `ordeal check --timeout-ms N` (#314, TR-093), with the real binary. The
-//! slow query is #314's own shape at width 64: `x udiv 2^32` against the
-//! high half of `x`, which the built-in search did not decide in 300 s on
-//! v0.37.0. The bound must turn it into a prompt `unknown` in every output
-//! shape, and must not change a verdict the solver reaches in time.
+//! slow query is 32-bit distributivity, `a * (b + c)` against
+//! `a * b + a * c`, which the built-in search does not decide in 30 s. (Up
+//! to v0.37.0 it was #314's own shape at width 64; since TR-096 the mux
+//! fold decides that one in milliseconds — it is now the decided leg
+//! below.) The bound must turn the slow query into a prompt `unknown` in
+//! every output shape, and must not change a verdict the solver reaches in
+//! time.
 
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
@@ -11,8 +14,15 @@ use std::time::{Duration, Instant};
 
 const ORDEAL: &str = env!("CARGO_BIN_EXE_ordeal");
 
-/// #314 at width 64: valid, so the honest answers are `unsat` or `unknown`.
-const SLOW: &str = "(set-logic QF_BV)\n(declare-fun x () (_ BitVec 64))\n\
+/// 32-bit distributivity: valid, so the honest answers are `unsat` or
+/// `unknown`.
+const SLOW: &str = "(set-logic QF_BV)\n(declare-fun a () (_ BitVec 32))\n\
+    (declare-fun b () (_ BitVec 32))\n(declare-fun c () (_ BitVec 32))\n\
+    (assert (distinct (bvmul a (bvadd b c)) (bvadd (bvmul a b) (bvmul a c))))\n\
+    (check-sat)\n";
+/// #314 at width 64: `x udiv 2^32` against the high half of `x`. Undecided
+/// after 300 s on v0.37.0; decided since v0.38.0 (TR-096).
+const ISSUE_314_W64: &str = "(set-logic QF_BV)\n(declare-fun x () (_ BitVec 64))\n\
     (assert (distinct (bvudiv x #x0000000100000000) \
     ((_ zero_extend 32) ((_ extract 63 32) x))))\n(check-sat)\n";
 /// Decided at once.
@@ -58,6 +68,21 @@ fn bound_turns_a_slow_solve_into_unknown() {
         took < Duration::from_secs(1) + SLACK,
         "bound ignored: took {took:?}"
     );
+}
+
+/// #314's width-64 query, the slow one of this file until v0.37.0, is
+/// decided well inside the same bound since the mux fold (TR-096).
+#[test]
+fn bound_no_longer_needed_for_issue_314_at_width_64() {
+    let (o, took) = run(&["check", "-", "--timeout-ms", "1000"], ISSUE_314_W64);
+    assert_eq!(
+        stdout(&o).lines().next(),
+        Some("unsat"),
+        "stderr: {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+    assert_eq!(o.status.code(), Some(0));
+    assert!(took < SLACK, "took {took:?}");
 }
 
 #[test]
