@@ -1851,3 +1851,17 @@ artifacts:
     links:
       - type: verifies
         target: TR-093
+
+  - id: VER-094
+    type: sw-verification
+    title: A second check-sat is refused before solving; one check-sat and a check-sat after exit read as before (TR-094)
+    status: verified
+    release: v0.38.0
+    tags: [smtlib, front-end, cli]
+    fields:
+      coverage: two check-sats via solve_str and read_script; one check-sat; a check-sat after exit
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests::a_second_check_sat_is_refused_not_answered_once"
+    links:
+      - type: verifies
+        target: TR-094

@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A script with more than one `check-sat` (before `exit`) is refused with exit 2,
+  `unsupported: more than one check-sat`, before anything is solved (#321,
+  TR-094). Earlier releases decided every assertion once and printed one answer,
+  which a consumer pairing answers with `check-sat`s would pin on the first one.
+  Every answer printed before was correct for the script as a whole.
 - `ordeal check` refuses an unknown option or a second file with exit 2.
   Earlier releases ignored them, so a misspelled `--timeout-ms` ran
   unbounded.
