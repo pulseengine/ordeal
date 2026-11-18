@@ -2265,3 +2265,23 @@ artifacts:
         target: TR-070
       - type: allocated-to
         target: ARC-006
+
+  - id: TR-082
+    type: sw-req
+    title: "Trap-refinement VC: opt traps exactly where orig traps and otherwise yields a value orig may yield, with WASM NaN sets as bit-pattern predicates"
+    status: draft
+    release: v0.38.0
+    description: "loom (loom#313 / loom#300) needs refinement, not equivalence: a WASM float op that yields a NaN may yield any NaN of the spec's nans_N set (Core 4.3.3), so folding f32.div 0.0 0.0 to 0x7fc00000 is correct although the original's model produced another NaN. Requirement: crates/ordeal/src/trap.rs builds the BoolTerm orig.trap != opt.trap OR (NOT orig.trap AND opt.value NOT IN orig.values), whose Unsat means opt refines orig (trap_refinement_violation, decided by prove_trap_refinement on the certificate-checked pipeline). The value set is Exact(v) or Float { value, fmt, nans } with nans Canonical, Arithmetic or Propagating(operands) (nans_N: canonical when every NaN operand is canonical, arithmetic otherwise); membership is a bit-pattern predicate (fp_is_nan, fp_is_canonical_nan, fp_is_arithmetic_nan: extracts and constant compares). No floating-point value is computed and the closed op set in term.rs is unchanged. docs/consuming-ordeal.md documents how the constructs loom's pure-BV seam refuses (select/store, pure_call) map to Solver::from_sliver, claim-gated. Effect: behaviour. Issue #284."
+    tags: [trap, refinement, loom, "nan", sliver]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: Unit tests evaluate the NaN-class predicates and value-set membership against a spec reference; the violation formula equals the issue's formula over an 8-bit sweep; loom-shaped worked examples give a re-checkable Unsat for a valid refinement and Sat with a genuine counterexample for a dropped trap, a wrong value and a signalling-NaN boundary; the sliver mapping is exercised through Solver::from_sliver; a Z3 differential (oracle feature) proves the builders equal to an independent FP-theory spelling and agrees on every worked verdict.
+    links:
+      - type: derives-from
+        target: SYS-007
+      - type: allocated-to
+        target: ARC-002
+      - type: refines
+        target: TR-019

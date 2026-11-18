@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Trap refinement for loom** (TR-082, #284; loom#313 / loom#300).
+  `ordeal::trap::trap_refinement_violation(orig, opt)` builds
+  `orig.trap ≠ opt.trap ∨ (¬orig.trap ∧ opt.value ∉ orig.values)`, whose
+  `Unsat` means the optimised code refines the original, and
+  `prove_trap_refinement` decides it on the certificate-checked pipeline.
+  `orig` is a `DefineSetOrTrap` whose `ValueSet` is `Exact(v)` or a float
+  result with WASM's NaN freedom (`NanSet::Canonical`, `Arithmetic`, or
+  `Propagating(operands)` for the spec's `nans_N`). New bit-pattern
+  predicates `fp_is_canonical_nan` and `fp_is_arithmetic_nan`, plus
+  `nan_set_member` and `value_set_member`. No floating-point value is
+  computed and the closed op set is unchanged. `docs/consuming-ordeal.md`
+  shows how loom's refused `select`/`store` and `pure_call` obligations go
+  through `Solver::from_sliver`. Tests include loom-shaped worked examples
+  with negative controls (a dropped trap, a wrong value, a signalling NaN)
+  and a Z3 differential under `oracle` against an FP-theory spelling.
+
 ## [0.37.0] - 2026-11-14
 
 Two strands. The first phase of the certified query echo (#281, E1): a

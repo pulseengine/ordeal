@@ -871,6 +871,46 @@ claims:
         glob: crates/ordeal/src/mirror.rs
         min: 4
 
+  - id: CONS-TRAP-REFINEMENT
+    doc: docs/consuming-ordeal.md
+    text: "`trap_refinement_violation(orig, opt)` builds exactly that `BoolTerm`"
+    evidence:
+      - kind: count-min
+        pattern: '^pub fn (trap_refinement_violation|prove_trap_refinement|value_set_member|fp_is_canonical_nan|fp_is_arithmetic_nan)\('
+        glob: crates/ordeal/src/trap.rs
+        min: 5
+      # The worked examples the doc names, positive and both negative controls.
+      - kind: count-min
+        pattern: 'fn (loom_redundant_div_guard_removal_refines|loom_dropped_div_trap_is_not_a_refinement|loom_wrong_strength_reduction_is_not_a_refinement|nan_constant_fold_refines_only_under_the_nan_set|add_neg_zero_to_x_is_caught_on_signalling_nan)\(\)'
+        glob: crates/ordeal/src/trap.rs
+        min: 5
+
+  - id: CONS-TRAP-REFINEMENT-SLIVER
+    doc: docs/consuming-ordeal.md
+    text: "Lift the VC with `ordeal::sliver::ext_of_core`, and add one defining assertion per name"
+    evidence:
+      - kind: count-min
+        pattern: '^pub fn ext_of_core\(t: &BoolTerm\) -> ExtBoolTerm'
+        glob: crates/ordeal/src/sliver.rs
+        min: 1
+      - kind: count-min
+        pattern: 'fn (sliver_store_to_load_forwarding_refinement|sliver_pure_call_argument_rewrite_refinement|sliver_store_effect_compared_at_a_fresh_index)\(\)'
+        glob: crates/ordeal/src/trap.rs
+        min: 3
+      - kind: count-min
+        pattern: 'Solver::from_sliver\(&'
+        glob: crates/ordeal/src/trap.rs
+        min: 3
+
+  - id: CONS-SLIVER-LIFTS-DERIVED-OPS
+    doc: docs/consuming-ordeal.md
+    text: "including `Urem`, `Sdiv`, `Srem`, `Rotl` since 0.29.0"
+    evidence:
+      - kind: count-min
+        pattern: '^    (Urem|Sdiv|Srem|Rotl)\(ExtBvTerm, ExtBvTerm\),$'
+        glob: crates/ordeal/src/sliver.rs
+        min: 4
+
   # ── CHANGELOG.md (the latest release's trust statement) ──────────────────
   - id: CHANGELOG-0-34-TRUSTED
     doc: CHANGELOG.md

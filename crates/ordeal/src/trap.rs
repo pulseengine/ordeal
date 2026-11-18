@@ -509,6 +509,220 @@ pub fn prove_trap_condition_equivalence(
     Solver::prove_valid(trap_condition_equivalence(orig_may_trap, opt_may_trap))
 }
 
+// ---------------------------------------------------------------------------
+// Trap REFINEMENT (issue #284, TR-082; loom#313 / loom#300).
+//
+// Equivalence ([`trap_equivalence_vc`]) demands that the optimised code
+// produce the SAME value as the original. That is too strong for WASM float
+// results: when an op yields a NaN, the spec (Core §4.3.3, `nans_N`) lets it
+// yield any member of a SET of NaNs, so an optimiser that constant-folds
+// `0.0 / 0.0` to the canonical NaN `0x7fc00000` is correct even though the
+// original's model produced another member of the set. What loom needs is
+// REFINEMENT: the optimised code traps exactly when the original does, and
+// otherwise produces a value the original was ALLOWED to produce.
+//
+// The set is described over bit patterns only. "Is a NaN", "is a canonical
+// NaN" and "is an arithmetic NaN" are extracts and constant compares on the
+// exponent and trailing-significand fields; no floating-point value is ever
+// computed and no operation is added to the closed fragment.
+// ---------------------------------------------------------------------------
+
+/// The value-field pattern of the canonical NaN payload: only the most
+/// significant trailing-significand bit set (`1 << (mant - 1)`; WASM Core
+/// §4.3.3 `canon_N = 2^(signif(N) - 1)`).
+const fn canon_payload(fmt: FpFmt) -> u128 {
+    1u128 << (fmt.mant_bits() - 1)
+}
+
+/// The float's bits encode a **canonical NaN** (WASM Core §4.3.3): exponent
+/// all-ones and trailing significand exactly `canon_N` (only its top bit set),
+/// with either sign. `0x7fc00000` / `0xffc00000` for f32,
+/// `0x7ff8000000000000` / `0xfff8000000000000` for f64.
+pub fn fp_is_canonical_nan(bits: &BvTerm, fmt: FpFmt) -> BoolTerm {
+    let payload_canon = BoolTerm::Eq(
+        bx(fp_mant_field(bits, fmt)),
+        bx(BvTerm::Const {
+            value: canon_payload(fmt),
+            sort: Sort::new(fmt.mant_bits()),
+        }),
+    );
+    BoolTerm::And(bb(fp_exp_is_all_ones(bits, fmt)), bb(payload_canon))
+}
+
+/// The float's bits encode an **arithmetic NaN** (WASM Core §4.3.3): exponent
+/// all-ones and the top trailing-significand bit (the quiet bit) set, i.e. the
+/// payload is `≥ canon_N`. Every canonical NaN is arithmetic; a signalling NaN
+/// (quiet bit clear, payload non-zero) is a NaN that is not arithmetic.
+pub fn fp_is_arithmetic_nan(bits: &BvTerm, fmt: FpFmt) -> BoolTerm {
+    let m = fmt.mant_bits();
+    let quiet = BoolTerm::Eq(
+        bx(BvTerm::Extract {
+            hi: m - 1,
+            lo: m - 1,
+            arg: bx(bits.clone()),
+        }),
+        bx(BvTerm::Const {
+            value: 1,
+            sort: Sort::new(1),
+        }),
+    );
+    BoolTerm::And(bb(fp_exp_is_all_ones(bits, fmt)), bb(quiet))
+}
+
+/// Which NaNs a float result may be, when it is a NaN.
+#[derive(Clone, Debug)]
+pub enum NanSet {
+    /// Any canonical NaN, either sign ([`fp_is_canonical_nan`]).
+    Canonical,
+    /// Any arithmetic NaN, either sign ([`fp_is_arithmetic_nan`]).
+    Arithmetic,
+    /// WASM's `nans_N{z*}` (Core §4.3.3) for an op whose float operands are
+    /// `z*` (each with its own format, so `f64.promote_f32` passes an f32
+    /// operand): the canonical NaNs when every operand that is a NaN is a
+    /// canonical NaN (vacuously, when no operand is a NaN), the arithmetic
+    /// NaNs otherwise. The choice is made per input, inside the formula.
+    Propagating(Vec<(BvTerm, FpFmt)>),
+}
+
+/// The set of values the ORIGINAL code may produce when it does not trap.
+///
+/// **Why this representation** (TR-082). loom's semantics of a WASM op is one
+/// bit pattern, except for the float ops whose NaN result the spec leaves
+/// open. So the set is either a single pattern, or "this pattern, unless it
+/// is a NaN, in which case any NaN of the stated kind". Both are a predicate
+/// on the optimised value built from compares and extracts (see
+/// [`value_set_member`]), so the refinement VC stays in the closed QF_BV
+/// fragment. An "any NaN at all" set is deliberately not offered: the ops
+/// with NaN freedom never return a signalling NaN (`nans_N` holds only
+/// canonical or arithmetic NaNs), so that set would be wider than the
+/// original's and would accept an optimisation that is not a refinement
+/// (see the `x + -0.0 → x` test).
+#[derive(Clone, Debug)]
+pub enum ValueSet {
+    /// Exactly this value. Every integer op; and the float ops the spec makes
+    /// bit-exact on NaN (`neg`, `abs`, `copysign`, `reinterpret`, loads,
+    /// `select`).
+    Exact(BvTerm),
+    /// A float result of format `fmt` with the spec's NaN freedom: when
+    /// `value` is not a NaN the set is `{value}`; when `value` is a NaN the
+    /// set is `nans`. `value` is the consumer's model of the result (ordeal
+    /// computes no float value); its NaN payload does not matter, only that
+    /// it is a NaN.
+    Float {
+        /// The original's result bit pattern (width `fmt.total_bits()`).
+        value: BvTerm,
+        /// The float format of the result.
+        fmt: FpFmt,
+        /// The NaNs the result may be when `value` is a NaN.
+        nans: NanSet,
+    },
+}
+
+/// The original side of a refinement check: the condition under which it
+/// traps, and the set of values it may produce when it does not. The
+/// set-valued twin of [`DefineOrTrap`] (which converts into it with an
+/// [`ValueSet::Exact`] set).
+#[derive(Clone, Debug)]
+pub struct DefineSetOrTrap {
+    /// The values the original may produce when it does not trap.
+    pub values: ValueSet,
+    /// The condition under which the original traps.
+    pub may_trap: BoolTerm,
+}
+
+impl From<DefineOrTrap> for DefineSetOrTrap {
+    fn from(d: DefineOrTrap) -> Self {
+        DefineSetOrTrap {
+            values: ValueSet::Exact(d.value),
+            may_trap: d.may_trap,
+        }
+    }
+}
+
+/// `x ∈ nans`: `x` is a NaN of `fmt` of the kind `nans` names.
+pub fn nan_set_member(x: &BvTerm, fmt: FpFmt, nans: &NanSet) -> BoolTerm {
+    match nans {
+        NanSet::Canonical => fp_is_canonical_nan(x, fmt),
+        NanSet::Arithmetic => fp_is_arithmetic_nan(x, fmt),
+        NanSet::Propagating(operands) => {
+            // all_canon = ∧ (¬is_nan(z) ∨ is_canonical_nan(z)); empty ⇒ true.
+            let all_canon = operands.iter().fold(bool_true(), |acc, (z, zf)| {
+                let ok = BoolTerm::Or(
+                    bb(BoolTerm::Not(bb(fp_is_nan(z, *zf)))),
+                    bb(fp_is_canonical_nan(z, *zf)),
+                );
+                BoolTerm::And(bb(acc), bb(ok))
+            });
+            // all_canon ? canonical(x) : arithmetic(x)
+            BoolTerm::Or(
+                bb(BoolTerm::And(
+                    bb(all_canon.clone()),
+                    bb(fp_is_canonical_nan(x, fmt)),
+                )),
+                bb(BoolTerm::And(
+                    bb(BoolTerm::Not(bb(all_canon))),
+                    bb(fp_is_arithmetic_nan(x, fmt)),
+                )),
+            )
+        }
+    }
+}
+
+/// `x ∈ set`, as a bit-pattern predicate. `Exact(v)` is `x == v`;
+/// `Float { value, fmt, nans }` is
+/// `(¬is_nan(value) ∧ x == value) ∨ (is_nan(value) ∧ x ∈ nans)`. A non-NaN
+/// float result must match bit for bit (so `+0.0` and `-0.0` differ).
+pub fn value_set_member(x: &BvTerm, set: &ValueSet) -> BoolTerm {
+    match set {
+        ValueSet::Exact(v) => BoolTerm::Eq(bx(x.clone()), bx(v.clone())),
+        ValueSet::Float { value, fmt, nans } => {
+            let value_nan = fp_is_nan(value, *fmt);
+            let same = BoolTerm::And(
+                bb(BoolTerm::Not(bb(value_nan.clone()))),
+                bb(BoolTerm::Eq(bx(x.clone()), bx(value.clone()))),
+            );
+            let in_nans = BoolTerm::And(bb(value_nan), bb(nan_set_member(x, *fmt, nans)));
+            BoolTerm::Or(bb(same), bb(in_nans))
+        }
+    }
+}
+
+/// **Trap-refinement violation** (issue #284): the formula
+///
+/// `orig.trap ≠ opt.trap ∨ (¬orig.trap ∧ opt.value ∉ orig.values)`
+///
+/// whose **`Unsat` means `opt` refines `orig`**: on every input `opt` traps
+/// exactly when `orig` does, and when neither traps `opt`'s value is one
+/// `orig` may produce. A model is an input on which the optimisation is
+/// wrong — either a dropped or added trap, or a value outside the set.
+///
+/// Unlike the other VCs in this module this returns the formula to assert
+/// (not the goal to prove valid), because that is the shape the issue and
+/// loom state it in; [`prove_trap_refinement`] decides it.
+pub fn trap_refinement_violation(orig: &DefineSetOrTrap, opt: &DefineOrTrap) -> BoolTerm {
+    let trap_differs = BoolTerm::Not(bb(iff(&orig.may_trap, &opt.may_trap)));
+    let value_outside = BoolTerm::And(
+        bb(BoolTerm::Not(bb(orig.may_trap.clone()))),
+        bb(BoolTerm::Not(bb(value_set_member(
+            &opt.value,
+            &orig.values,
+        )))),
+    );
+    BoolTerm::Or(bb(trap_differs), bb(value_outside))
+}
+
+/// One-call refinement gate: assert [`trap_refinement_violation`] and decide
+/// it on the certificate-checked pipeline. [`CheckResult::Unsat`] ⟹ `opt`
+/// refines `orig` (the certificate was validated before return and
+/// re-checks with `cert.recheck()`); [`CheckResult::Sat`] ⟹ the model is an
+/// input on which it does not; [`CheckResult::Unknown`] ⟹ no claim (e.g. a
+/// width mismatch) — keep the original.
+pub fn prove_trap_refinement(orig: &DefineSetOrTrap, opt: &DefineOrTrap) -> CheckResult {
+    let mut s = Solver::new();
+    s.assert(trap_refinement_violation(orig, opt));
+    s.check()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1401,6 +1615,548 @@ mod tests {
         match prove_trap_condition_equivalence(&orig_trap, &orig_trap) {
             CheckResult::Unsat(cert) => cert.recheck().expect("re-check"),
             other => panic!("preserved bounds check must be Unsat, got {other:?}"),
+        }
+    }
+
+    // ---- trap refinement (issue #284, TR-082) ----
+
+    fn model_val(m: &crate::Model, name: &str) -> u128 {
+        m.assignments
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, x)| *x)
+            .unwrap_or_else(|| panic!("model must assign {name}"))
+    }
+
+    /// Spec-side reference for the NaN classes, from the host float's
+    /// `is_nan` plus the WASM Core §4.3.3 payload definitions — NOT from the
+    /// builders' extracts.
+    fn ref_nan_class(fmt: FpFmt, p: u128) -> (bool, bool) {
+        let m = fmt.mant_bits();
+        let is_nan = fval(fmt, p).is_nan();
+        let payload = p & ((1u128 << m) - 1);
+        let canonical = is_nan && payload == 1u128 << (m - 1);
+        let arithmetic = is_nan && payload >= 1u128 << (m - 1);
+        (canonical, arithmetic)
+    }
+
+    // rivet: verifies VER-082
+    /// `fp_is_canonical_nan` / `fp_is_arithmetic_nan` ⇔ the spec reference,
+    /// over the structured sweep of both formats, plus the named patterns.
+    #[test]
+    fn nan_class_predicates_match_spec_reference() {
+        for fmt in [FpFmt::F32, FpFmt::F64] {
+            let f = v("f", fmt.total_bits());
+            let canon_t = fp_is_canonical_nan(&f, fmt);
+            let arith_t = fp_is_arithmetic_nan(&f, fmt);
+            let mut env = Env::new();
+            for p in structured_patterns(fmt) {
+                env.insert("f".into(), p);
+                let (canon, arith) = ref_nan_class(fmt, p);
+                assert_eq!(eval::eval_bool(&canon_t, &env).unwrap(), canon, "{p:#x}");
+                assert_eq!(eval::eval_bool(&arith_t, &env).unwrap(), arith, "{p:#x}");
+            }
+        }
+        let at = |fmt: FpFmt, p: u128| {
+            let f = v("f", fmt.total_bits());
+            let mut env = Env::new();
+            env.insert("f".into(), p);
+            (
+                eval::eval_bool(&fp_is_canonical_nan(&f, fmt), &env).unwrap(),
+                eval::eval_bool(&fp_is_arithmetic_nan(&f, fmt), &env).unwrap(),
+            )
+        };
+        assert_eq!(at(FpFmt::F32, 0x7fc0_0000), (true, true));
+        assert_eq!(at(FpFmt::F32, 0xffc0_0000), (true, true));
+        assert_eq!(at(FpFmt::F32, 0x7fc0_0001), (false, true));
+        assert_eq!(at(FpFmt::F32, 0x7f80_0001), (false, false), "sNaN");
+        assert_eq!(at(FpFmt::F32, 0x7f80_0000), (false, false), "+inf");
+        assert_eq!(at(FpFmt::F32, 0x3fc0_0000), (false, false), "1.5");
+        assert_eq!(at(FpFmt::F64, 0x7ff8_0000_0000_0000), (true, true));
+        assert_eq!(at(FpFmt::F64, 0xfff8_0000_0000_0001), (false, true));
+        assert_eq!(at(FpFmt::F64, 0x7ff0_0000_0000_0001), (false, false));
+    }
+
+    /// Reference for `x ∈ Float { value, F32, Propagating([z]) }`, spelled
+    /// from the spec in plain Rust.
+    fn ref_member_f32(x: u128, value: u128, z: u128) -> bool {
+        let fmt = FpFmt::F32;
+        if !fval(fmt, value).is_nan() {
+            return x == value;
+        }
+        let z_ok = !fval(fmt, z).is_nan() || ref_nan_class(fmt, z).0;
+        let (canon, arith) = ref_nan_class(fmt, x);
+        if z_ok { canon } else { arith }
+    }
+
+    // rivet: verifies VER-082
+    /// `value_set_member` for every set kind ⇔ its reference, over a cross
+    /// product of interesting f32 patterns for the result, the original value
+    /// and the operand.
+    #[test]
+    fn value_set_member_matches_reference() {
+        let pats: [u128; 12] = [
+            0x0000_0000,
+            0x8000_0000,
+            0x3f80_0000,
+            0x7f80_0000,
+            0xff80_0000,
+            0x7fc0_0000,
+            0xffc0_0000,
+            0x7fc0_0001,
+            0xffff_ffff,
+            0x7f80_0001,
+            0x7fbf_ffff,
+            0x0000_0001,
+        ];
+        let (x, val, z) = (v("x", 32), v("val", 32), v("z", 32));
+        let fl = |nans: NanSet| ValueSet::Float {
+            value: val.clone(),
+            fmt: FpFmt::F32,
+            nans,
+        };
+        let exact = value_set_member(&x, &ValueSet::Exact(val.clone()));
+        let canon = value_set_member(&x, &fl(NanSet::Canonical));
+        let arith = value_set_member(&x, &fl(NanSet::Arithmetic));
+        let prop = value_set_member(&x, &fl(NanSet::Propagating(vec![(z.clone(), FpFmt::F32)])));
+        let prop0 = value_set_member(&x, &fl(NanSet::Propagating(vec![])));
+        for &xp in &pats {
+            for &vp in &pats {
+                for &zp in &pats {
+                    let mut e = Env::new();
+                    e.insert("x".into(), xp);
+                    e.insert("val".into(), vp);
+                    e.insert("z".into(), zp);
+                    let ev = |t: &BoolTerm| eval::eval_bool(t, &e).unwrap();
+                    let v_nan = fval(FpFmt::F32, vp).is_nan();
+                    let (xc, xa) = ref_nan_class(FpFmt::F32, xp);
+                    assert_eq!(ev(&exact), xp == vp);
+                    assert_eq!(ev(&canon), if v_nan { xc } else { xp == vp });
+                    assert_eq!(ev(&arith), if v_nan { xa } else { xp == vp });
+                    assert_eq!(
+                        ev(&prop),
+                        ref_member_f32(xp, vp, zp),
+                        "x={xp:#x} v={vp:#x} z={zp:#x}"
+                    );
+                    // No operands: vacuously all-canonical, so the canonical set.
+                    assert_eq!(ev(&prop0), ev(&canon));
+                }
+            }
+        }
+    }
+
+    // rivet: verifies VER-082
+    /// The builder is the issue's formula: over an 8-bit sweep, the violation
+    /// holds iff `orig.trap ≠ opt.trap ∨ (¬orig.trap ∧ opt.value ≠ orig.value)`
+    /// computed in Rust, and an `Exact` refinement agrees with trap
+    /// equivalence (the `From<DefineOrTrap>` embedding).
+    #[test]
+    fn refinement_violation_is_the_issue_formula() {
+        let (a, b) = (v("a", 8), v("b", 8));
+        let orig = DefineOrTrap {
+            value: BvTerm::Udiv(bx(a.clone()), bx(b.clone())),
+            may_trap: trap_div(DivOp::DivU, &a, &b, 8),
+        };
+        // opt traps on b == 0 OR a == 1, and computes a >> 1.
+        let opt = DefineOrTrap {
+            value: BvTerm::Lshr(bx(a.clone()), bx(c(1, 8))),
+            may_trap: BoolTerm::Or(
+                bb(BoolTerm::Eq(bx(b.clone()), bx(c(0, 8)))),
+                bb(BoolTerm::Eq(bx(a.clone()), bx(c(1, 8)))),
+            ),
+        };
+        let viol = trap_refinement_violation(&orig.clone().into(), &opt);
+        let equiv = trap_equivalence_vc(&orig, &opt);
+        for av in 0u128..256 {
+            for bv in 0u128..256 {
+                let e = env2(av, bv);
+                let ot = bv == 0;
+                let pt = bv == 0 || av == 1;
+                let want = ot != pt || (!ot && av.checked_div(bv).unwrap() != av >> 1);
+                let got = eval::eval_bool(&viol, &e).unwrap();
+                assert_eq!(got, want, "a={av} b={bv}");
+                assert_eq!(got, !eval::eval_bool(&equiv, &e).unwrap());
+            }
+        }
+    }
+
+    /// loom's guarded division: `if b == 0 { unreachable } ; a /u b` at i32.
+    /// The explicit guard traps exactly where the division would.
+    fn guarded_div_u32() -> (BvTerm, BvTerm, DefineSetOrTrap) {
+        let (a, b) = (v("a", 32), v("b", 32));
+        let guard = BoolTerm::Eq(bx(b.clone()), bx(c(0, 32)));
+        let orig = DefineOrTrap {
+            value: BvTerm::Udiv(bx(a.clone()), bx(b.clone())),
+            may_trap: trap_any(&[guard, trap_div(DivOp::DivU, &a, &b, 32)]),
+        };
+        (a, b, orig.into())
+    }
+
+    // rivet: verifies VER-082
+    /// Worked loom example, positive: removing the now-redundant `b == 0`
+    /// guard in front of `i32.div_u` refines the original. Unsat, and the
+    /// certificate re-checks.
+    #[test]
+    fn loom_redundant_div_guard_removal_refines() {
+        let (a, b, orig) = guarded_div_u32();
+        let opt = DefineOrTrap {
+            value: BvTerm::Udiv(bx(a.clone()), bx(b.clone())),
+            may_trap: trap_div(DivOp::DivU, &a, &b, 32),
+        };
+        match prove_trap_refinement(&orig, &opt) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("refinement cert re-checks"),
+            other => panic!("guard removal must refine (Unsat), got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-082
+    /// Negative control, wrong TRAP behaviour: the optimiser replaces the
+    /// guarded division by a "safe" total division `b == 0 ? 0 : a /u b`.
+    /// Every non-trapping value is right, but the trap is dropped: Sat, and
+    /// the model is the trapping input `b == 0`.
+    #[test]
+    fn loom_dropped_div_trap_is_not_a_refinement() {
+        let (a, b, orig) = guarded_div_u32();
+        let b_zero = BoolTerm::Eq(bx(b.clone()), bx(c(0, 32)));
+        let opt = DefineOrTrap {
+            value: BvTerm::Ite {
+                cond: bb(b_zero),
+                then_: bx(c(0, 32)),
+                else_: bx(BvTerm::Udiv(bx(a.clone()), bx(b.clone()))),
+            },
+            may_trap: bool_false(),
+        };
+        match prove_trap_refinement(&orig, &opt) {
+            CheckResult::Sat(m) => {
+                assert_eq!(model_val(&m, "b"), 0, "the dropped trap is at b == 0")
+            }
+            other => panic!("dropped trap must be Sat, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-082
+    /// Negative control, wrong VALUE: strength-reducing `x /u 2` to the
+    /// arithmetic shift `x >>s 1` (neither traps). Sat, and the model is an
+    /// input with the sign bit set, on which the two really differ.
+    #[test]
+    fn loom_wrong_strength_reduction_is_not_a_refinement() {
+        let x = v("x", 32);
+        let orig = DefineOrTrap {
+            value: BvTerm::Udiv(bx(x.clone()), bx(c(2, 32))),
+            may_trap: trap_div(DivOp::DivU, &x, &c(2, 32), 32),
+        };
+        let bad = DefineOrTrap {
+            value: BvTerm::Ashr(bx(x.clone()), bx(c(1, 32))),
+            may_trap: bool_false(),
+        };
+        match prove_trap_refinement(&orig.clone().into(), &bad) {
+            CheckResult::Sat(m) => {
+                let xv = model_val(&m, "x");
+                assert!(
+                    xv >> 31 == 1,
+                    "counterexample {xv:#x} must have the sign bit set"
+                );
+                let ashr = ((xv as u32 as i32) >> 1) as u32 as u128;
+                assert_ne!(xv / 2, ashr, "the model must be a real difference");
+            }
+            other => panic!("wrong value must be Sat, got {other:?}"),
+        }
+        let good = DefineOrTrap {
+            value: BvTerm::Lshr(bx(x.clone()), bx(c(1, 32))),
+            may_trap: bool_false(),
+        };
+        match prove_trap_refinement(&orig.into(), &good) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("re-checks"),
+            other => panic!("x /u 2 → x >>u 1 must refine, got {other:?}"),
+        }
+    }
+
+    // rivet: verifies VER-082
+    /// The NaN set is what makes float constant folding provable: loom folds
+    /// `f32.div 0.0 0.0` to the canonical NaN `0x7fc00000`, while its model
+    /// of the original produced the negative canonical NaN `0xffc00000` (the
+    /// x86 default NaN). Under `nans{0.0, 0.0}` (no NaN operand ⇒ the
+    /// canonical NaNs) that is a refinement: Unsat. Control: the same pair
+    /// under `Exact` is Sat — equivalence would wrongly reject the fold.
+    #[test]
+    fn nan_constant_fold_refines_only_under_the_nan_set() {
+        let zero = c(0, 32);
+        let orig_value = c(0xffc0_0000, 32);
+        let opt = DefineOrTrap {
+            value: c(0x7fc0_0000, 32),
+            may_trap: bool_false(),
+        };
+        let orig = DefineSetOrTrap {
+            values: ValueSet::Float {
+                value: orig_value.clone(),
+                fmt: FpFmt::F32,
+                nans: NanSet::Propagating(vec![(zero.clone(), FpFmt::F32), (zero, FpFmt::F32)]),
+            },
+            may_trap: bool_false(),
+        };
+        match prove_trap_refinement(&orig, &opt) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("re-checks"),
+            other => panic!("NaN fold must refine under nans_N, got {other:?}"),
+        }
+        let exact = DefineSetOrTrap {
+            values: ValueSet::Exact(orig_value),
+            may_trap: bool_false(),
+        };
+        assert!(
+            matches!(prove_trap_refinement(&exact, &opt), CheckResult::Sat(_)),
+            "under Exact the two NaNs differ"
+        );
+    }
+
+    /// loom's model of `f32.add x -0.0`: `x` when `x` is not a NaN (exact
+    /// for ±0, ±∞ and every finite `x`), and `x` with its quiet bit set when
+    /// it is (a member of the arithmetic NaNs).
+    fn add_neg_zero_f32(x: &BvTerm) -> BvTerm {
+        BvTerm::Ite {
+            cond: bb(fp_is_nan(x, FpFmt::F32)),
+            then_: bx(BvTerm::Or(bx(x.clone()), bx(c(0x0040_0000, 32)))),
+            else_: bx(x.clone()),
+        }
+    }
+
+    // rivet: verifies VER-082
+    /// Negative control at the NaN boundary: `x + -0.0 → x` is NOT a WASM
+    /// refinement — for a signalling-NaN `x` the add must return an
+    /// arithmetic (quiet) NaN and `x` is not one. Sat, and the model is a
+    /// signalling NaN. The quieting rewrite `x | quiet-if-NaN` refines.
+    #[test]
+    fn add_neg_zero_to_x_is_caught_on_signalling_nan() {
+        let x = v("x", 32);
+        let orig = DefineSetOrTrap {
+            values: ValueSet::Float {
+                value: add_neg_zero_f32(&x),
+                fmt: FpFmt::F32,
+                nans: NanSet::Propagating(vec![
+                    (x.clone(), FpFmt::F32),
+                    (c(0x8000_0000, 32), FpFmt::F32),
+                ]),
+            },
+            may_trap: bool_false(),
+        };
+        let to_x = DefineOrTrap {
+            value: x.clone(),
+            may_trap: bool_false(),
+        };
+        match prove_trap_refinement(&orig, &to_x) {
+            CheckResult::Sat(m) => {
+                let p = model_val(&m, "x");
+                let (_, arith) = ref_nan_class(FpFmt::F32, p);
+                assert!(
+                    fval(FpFmt::F32, p).is_nan() && !arith,
+                    "counterexample {p:#010x} must be a signalling NaN"
+                );
+            }
+            other => panic!("x + -0.0 → x must be Sat, got {other:?}"),
+        }
+        let quieted = DefineOrTrap {
+            value: add_neg_zero_f32(&x),
+            may_trap: bool_false(),
+        };
+        match prove_trap_refinement(&orig, &quieted) {
+            CheckResult::Unsat(cert) => cert.recheck().expect("re-checks"),
+            other => panic!("the quieting rewrite must refine, got {other:?}"),
+        }
+    }
+
+    // ---- the refused constructs through the sliver (docs/consuming-ordeal.md) ----
+
+    use crate::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm, ext_of_core};
+
+    fn ext_var(name: &str, w: u32) -> ExtBvTerm {
+        ExtBvTerm::Core(v(name, w))
+    }
+
+    /// `i32.store8 [q] v ; i32.load8_u [p]` against a 32-bit memory bound,
+    /// the load forwarded to `zero_ext(v)` by the optimiser. The load's byte
+    /// is named by the core variable `ld`, which the sliver defines as the
+    /// `select`: `ld == select(store(mem, q, v), p)`.
+    fn store_forward_query(q: BvTerm) -> Vec<ExtBoolTerm> {
+        let (p, val, bound) = (v("p", 32), v("val", 8), v("bound", 32));
+        let one = c(1, 32);
+        let store_trap = trap_mem_oob(&q, &one, &bound);
+        let load_trap = trap_mem_oob(&p, &one, &bound);
+        let orig = DefineOrTrap {
+            value: BvTerm::ZeroExt {
+                by: 24,
+                arg: bx(v("ld", 8)),
+            },
+            may_trap: trap_any(&[store_trap.clone(), load_trap.clone()]),
+        };
+        let opt = DefineOrTrap {
+            value: BvTerm::ZeroExt {
+                by: 24,
+                arg: bx(val.clone()),
+            },
+            // The store stays; the load is gone, so only its trap is kept as
+            // an explicit bounds check.
+            may_trap: trap_any(&[store_trap, load_trap]),
+        };
+        let mem = ArrayTerm::Store {
+            array: Box::new(ArrayTerm::Var { name: "mem".into() }),
+            index: Box::new(ExtBvTerm::Core(q)),
+            value: Box::new(ExtBvTerm::Core(val)),
+        };
+        vec![
+            ext_of_core(&trap_refinement_violation(&orig.into(), &opt)),
+            ExtBoolTerm::Eq(
+                ext_var("ld", 8),
+                ExtBvTerm::Select {
+                    array: Box::new(mem),
+                    index: Box::new(ExtBvTerm::Core(p)),
+                },
+            ),
+        ]
+    }
+
+    // rivet: verifies VER-082
+    /// A `select`/`store` obligation mapped to `Solver::from_sliver`: store-
+    /// to-load forwarding at the same address refines (Unsat, re-checks);
+    /// forwarding a store to `p + 1` into a load from `p` does not (Sat, and
+    /// the model really has `ld ≠ val`).
+    #[test]
+    fn sliver_store_to_load_forwarding_refinement() {
+        let same = store_forward_query(v("p", 32));
+        match Solver::from_sliver(&same).expect("in the sliver").check() {
+            CheckResult::Unsat(cert) => cert.recheck().expect("re-checks"),
+            other => panic!("same-address forwarding must refine, got {other:?}"),
+        }
+        let other_addr = store_forward_query(BvTerm::Add(bx(v("p", 32)), bx(c(1, 32))));
+        match Solver::from_sliver(&other_addr)
+            .expect("in the sliver")
+            .check()
+        {
+            CheckResult::Sat(m) => assert_ne!(model_val(&m, "ld"), model_val(&m, "val")),
+            other => panic!("forwarding from another address must be Sat, got {other:?}"),
+        }
+    }
+
+    /// `pure_call f(arg) + b` behind a `b == 0` division guard, with the
+    /// call's result named `r` and defined by `r == f(arg_orig)`; the
+    /// optimiser's call `f(arg_opt)` is `s`.
+    fn pure_call_query(arg_orig: BvTerm, arg_opt: BvTerm) -> Vec<ExtBoolTerm> {
+        let b = v("b", 32);
+        let call = |arg: BvTerm| ExtBvTerm::PureCall {
+            name: "f".into(),
+            args: vec![ExtBvTerm::Core(arg)],
+            sort: Sort::new(32),
+        };
+        // The value is `r + b`, not `r /u b`: equal values from equal call
+        // results is what the test is about, and two 32-bit dividers over
+        // distinct variables are a hard equivalence for CDCL (it ran for
+        // minutes) that says nothing about the mapping.
+        let side = |res: &str| DefineOrTrap {
+            value: BvTerm::Add(bx(v(res, 32)), bx(b.clone())),
+            may_trap: trap_div(DivOp::DivU, &v(res, 32), &b, 32),
+        };
+        vec![
+            ext_of_core(&trap_refinement_violation(&side("r").into(), &side("s"))),
+            ExtBoolTerm::Eq(ext_var("r", 32), call(arg_orig)),
+            ExtBoolTerm::Eq(ext_var("s", 32), call(arg_opt)),
+        ]
+    }
+
+    // rivet: verifies VER-082
+    /// A `pure_call` obligation mapped to `Solver::from_sliver`: rewriting the
+    /// argument `a | a` to `a` refines by congruence (Unsat, re-checks);
+    /// rewriting it to `a + 1` does not (Sat, with the two call results
+    /// differing in the model).
+    #[test]
+    fn sliver_pure_call_argument_rewrite_refinement() {
+        let a = v("a", 32);
+        let ok = pure_call_query(BvTerm::Or(bx(a.clone()), bx(a.clone())), a.clone());
+        match Solver::from_sliver(&ok).expect("in the sliver").check() {
+            CheckResult::Unsat(cert) => cert.recheck().expect("re-checks"),
+            other => panic!("congruent argument rewrite must refine, got {other:?}"),
+        }
+        let bad = pure_call_query(a.clone(), BvTerm::Add(bx(a), bx(c(1, 32))));
+        match Solver::from_sliver(&bad).expect("in the sliver").check() {
+            CheckResult::Sat(m) => assert_ne!(model_val(&m, "r"), model_val(&m, "s")),
+            other => panic!("a different call argument must be Sat, got {other:?}"),
+        }
+    }
+
+    /// The memory a store chain leaves behind, compared through a read at a
+    /// FRESH index `k`: since the query is existential, `Unsat` means the two
+    /// memories agree at every index (the sliver has no whole-array
+    /// equality, so this is how an extensional comparison is asked).
+    fn memory_differs_at_k(orig: ArrayTerm, opt: ArrayTerm) -> ExtBoolTerm {
+        let read = |m: ArrayTerm| ExtBvTerm::Select {
+            array: Box::new(m),
+            index: Box::new(ext_var("k", 32)),
+        };
+        ExtBoolTerm::Ne(read(orig), read(opt))
+    }
+
+    fn st(m: ArrayTerm, i: BvTerm, val: BvTerm) -> ArrayTerm {
+        ArrayTerm::Store {
+            array: Box::new(m),
+            index: Box::new(ExtBvTerm::Core(i)),
+            value: Box::new(ExtBvTerm::Core(val)),
+        }
+    }
+
+    // rivet: verifies VER-082
+    /// A store's effect beside the refinement VC: `store8 [p] v; store8 [p] v`
+    /// → one store (same trap, same memory) refines — the violation OR a
+    /// memory difference at a fresh `k` is Unsat. Dropping a store that is
+    /// not dead (`store8 [p] v; store8 [q] w` → `store8 [q] w`, the bounds
+    /// checks kept) is Sat, at `k == p` with `p ≠ q`.
+    #[test]
+    fn sliver_store_effect_compared_at_a_fresh_index() {
+        let (p, q, val, w, bound) = (
+            v("p", 32),
+            v("q", 32),
+            v("val", 8),
+            v("w", 8),
+            v("bound", 32),
+        );
+        let one = c(1, 32);
+        let mem = || ArrayTerm::Var { name: "mem".into() };
+        let result = DefineOrTrap {
+            value: c(0, 32),
+            may_trap: trap_any(&[
+                trap_mem_oob(&p, &one, &bound),
+                trap_mem_oob(&q, &one, &bound),
+            ]),
+        };
+        let query = |orig_mem: ArrayTerm, opt_mem: ArrayTerm| {
+            vec![ExtBoolTerm::Or(
+                Box::new(ext_of_core(&trap_refinement_violation(
+                    &result.clone().into(),
+                    &result,
+                ))),
+                Box::new(memory_differs_at_k(orig_mem, opt_mem)),
+            )]
+        };
+        let twice = st(st(mem(), p.clone(), val.clone()), p.clone(), val.clone());
+        let once = st(mem(), p.clone(), val.clone());
+        match Solver::from_sliver(&query(twice, once))
+            .expect("in the sliver")
+            .check()
+        {
+            CheckResult::Unsat(cert) => cert.recheck().expect("re-checks"),
+            other => panic!("the duplicate store is dead, got {other:?}"),
+        }
+        let both = st(st(mem(), p.clone(), val.clone()), q.clone(), w.clone());
+        let only_q = st(mem(), q, w);
+        match Solver::from_sliver(&query(both, only_q))
+            .expect("in the sliver")
+            .check()
+        {
+            CheckResult::Sat(m) => {
+                assert_eq!(
+                    model_val(&m, "k"),
+                    model_val(&m, "p"),
+                    "the lost byte is at p"
+                );
+                assert_ne!(model_val(&m, "p"), model_val(&m, "q"));
+            }
+            other => panic!("dropping a live store must be Sat, got {other:?}"),
         }
     }
 }

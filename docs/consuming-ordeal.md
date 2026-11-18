@@ -138,6 +138,82 @@ reproducible on your side or in a separate audit step. See the runnable
 (`cargo run -p ordeal --example translation_validation`) for correct rules being
 proven and a buggy `i32.mul(x,3) ⇒ LSL x,#1` being caught with a counterexample.
 
+### Trap refinement (loom): `ordeal::trap::prove_trap_refinement`
+
+Equivalence (`trap_equivalence_vc`) asks the optimised code for the same
+value as the original. A WASM float op that yields a NaN may yield any NaN
+of a set (Core §4.3.3, `nans_N`), so folding `f32.div 0.0 0.0` to
+`0x7fc00000` is correct even when your model of the original produced
+`0xffc00000`. The relation loom needs (loom#300) is refinement:
+
+```text
+UNSAT( orig.trap ≠ opt.trap  ∨  (¬orig.trap ∧ opt.value ∉ orig.values) )
+```
+
+`trap_refinement_violation(orig, opt)` builds exactly that `BoolTerm`, and
+`prove_trap_refinement(orig, opt)` asserts and decides it, so `Unsat` means
+"opt refines orig" with a certificate that re-checks. `orig` is a
+`DefineSetOrTrap { values, may_trap }`; `values` is a `ValueSet`:
+
+- `ValueSet::Exact(v)`: integer results, and the float ops that are
+  bit-exact on NaN (`neg`, `abs`, `copysign`, `reinterpret`, loads,
+  `select`). A `DefineOrTrap` converts into this with `.into()`.
+- `ValueSet::Float { value, fmt, nans }`: `{value}` when `value` is not a
+  NaN; when it is, any NaN in `nans`, which is `NanSet::Canonical`,
+  `NanSet::Arithmetic` or `NanSet::Propagating(operands)` (the spec's
+  `nans_N{z*}`: canonical when every NaN operand is canonical, arithmetic
+  otherwise).
+
+The NaN classes are bit-pattern predicates (`fp_is_nan`,
+`fp_is_canonical_nan`, `fp_is_arithmetic_nan`: extracts and constant
+compares), so the closed op set is unchanged and no floating-point value is
+computed. There is no "any NaN at all" set on purpose: it is wider than what
+any WASM op may return, and would accept `x + -0.0 → x`, which is wrong for
+a signalling-NaN `x`.
+
+Two points where this is stricter than Alive2's refinement, both because a
+WASM trap is observable behaviour, not undefined behaviour: `opt` must trap
+exactly where `orig` traps (it may not trap less and may not trap more), and
+`opt` may not do "anything" on inputs where `orig` traps.
+
+**The constructs loom's pure-BV seam refuses.** The builder takes core
+`BvTerm`s. A `select`/`store` or a `pure_call` in a value, an address or a
+divisor goes through `Solver::from_sliver` like this:
+
+1. Name each `select` and each `pure_call` with a fresh core variable
+   (`ld`, `r`) and build the VC over those names with the `trap` builders
+   (`trap_mem_oob` on the address for a load or store, `trap_div` on the
+   divisor, ...).
+2. Lift the VC with `ordeal::sliver::ext_of_core`, and add one defining
+   assertion per name: `ExtBoolTerm::Eq(ExtBvTerm::Core(ld),
+   ExtBvTerm::Select { .. })`, `ExtBoolTerm::Eq(ExtBvTerm::Core(r),
+   ExtBvTerm::PureCall { .. })`. The name is fresh, so the conjunction is
+   satisfiable exactly when the VC with the `select` in place is.
+3. `Solver::from_sliver(&query)` and any entry point on the result. An
+   `Err(SliverError)` is a refusal (bad array sort, inconsistent call
+   signature): keep the original. The verdict rests on the trusted
+   `check_sliver_lowering`, as for every sliver query.
+
+What the sliver gives you and what it does not: memory is
+`Array(BV32 → BV8)`, so a 32-bit load is four `select`s joined with
+`Concat`; indices may be symbolic; `pure_call` congruence is by name, with
+any result width. There is no whole-array equality. To compare the memory
+two store chains leave behind, OR into the query a read of each at one fresh
+index, `Ne(select(m_orig, k), select(m_opt, k))`: the query is existential,
+so `Unsat` means the memories agree at every index. The builder does not
+guard that disjunct by `¬orig.trap`; whether memory written before a trap
+counts is your semantics to state. Every core operator lifts over sliver
+children (`ExtOp`, including `Urem`, `Sdiv`, `Srem`, `Rotl` since 0.29.0,
+#231), so a `select` under them needs no workaround.
+
+The worked examples are the `trap::tests` named `loom_*` (a redundant
+`b == 0` guard removed before `i32.div_u`: Unsat; replaced by a total
+"safe" division: Sat at `b == 0`; `x /u 2 → x >>s 1`: Sat with the sign bit
+set), `nan_constant_fold_refines_only_under_the_nan_set`,
+`add_neg_zero_to_x_is_caught_on_signalling_nan`, and the three `sliver_*`
+tests (store-to-load forwarding, a `pure_call` argument rewrite, a store's
+effect compared at a fresh index).
+
 ## Parallelize across queries, not inside them
 
 Real workloads are many *independent* queries — synth validates many VCs,
