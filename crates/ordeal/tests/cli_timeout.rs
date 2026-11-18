@@ -33,12 +33,9 @@ fn run(args: &[&str], stdin: &str) -> (Output, Duration) {
         .stderr(Stdio::piped())
         .spawn()
         .expect("spawn ordeal");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(stdin.as_bytes())
-        .unwrap();
+    // A usage error exits before reading stdin; the write then fails with a
+    // broken pipe, which is the behaviour under test, not a harness fault.
+    let _ = child.stdin.take().unwrap().write_all(stdin.as_bytes());
     let out = child.wait_with_output().expect("wait ordeal");
     (out, start.elapsed())
 }
