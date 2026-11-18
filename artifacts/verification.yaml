@@ -1825,7 +1825,7 @@ artifacts:
   - id: VER-082
     type: sw-verification
     title: "Trap-refinement VC: NaN classes and value sets match the spec, loom worked examples certify or refute, sliver mapping, Z3 differential (TR-082)"
-    status: draft
+    status: verified
     release: v0.38.0
     description: "crates/ordeal/src/trap.rs tests: nan_class_predicates_match_spec_reference and value_set_member_matches_reference (eval against a reference from the host float's is_nan and the Core 4.3.3 payload definitions); refinement_violation_is_the_issue_formula (8-bit sweep against the formula computed in Rust, and agreement with trap_equivalence_vc under Exact); loom worked examples: loom_redundant_div_guard_removal_refines (Unsat, cert re-checks), negative controls loom_dropped_div_trap_is_not_a_refinement (wrong trap: Sat at b == 0) and loom_wrong_strength_reduction_is_not_a_refinement (wrong value: Sat with the sign bit set); nan_constant_fold_refines_only_under_the_nan_set (Unsat under nans_N, Sat under Exact); add_neg_zero_to_x_is_caught_on_signalling_nan (Sat on a signalling NaN; the quieting rewrite is Unsat); sliver_store_to_load_forwarding_refinement, sliver_pure_call_argument_rewrite_refinement, sliver_store_effect_compared_at_a_fresh_index (through Solver::from_sliver). crates/ordeal/src/oracle.rs trap_refinement_oracle_tests (oracle feature): the NaN predicates, value-set membership and the violation formula are proven equal by Z3 to an independent spelling in Z3's FP theory (fp.isNaN over to_fp of the bits), and every worked verdict agrees with Z3."
     tags: [trap, refinement, loom, "nan", sliver]
