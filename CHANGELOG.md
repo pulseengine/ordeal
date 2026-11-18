@@ -70,7 +70,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the affected queries. `QueryDag::encoding` gains the `v3` case,
   `QueryDag::has_mux_fold` / `min_reader_version`, `MUX_FOLD_HINT` and
   `dag::fold_hints` are new, and `AigOptions` gains the field `mux`
-  (`AigOptions::V0_37` is the previous lowering).
+  (`AigOptions::V0_37` is the previous lowering). **Breaking:** `AigOptions`
+  is now `#[non_exhaustive]`, so code outside ordeal that built it with a
+  struct literal must start from `AigOptions::default()` or a named constant
+  (`RAW`, `FOLD_ONLY`, `V0_37`) and set fields; future options will not break
+  it again.
 - A 32-bit reader (`ordeal-recheck` on wasm32) refuses the index
   `4294967295` in a bundle as malformed. It used to read it as the "no
   image" sentinel, which a 64-bit reader does not; no bundle ordeal writes

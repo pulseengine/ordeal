@@ -93,10 +93,15 @@ enum Node {
 /// Which simplifications [`Aig::and`] applies (issue #192 phase 1: the
 /// CNF-size / time benchmark in `docs/design/query-cnf-gap.md` runs the
 /// shipped blast rules under each combination). The production pipeline
-/// always uses [`AigOptions::default`] (both on); every other setting is a
+/// always uses [`AigOptions::default`] (all on); every other setting is a
 /// measurement / test configuration and yields a *simulation-identical*
 /// AIG (folding and hashing only change which gates exist, never what a
 /// literal computes).
+///
+/// `#[non_exhaustive]` since v0.38.0: build one from [`AigOptions::default`] or a
+/// named constant and set fields on it, so a future option is not a breaking
+/// change.
+#[non_exhaustive]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct AigOptions {
     /// Constant folding: `x&0=0`, `x&1=x`, `x&x=x`, `x&!x=0`.

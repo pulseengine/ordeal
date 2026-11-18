@@ -1084,6 +1084,57 @@ mod tests {
         }
     }
 
+    // rivet: verifies VER-096
+    /// #314, adversarial hints: a bundle's hints are untrusted, so the
+    /// kernel's own shape check in `mux_fold` is all that stands between a
+    /// fold request on a gate that is NOT `g ? r : r` and a wrong CNF.
+    /// Requesting the fold on EVERY node of queries full of near-miss
+    /// shapes (`!(a & r) & !(c & r)` with `c != !a` arises in adders,
+    /// comparators, multipliers and dividers) must still carry every raw
+    /// node's value under every input. A guard weakened to check only the
+    /// shared operand passed every other Rust test and is caught here.
+    #[test]
+    fn mux_fold_requested_everywhere_keeps_every_node_value() {
+        // Every gate pair over the literals of three inputs, and every
+        // `!g1 & !g2` over them in both operand orders: the true mux
+        // shapes in both of `mux_fold`'s branches and every near miss.
+        let mut raw = k::aig_new();
+        let ins: Vec<k::Lit> = (0..3).map(|i| k::push_input(&mut raw, i)).collect();
+        let lits: Vec<k::Lit> = ins.iter().flat_map(|&l| [l, k::lit_not(l)]).collect();
+        let mut gates = Vec::new();
+        for &p in &lits {
+            for &q in &lits {
+                gates.push(k::push_and(&mut raw, p, q));
+            }
+        }
+        for &g1 in &gates {
+            for &g2 in &gates {
+                k::push_and(&mut raw, k::lit_not(g1), k::lit_not(g2));
+            }
+        }
+        let all = vec![MUX_FOLD_HINT; raw.nodes.len()];
+        let (folded, map) = k::compact(&raw, &all);
+        // Baseline: a hint that names no node and requests nothing (no
+        // sharing, no fold), so the only difference is the fold.
+        let (plain, _) = k::compact(&raw, &vec![usize::MAX - 1; raw.nodes.len()]);
+        assert!(
+            folded.nodes.len() < plain.nodes.len(),
+            "no fold was taken anywhere: the test is vacuous"
+        );
+        for bits in 0u32..8 {
+            let inputs: Vec<bool> = (0..3).map(|j| bits >> j & 1 == 1).collect();
+            let v_raw = k::simulate(&raw, &inputs);
+            let v_new = k::simulate(&folded, &inputs);
+            for i in 0..raw.nodes.len() {
+                assert_eq!(
+                    k::eval_lit(&v_new, map[i]),
+                    v_raw[i],
+                    "raw node {i} under inputs {bits:#b}, fold requested everywhere"
+                );
+            }
+        }
+    }
+
     // rivet: verifies VER-061
     /// Wrong hints are harmless: pointing every gate at node 0, at a
     /// random earlier node, or past the end gives a correct (merely
