@@ -696,8 +696,10 @@ jobs:
           set -uo pipefail
           planted() {
             local want="$1"; shift
-            out="$(env "$@" cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets --nocapture 2>&1)"
-            rc=$?
+            # The control MUST fail; under `bash -e` a bare failing assignment
+            # would end the step before rc is read, so capture it explicitly.
+            out="$(env "$@" cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets --nocapture 2>&1)" \
+              && rc=0 || rc=$?
             echo "$out" | grep -E '^(perf gate:|FAIL )' || true
             if [ "$rc" -eq 0 ]; then echo "::error::planted control passed ($*): the gate is vacuous"; exit 1; fi
             echo "$out" | grep -qF "$want" \
