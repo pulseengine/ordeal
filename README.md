@@ -124,6 +124,10 @@ query.cert.json: accepted (ordeal-cert/v3, unsat)
 
 An `unknown` verdict has nothing to certify: no file is written and the exit code is 1.
 
+`--timeout-ms N` gives up after N milliseconds and answers `unknown`, which is always sound. Without it the
+search runs until it decides, and some queries take minutes or longer (#314). An unknown option is a usage
+error (exit 2).
+
 ### Rust
 
 ```rust

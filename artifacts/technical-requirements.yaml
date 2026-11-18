@@ -2287,3 +2287,21 @@ artifacts:
         target: TR-019
       - type: allocated-to
         target: ARC-012
+
+  - id: TR-093
+    type: sw-req
+    title: ordeal check --timeout-ms N bounds the solve by wall-clock time and answers unknown when it elapses
+    status: verified
+    release: v0.38.0
+    description: "ordeal check ran the built-in search unbounded, so a query it cannot decide (issue #314: 128-bit bvudiv by 2^64, killed after 60 s and still undecided after 300 s at width 64) never returns. Solver::check_with_deadline existed in the library but not on the command line. Requirement: ordeal check accepts --timeout-ms N; once N milliseconds elapse the verdict is unknown, printed in the shape the selected flags print unknown (text, --format json, --with-query, --with-term), and under --cert-out no file is written and the exit code is 1. The bound never changes a verdict reached in time, and nothing the trusted crate checks is skipped on a printed verdict. A missing or non-numeric N is a usage error (exit 2). Without the flag the solve runs inline as before. This bounds the wait; it does not make #314 decidable (see the #314 route decision). Effect: behaviour. Issue #314."
+    tags: [cli, liveness]
+    fields:
+      effect: behaviour
+      priority: should
+      req-type: functional
+      verification-criteria: "An integration test runs the real ordeal binary on the width-64 #314 query with --timeout-ms 1000 and gets unknown within the bound plus slack in text, json, --with-query and --with-term shapes; with --cert-out it exits 1 and writes no file; a decided unsat query keeps its verdict under the flag; malformed values exit 2 with nothing on stdout."
+    links:
+      - type: derives-from
+        target: SYS-004
+      - type: allocated-to
+        target: ARC-010
