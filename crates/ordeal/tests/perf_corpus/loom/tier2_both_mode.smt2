@@ -1,0 +1,20 @@
+; thread: verify::tests::tier2_slice1_both_mode_finds_no_divergence_on_real_obligations
+; entry: check_with_deadline
+; assertions: 1
+(set-logic QF_BV)
+(declare-fun memory_size () (_ BitVec 32))
+(declare-fun param0 () (_ BitVec 32))
+(define-fun |n0| () Bool (bvule memory_size (_ bv65536 32)))
+(define-fun |n1| () Bool (not |n0|))
+(define-fun |n2| () (_ BitVec 32) (bvxor param0 (_ bv4294967295 32)))
+(define-fun |n3| () (_ BitVec 32) (bvsub (_ bv4294967295 32) param0))
+(define-fun |n4| () (_ BitVec 32) (bvsub |n3| (_ bv1 32)))
+(define-fun |n5| () (_ BitVec 32) (bvadd |n4| (_ bv1 32)))
+(define-fun |n6| () Bool (= |n2| |n5|))
+(define-fun |n7| () Bool (or |n1| |n6|))
+(define-fun |n8| () (_ BitVec 1) (ite |n7| (_ bv1 1) (_ bv0 1)))
+(define-fun |n9| () (_ BitVec 2) (concat (_ bv0 1) |n8|))
+(define-fun |n10| () (_ BitVec 2) (concat (_ bv0 1) (_ bv1 1)))
+(define-fun |n11| () Bool (distinct |n9| |n10|))
+(assert |n11|)
+(check-sat)

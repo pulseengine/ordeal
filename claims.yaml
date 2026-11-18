@@ -497,8 +497,24 @@ claims:
           - Bazel build (optional)
           - Z3 Oracle (optional)
           - varve layer pin resolves (pinned rivet validates the graph)
+          - Perf + proof-size gate (#283)   # advisory until the owner decides (TR-081)
       - kind: count-min            # the claim gate runs inside the required Test job
         pattern: 'python3 scripts/claim_check\.py claims\.yaml'
+        glob: .github/workflows/ci.yml
+        min: 1
+
+  - id: CONTRIB-PERF-GATE
+    doc: CONTRIBUTING.md
+    text: "time has 5x headroom"
+    # TR-081: the published time policy is the harness constant, and the
+    # advisory job the paragraph names exists.
+    evidence:
+      - kind: count-min
+        pattern: 'pub const TIME_FACTOR: u64 = 5;'
+        glob: crates/ordeal/tests/perf_gate_lib/mod.rs
+        min: 1
+      - kind: count-min
+        pattern: 'name: Perf \+ proof-size gate \(#283\)'
         glob: .github/workflows/ci.yml
         min: 1
 

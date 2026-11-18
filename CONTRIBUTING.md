@@ -78,6 +78,18 @@ them locally with:
 cargo test -p ordeal --features oracle --release --lib -- oracle::front::tests oracle::echo::tests --nocapture
 ```
 
+The performance and proof-size gate (#283, TR-081) solves real queries
+taken from gale, synth and loom (`crates/ordeal/tests/perf_corpus/`, with
+provenance in `manifest.json`) and holds each to `budgets.json`: the CNF
+clause count and the LRAT size are pinned exactly, and time has 5x headroom
+over a release-build measurement. It runs as the advisory job
+`Perf + proof-size gate (#283)`. A change that alters a proof must update
+that query's budget in the same pull request. Run it locally with:
+
+```bash
+cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets --nocapture
+```
+
 ## Pull Request Process
 
 1. Fork the repository.
