@@ -19,7 +19,7 @@ env:
 jobs:
   fmt:
     name: Format
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -34,7 +34,7 @@ jobs:
 
   clippy:
     name: Clippy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -54,7 +54,7 @@ jobs:
 
   build:
     name: Build (release)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -64,7 +64,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       RUSTFLAGS: -Dwarnings
     steps:
@@ -158,7 +158,7 @@ jobs:
   # C/C++ toolchain is ever invoked).
   repro:
     name: Reproducible build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -222,7 +222,7 @@ jobs:
   # not just buildability.
   wasip2:
     name: Build (wasm32-wasip2)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
@@ -305,7 +305,7 @@ jobs:
   # just built (the #135 lesson): version assert + a certified-unsat solve.
   musl-sbom:
     name: musl build + SBOM smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -351,7 +351,7 @@ jobs:
   # release-time qemu version assert cannot first fail at a tag cut.
   cross-qemu:
     name: cross aarch64-musl + qemu smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -381,7 +381,7 @@ jobs:
   # the core cargo gate. The cargo `wasip2` job above is the enforced gate.
   bazel:
     name: Bazel build (optional)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -415,7 +415,7 @@ jobs:
   # new axiom in the soundness chain or a blaster capstone.
   lean:
     name: Lean model + soundness proof
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Install Nix (flakes)
@@ -553,7 +553,7 @@ jobs:
   # LRAT checker and that it agrees with the own pure-Rust core.
   cadical:
     name: CaDiCaL backend (cadical feature)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@stable
@@ -576,7 +576,7 @@ jobs:
   # (own core vs CaDiCaL vs Z3) in solver::cadical_parity_tests.
   oracle:
     name: Z3 Oracle (optional)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     continue-on-error: true
     # Normally ~2 min. On 2026-09-30 main's run hung in "Install Z3" for
     # ~2 h; push runs share a no-cancel concurrency group, so the hang
@@ -621,7 +621,7 @@ jobs:
   # red too, rather than a silent pass.
   parser-differential:
     name: SMT-LIB parser differential (Z3)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -654,7 +654,7 @@ jobs:
   # the same pin).
   varve-pin:
     name: varve layer pin resolves (pinned rivet validates the graph)
-    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-latest' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -39,7 +39,7 @@ jobs:
   # v0.22.0 reached crates.io 15 minutes before its gate ran.
   gate:
     name: Release gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       actions: read
@@ -127,10 +127,10 @@ jobs:
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
           - target: aarch64-unknown-linux-gnu
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
           - target: x86_64-apple-darwin
@@ -147,10 +147,10 @@ jobs:
           # x86_64 leg is NOT cross: the static binary executes on the
           # runner, so it also passes the tag-version assert below.
           - target: x86_64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
           - target: aarch64-unknown-linux-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04
             archive: tar.gz
             cross: true
     steps:
@@ -312,7 +312,7 @@ jobs:
   build-wasm:
     name: Build wasm32-wasip2 component
     needs: [gate]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       RUSTUP_TOOLCHAIN: "1.99.1"
     steps:
@@ -392,7 +392,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [build-binaries, build-wasm]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       # Release-asset upload needs contents: write; SLSA build-provenance
       # attestation needs id-token + attestations: write.

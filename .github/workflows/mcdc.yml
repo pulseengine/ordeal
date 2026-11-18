@@ -24,7 +24,7 @@ concurrency:
 jobs:
   mcdc-ordeal-lrat:
     name: witness MC/DC ratchet (ordeal-lrat)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -4,7 +4,7 @@
 Every job in .github/workflows/ whose runs-on names `self-hosted` must use
 exactly the fail-closed form
 
-  ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('[...]') || 'ubuntu-latest' }}
+  ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('[...]') || 'ubuntu-24.04' }}
 
 so the self-hosted labels are chosen only for a non-PR event or a PR whose
 head repository is this one; anything else (a fork, a deleted fork whose
@@ -17,7 +17,12 @@ head.repo is null) falls to the hosted runner. Rejected:
     fork can cause under another name (pull_request_target, workflow_run,
     issue_comment, pull_request_review*, ...) would reach the runner;
   - no self-hosted job at all, so the check never passes having compared
-    nothing (delete it if ordeal stops using self-hosted runners).
+    nothing (delete it if ordeal stops using self-hosted runners);
+  - a floating `ubuntu-latest` anywhere a job's runner is chosen (plain,
+    matrix value, the fail-closed fallback). The label moves to a new Ubuntu
+    release without a commit here, changing apt packages, Python and the
+    preinstalled tools under every hosted job; moving to a newer image is a
+    deliberate PR that names the version.
 """
 import pathlib
 import re
@@ -28,7 +33,7 @@ import yaml
 FORM = re.compile(
     r"^\$\{\{ \(github\.event_name != 'pull_request' \|\| "
     r"github\.event\.pull_request\.head\.repo\.full_name == github\.repository\) && "
-    r"fromJSON\('\[[^\]]*\"self-hosted\"[^\]]*\]'\) \|\| 'ubuntu-latest' \}\}$"
+    r"fromJSON\('\[[^\]]*\"self-hosted\"[^\]]*\]'\) \|\| 'ubuntu-\d+\.\d+' \}\}$"
 )
 MATRIX_REF = re.compile(r"^\$\{\{\s*(fromJSON\()?matrix\.([A-Za-z0-9_-]+)\)?\s*\}\}$")
 # Triggers only a maintainer or this repository's own branches can cause,
@@ -51,7 +56,9 @@ def _strings(node, path=()):
         yield path, node
 
 
-HOSTED = re.compile(r"^(ubuntu|macos|windows)-[A-Za-z0-9._-]+$")
+HOSTED = re.compile(r"^(ubuntu-\d+\.\d+(-arm)?|(macos|windows)-[A-Za-z0-9._-]+)$")
+FLOATING = "ubuntu-latest"
+FLOAT_MSG = "floating ubuntu-latest: pin the image version (ubuntu-24.04); a move is its own PR"
 
 
 def _runner_problem(spec):
@@ -62,6 +69,8 @@ def _runner_problem(spec):
     `group:` map), so everything else fails, with or without the word
     self-hosted."""
     ro = spec.get("runs-on")
+    if FLOATING in str(ro) or FLOATING in str((spec.get("strategy") or {}).get("matrix")):
+        return FLOAT_MSG
     if isinstance(ro, str):
         t = ro.strip()
         if HOSTED.match(t) or FORM.match(t):
@@ -124,8 +133,8 @@ def check(wfdir):
 
 GOOD = ("${{ (github.event_name != 'pull_request' || "
         "github.event.pull_request.head.repo.full_name == github.repository) && "
-        "fromJSON('[\"self-hosted\",\"linux\",\"x64\",\"light\"]') || 'ubuntu-latest' }}")
-FAIL_OPEN = ("${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || "
+        "fromJSON('[\"self-hosted\",\"linux\",\"x64\",\"light\"]') || 'ubuntu-24.04' }}")
+FAIL_OPEN = ("${{ github.event.pull_request.head.repo.fork && 'ubuntu-24.04' || "
              "fromJSON('[\"self-hosted\",\"linux\",\"x64\",\"light\"]') }}")
 
 
@@ -146,10 +155,10 @@ def self_test():
         ("plain label string -> fails", "x.yml", wf(["push"], "self-hosted"), True),
         ("fail-open fork form -> fails", "x.yml", wf(["push", "pull_request"], FAIL_OPEN), True),
         ("unguarded job in a .yaml file -> fails", "x.yaml", wf(["push"], ["self-hosted"]), True),
-        ("no self-hosted job -> fails", "x.yml", wf(["push"], "ubuntu-latest"), True),
+        ("no self-hosted job -> fails", "x.yml", wf(["push"], "ubuntu-24.04"), True),
         ("self-hosted runner from strategy.matrix -> fails", "x.yml", yaml.safe_dump({
             "on": ["push", "pull_request"],
-            "jobs": {"a": {"strategy": {"matrix": {"runner": ['["self-hosted","linux"]', '"ubuntu-latest"']}},
+            "jobs": {"a": {"strategy": {"matrix": {"runner": ['["self-hosted","linux"]', '"ubuntu-24.04"']}},
                            "runs-on": "${{ fromJSON(matrix.runner) }}", "steps": []}}}), True),
         ("self-hosted label in an input default -> fails", "x.yml", yaml.safe_dump({
             "on": {"workflow_dispatch": {"inputs": {"r": {"default": "self-hosted"}}}},
@@ -164,15 +173,15 @@ def self_test():
             "on": ["push"], "jobs": {"a": {"runs-on": {"group": "ordeal-pool"}, "steps": []},
                                      "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("matrix value that is a custom label -> fails", "x.yml", yaml.safe_dump({
-            "on": ["push"], "jobs": {"m": {"strategy": {"matrix": {"include": [{"os": "ubuntu-latest"}, {"os": "light"}]}},
+            "on": ["push"], "jobs": {"m": {"strategy": {"matrix": {"include": [{"os": "ubuntu-24.04"}, {"os": "light"}]}},
                                            "runs-on": "${{ matrix.os }}", "steps": []},
                                      "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("contains() matrix guard with a [linux, light] runner -> fails", "x.yml", yaml.safe_dump({
             "on": ["push", "pull_request"],
-            "jobs": {"m": {"strategy": {"matrix": {"runner": ['["linux","light"]', '"ubuntu-latest"']}},
+            "jobs": {"m": {"strategy": {"matrix": {"runner": ['["linux","light"]', '"ubuntu-24.04"']}},
                            "runs-on": "${{ (github.event_name != 'pull_request' || "
                                       "github.event.pull_request.head.repo.full_name == github.repository || "
-                                      "!contains(matrix.runner, 'self-hosted')) && fromJSON(matrix.runner) || 'ubuntu-latest' }}",
+                                      "!contains(matrix.runner, 'self-hosted')) && fromJSON(matrix.runner) || 'ubuntu-24.04' }}",
                            "steps": []},
                      "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("runner from vars -> fails", "x.yml", yaml.safe_dump({
@@ -180,17 +189,29 @@ def self_test():
                                      "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("runner from a needs output -> fails", "x.yml", yaml.safe_dump({
             "on": ["push"],
-            "jobs": {"pick": {"runs-on": "ubuntu-latest", "steps": [{"run": "echo r=x >> $GITHUB_OUTPUT"}]},
+            "jobs": {"pick": {"runs-on": "ubuntu-24.04", "steps": [{"run": "echo r=x >> $GITHUB_OUTPUT"}]},
                      "a": {"needs": "pick", "runs-on": "${{ needs.pick.outputs.r }}", "steps": []},
                      "b": {"runs-on": GOOD, "steps": []}}}), True),
         ("hosted matrix runner beside a good self-hosted job -> holds", "x.yml", yaml.safe_dump({
             "on": ["push"],
-            "jobs": {"m": {"strategy": {"matrix": {"os": ["ubuntu-latest", "macos-latest"]}},
+            "jobs": {"m": {"strategy": {"matrix": {"os": ["ubuntu-24.04", "macos-latest"]}},
                            "runs-on": "${{ matrix.os }}", "steps": []},
                      "b": {"runs-on": GOOD, "steps": [{"name": "mentions self-hosted"}]}}}), False),
         ("self-hosted only inside a step script -> no job to check, fails as empty", "x.yml", yaml.safe_dump({
             "on": ["push"],
-            "jobs": {"a": {"runs-on": "ubuntu-latest", "steps": [{"run": "echo self-hosted"}]}}}), True),
+            "jobs": {"a": {"runs-on": "ubuntu-24.04", "steps": [{"run": "echo self-hosted"}]}}}), True),
+        ("plain floating ubuntu-latest beside a good job -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"a": {"runs-on": "ubuntu-latest", "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("floating ubuntu-latest in a matrix -> fails", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"m": {"strategy": {"matrix": {"os": ["ubuntu-latest", "macos-15"]}},
+                                           "runs-on": "${{ matrix.os }}", "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), True),
+        ("floating ubuntu-latest as the fail-closed fallback -> fails", "x.yml",
+         wf(["push"], GOOD.replace("ubuntu-24.04", "ubuntu-latest")), True),
+        ("pinned ubuntu-24.04 job beside a good job -> holds", "x.yml", yaml.safe_dump({
+            "on": ["push"], "jobs": {"a": {"runs-on": "ubuntu-24.04", "steps": []},
+                                     "b": {"runs-on": GOOD, "steps": []}}}), False),
     ] + [
         (f"good form under {t} -> fails", "x.yml", wf(["push", t], GOOD), True)
         for t in ("pull_request_target", "workflow_run", "issue_comment",
@@ -223,7 +244,7 @@ def main():
     if not seen:
         sys.exit("FAIL  no self-hosted job found: this check compared nothing")
     if bad:
-        sys.exit(f"FAIL  {len(bad)} self-hosted job(s) a fork PR could reach")
+        sys.exit(f"FAIL  {len(bad)} runner problem(s): a fork PR could reach a self-hosted job, or an image floats")
     print(f"{len(seen)} self-hosted job(s), each in the fail-closed form")
 
 
