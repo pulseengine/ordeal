@@ -3492,3 +3492,31 @@ artifacts:
         target: VER-079
       - type: part-of-execution
         target: VE-073
+
+  - id: VE-075
+    type: verification-execution
+    title: "Trap-refinement run (VER-082): unit tests, Z3 differential, negative controls, claim gate"
+    status: implemented
+    description: "Local run of the TR-082 verification on branch feat/284-trap-refinement at 4d85fee (base origin/main eb191f2). cargo test -p ordeal --lib trap:: exit 0 (33 passed, 1 ignored); cargo test -p ordeal --no-fail-fast exit 0 (lib 292 passed, 4 ignored; cli_baseline 14, cli_cert_out 7, cli_term 3, sha256_differential 2); LIBRARY_PATH=/opt/homebrew/lib cargo test -p ordeal --features oracle --lib oracle::trap_refinement_oracle_tests exit 0 (5 passed); cargo fmt --check exit 0; cargo clippy --all-targets -D warnings exit 0, and -p ordeal --features oracle exit 0. Negative controls: (1) the Z3 reference's canonical payload planted as 4194305: 3 of 5 oracle tests fail with Z3 models 0xffc00000 / 0x7fc00001; (2) the builder mutated to drop the trap-mismatch disjunct: refinement_violation_is_the_issue_formula and loom_dropped_div_trap_is_not_a_refinement fail, and violation_equals_the_issue_formula_in_z3 and worked_examples_agree_with_z3 fail; tree restored after each. claim_check.py claims.yaml 67/67 exit 0; each of the three new claims went red on a planted input (reworded doc text, a renamed test, a removed ExtOp variant). Finding fixed during the run: a pure_call example whose value was r /u b ran for minutes (two 32-bit dividers over distinct variables), changed to r + b."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew), LIBRARY_PATH=/opt/homebrew/lib
+      executor: local
+      timestamp: 2026-11-18 06:04:47+00:00
+      version: 4d85fee (feat/284-trap-refinement)
+    links:
+      - type: traces-to
+        target: TR-082
+
+  - id: VV-153
+    type: verification-verdict
+    title: "VER-082 pass: refinement builders equal an FP-theory reference in Z3; worked examples certify or refute; controls red"
+    status: implemented
+    description: Verdict of VE-075 for VER-082.
+    fields:
+      evidence: "VE-075: trap:: 33 passed; oracle trap_refinement_oracle_tests 5 passed; full ordeal suite exit 0; planted Z3 reference and mutated builder each turn the named tests red"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-082
+      - type: part-of-execution
+        target: VE-075

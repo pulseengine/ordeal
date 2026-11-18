@@ -1831,3 +1831,384 @@ mod sliver_oracle_tests {
         query.iter().any(in_bool)
     }
 }
+
+// ─── Trap-refinement differential (TR-082, #284) ─────────────────────────────
+
+#[cfg(test)]
+mod trap_refinement_oracle_tests {
+    //! The refinement builders against Z3, two ways. (1) Equivalence: each
+    //! builder is proven EQUAL, for every bit pattern, to an independent
+    //! spelling in SMT-LIB whose NaN test is Z3's floating-point theory
+    //! (`fp.isNaN` over `to_fp` of the bits) and whose payload constants are
+    //! written in decimal from the spec, not from `FpFmt`. (2) Verdicts: the
+    //! loom worked examples and a seeded corpus of refinement queries get the
+    //! same verdict from ordeal (raw and through the gated `Solver::check`)
+    //! and from Z3.
+    use super::*;
+    use crate::solver::{CheckResult, Solver as OSolver};
+    use crate::trap::{
+        DefineOrTrap, DefineSetOrTrap, DivOp, FpFmt, NanSet, ValueSet, fp_is_arithmetic_nan,
+        fp_is_canonical_nan, fp_is_nan, trap_any, trap_div, trap_refinement_violation,
+        value_set_member,
+    };
+
+    fn v(name: &str, w: u32) -> BvTerm {
+        BvTerm::Var {
+            name: name.into(),
+            sort: Sort::new(w),
+        }
+    }
+    fn c(value: u128, w: u32) -> BvTerm {
+        BvTerm::Const {
+            value,
+            sort: Sort::new(w),
+        }
+    }
+    fn bit(name: &str) -> BoolTerm {
+        BoolTerm::Eq(Box::new(v(name, 1)), Box::new(c(1, 1)))
+    }
+
+    /// The reference NaN-class functions, in SMT-LIB. Canonical payload:
+    /// 2^22 = 4194304 (f32), 2^51 = 2251799813685248 (f64).
+    const PRELUDE: &str = "
+        (define-fun nan32 ((b (_ BitVec 32))) Bool (fp.isNaN ((_ to_fp 8 24) b)))
+        (define-fun canon32 ((b (_ BitVec 32))) Bool
+          (and (nan32 b) (= ((_ extract 22 0) b) (_ bv4194304 23))))
+        (define-fun arith32 ((b (_ BitVec 32))) Bool
+          (and (nan32 b) (= ((_ extract 22 22) b) #b1)))
+        (define-fun nan64 ((b (_ BitVec 64))) Bool (fp.isNaN ((_ to_fp 11 53) b)))
+        (define-fun canon64 ((b (_ BitVec 64))) Bool
+          (and (nan64 b) (= ((_ extract 51 0) b) (_ bv2251799813685248 52))))
+        (define-fun arith64 ((b (_ BitVec 64))) Bool
+          (and (nan64 b) (= ((_ extract 51 51) b) #b1)))
+    ";
+
+    /// Parse `decls` + `(assert reference)` with Z3 and prove the ordeal
+    /// term equal to it: `ours xor reference` must be Unsat.
+    fn assert_equal_to_reference(label: &str, ours: &BoolTerm, decls: &str, reference: &str) {
+        let script = format!("{decls}\n{PRELUDE}\n(assert {reference})");
+        let parsed = match super::front::z3_read(&script) {
+            super::front::Z3Reading::Accepted(a) => a,
+            super::front::Z3Reading::Refused(e) => panic!("{label}: reference refused: {e}"),
+        };
+        assert_eq!(parsed.len(), 1, "{label}: one reference assertion");
+        let solver = Solver::new();
+        solver.assert(to_z3(ours).xor(parsed[0].clone()));
+        match solver.check() {
+            SatResult::Unsat => {}
+            other => panic!(
+                "{label}: builder and FP-theory reference differ ({other:?}): {:?}",
+                solver.get_model()
+            ),
+        }
+    }
+
+    // rivet: verifies VER-082
+    #[test]
+    fn nan_classes_equal_the_fp_theory_reference() {
+        for (fmt, w) in [(FpFmt::F32, 32), (FpFmt::F64, 64)] {
+            let decls = format!("(declare-const x (_ BitVec {w}))");
+            let x = v("x", w);
+            assert_equal_to_reference(
+                "is_nan",
+                &fp_is_nan(&x, fmt),
+                &decls,
+                &format!("(nan{w} x)"),
+            );
+            assert_equal_to_reference(
+                "canonical",
+                &fp_is_canonical_nan(&x, fmt),
+                &decls,
+                &format!("(canon{w} x)"),
+            );
+            assert_equal_to_reference(
+                "arithmetic",
+                &fp_is_arithmetic_nan(&x, fmt),
+                &decls,
+                &format!("(arith{w} x)"),
+            );
+        }
+    }
+
+    // rivet: verifies VER-082
+    #[test]
+    fn value_sets_equal_the_fp_theory_reference() {
+        // f32 result, two f32 operands (an f32 binary op).
+        let d32 = "(declare-const x (_ BitVec 32)) (declare-const val (_ BitVec 32))
+                   (declare-const z (_ BitVec 32)) (declare-const y (_ BitVec 32))";
+        let (x, val) = (v("x", 32), v("val", 32));
+        let fl = |nans| ValueSet::Float {
+            value: val.clone(),
+            fmt: FpFmt::F32,
+            nans,
+        };
+        let cases: [(&str, ValueSet, &str); 5] = [
+            ("exact", ValueSet::Exact(val.clone()), "(= x val)"),
+            (
+                "canonical",
+                fl(NanSet::Canonical),
+                "(ite (nan32 val) (canon32 x) (= x val))",
+            ),
+            (
+                "arithmetic",
+                fl(NanSet::Arithmetic),
+                "(ite (nan32 val) (arith32 x) (= x val))",
+            ),
+            (
+                "propagating",
+                fl(NanSet::Propagating(vec![
+                    (v("z", 32), FpFmt::F32),
+                    (v("y", 32), FpFmt::F32),
+                ])),
+                "(ite (nan32 val)
+                   (ite (and (or (not (nan32 z)) (canon32 z)) (or (not (nan32 y)) (canon32 y)))
+                        (canon32 x) (arith32 x))
+                   (= x val))",
+            ),
+            (
+                "propagating-none",
+                fl(NanSet::Propagating(vec![])),
+                "(ite (nan32 val) (canon32 x) (= x val))",
+            ),
+        ];
+        for (label, set, reference) in cases {
+            assert_equal_to_reference(label, &value_set_member(&x, &set), d32, reference);
+        }
+        // f64 result of f64.promote_f32: the operand is an f32.
+        let d64 = "(declare-const x (_ BitVec 64)) (declare-const val (_ BitVec 64))
+                   (declare-const z (_ BitVec 32))";
+        let promote = ValueSet::Float {
+            value: v("val", 64),
+            fmt: FpFmt::F64,
+            nans: NanSet::Propagating(vec![(v("z", 32), FpFmt::F32)]),
+        };
+        assert_equal_to_reference(
+            "promote",
+            &value_set_member(&v("x", 64), &promote),
+            d64,
+            "(ite (nan64 val)
+               (ite (or (not (nan32 z)) (canon32 z)) (canon64 x) (arith64 x))
+               (= x val))",
+        );
+    }
+
+    // rivet: verifies VER-082
+    #[test]
+    fn violation_equals_the_issue_formula_in_z3() {
+        let decls = "(declare-const ot (_ BitVec 1)) (declare-const pt (_ BitVec 1))
+                     (declare-const x (_ BitVec 32)) (declare-const val (_ BitVec 32))
+                     (declare-const z (_ BitVec 32))";
+        let orig = DefineSetOrTrap {
+            values: ValueSet::Float {
+                value: v("val", 32),
+                fmt: FpFmt::F32,
+                nans: NanSet::Propagating(vec![(v("z", 32), FpFmt::F32)]),
+            },
+            may_trap: bit("ot"),
+        };
+        let opt = DefineOrTrap {
+            value: v("x", 32),
+            may_trap: bit("pt"),
+        };
+        assert_equal_to_reference(
+            "violation",
+            &trap_refinement_violation(&orig, &opt),
+            decls,
+            "(or (distinct (= ot #b1) (= pt #b1))
+                 (and (not (= ot #b1))
+                      (not (ite (nan32 val)
+                                (ite (or (not (nan32 z)) (canon32 z)) (canon32 x) (arith32 x))
+                                (= x val)))))",
+        );
+    }
+
+    /// Ordeal raw, ordeal gated (`Solver::check`) and Z3 agree on `q`, and
+    /// the verdict is `want_unsat`. Returns whether it was Unsat.
+    fn agree(label: &str, q: &BoolTerm, want_unsat: Option<bool>) -> bool {
+        let qs = [q.clone()];
+        if let Some(d) = differential_check(&qs, ordeal_engine) {
+            panic!("{label}: ordeal-vs-Z3 disagreement — {d:?}");
+        }
+        let mut s = OSolver::new();
+        s.assert(q.clone());
+        let gated_unsat = match s.check() {
+            CheckResult::Unsat(cert) => {
+                cert.recheck().expect("re-checks");
+                true
+            }
+            CheckResult::Sat(_) => false,
+            CheckResult::Unknown => panic!("{label}: gated Unknown"),
+        };
+        let z3_unsat = match z3_check(&qs) {
+            OracleVerdict::Unsat => true,
+            OracleVerdict::Sat(_) => false,
+            OracleVerdict::Unknown => panic!("{label}: Z3 Unknown"),
+        };
+        assert_eq!(gated_unsat, z3_unsat, "{label}: gated vs Z3");
+        if let Some(w) = want_unsat {
+            assert_eq!(gated_unsat, w, "{label}: expected unsat={w}");
+        }
+        gated_unsat
+    }
+
+    // rivet: verifies VER-082
+    #[test]
+    fn worked_examples_agree_with_z3() {
+        let (a, b) = (v("a", 32), v("b", 32));
+        let b_zero = BoolTerm::Eq(Box::new(b.clone()), Box::new(c(0, 32)));
+        let udiv = BvTerm::Udiv(Box::new(a.clone()), Box::new(b.clone()));
+        let div_trap = trap_div(DivOp::DivU, &a, &b, 32);
+        let guarded: DefineSetOrTrap = DefineOrTrap {
+            value: udiv.clone(),
+            may_trap: trap_any(&[b_zero.clone(), div_trap.clone()]),
+        }
+        .into();
+        let never = BoolTerm::Not(Box::new(BoolTerm::Eq(Box::new(c(0, 8)), Box::new(c(0, 8)))));
+        let plain = DefineOrTrap {
+            value: udiv.clone(),
+            may_trap: div_trap,
+        };
+        let safe = DefineOrTrap {
+            value: BvTerm::Ite {
+                cond: Box::new(b_zero),
+                then_: Box::new(c(0, 32)),
+                else_: Box::new(udiv),
+            },
+            may_trap: never.clone(),
+        };
+        agree(
+            "guard removal",
+            &trap_refinement_violation(&guarded, &plain),
+            Some(true),
+        );
+        agree(
+            "safe division",
+            &trap_refinement_violation(&guarded, &safe),
+            Some(false),
+        );
+        let nan_fold = |nans: Option<NanSet>| {
+            let orig_value = c(0xffc0_0000, 32);
+            let values = match nans {
+                Some(nans) => ValueSet::Float {
+                    value: orig_value,
+                    fmt: FpFmt::F32,
+                    nans,
+                },
+                None => ValueSet::Exact(orig_value),
+            };
+            trap_refinement_violation(
+                &DefineSetOrTrap {
+                    values,
+                    may_trap: never.clone(),
+                },
+                &DefineOrTrap {
+                    value: c(0x7fc0_0000, 32),
+                    may_trap: never.clone(),
+                },
+            )
+        };
+        agree(
+            "nan fold, nans_N",
+            &nan_fold(Some(NanSet::Propagating(vec![]))),
+            Some(true),
+        );
+        agree("nan fold, exact", &nan_fold(None), Some(false));
+        let x = v("x", 32);
+        let quiet = BvTerm::Ite {
+            cond: Box::new(fp_is_nan(&x, FpFmt::F32)),
+            then_: Box::new(BvTerm::Or(
+                Box::new(x.clone()),
+                Box::new(c(0x0040_0000, 32)),
+            )),
+            else_: Box::new(x.clone()),
+        };
+        let add_nz = DefineSetOrTrap {
+            values: ValueSet::Float {
+                value: quiet.clone(),
+                fmt: FpFmt::F32,
+                nans: NanSet::Propagating(vec![
+                    (x.clone(), FpFmt::F32),
+                    (c(0x8000_0000, 32), FpFmt::F32),
+                ]),
+            },
+            may_trap: never.clone(),
+        };
+        let to_x = DefineOrTrap {
+            value: x,
+            may_trap: never.clone(),
+        };
+        let to_quiet = DefineOrTrap {
+            value: quiet,
+            may_trap: never,
+        };
+        agree(
+            "x + -0.0 -> x",
+            &trap_refinement_violation(&add_nz, &to_x),
+            Some(false),
+        );
+        agree(
+            "x + -0.0 -> quiet(x)",
+            &trap_refinement_violation(&add_nz, &to_quiet),
+            Some(true),
+        );
+    }
+
+    // rivet: verifies VER-082
+    /// A seeded corpus of refinement queries over random core terms, every
+    /// value-set kind: ordeal (raw and gated) agrees with Z3 on each, and the
+    /// corpus produces both verdicts.
+    #[test]
+    fn refinement_corpus_agrees_with_z3() {
+        let mut rng = XorShift64::new(0x0284_7EF1_0E5E_ED01);
+        let vars: Vec<(String, u32)> = vec![("p".into(), 32), ("q".into(), 32), ("r".into(), 8)];
+        let (mut unsats, mut sats) = (0u32, 0u32);
+        for i in 0..80 {
+            let orig_value = gen_bv(&mut rng, 32, 2, &vars);
+            let orig_trap = gen_bool(&mut rng, 1, &vars);
+            let same = rng.below(2) == 0;
+            let opt = DefineOrTrap {
+                value: if same {
+                    orig_value.clone()
+                } else {
+                    gen_bv(&mut rng, 32, 2, &vars)
+                },
+                may_trap: if same {
+                    orig_trap.clone()
+                } else {
+                    gen_bool(&mut rng, 1, &vars)
+                },
+            };
+            let nans = match rng.below(3) {
+                0 => NanSet::Canonical,
+                1 => NanSet::Arithmetic,
+                _ => NanSet::Propagating(vec![(gen_bv(&mut rng, 32, 1, &vars), FpFmt::F32)]),
+            };
+            let values = if rng.below(3) == 0 {
+                ValueSet::Exact(orig_value)
+            } else {
+                ValueSet::Float {
+                    value: orig_value,
+                    fmt: FpFmt::F32,
+                    nans,
+                }
+            };
+            let orig = DefineSetOrTrap {
+                values,
+                may_trap: orig_trap,
+            };
+            if agree(
+                &format!("corpus {i}"),
+                &trap_refinement_violation(&orig, &opt),
+                None,
+            ) {
+                unsats += 1;
+            } else {
+                sats += 1;
+            }
+        }
+        assert!(
+            unsats > 0 && sats > 0,
+            "both verdicts: {unsats} unsat, {sats} sat"
+        );
+    }
+}

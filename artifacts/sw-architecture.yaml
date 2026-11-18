@@ -384,6 +384,8 @@ artifacts:
         target: FEAT-008
       - type: allocated-from
         target: FEAT-010
+      - type: allocated-from
+        target: TR-082
   - id: ARC-013
     type: sw-arch-component
     title: ordeal-release-pipeline (signed release, SBOM, VEX, musl, verification of published bytes)
