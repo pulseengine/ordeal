@@ -1836,3 +1836,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-082
+
+  - id: VER-093
+    type: sw-verification
+    title: "ordeal check --timeout-ms turns the slow #314 query into a prompt unknown in every output shape, and keeps decided verdicts (TR-093)"
+    status: verified
+    release: v0.38.0
+    description: "crates/ordeal/tests/cli_timeout.rs, with the real binary: bound_turns_a_slow_solve_into_unknown, bound_keeps_the_json_shape (plain, --with-query, --with-term), bound_with_cert_out_writes_nothing_and_exits_1, bound_does_not_change_a_decided_verdict, malformed_bound_is_a_usage_error. The slow query is #314 at width 64."
+    tags: [cli, liveness]
+    fields:
+      coverage: text, json, with-query, with-term and cert-out shapes under the bound; a decided verdict under the bound; malformed values
+      method: automated-test
+      steps: "run: cargo test -p ordeal --test cli_timeout"
+    links:
+      - type: verifies
+        target: TR-093

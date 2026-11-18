@@ -3520,3 +3520,31 @@ artifacts:
         target: VER-082
       - type: part-of-execution
         target: VE-075
+
+  - id: VE-074
+    type: verification-execution
+    title: "Check timeout run (VER-093): ordeal check --timeout-ms and unknown-option refusal"
+    status: implemented
+    description: "Local run on branch feat/314-check-timeout (based on eb191f2). cargo test -p ordeal --no-fail-fast exit 0 (lib 281 passed, 4 ignored; cli_timeout 6 passed; cli_cert_out, cli_term, cli_baseline pass). The width-64 #314 query answers unknown in 1.51 s under --timeout-ms 1500; v0.37.0 ignored the flag (and any unknown option), so the bound and the exit-2 refusal are new behaviour. cargo fmt --check, cargo clippy --all-targets -D warnings, claim_check exit 0."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, debug build, nice -n 19
+      executor: local
+      timestamp: 2026-11-18 06:03:52+00:00
+      version: eb191f2 + feat/314-check-timeout
+    links:
+      - type: traces-to
+        target: TR-093
+
+  - id: VV-152
+    type: verification-verdict
+    title: "VER-093 pass: --timeout-ms answers unknown promptly in every output shape and keeps decided verdicts"
+    status: implemented
+    description: ordeal check --timeout-ms answers unknown promptly in every output shape and keeps decided verdicts
+    fields:
+      evidence: "cargo test -p ordeal --test cli_timeout (6 passed): text, json, --with-query, --with-term and --cert-out shapes under a 1 s bound on the width-64 #314 query, a decided unsat unchanged, malformed values and unknown options exit 2"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-093
+      - type: part-of-execution
+        target: VE-074

@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `Solver::from_sliver`. Tests include loom-shaped worked examples
   with negative controls (a dropped trap, a wrong value, a signalling NaN)
   and a Z3 differential under `oracle` against an FP-theory spelling.
+- `ordeal check --timeout-ms N` bounds the solve by wall-clock time; when it
+  elapses the verdict is `unknown` in every output shape, and under
+  `--cert-out` no file is written and the exit code is 1 (#314, TR-093). A
+  verdict reached in time is unchanged. This bounds the wait on queries such
+  as #314's 128-bit `bvudiv` by 2^64; it does not decide them.
+
+### Changed
+
+- `ordeal check` refuses an unknown option or a second file with exit 2.
+  Earlier releases ignored them, so a misspelled `--timeout-ms` ran
+  unbounded.
 
 ## [0.37.0] - 2026-11-14
 

@@ -41,7 +41,7 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!(
-                "Usage: ordeal check [FILE | -] [--format json] [--with-query | --with-term] [--cert-out PATH]   (reads stdin if FILE is '-' or omitted)"
+                "Usage: ordeal check [FILE | -] [--format json] [--with-query | --with-term] [--cert-out PATH] [--timeout-ms N]   (reads stdin if FILE is '-' or omitted)"
             );
             eprintln!(
                 "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]"
@@ -112,6 +112,10 @@ fn run_check(args: &[String]) -> ExitCode {
     // `--cert-out PATH` (#316): write the `ordeal-cert/v3` bundle of the
     // verdict, for `ordeal-recheck`. Not the `--format json` report.
     let mut cert_out: Option<&str> = None;
+    // `--timeout-ms N` (#314): a wall-clock bound on the whole solve. When it
+    // elapses the verdict is `unknown`, which is always sound; nothing that
+    // the trusted crate checks is skipped on any verdict that is printed.
+    let mut timeout_ms: Option<u64> = None;
     let mut positional: Vec<&str> = Vec::new();
     let mut i = 0;
     while i < rest.len() {
@@ -127,11 +131,34 @@ fn run_check(args: &[String]) -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--timeout-ms" => match rest.get(i + 1).and_then(|v| v.parse::<u64>().ok()) {
+                Some(ms) => {
+                    timeout_ms = Some(ms);
+                    i += 2;
+                }
+                None => {
+                    eprintln!("ordeal: --timeout-ms needs a whole number of milliseconds");
+                    return ExitCode::from(2);
+                }
+            },
             other => {
                 positional.push(other);
                 i += 1;
             }
         }
+    }
+    // An unknown flag, or a second file, is a usage error (exit 2) rather than
+    // ignored: a misspelled `--timeout-ms` must not run unbounded unnoticed.
+    if let Some(bad) = positional.iter().find(|a| a.starts_with('-') && **a != "-") {
+        eprintln!("ordeal: unknown option '{bad}' for check");
+        return ExitCode::from(2);
+    }
+    if positional.len() > 1 {
+        eprintln!(
+            "ordeal: check takes one FILE (or '-'), got {}",
+            positional.len()
+        );
+        return ExitCode::from(2);
     }
     let rest = positional;
     if with_query && format != Format::Json {
@@ -162,13 +189,17 @@ fn run_check(args: &[String]) -> ExitCode {
     };
 
     if let Some(out) = cert_out {
-        return run_check_with_bundle(&input, out, format, with_query, with_term);
+        return run_check_with_bundle(input, out, format, with_query, with_term, timeout_ms);
     }
     if with_term {
         // The term-carrying solve (#192 phase 7): a verdict is only ever
         // printed after the trusted crate related the term to the query
         // (`check_term_dag`) and re-checked the proof or the model.
-        return match smtlib::solve_str_with_term(&input) {
+        let Some(solved) = solve_bounded(timeout_ms, move || smtlib::solve_str_with_term(&input))
+        else {
+            return timed_out(format, false);
+        };
+        return match solved {
             Ok((result, declared)) => print_term_outcome_json(result.as_ref(), &declared),
             Err(e) => {
                 eprintln!("{e}");
@@ -180,7 +211,11 @@ fn run_check(args: &[String]) -> ExitCode {
         // The query-carrying solve (#192 phase 4): an `unsat` is only ever
         // printed after the trusted crate re-encoded the query and
         // re-checked the proof against ITS CNF.
-        return match smtlib::solve_str_with_query(&input) {
+        let Some(solved) = solve_bounded(timeout_ms, move || smtlib::solve_str_with_query(&input))
+        else {
+            return timed_out(format, false);
+        };
+        return match solved {
             Ok((result, declared)) => print_query_outcome_json(result.as_ref(), &declared),
             Err(e) => {
                 eprintln!("{e}");
@@ -191,7 +226,11 @@ fn run_check(args: &[String]) -> ExitCode {
     // The witness-carrying solve (TR-038): a `sat` is only ever printed
     // after the trusted crate re-checked its witness, and `--format json`
     // carries that witness so the consumer can re-check it too (#162).
-    match smtlib::solve_str_with_witness(&input) {
+    let Some(solved) = solve_bounded(timeout_ms, move || smtlib::solve_str_with_witness(&input))
+    else {
+        return timed_out(format, false);
+    };
+    match solved {
         Ok((result, declared)) => match format {
             Format::Text => print_outcome(result.as_ref(), &declared),
             Format::Json => print_outcome_json(result.as_ref(), &declared),
@@ -202,6 +241,53 @@ fn run_check(args: &[String]) -> ExitCode {
             ExitCode::from(2)
         }
     }
+}
+
+/// Run `solve` under the `--timeout-ms` bound (#314). Without a bound it runs
+/// inline, exactly as before the flag existed. With one it runs on a worker
+/// thread and `None` means the bound elapsed first; the worker is abandoned
+/// (the process exits right after the caller prints `unknown`), so no verdict
+/// from it can reach stdout. The worker's stack is sized like a main thread's
+/// would be on Linux and macOS, so a deep query does not fail only because a
+/// bound was given.
+fn solve_bounded<T: Send + 'static>(
+    timeout_ms: Option<u64>,
+    solve: impl FnOnce() -> T + Send + 'static,
+) -> Option<T> {
+    let Some(ms) = timeout_ms else {
+        return Some(solve());
+    };
+    let (tx, rx) = std::sync::mpsc::channel();
+    let spawned = std::thread::Builder::new()
+        .name("ordeal-solve".into())
+        .stack_size(64 << 20)
+        .spawn(move || {
+            let _ = tx.send(solve());
+        });
+    if let Err(e) = spawned {
+        // wasm32-wasip2 has no threads: say so rather than ignore the bound.
+        eprintln!("ordeal: --timeout-ms is not available here ({e})");
+        std::process::exit(2);
+    }
+    rx.recv_timeout(std::time::Duration::from_millis(ms)).ok()
+}
+
+/// Print `unknown` for a solve the `--timeout-ms` bound stopped, in the
+/// shape the selected flags print an `unknown` verdict, then exit at once so
+/// the abandoned worker cannot print anything. Under `--cert-out` no file is
+/// written and the exit code is 1, as for any other `unknown`.
+fn timed_out(format: Format, cert_out: bool) -> ExitCode {
+    eprintln!("ordeal: --timeout-ms elapsed; the verdict is unknown");
+    match format {
+        Format::Text => println!("unknown"),
+        Format::Json => println!(
+            "{{\"tool\":\"ordeal\",\"version\":\"{}\",\"verdict\":\"unknown\"}}",
+            env!("CARGO_PKG_VERSION")
+        ),
+    }
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    std::process::exit(if cert_out { 1 } else { 0 });
 }
 
 /// `ordeal check FILE --cert-out PATH` (#316): solve with the term-carrying
@@ -215,14 +301,19 @@ fn run_check(args: &[String]) -> ExitCode {
 /// `unknown` (or a script with no `check-sat`) has nothing to certify: the
 /// verdict is still printed, no file is written, and the exit code is 1.
 fn run_check_with_bundle(
-    input: &str,
+    input: String,
     out: &str,
     format: Format,
     with_query: bool,
     with_term: bool,
+    timeout_ms: Option<u64>,
 ) -> ExitCode {
     use ordeal::TermCheckResult;
-    let (result, declared) = match smtlib::solve_str_with_term(input) {
+    let Some(solved) = solve_bounded(timeout_ms, move || smtlib::solve_str_with_term(&input))
+    else {
+        return timed_out(format, true);
+    };
+    let (result, declared) = match solved {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{e}");
@@ -792,6 +883,9 @@ fn banner() {
     println!("                             The --format json report is NOT a bundle and");
     println!("                             ordeal-recheck rejects it; an unknown verdict");
     println!("                             writes no file and exits 1");
+    println!("  --timeout-ms N             (check) give up after N milliseconds and");
+    println!("                             answer unknown (always sound); without it");
+    println!("                             the solve is unbounded");
     println!("  --with-term                (check, with --format json) as --with-query,");
     println!("                             plus the term the query was lowered from,");
     println!("                             re-checked against the query by the");
