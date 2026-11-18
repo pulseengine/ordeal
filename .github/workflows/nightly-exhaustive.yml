@@ -17,7 +17,7 @@ permissions:
 jobs:
   exhaustive:
     name: Exhaustive sweeps (ignored tests)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -39,7 +39,7 @@ jobs:
   # each in the blocking "SMT-LIB parser differential" job).
   parser-differential-1e5:
     name: SMT-LIB parser differential, 10^5 scripts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
