@@ -2327,7 +2327,7 @@ artifacts:
   - id: TR-081
     type: sw-req
     title: Performance and proof-size regression gate on real consumer queries (gale, synth, loom) with published budgets
-    status: implemented
+    status: verified
     release: v0.38.0
     description: "Consumers saw ordeal slow down with no ordeal gate noticing: synth's test job hung after the 0.9 to 0.12 upgrade (synth#1132), loom#353, and synth's I64Popcnt certification got about 17% slower from 0.31 to 0.32 (ordeal#308, the TR-070 trusted re-check). Requirement: crates/ordeal/tests/perf_corpus/ holds real queries taken from the consumers, each with provenance in manifest.json (repository, full commit SHA, source file or test, how it was produced, SHA-256 of the file; for API-path queries the consumer's own CNF and LRAT sizes when it was taken). budgets.json publishes a budget per query; the manifest and the budgets name the same queries in both directions and a run over zero queries fails. The gate asserts each query's expected verdict, re-checks every Unsat certificate and every Sat witness with the trusted crate, pins the CNF clause count and the LRAT byte and line counts exactly (deterministic), and holds release-build wall-clock time to max(5x measured, measured + 500 ms). A consumer with no real query (spar: no ordeal dependency on main) is declared uncovered; synthetic stand-ins are labelled and not counted as real. The #314 query is excluded (liveness, bounded by TR-093). Effect: confidence. It gates future regressions; it does not fix the synth or loom reports. Issue #283."
     tags: [perf, proof-size, regression-gate, consumer-corpus]
