@@ -84,21 +84,36 @@ conditions +3, proved conditions -3).
 
 ## Numbers
 
-Rows: 344 (286 when the gate landed; 58 for the printer `echo_kernel.rs`,
+Rows: 359 (286 when the gate landed; 58 for the printer `echo_kernel.rs`,
 #281, whose line is new, and which moved a few conditions of `kernel.rs` and
-`sliver_kernel.rs`). Before (the 5-row spike, same summariser; its `src/lib.rs` row also
+`sliver_kernel.rs`; 15 for the mux fold, #314, see below). Before (the 5-row spike, same summariser; its `src/lib.rs` row also
 contains the spike harness's own decisions, so treat that line as an upper
 bound): `kernel.rs` 17 decisions / 0 full / 23 gap conditions, `lib.rs` 8 / 0 /
 15, the other three files not reached at all. After:
 
 | file | decisions | not full MC/DC | gap conds | dead conds | proved conds |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `src/blast_kernel.rs` | 62 | 61 | 233 | 72 | 54 |
+| `src/blast_kernel.rs` | 67 | 66 | 246 | 74 | 61 |
 | `src/echo_kernel.rs` | 72 | 69 | 631 | 356 | 234 |
 | `src/kernel.rs` | 101 | 91 | 370 | 461 | 175 |
 | `src/lib.rs` | 9 | 6 | 15 | 2 | 16 |
 | `src/sliver_kernel.rs` | 46 | 42 | 171 | 29 | 38 |
 | `src/term_kernel.rs` | 39 | 35 | 144 | 5 | 68 |
+
+The `blast_kernel.rs` line was re-baselined with the mux fold (#314,
+TR-096; it was 62 / 61 / 233 / 72 / 54). The fold is new trusted code, so
+the gate went red on it by design: `mux_fold` adds four decisions and
+`compact_and`'s tail became a function of its own (`compact_gate`), five
+decisions more in all. The 15 new rows call `mux_fold` directly on a
+hand-built arena — both hits (shared operand stored first, stored second)
+and one miss per source-level condition (an operand not negated, out of
+range, a constant, an input; no shared operand; a shared operand whose
+partners are not complements, on either side) — and drive `compact` with
+the fold requested on every gate, so it is taken once and declined
+elsewhere. Proved conditions rose by 7; witness reports the two `match`
+decisions as `pppd` (the dead condition is the index bounds check behind
+the explicit range test) and the others as `no_witness`, as it does for
+61 of the 62 decisions the file had before.
 
 (`rollup.txt` uses witness's own per-file attribution and counts a few more
 or fewer decisions per file; the gate counts from `mcdc-json`, folding the

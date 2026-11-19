@@ -426,6 +426,26 @@ both. Every path lowers them as nodes since v0.28.0 (`DerivedOps::Nodes`
 in `solver.rs`; the old `lowering.rs` rewrite is kept only for the
 differential tests that compare it against the proven nodes).
 
+Since v0.38.0 (#314, TR-096) the trusted compaction has one more fold: a
+mux with equal arms, `g ? r : r`, is `r`. The restoring divider emits
+that mux for every remainder bit below the divisor's lowest set bit, and
+without the fold `bvudiv` / `bvurem` by a constant `2^k` did not finish
+at 128 bits; with it they are decided in milliseconds. The solver asks
+for the fold with a hint (`18446744073709551615`, `u64::MAX`, in
+`query.hints`) and the trusted crate checks the gate shape before it
+folds, so the hint stays untrusted advice. A block whose hints ask for it
+is tagged `"encoding": "ordeal-dag/v3"` with `recheck.min_version`
+`0.38.0`: a reader older than v0.38.0 has no such fold, would re-derive a
+different CNF, and refuses the block as unsupported rather than report a
+mismatch. A block the fold never fires on keeps its `ordeal-dag/v1` /
+`v2` tag, bytes and hash. Bundles written by v0.37.0 and earlier never
+carry the hint, so v0.38.0 re-derives exactly the CNF they carry and
+accepts them as before. What changes for you: the certificate of a query
+the fold fires on (35 % to 50 % of the random differential corpora; none
+of the bench corpora) has a smaller CNF and a different proof than v0.37.0
+wrote for the same query, so a pinned digest of such a certificate must
+be re-pinned.
+
 Since v0.29.0 (#192 phase 6, TR-065) the `sat` direction is symmetric on
 this path. `QueryCheckResult::Sat` carries a `QuerySatCertificate`: the
 v1 witness (`.witness`, exactly what the variant used to carry), the same

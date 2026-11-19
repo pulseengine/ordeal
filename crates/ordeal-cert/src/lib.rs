@@ -111,6 +111,23 @@ mod tests {
         assert_eq!(query::unwire_usize(u64::MAX), Some(query::NO_IMAGE));
         assert_eq!(query::wire_usize(7), 7);
         assert_eq!(query::unwire_usize(7), Some(7));
+        // #314: the same spelling carries the mux-fold hint, and a plain
+        // index never decodes to the sentinel. On a 32-bit target
+        // `4294967295` is `usize::MAX`; reading it as the sentinel would
+        // make that reader fold (or see "no image") where a 64-bit reader
+        // does not, so it is refused there and an ordinary index here.
+        assert_eq!(query::wire_usize(query::MUX_FOLD_HINT), u64::MAX);
+        assert_eq!(query::unwire_usize(u64::MAX), Some(query::MUX_FOLD_HINT));
+        let plain = u64::from(u32::MAX);
+        if usize::BITS == 32 {
+            assert_eq!(query::unwire_usize(plain), None);
+        } else {
+            assert_eq!(query::unwire_usize(plain), Some(plain as usize));
+        }
+        assert_eq!(
+            query::unwire_usize(u64::MAX - 1),
+            usize::try_from(u64::MAX - 1).ok()
+        );
         let t = QueryTerm {
             map: vec![0, query::NO_IMAGE],
             ..QueryTerm::default()

@@ -642,19 +642,19 @@ jobs:
           key: parser-differential
       - name: Install Z3
         run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
-      - name: Front leg (VER-087), echo leg (#281 E1) and trap-refinement leg (VER-082)
+      - name: Front leg (VER-087), echo leg (#281 E1), trap-refinement leg (VER-082) and mux-fold leg (VER-096)
         run: |
           set -euo pipefail
           z3 --version
-          out="$(cargo test -p ordeal --features oracle --release --lib -- oracle::front::tests oracle::echo::tests oracle::trap_refinement_oracle_tests --nocapture 2>&1)" \
+          out="$(cargo test -p ordeal --features oracle --release --lib -- oracle::front::tests oracle::echo::tests oracle::trap_refinement_oracle_tests mux_fold_differential_pow2_division_at_odd_widths v0_37_lowering_is_byte_identical_on_the_oracle_corpora --nocapture 2>&1)" \
             || { echo "$out"; exit 1; }
           # The tallies and the negative controls, printed on every run.
           echo "$out" | grep -E '^(front leg:|echo leg|echo size:|control |[0-9]+ (files|generated|sliver))|^  FAIL'
           echo "$out" | tail -3
-          # No vacuous pass: the filters must have matched all fifteen tests
-          # (five front-leg, five echo-leg, five trap-refinement).
-          echo "$out" | grep -q 'test result: ok. 15 passed' \
-            || { echo "::error::expected the 5 front-leg, 5 echo-leg and 5 trap-refinement tests to pass"; exit 1; }
+          # No vacuous pass: the filters must have matched all seventeen tests
+          # (five front-leg, five echo-leg, five trap-refinement, two #314 mux-fold).
+          echo "$out" | grep -q 'test result: ok. 17 passed' \
+            || { echo "::error::expected the 5 front-leg, 5 echo-leg, 5 trap-refinement and 2 mux-fold tests to pass"; exit 1; }
 
   # #283 / TR-081 / VER-095: the performance and proof-size regression gate
   # on real consumer queries (gale, synth, loom; spar has none to give and
@@ -706,7 +706,7 @@ jobs:
               || { echo "::error::planted control red for the wrong reason ($*)"; exit 1; }
           }
           planted 'synth/i64_shl: time' ORDEAL_PERF_GATE_ONLY=synth/i64_shl ORDEAL_PERF_GATE_SLOWDOWN=20
-          planted 'lrat_bytes 1268756 exceeds the budget 1268755 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
+          planted 'lrat_bytes 618086 exceeds the budget 618085 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
           echo "both planted controls are red"
 
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every

@@ -2018,3 +2018,100 @@ post-order, left-to-right walk with no semantic decision, which a
 consumer holding the assertions re-runs and compares by hash), the
 variable names, the sliver lowering (`sliver.rs`) and the SMT-LIB /
 Verus front ends. `docs/formal-verification.md` states the same list.
+
+## The mux fold (#314, TR-096, v0.38.0): the first change to the shipped CNF since phase 5
+
+Until v0.37.0 every phase above kept the production CNF byte-identical
+(or, in phase 5, renumbered it for the queries with `bvsdiv` / `bvsrem`).
+The mux fold is the first change that makes a CNF *smaller*: `compact_and`
+folds `!(g&r) & !(!g&r)` to `!r`, so `push_mux(g, r, r)` compacts to `r`.
+The solver asks for it with the hint `usize::MAX` (`dag::fold_hints`) and
+the trusted crate checks the gate shape (`mux_fold`); without the request
+`compact` is what it was.
+
+### How often it fires
+
+`cargo test -p ordeal --release --features oracle --lib mux_fold_fire_counts -- --ignored --nocapture`
+(2026-11-18). "fires" is the number of fold requests `fold_hints` makes,
+which does not depend on the kernel honouring them: on a kernel without
+the fold the same column is "would fire" and the two gate and clause
+columns are equal.
+
+| corpus | queries | queries the fold fires on | fires | ANDs v0.37 | ANDs | clauses v0.37 | clauses |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| benches/latency.rs corpus | 6 | 0 | 0 | 37446 | 37446 | 112352 | 112352 |
+| benches/bmc.rs corpus | 5 | 0 | 0 | 28641 | 28641 | 86344 | 86344 |
+| the tracked `.smt2` files the reader accepts with a `check-sat`, 24 of 27 (tests/fixtures, fixtures/differential, evidence/certs, fuzz/seeds/smtlib) | 24 | 0 | 0 | 13860 | 13860 | 41640 | 41640 |
+| `oracle::gen_corpus(0x192, 200)` | 200 | 100 | 3658 | 3423916 | 3420209 | 10272352 | 10261231 |
+| `oracle::gen_corpus(0xC0FFEE, 1000)` | 1000 | 470 | 11228 | 11371489 | 11359731 | 34117473 | 34082199 |
+| `oracle::gen_corpus(0xC0FF_EE00_5EED_0001, 300)` (the Z3 differential) | 300 | 106 | 2298 | 3190278 | 3187874 | 9571710 | 9564498 |
+| `oracle::gen_sliver_corpus(0x5111_5EED_A55A_0001, 300)`, lowered | 300 | 17 | 117 | 4044413 | 4043552 | 12199323 | 12196740 |
+| `oracle::gen_sliver_lifted_corpus(0x5111_0231_11FE_0001, 300)`, lowered | 300 | 65 | 447 | 2833699 | 2832942 | 8533185 | 8530914 |
+| #314 sweep: `udiv` / `urem` by `2^k`, `w` in 8..128, `k` in {1, w/2, w−1} | 30 | 30 | 11884 | 40600 | 23768 | 121860 | 71364 |
+
+On the random bit-vector corpora the fold fires on 35 % to 50 % of the
+queries, on the lowered sliver corpora on 6 % and 22 %, and it removes
+0.02 % to 0.1 % of the gates. On the #314 shape it removes 41 %. For a divisor `2^k` at width `w` it fires exactly
+`k·(w−k)` times: 4096 at `w = 128, k = 64`.
+
+### The digests
+
+`cnf_gap_digest` now prints each corpus under both lowerings. The v0.37.0
+lowering (`AigOptions::V0_37`) reproduces every digest recorded above;
+`v0_37_lowering_is_byte_identical_on_the_bench_corpora` and
+`…_on_the_oracle_corpora` pin them as tests.
+
+| corpus | v0.37.0 lowering (unchanged since phase 5) | production lowering since v0.38.0 |
+|---|---|---|
+| benches/latency.rs | `7b35d569f722f36db0200c2ab541b6e82fb156ff4ccbb4fefc208d52118e1e84` | the same |
+| benches/bmc.rs | `5c14a69e452c4fbfb736c98dade24c06547968e06ec853194e8262a9e26826b5` | the same |
+| `gen_corpus(0x192, 200)` | `a1d80de907c207a589d7fd1bb7b4a2d7751764776d85d75e6184d43e64e52597` (10272352 clauses) | `9a6378122e5a27658df578453f939c4c33afe42eda1021c8873ff1f73faaf3fc` (10261231 clauses) |
+| `gen_corpus(0xC0FFEE, 1000)` | `42d44115dec319b317cf34e64494b33f29404653a5cbabd4c8334c2b27570f7c` (34117473 clauses) | `ebf61d2b52db9b2fe879f9fd12de4f431ab90f2ccc89138b341669c7ba08cd02` (34082199 clauses) |
+
+### What it buys
+
+`cargo test -p ordeal --release --test issue314 timings -- --ignored --nocapture`,
+`U314_DEADLINE_MS=60000`, macOS arm64, `nice -n 19`, 2026-11-18. "search"
+is the built-in SAT core alone; "certified decision" is
+`check_with_term`: lowering, search, proof, every trusted gate.
+
+| query | clauses v0.37 | search v0.37 | fires | clauses | search | certified decision |
+|---|---:|---:|---:|---:|---:|---:|
+| udiv w=128 k=64 (#314) | 37619 | deadline (60 s) | 4096 | 24578 | 0.5 ms | 8.7 ms |
+| urem w=128 k=64 | 38744 | deadline (60 s) | 4096 | 24578 | 0.4 ms | 10.0 ms |
+| udiv w=128 k=1 | 2654 | 4.5 ms | 127 | 764 | 0.1 ms | 4.2 ms |
+| urem w=128 k=1 | 4913 | 20.6 ms | 127 | 764 | 0.0 ms | 7.0 ms |
+| udiv w=128 k=127 | 1145 | 0.4 ms | 127 | 764 | 0.0 ms | 4.4 ms |
+| urem w=128 k=127 | 1145 | 0.0 ms | 127 | 764 | 0.0 ms | 7.0 ms |
+| udiv w=64 k=32 | 9587 | deadline (60 s) | 1024 | 6146 | 0.1 ms | 1.4 ms |
+| urem w=64 k=32 | 10136 | deadline (60 s) | 1024 | 6146 | 0.1 ms | 1.9 ms |
+| udiv w=64 k=7 | 4262 | 40.1 ms | 399 | 2396 | 0.2 ms | 1.2 ms |
+| urem w=64 k=7 | 5261 | 38.1 ms | 399 | 2396 | 0.1 ms | 1.6 ms |
+| udiv w=32 k=16 | 2483 | 71.1 ms | 256 | 1538 | 0.1 ms | 0.4 ms |
+| urem w=32 k=16 | 2744 | 1274.7 ms | 256 | 1538 | 0.0 ms | 0.5 ms |
+| udiv w=24 k=11 | 1430 | 11.1 ms | 143 | 860 | 0.0 ms | 0.2 ms |
+| urem w=24 k=11 | 1637 | 51.7 ms | 143 | 860 | 0.0 ms | 0.3 ms |
+| udiv w=16 k=8 | 659 | 0.8 ms | 64 | 386 | 0.0 ms | 0.1 ms |
+| urem w=16 k=8 | 776 | 0.9 ms | 64 | 386 | 0.0 ms | 0.1 ms |
+
+(The remaining rows of the table — widths 3, 5, 8, 12 and `k = w−1` — are
+all below 0.3 ms on both sides.) With the fold the refutation of the #314
+query needs no search: unit propagation over the 24578 clauses derives
+the empty clause, and the LRAT proof is the one step `24579 0 1 24578 0`.
+
+### Old certificates
+
+A hint list without the request is compacted exactly as before, so a
+certificate written up to v0.37.0 re-derives the CNF it carries. Two
+bundles written by the published v0.37.0 binary (the `ordeal` of
+`ordeal-v0.37.0-aarch64-apple-darwin.tar.gz`, sha256 `3a5f3573…` as in
+the release's `SHA256SUMS.txt`) are committed
+(`crates/ordeal/tests/fixtures/issue314/*.v0.37.0.cert.json`) and
+accepted by this build's `ordeal-recheck` in the test suite; the v0.37.0
+`ordeal-recheck` refuses a v0.38.0 bundle of a query the fold fired on
+with `unsupported by this reader: query encoding ordeal-dag/v3`. What the
+tag prevents is reproduced in
+`v3_tag_marks_the_mux_fold_and_older_tags_must_not_carry_it`: the same
+bundle with the requests taken out of the hints fails the recheck,
+because the CNF re-derived without the fold is not the one the proof
+refutes.

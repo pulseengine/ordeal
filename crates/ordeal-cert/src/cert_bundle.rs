@@ -31,7 +31,7 @@
 
 use crate::certificate::{Certificate, Model};
 use crate::query::{
-    QUERY_ENCODING, QUERY_ENCODING_V2, QueryCertificate, QueryDag, QueryInputs,
+    QUERY_ENCODING, QUERY_ENCODING_V2, QUERY_ENCODING_V3, QueryCertificate, QueryDag, QueryInputs,
     QueryModelRecheckError, QueryRecheckError, QuerySatCertificate, QueryTerm, TERM_ENCODING,
     TermCertificate, TermModelRecheckError, TermRecheckError, TermSatCertificate, bits_from_string,
     bits_string, encoding_supported, node_from_op, node_op,
@@ -252,6 +252,10 @@ struct QueryBlock {
     /// The constant table as a `0`/`1` string.
     bits: String,
     roots: Vec<usize>,
+    /// The compaction hints. In the portable spelling since v0.38.0: a
+    /// hint may be [`crate::query::MUX_FOLD_HINT`] (`u64::MAX` on every
+    /// target). Identical bytes for every hint list without it.
+    #[serde(with = "wire_indices")]
     hints: Vec<usize>,
     /// `sha256` of `QueryDag::canonical_text`.
     sha256: String,
@@ -369,6 +373,16 @@ fn query_from_block(block: QueryBlock) -> Result<QueryDag, BundleError> {
             QUERY_ENCODING, QUERY_ENCODING_V2
         )));
     }
+    // A block tagged `ordeal-dag/v1` or `/v2` must not ask for the mux
+    // fold (#314): those tags name the lowering without it, which is how
+    // every bundle written up to v0.37.0 is re-derived. This reader
+    // refuses the lie about the tag instead of re-deriving another CNF.
+    if block.encoding != QUERY_ENCODING_V3 && query.has_mux_fold() {
+        return Err(BundleError::Malformed(format!(
+            "query encoding {} carries a mux-fold hint ({} is required)",
+            block.encoding, QUERY_ENCODING_V3
+        )));
+    }
     // The hash covers the DECLARED tag.
     if query.sha256_tagged(&block.encoding) != block.sha256 {
         return Err(BundleError::HashMismatch("query"));
@@ -428,7 +442,9 @@ impl QueryCertificate {
             recheck: RecheckBlockV2 {
                 tool: "ordeal-lrat".into(),
                 // A derived-op node needs the phase-5 `check_query`.
-                min_version: if q.has_derived() { "0.28.0" } else { "0.27.0" }.into(),
+                min_version: q
+                    .min_reader_version(if q.has_derived() { "0.28.0" } else { "0.27.0" })
+                    .into(),
                 cmd: "ordeal_lrat::check_query(query.nodes, query.bits, query.roots, \
                       query.hints, proof.body) == Ok(problem.clauses)"
                     .into(),
@@ -841,7 +857,7 @@ impl QuerySatCertificate {
             },
             recheck: SatWitnessRecheck {
                 tool: "ordeal-lrat".into(),
-                min_version: "0.29.0".into(),
+                min_version: self.query.min_reader_version("0.29.0").into(),
                 cmd: "ordeal_lrat::check_sat(problem, witness.assignment) + \
                       ordeal_lrat::check_binding per model binding + \
                       ordeal_lrat::check_query_model(query.nodes, query.bits, query.roots, \
@@ -1136,7 +1152,7 @@ impl TermCertificate {
             term: term_to_block(&self.term),
             recheck: RecheckBlockV2 {
                 tool: "ordeal-lrat".into(),
-                min_version: V3_MIN_VERSION.into(),
+                min_version: self.query.query.min_reader_version(V3_MIN_VERSION).into(),
                 cmd: V3_UNSAT_CMD.into(),
                 problem_sha256: sha256_hex(problem_text.as_bytes()),
                 proof_sha256: sha256_hex(proof_text.as_bytes()),
@@ -1335,7 +1351,7 @@ impl TermSatCertificate {
             term: term_to_block(&self.term),
             recheck: SatWitnessRecheck {
                 tool: "ordeal-lrat".into(),
-                min_version: V3_MIN_VERSION.into(),
+                min_version: self.query.query.min_reader_version(V3_MIN_VERSION).into(),
                 cmd: "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
                       query.nodes, query.bits, query.roots) == Ok(()) + \
                       ordeal_lrat::check_sat(problem, witness.assignment) + \
@@ -1712,7 +1728,12 @@ impl SliverCertificate {
             ext: ext_to_block(&self.sliver),
             recheck: RecheckBlockV2 {
                 tool: "ordeal-lrat".into(),
-                min_version: V4_MIN_VERSION.into(),
+                min_version: self
+                    .term
+                    .query
+                    .query
+                    .min_reader_version(V4_MIN_VERSION)
+                    .into(),
                 cmd: V4_UNSAT_CMD.into(),
                 problem_sha256: sha256_hex(problem_text.as_bytes()),
                 proof_sha256: sha256_hex(proof_text.as_bytes()),
@@ -1900,7 +1921,12 @@ impl SliverSatCertificate {
             ext_model: ext_model_to_block(&self.model),
             recheck: SatWitnessRecheck {
                 tool: "ordeal-lrat".into(),
-                min_version: V4_MIN_VERSION.into(),
+                min_version: self
+                    .term
+                    .query
+                    .query
+                    .min_reader_version(V4_MIN_VERSION)
+                    .into(),
                 cmd:
                     "ordeal_lrat::check_sliver_lowering(ext.nodes, ext.bits, ext.side, ext.roots, \
                       ext.map, ext.reads, ext.calls, ext.cargs, term.nodes, term.bits, term.roots) \

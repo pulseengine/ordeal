@@ -397,7 +397,7 @@ fn unsat_bundle_v3(cert: &ordeal::TermCertificate) -> String {
     let problem = dimacs_text(&c.cnf);
     let proof = c.lrat_text().unwrap_or_default();
     format!(
-        "{},\"problem\":{},\"proof\":{{\"encoding\":\"lrat\",\"body\":\"{}\"}},\"query\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"0.31.0\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\",\"proof_sha256\":\"{}\"}}}}\n",
+        "{},\"problem\":{},\"proof\":{{\"encoding\":\"lrat\",\"body\":\"{}\"}},\"query\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"{}\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\",\"proof_sha256\":\"{}\"}}}}\n",
         bundle_head(
             "unsat",
             "qf_bv_validity",
@@ -407,6 +407,7 @@ fn unsat_bundle_v3(cert: &ordeal::TermCertificate) -> String {
         json_escape(proof),
         query_json(&cert.query.query),
         term_json(&cert.term),
+        cert.query.query.min_reader_version("0.31.0"),
         json_escape(
             "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
              query.nodes, query.bits, query.roots) == Ok(()) && \
@@ -441,7 +442,7 @@ fn sat_bundle_v3(cert: &ordeal::TermSatCertificate) -> String {
         })
         .collect();
     format!(
-        "{},\"problem\":{},\"model\":{{\"encoding\":\"assignments\",\"assignments\":[{}]}},\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}},\"query\":{},\"inputs\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"0.31.0\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\"}}}}\n",
+        "{},\"problem\":{},\"model\":{{\"encoding\":\"assignments\",\"assignments\":[{}]}},\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}},\"query\":{},\"inputs\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"{}\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\"}}}}\n",
         bundle_head(
             "sat",
             "qf_bv_validity",
@@ -457,6 +458,7 @@ fn sat_bundle_v3(cert: &ordeal::TermSatCertificate) -> String {
         query_json(&cert.query.query),
         inputs_json(&cert.query.inputs),
         term_json(&cert.term),
+        cert.query.query.min_reader_version("0.31.0"),
         json_escape(
             "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
              query.nodes, query.bits, query.roots) == Ok(()) + \
@@ -499,7 +501,13 @@ fn query_json(q: &QueryDag) -> String {
         nodes.join(","),
         ordeal::query::bits_string(&q.bits),
         list(&q.roots),
-        list(&q.hints),
+        // `wire_usize`: the mux-fold hint (#314) is `u64::MAX` on every
+        // target, as the bundle codec spells it.
+        q.hints
+            .iter()
+            .map(|&x| ordeal::query::wire_usize(x).to_string())
+            .collect::<Vec<_>>()
+            .join(","),
         q.sha256()
     )
 }

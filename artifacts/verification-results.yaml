@@ -3604,3 +3604,31 @@ artifacts:
         target: VER-095
       - type: part-of-execution
         target: VE-077
+
+  - id: VE-078
+    type: verification-execution
+    title: "Mux-fold run (VER-096): regression and control, differentials, Lean build over the regenerated model, planted controls, old-bundle re-check"
+    status: implemented
+    description: "Local run on branch feat/314-mux-fold (base origin/main 2629ed5), tree = 069abef plus the bounded regression test and the measurement record of the following commit. Gates, each with its exit code: cargo fmt --all --check 0; cargo clippy --all-targets -D warnings 0, and with --features 'oracle cadical cert-bundle' 0; cargo test -p ordeal --no-fail-fast 0 (lib 295 passed, 5 ignored; cli_baseline 14, cli_cert_out 7, cli_term 3, cli_timeout 7, issue314 4 passed 1 ignored, sha256_differential 2); cargo test -p ordeal-lrat 0 (58 passed); cargo test --workspace --no-fail-fast 0; LIBRARY_PATH=/opt/homebrew/lib cargo test --all --features 'oracle cadical cert-bundle' --release --no-fail-fast 0 (lib 372 passed, 7 ignored; mux_fold_differential_pow2_division_at_odd_widths: 500 queries at widths 3/5/12/24, 80 unsat, 420 sat, 29108 folds, 0 disagreements with Z3; the 0x192/200 and 0xC0FFEE/1000 corpora re-derive the recorded v0.37.0 digests a1d80de9 and 42d44115 under AigOptions::V0_37). Lean: lean/Kernel.lean regenerated from the kernel sources with the Charon/Aeneas release binaries of the local bundle directory, using the two commands of lean/regen.sh (the nix build of the pinned revisions was started and stopped, see the note); on the unmodified sources those binaries reproduce the reference model byte for byte (sha256 3ae61410), the model of this tree is sha256 55e3db50 and a second regeneration from the final sources is byte-identical to it; grep -c '^axiom' lean/Kernel.lean 0 before and 0 after; lake build (all default targets, 1736 jobs) exit 0 on the first build over the new model and on the final re-run; scripts/axiom_check.sh 0; the CI sorry guard over the 21 tracked proof files: every lake env lean exit 0, 0 sorry-bearing declarations (0 before). Timings, release build, U314_DEADLINE_MS=60000: udiv w=128 k=64 (#314) search under the v0.37.0 lowering hits the 60 s deadline (37619 clauses), with the fold 4096 fires, 24578 clauses, search 0.5 ms, certified decision 8.7 ms; urem 128/64 deadline -> 10.0 ms; udiv and urem 64/32 deadline -> 1.4 and 1.9 ms; urem 32/16 1274.7 ms -> 0.5 ms; every other measured width/k below 0.3 ms after. Fire counts: 0 on the latency, BMC and tracked .smt2 corpora; 100 of 200, 470 of 1000 and 106 of 300 queries of the oracle corpora (3658, 11228, 2298 fires); 4096 on #314. Planted controls, tree restored after each: (A) compact_and declines every fold request: pow2_division_is_certified_unsat_inside_the_bound fails with 'udiv w=128 k=64: not decided inside 20s (took 20.02510275s): Unknown', without_the_fold_the_search_runs_into_the_deadline, a_v0_37_bundle_still_rechecks_and_a_new_one_is_tagged_v3 and mux_fold_carries_every_node_value_at_odd_widths fail too; (B) mux_fold returns r instead of !r: mux_fold_carries_every_node_value_at_odd_widths fails ('w=3 d=2 urem=false: raw node 71 under inputs 0b0'), differential_ordeal_vs_z3_on_corpus, mux_fold_differential_pow2_division_at_odd_widths and both issue314 verdict tests fail, and in a scratch clone of lean/ over the regenerated mutant model lake build BlasterCompact exits 1; (B') mux_fold returns !a1 where !a0 is right: lake build BlasterCompact exits 1 with 'has type MFPost out rx ry (true, !a0) but is expected to have type MFPost out rx ry (true, !a1)' once the script follows the mutant. Old bundles: the two fixtures written by the published v0.37.0 aarch64-apple-darwin binary are accepted by this build's ordeal-recheck, native and wasm32-wasip2 under wasmtime 42.0.1 with byte-identical JSON over five bundles (3 new, 2 old; accepted 5); the v0.37.0 ordeal-recheck answers 'unsupported by this reader: query encoding ordeal-dag/v3' on the new ones. MC/DC: 15 new rows, harness native test 0, scripts/mcdc_gate.sh 0 against the re-pinned blast_kernel.rs line (67 decisions, 66 not full, gap 246, dead 74, proved 61; was 62/61/233/72/54). python3 scripts/claim_check.py 67/67; scripts/check_verification_citations.sh PASS (105 legs, 24 feature legs skipped in the default run). Kani: no harness in crates/ordeal/src/blast/proofs.rs covers compact or compact_and (they target the blast rules on the raw arena), so none was run. Note: lean/regen.sh itself was not completed; its nix build began rebuilding Charon from source in the nix store on the system volume and was stopped, and the store paths it had added were deleted again."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Lean 4.30.0-rc2, Z3 from Homebrew (LIBRARY_PATH=/opt/homebrew/lib), witness 0.45.0, wasmtime 42.0.1, nice -n 19
+      executor: local
+      timestamp: 2026-11-18 12:27:49+00:00
+      version: 069abef + working tree (feat/314-mux-fold)
+    links:
+      - type: traces-to
+        target: TR-096
+
+  - id: VV-156
+    type: verification-verdict
+    title: "VER-096 pass: the mux fold decides udiv/urem by 2^k inside the bound, is proven, agrees with Z3, and v0.37.0 bundles still re-check; controls red"
+    status: implemented
+    description: Verdict of VE-078 for VER-096.
+    fields:
+      evidence: "VE-078: issue314 4 passed (28 certified decisions inside the 20 s bound, control without the fold hits the deadline, 0 wrong verdicts at widths 3/5/12/24, v0.37.0 bundles accepted); dag and solver pins pass; oracle suite 372 passed with 0 disagreements over 500 targeted and 1500 corpus queries; lake build exit 0 on the regenerated model with 0 axioms and 0 sorry; a disabled fold and two wrong folds each turn the named tests or the proof red"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-096
+      - type: part-of-execution
+        target: VE-078
