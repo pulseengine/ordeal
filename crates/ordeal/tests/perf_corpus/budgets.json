@@ -113,22 +113,22 @@
       "time_ms": 600
     },
     "synth/i64_shl": {
-      "cnf_clauses": 12962,
-      "lrat_bytes": 1824099,
-      "lrat_lines": 4329,
+      "cnf_clauses": 11240,
+      "lrat_bytes": 970528,
+      "lrat_lines": 2935,
       "measured_ms": 314.2,
       "time_ms": 1600
     },
     "synth/i64_rotl": {
-      "cnf_clauses": 22367,
-      "lrat_bytes": 2825605,
-      "lrat_lines": 6568,
+      "cnf_clauses": 21797,
+      "lrat_bytes": 2511154,
+      "lrat_lines": 5725,
       "measured_ms": 743.7,
       "time_ms": 3800
     },
     "synth/i64_ctz": {
-      "cnf_clauses": 4568,
-      "lrat_bytes": 166215,
+      "cnf_clauses": 4553,
+      "lrat_bytes": 161740,
       "lrat_lines": 65,
       "measured_ms": 572.3,
       "time_ms": 2900
@@ -141,9 +141,9 @@
       "time_ms": 29300
     },
     "loom/optimize_quicksort": {
-      "cnf_clauses": 17739,
-      "lrat_bytes": 1268755,
-      "lrat_lines": 2187,
+      "cnf_clauses": 13563,
+      "lrat_bytes": 618085,
+      "lrat_lines": 835,
       "measured_ms": 113.3,
       "time_ms": 700
     },
@@ -162,7 +162,7 @@
       "time_ms": 600
     },
     "loom/slice4_memory_budget": {
-      "cnf_clauses": 72794,
+      "cnf_clauses": 72722,
       "lrat_bytes": 18,
       "lrat_lines": 1,
       "measured_ms": 19.6,

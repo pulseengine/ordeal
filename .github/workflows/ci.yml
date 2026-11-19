@@ -706,7 +706,7 @@ jobs:
               || { echo "::error::planted control red for the wrong reason ($*)"; exit 1; }
           }
           planted 'synth/i64_shl: time' ORDEAL_PERF_GATE_ONLY=synth/i64_shl ORDEAL_PERF_GATE_SLOWDOWN=20
-          planted 'lrat_bytes 1268756 exceeds the budget 1268755 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
+          planted 'lrat_bytes 618086 exceeds the budget 618085 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
           echo "both planted controls are red"
 
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
