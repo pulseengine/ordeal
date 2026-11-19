@@ -128,6 +128,20 @@ query.cert.json: accepted (ordeal-cert/v3, unsat)
 
 An `unknown` verdict has nothing to certify: no file is written and the exit code is 1.
 
+With `--echo` as well, the bundle is `ordeal-cert/v5`: the v3 bundle plus the certified echo, the query as ordeal
+read it, printed back as SMT-LIB by the proven printer in the trusted crate. `ordeal-recheck` prints it again from
+the bundle's term and requires the same bytes. A quoted symbol is named by its content (`|a b|` is the name `a b`,
+SMT-LIB 2.6 §3.1) and echoed quoted. If the printer refuses the term (an empty name `||`, a byte outside printable
+ASCII), the bundle is v3 and stderr says why. `ordeal verus … --cert-out DIR --echo` writes such a bundle beside each
+`.lrat`.
+
+```sh
+$ ordeal check query.smt2 --cert-out query.cert.json --echo
+unsat
+$ ordeal-recheck query.cert.json
+query.cert.json: accepted (ordeal-cert/v5, unsat)
+```
+
 `--timeout-ms N` gives up after N milliseconds and answers `unknown`, which is always sound. Without it the
 search runs until it decides, and some queries take minutes or longer (#314). An unknown option is a usage
 error (exit 2).

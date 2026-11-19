@@ -24,6 +24,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `Solver::from_sliver`. Tests include loom-shaped worked examples
   with negative controls (a dropped trap, a wrong value, a signalling NaN)
   and a Z3 differential under `oracle` against an FP-theory spelling.
+- **`ordeal-cert/v5`: the certified query echo in the bundle** (TR-097,
+  #281 phase E2). `ordeal check FILE --cert-out PATH --echo` writes the
+  v3 bundle plus an `echo` block (`ordeal-echo/v1`: `logic`, `text`,
+  `sha256`): the SMT-LIB script the trusted printer (`echo_term`, proven
+  in v0.37.0) makes of the bundle's `term` block, that is, the query as
+  ordeal read it. `ordeal verus … --cert-out DIR --echo` writes such a
+  `<name>.cert.json` beside each `<name>.lrat`. `ordeal-recheck` accepts
+  `ordeal-cert/v5`: it runs the full v3 (or, with an `ext` block, v4)
+  recheck, then prints the block again with the trusted printer and
+  requires the bytes to equal `echo.text` (`echo_ext` for an extended
+  query); no SMT-LIB parser is involved. A changed echo byte is refused by
+  `echo.sha256`, and with the hash recomputed by the re-derivation. In the
+  API: `EchoCertificate` (`new`, `recheck`, `to_cert_v5`, `from_cert_v5`),
+  `QueryTerm::echo`, `SliverBlock::echo`. A printer refusal (an empty
+  name, a name with a byte outside 0x20–0x7E, a reserved name, a rotate by
+  a term amount) is not a verdict: the bundle is then written as v3 and
+  stderr says why. `recheck.min_version` is `0.38.0`; v1..v4 readers
+  refuse v5 by `format`. The echo is opt-in in this release: without
+  `--echo` the CLI writes the v3 bundle as before, and the API's
+  `to_cert_v1..v4` are unchanged. Comparing the echo with your own input
+  (`echo-check`) is #281's next phase (E3); until then the echo is text
+  the bundle commits to, not a check you have run.
 - `ordeal check --timeout-ms N` bounds the solve by wall-clock time; when it
   elapses the verdict is `unknown` in every output shape, and under
   `--cert-out` no file is written and the exit code is 1 (#314, TR-093). A
@@ -45,6 +67,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The SMT-LIB reader names a quoted symbol by its content** (TR-097,
+  #281 E2; owner decision 20261117T185255-a55cd4). SMT-LIB 2.6 §3.1:
+  `|x|` and `x` are one symbol when `x` is a simple symbol, and a quoted
+  symbol whose content is not a simple symbol is a symbol of its own.
+  v0.37.0 kept such a symbol with its bars (`|a b|` was the name `|a b|`);
+  it is now the name `a b`, as are `||` (the empty name), `|0v|`, `|v#0|`
+  and `|let|` (the symbol `let`, still refused as a declaration, #315).
+  A quoted symbol is never a literal, keyword, operator or reserved word,
+  and a bare token that is not a simple symbol (`0v`, `#x01`) is not a
+  name: declaring or using one is now refused (v0.37.0 accepted
+  `(declare-const 0v …)`; Z3 refuses it). Also newly refused, as SMT-LIB
+  excludes them: a quoted symbol holding `\` or a control character other
+  than tab, newline and carriage return, and a quoted command name in
+  command position (`(|assert| …)`). The printed model quotes a name that
+  needs it (`((|a b| #x07))`, as before). **Bundle bytes change only for
+  scripts that declare a quoted symbol whose content is not a simple
+  symbol:** for those, the variable names in the `term`, `query`,
+  `inputs`, `model` and `witness` blocks of every bundle format (and of
+  `--format json`) are the content, so those blocks' hashes and the
+  bundle differ from v0.37.0. A script whose symbols are all simple,
+  bare or quoted — every tracked `.smt2` file and the Verus obligations
+  in the repository (`%%location_label%%0` is simple) — keeps its bytes,
+  apart from the version strings. Bundles written by v0.37.0 and earlier
+  still re-check: a name is opaque to the recheck. With the content as
+  the name, the echo of the 10^4 generated scripts the parser
+  differential reads is refused for 0 of them (v0.37.0: 8490 refused for
+  the name).
 - A script with more than one `check-sat` (before `exit`) is refused with exit 2,
   `unsupported: more than one check-sat`, before anything is solved (#321,
   TR-094). Earlier releases decided every assertion once and printed one answer,

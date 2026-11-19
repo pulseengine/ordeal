@@ -21,17 +21,12 @@
 //!
 //! # Names
 //!
-//! The reader keeps a quoted symbol that is not a simple symbol with its
-//! bars (`|a b|`, `|0v|`, `|v#0|`; `smtlib::canonical_quoted`, #294), and
-//! that spelling is the name the flattener and the bundle carry. The
-//! printer refuses a name with a `|` in it, so on the production path a
-//! script with such a symbol is a printer refusal (`EchoError::Name`),
-//! listed here. To still put the printer's quoting in front of Z3, a
-//! script refused for that reason is echoed a second time with every name
-//! reduced to its content (the front leg's `rename_bool`: `|a b|` is the
-//! symbol `a b`), in a tally of its own. That second pass is not the
-//! production path: it shows what the printer prints for such names, not
-//! what ordeal emits today.
+//! The reader names a quoted symbol by its content (`|a b|` is the name
+//! `a b`, #281 E2), and the printer quotes every name, so the echo prints
+//! `|a b|` again and Z3 reads the same symbol. Until E2 the reader kept the
+//! bars of such a symbol and the printer refused the name (8490 of the
+//! 10^4 generated scripts); the leg now asserts that no generated script
+//! is refused for its names.
 //!
 //! For the sliver (`echo_ext`), there is no reader: the original is the
 //! [`ExtBoolTerm`] tree through [`super::ext_bool_to_z3`], flattened by
@@ -55,7 +50,7 @@
 //! Not trusted, not on any verdict path (`oracle.rs` header).
 
 use super::ext_bool_to_z3;
-use super::front::{CHECK_TIMEOUT_MS, Z3Reading, bool_links, rename_bool, z3_read};
+use super::front::{CHECK_TIMEOUT_MS, Z3Reading, bool_links, z3_read};
 use crate::sliver::ExtBoolTerm;
 use crate::smtlib;
 use crate::term::BoolTerm;
@@ -249,17 +244,7 @@ fn classify(originals: &[Bool], links: &[Bool], echoed: Echoed, post: Option<Pos
     result(EchoClass::Agree, originals.len(), String::new())
 }
 
-/// How the reading's names reach the flattener.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Names {
-    /// As the reader spells them: the production path.
-    AsRead,
-    /// Reduced to the symbol's content (`|a b|` to `a b`): not the
-    /// production path, see the module docs.
-    Content,
-}
-
-fn echo_leg_with(script: &str, names: Names, post: Option<Post>) -> EchoResult {
+fn echo_leg_with(script: &str, post: Option<Post>) -> EchoResult {
     let (originals, reading) = match (z3_read(script), smtlib::read_script(script)) {
         (Z3Reading::Accepted(a), Ok(r)) => (a, r),
         (Z3Reading::Refused(z), _) => {
@@ -277,13 +262,7 @@ fn echo_leg_with(script: &str, names: Names, post: Option<Post>) -> EchoResult {
             );
         }
     };
-    let echoed = match names {
-        Names::AsRead => echo_core(&reading.assertions),
-        Names::Content => {
-            let renamed: Vec<BoolTerm> = reading.assertions.iter().map(rename_bool).collect();
-            echo_core(&renamed)
-        }
-    };
+    let echoed = echo_core(&reading.assertions);
     let sizes = match &echoed {
         Echoed::Text(t) => Some((script.len(), t.len())),
         _ => None,
@@ -294,14 +273,9 @@ fn echo_leg_with(script: &str, names: Names, post: Option<Post>) -> EchoResult {
 }
 
 /// Run the echo leg on one SMT-LIB script (`echo_term`), the names as the
-/// reader spells them.
+/// reader stores them (the production path).
 pub fn echo_leg(script: &str) -> EchoResult {
-    echo_leg_with(script, Names::AsRead, None)
-}
-
-/// [`echo_leg`] with every name reduced to its content.
-pub fn echo_leg_content_names(script: &str) -> EchoResult {
-    echo_leg_with(script, Names::Content, None)
+    echo_leg_with(script, None)
 }
 
 fn echo_leg_sliver_with(assertions: &[ExtBoolTerm], post: Option<Post>) -> EchoResult {
@@ -465,44 +439,13 @@ impl EchoTally {
     }
 }
 
-/// The two tallies of a run over SMT-LIB scripts.
-#[derive(Default, Debug)]
-pub struct EchoRun {
-    /// Every script, the names as the reader spells them (production).
-    pub as_read: EchoTally,
-    /// The scripts `as_read` lists as refused for a name, echoed again
-    /// with the names reduced to their content.
-    pub content: EchoTally,
-}
-
-impl EchoRun {
-    /// Both tallies, the production one first.
-    pub fn report(&self) -> String {
-        format!(
-            "{}\n{}",
-            self.as_read.report(),
-            self.content.report_as("echo leg, content names")
-        )
-    }
-
-    /// Whether the run passes: the production path compared something, and
-    /// neither pass failed.
-    pub fn passes(&self) -> bool {
-        self.as_read.passes() && self.content.failures.is_empty()
-    }
-}
-
 /// Run the echo leg over labelled scripts.
-pub fn run_echo_leg<'a>(scripts: impl IntoIterator<Item = (String, &'a str)>) -> EchoRun {
-    let mut run = EchoRun::default();
+pub fn run_echo_leg<'a>(scripts: impl IntoIterator<Item = (String, &'a str)>) -> EchoTally {
+    let mut tally = EchoTally::default();
     for (label, script) in scripts {
-        let r = echo_leg(script);
-        run.as_read.record(&label, &r);
-        if r.class == EchoClass::PrinterRefuses(EchoError::Name) {
-            run.content.record(&label, &echo_leg_content_names(script));
-        }
+        tally.record(&label, &echo_leg(script));
     }
-    run
+    tally
 }
 
 #[cfg(test)]
@@ -584,11 +527,12 @@ mod tests {
             run.report()
         );
         assert!(run.passes(), "{}", run.report());
-        let (prod, content) = (&run.as_read, &run.content);
         // The generator emits only scripts the reader reads, except the
         // marked reserved-word declarations (#315), which it refuses and so
-        // are not echoed; the production path either compares every other
-        // script or refuses it for a name the reader kept with its bars...
+        // are not echoed. Every other script is printed and compared: the
+        // reader names a quoted symbol by its content and the printer
+        // quotes it, so no script is refused for a name (#281 E2; 8490
+        // were while the reader kept the bars).
         let reserved = scripts
             .iter()
             .filter(|s| s.contains(crate::oracle::front::RESERVED_DECL_MARK))
@@ -597,35 +541,26 @@ mod tests {
             reserved > 0,
             "the generator emitted no reserved-word declaration"
         );
-        assert_eq!(prod.not_echoed, reserved, "{}", run.report());
-        assert_eq!(
-            prod.compared() + prod.refused() + reserved,
-            n,
-            "{}",
-            run.report()
+        // Not vacuous: most scripts quote a symbol that is not simple.
+        let quoting = scripts
+            .iter()
+            .filter(|s| !s.contains(crate::oracle::front::RESERVED_DECL_MARK))
+            .filter(|s| s.contains("|v ") || s.contains("|v#"))
+            .count();
+        assert!(
+            quoting * 2 > n,
+            "only {quoting} scripts quote a non-simple symbol"
         );
-        assert_eq!(
-            prod.refused(),
-            prod.printer_refuses.get("Name").copied().unwrap_or(0),
-            "{}",
-            run.report()
+        eprintln!(
+            "echo names: {quoting} of {n} scripts quote a non-simple symbol, {} refused",
+            run.refused()
         );
-        // ...and with the names reduced to their content every one of
-        // those is printed and compared: no script is left unread.
-        assert_eq!(
-            content.refused() + content.not_echoed,
-            0,
-            "{}",
-            run.report()
-        );
-        assert_eq!(
-            prod.compared() + content.compared() + reserved,
-            n,
-            "{}",
-            run.report()
-        );
+        assert_eq!(run.not_echoed, reserved, "{}", run.report());
+        assert_eq!(run.refused(), 0, "{}", run.report());
+        assert_eq!(run.compared() + reserved, n, "{}", run.report());
     }
 
+    // rivet: verifies VER-097
     // rivet: verifies VER-079
     #[test]
     fn echo_leg_agrees_on_generated_scripts() {
@@ -665,17 +600,6 @@ mod tests {
         assert!(tally.compared() * 2 > corpus.len(), "{}", tally.report());
     }
 
-    /// The leg as the controls run it: the production names, and the
-    /// content names where the printer refused the production ones.
-    fn echo_leg_either(script: &str, post: Option<Post>) -> EchoResult {
-        let r = echo_leg_with(script, Names::AsRead, post);
-        if r.class == EchoClass::PrinterRefuses(EchoError::Name) {
-            echo_leg_with(script, Names::Content, post)
-        } else {
-            r
-        }
-    }
-
     /// Each echo negative control turns the leg red, and the same queries
     /// agree without it.
     // rivet: verifies VER-079
@@ -691,7 +615,7 @@ mod tests {
             let mut tally = EchoTally::default();
             let mut red = Vec::new();
             for (i, s) in scripts.iter().enumerate() {
-                let r = echo_leg_either(s, Some(post));
+                let r = echo_leg_with(s, Some(post));
                 tally.record(&format!("gen#{i}"), &r);
                 if matches!(r.class, EchoClass::Disagree | EchoClass::Z3RefusesEcho) {
                     red.push(i);
@@ -708,7 +632,7 @@ mod tests {
             assert!(!tally.passes(), "control {name}: the run still passes");
             for i in red {
                 assert_eq!(
-                    echo_leg_either(&scripts[i], None).class,
+                    echo_leg(&scripts[i]).class,
                     EchoClass::Agree,
                     "gen#{i} is red without the control {name}"
                 );
@@ -728,6 +652,7 @@ mod tests {
     }
 
     /// One fixture per outcome class, for the harness itself.
+    // rivet: verifies VER-097
     // rivet: verifies VER-079
     #[test]
     fn echo_harness_classifies_one_fixture_per_outcome_class() {
@@ -737,32 +662,52 @@ mod tests {
         assert_eq!((r.class, r.compared), (EchoClass::Agree, 1), "{r:?}");
         assert!(r.sizes.is_some());
 
-        // A quoted symbol that is not simple keeps its bars in the reading:
-        // the printer refuses it as read, and prints its content.
+        // A quoted symbol that is not simple is read as its content and
+        // printed quoted again (#281 E2): echoed and compared, with `x`
+        // and `|x|` one name beside it.
         let quoted = "(declare-const |x y| (_ BitVec 8))(declare-const |p q| Bool)\
-                      (assert (=> |p q| (bvslt |x y| #x02)))(check-sat)";
+                      (declare-const x (_ BitVec 8))\
+                      (assert (=> |p q| (bvslt |x y| |x|)))(check-sat)";
         let r = echo_leg(quoted);
-        assert_eq!(r.class, EchoClass::PrinterRefuses(EchoError::Name), "{r:?}");
-        let r = echo_leg_content_names(quoted);
         assert_eq!((r.class, r.compared), (EchoClass::Agree, 1), "{r:?}");
+        let reading = smtlib::read_script(quoted).expect("reads");
+        let Echoed::Text(text) = echo_core(&reading.assertions) else {
+            panic!("not echoed")
+        };
+        let text = String::from_utf8(text).expect("ascii");
+        assert!(
+            text.contains("(declare-const |x y| (_ BitVec 8))"),
+            "{text}"
+        );
+        assert!(
+            text.contains("(declare-const |p q| (_ BitVec 1))"),
+            "{text}"
+        );
+        assert!(text.contains("(declare-const |x| (_ BitVec 8))"), "{text}");
         let run = run_echo_leg([("quoted".to_string(), quoted)]);
-        assert_eq!((run.as_read.refused(), run.content.agree), (1, 1));
-        assert!(!run.passes(), "the production path compared nothing");
+        assert!(run.passes() && run.refused() == 0, "{}", run.report());
+        // The empty symbol `||` reads (it is a symbol), and the printer
+        // refuses an empty name: listed, not a failure.
+        let empty = "(declare-const || (_ BitVec 8))(assert (= || #x01))(check-sat)";
+        assert_eq!(
+            echo_leg(empty).class,
+            EchoClass::PrinterRefuses(EchoError::Name)
+        );
 
         // disagree, with Z3's witness.
-        let r = echo_leg_with(agree, Names::AsRead, Some(swap_slt_sle));
+        let r = echo_leg_with(agree, Some(swap_slt_sle));
         assert_eq!(r.class, EchoClass::Disagree, "{r:?}");
         assert!(r.detail.contains("witness"), "{r:?}");
         // disagree: an assertion missing.
         let two = "(declare-const x (_ BitVec 8))(assert (bvult x #x02))\
                    (assert (bvult #x00 x))(check-sat)";
         assert_eq!(echo_leg(two).class, EchoClass::Agree);
-        let r = echo_leg_with(two, Names::AsRead, Some(drop_last_assert));
+        let r = echo_leg_with(two, Some(drop_last_assert));
         assert_eq!(r.class, EchoClass::Disagree, "{r:?}");
         assert!(r.detail.contains("assertion count"), "{r:?}");
 
         // Z3 refuses the echo: fails the run.
-        let r = echo_leg_with(agree, Names::AsRead, Some(|_| "(assert (= x".to_string()));
+        let r = echo_leg_with(agree, Some(|_| "(assert (= x".to_string()));
         assert_eq!(r.class, EchoClass::Z3RefusesEcho, "{r:?}");
         let mut t = EchoTally::default();
         t.record("garbled", &r);

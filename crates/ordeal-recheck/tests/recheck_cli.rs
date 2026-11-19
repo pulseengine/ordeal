@@ -3,7 +3,7 @@
 //!
 //! The bundles come from the REAL solver (`tests/corpus/mod.rs`, through
 //! `ordeal`'s public API — a dev-dependency, never in the binary's
-//! closure). Every `ordeal-cert/v1`..`v4` UNSAT and SAT bundle must be
+//! closure). Every `ordeal-cert/v1`..`v5` UNSAT and SAT bundle must be
 //! ACCEPTED (exit 0); each mutation — a flipped clause literal, a dropped
 //! LRAT line, a swapped term node — must be REJECTED (exit 1). The
 //! mutations are re-emitted through the `ordeal-cert` emitters, so every
@@ -15,8 +15,8 @@ mod corpus;
 
 use ordeal_cert::cert_bundle::{Attests, bundle_header};
 use ordeal_cert::{
-    Certificate, QueryCertificate, QuerySatCertificate, SatCertificate, SliverCertificate,
-    SliverSatCertificate, TermCertificate, TermSatCertificate,
+    Certificate, EchoCertificate, EchoSubject, QueryCertificate, QuerySatCertificate,
+    SatCertificate, SliverCertificate, SliverSatCertificate, TermCertificate, TermSatCertificate,
 };
 use ordeal_lrat::ExtNode;
 use ordeal_lrat::blast_kernel::DagNode;
@@ -134,6 +134,24 @@ fn swap_node(nodes: &mut [DagNode]) {
     panic!("no swappable node");
 }
 
+/// Flip one `#b` digit of a printed echo: the one-byte change a tampered
+/// echo makes.
+fn flip_echo_digit(text: &mut String) {
+    let at = text.find("#b").expect("a #b literal") + 2;
+    let flipped = if &text[at..=at] == "0" { "1" } else { "0" };
+    text.replace_range(at..=at, flipped);
+}
+
+/// The term node list of a v5 subject, to swap a node in.
+fn subject_term_nodes(s: &mut EchoSubject) -> &mut Vec<DagNode> {
+    match s {
+        EchoSubject::Unsat(c) => &mut c.term.nodes,
+        EchoSubject::UnsatExt(c) => &mut c.term.term.nodes,
+        EchoSubject::Sat(c) => &mut c.term.nodes,
+        EchoSubject::SatExt(c) => &mut c.term.term.nodes,
+    }
+}
+
 /// Every mutation of a bundle, each re-emitted with fresh hashes.
 fn mutations(json: &str) -> Vec<(&'static str, String)> {
     let a = attests();
@@ -242,13 +260,40 @@ fn mutations(json: &str) -> Vec<(&'static str, String)> {
             swap_node(&mut m.term.term.nodes);
             out.push(("swapped term node", m.to_cert_v4(&a)));
         }
+        ("ordeal-cert/v5", _) => {
+            // #281 E2: the echo is re-derived by the trusted printer, so a
+            // changed echo (its hash recomputed) or a changed term (every
+            // hash, the echo's included, recomputed or not) is rejected.
+            let c = EchoCertificate::from_cert_v5(json).unwrap().certificate;
+            let mut m = c.clone();
+            flip_echo_digit(&mut m.echo.text);
+            out.push(("flipped echo byte", m.to_cert_v5(&a)));
+            let mut m = c.clone();
+            m.echo.logic = if m.echo.logic == "QF_BV" {
+                "QF_AUFBV".into()
+            } else {
+                "QF_BV".into()
+            };
+            out.push(("wrong echo logic", m.to_cert_v5(&a)));
+            let mut m = c.clone();
+            swap_node(subject_term_nodes(&mut m.subject));
+            out.push(("swapped term node", m.to_cert_v5(&a)));
+            // The term node swapped AND the echo reprinted from it: the
+            // echo now matches the term, and the term check refuses.
+            let mut subject = c.subject;
+            swap_node(subject_term_nodes(&mut subject));
+            if let Ok(m) = EchoCertificate::new(subject) {
+                out.push(("swapped term node, echo reprinted", m.to_cert_v5(&a)));
+            }
+        }
         other => panic!("unexpected bundle kind {other:?}"),
     }
     out
 }
 
-/// Every v1..v4 UNSAT and SAT bundle the solver emits on the corpus is
+/// Every v1..v5 UNSAT and SAT bundle the solver emits on the corpus is
 /// accepted, one at a time and all together (exit 0).
+// rivet: verifies VER-097
 #[test]
 fn every_solver_bundle_is_accepted() {
     let dir = scratch("accept");
@@ -270,8 +315,8 @@ fn every_solver_bundle_is_accepted() {
         kinds.insert(bundle_header(&e.json).unwrap());
         files.push(p);
     }
-    // All eight (format, verdict) kinds are covered.
-    assert_eq!(kinds.len(), 8, "{kinds:?}");
+    // All ten (format, verdict) kinds are covered.
+    assert_eq!(kinds.len(), 10, "{kinds:?}");
     let (code, v) = run_json(&files);
     assert_eq!(code, 0, "{v}");
     assert_eq!(v["tool"], "ordeal-recheck");
@@ -287,6 +332,7 @@ fn every_solver_bundle_is_accepted() {
 /// node — of each bundle is rejected (exit 1) BY THE RECHECK: the hashes
 /// were recomputed, so the integrity check passes and the trusted check
 /// is what refuses.
+// rivet: verifies VER-097
 #[test]
 fn every_mutated_bundle_is_rejected_by_the_recheck() {
     let dir = scratch("mutate");
@@ -319,12 +365,17 @@ fn every_mutated_bundle_is_rejected_by_the_recheck() {
         "swapped query node",
         "swapped term node",
         "swapped ext node",
+        "flipped echo byte",
+        "wrong echo logic",
+        "swapped term node, echo reprinted",
     ] {
         assert!(labels.contains(l), "mutation '{l}' never applied");
     }
     // 4 widths x (v1: 2, v2: 3, v3: 3) UNSAT + 3 widths x (v1: 1, v2: 2,
-    // v3: 2) SAT + v4 (UNSAT 4, SAT 2): every mutant ran.
-    assert_eq!(n, 53, "mutant count");
+    // v3: 2) SAT + v4 (UNSAT 4, SAT 2) + 10 v5 bundles x 4 (echo byte,
+    // echo logic, term node, term node with the echo reprinted): every
+    // mutant ran.
+    assert_eq!(n, 93, "mutant count");
 }
 
 /// One bad bundle among good ones makes the whole run exit 1, and the
@@ -368,6 +419,27 @@ fn tampered_malformed_and_witnessless_bundles_are_rejected() {
     let tampered = write(&dir, "tampered.json", &j.to_string());
     let (code, v) = run_json(std::slice::from_ref(&tampered));
     assert_eq!(code, 1);
+    assert!(
+        v["results"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("content hash mismatch"),
+        "{v}"
+    );
+
+    // #281 E2: one byte of a v5 echo flipped, its hash NOT recomputed, is
+    // refused at decoding by `echo.sha256`.
+    let v5 = corpus
+        .iter()
+        .find(|e| e.name == "v5-unsat-w8.json")
+        .unwrap();
+    let mut j5: serde_json::Value = serde_json::from_str(&v5.json).unwrap();
+    let mut text = j5["echo"]["text"].as_str().unwrap().to_string();
+    flip_echo_digit(&mut text);
+    j5["echo"]["text"] = serde_json::json!(text);
+    let p = write(&dir, "v5-echo-tampered.json", &j5.to_string());
+    let (code, v) = run_json(std::slice::from_ref(&p));
+    assert_eq!(code, 1, "{v}");
     assert!(
         v["results"][0]["reason"]
             .as_str()
@@ -428,11 +500,22 @@ fn cli_conventions() {
 /// The committed fixtures (`tests/fixtures/`, real solver output) that the
 /// release workflow smokes the shipped native binaries and the wasm
 /// component with are accepted.
+// rivet: verifies VER-097
 #[test]
 fn committed_release_smoke_fixtures_are_accepted() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    let files = [dir.join("v3-unsat-w3.json"), dir.join("v3-sat-w5.json")];
+    // v5 (#281 E2): core UNSAT and SAT, the extended UNSAT (`echo_ext`),
+    // and quoted-symbol names; the CI wasm differential runs all six.
+    let files = [
+        "v3-unsat-w3.json",
+        "v3-sat-w5.json",
+        "v5-unsat-w3.json",
+        "v5-sat-w5.json",
+        "v5-unsat-ext.json",
+        "v5-unsat-quoted.json",
+    ]
+    .map(|f| dir.join(f));
     let (code, v) = run_json(&files);
     assert_eq!(code, 0, "{v}");
-    assert_eq!(v["accepted"], 2);
+    assert_eq!(v["accepted"], 6);
 }

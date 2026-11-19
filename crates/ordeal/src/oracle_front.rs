@@ -14,9 +14,11 @@
 //! A bitvector name is linked by identity: ordeal's `Var { name: "x", w }`
 //! becomes Z3's constant `x` of sort `(_ BitVec w)`, the same declaration the
 //! parser made (a width the reader got wrong is a different constant, and
-//! the xor then has a model). A quoted name that the reader keeps with its
-//! bars (`|a b|`) denotes the SMT-LIB symbol `a b`, so the bars are stripped
-//! here. A `Bool` name `b` is held by ordeal as a BV1 variable read as
+//! the xor then has a model). The reader names a quoted symbol by its
+//! content (`|a b|` is the name `a b`, #281 E2), which is the symbol Z3's
+//! constant carries, so the names are linked as read, with no renaming: a
+//! reader that kept the bars would name a different constant and the xor
+//! would have a model. A `Bool` name `b` is held by ordeal as a BV1 variable read as
 //! `b = #b1` (`smtlib::Ctx::bool_decls`); Z3's `Bool` constant `b` and that
 //! BV1 constant are different declarations, so every check asserts the
 //! link `b ⇔ (b₁ = #b1)` (design note §2).
@@ -88,80 +90,6 @@ pub fn z3_read(script: &str) -> Z3Reading {
 
 // ─── Name linking ────────────────────────────────────────────────────────────
 
-/// The SMT-LIB symbol an ordeal name denotes: `|s|` is the symbol `s`.
-fn symbol_of(name: &str) -> &str {
-    name.strip_prefix('|')
-        .and_then(|n| n.strip_suffix('|'))
-        .unwrap_or(name)
-}
-
-fn rename_bv(t: &BvTerm) -> BvTerm {
-    let b = |x: &BvTerm| Box::new(rename_bv(x));
-    match t {
-        BvTerm::Var { name, sort } => BvTerm::Var {
-            name: symbol_of(name).to_string(),
-            sort: *sort,
-        },
-        BvTerm::Const { .. } => t.clone(),
-        BvTerm::Add(x, y) => BvTerm::Add(b(x), b(y)),
-        BvTerm::Sub(x, y) => BvTerm::Sub(b(x), b(y)),
-        BvTerm::Mul(x, y) => BvTerm::Mul(b(x), b(y)),
-        BvTerm::Udiv(x, y) => BvTerm::Udiv(b(x), b(y)),
-        BvTerm::Urem(x, y) => BvTerm::Urem(b(x), b(y)),
-        BvTerm::And(x, y) => BvTerm::And(b(x), b(y)),
-        BvTerm::Or(x, y) => BvTerm::Or(b(x), b(y)),
-        BvTerm::Xor(x, y) => BvTerm::Xor(b(x), b(y)),
-        BvTerm::Shl(x, y) => BvTerm::Shl(b(x), b(y)),
-        BvTerm::Lshr(x, y) => BvTerm::Lshr(b(x), b(y)),
-        BvTerm::Ashr(x, y) => BvTerm::Ashr(b(x), b(y)),
-        BvTerm::Rotr(x, y) => BvTerm::Rotr(b(x), b(y)),
-        BvTerm::Rotl(x, y) => BvTerm::Rotl(b(x), b(y)),
-        BvTerm::Sdiv(x, y) => BvTerm::Sdiv(b(x), b(y)),
-        BvTerm::Srem(x, y) => BvTerm::Srem(b(x), b(y)),
-        BvTerm::Concat(x, y) => BvTerm::Concat(b(x), b(y)),
-        BvTerm::Not(x) => BvTerm::Not(b(x)),
-        BvTerm::Neg(x) => BvTerm::Neg(b(x)),
-        BvTerm::Extract { hi, lo, arg } => BvTerm::Extract {
-            hi: *hi,
-            lo: *lo,
-            arg: b(arg),
-        },
-        BvTerm::ZeroExt { by, arg } => BvTerm::ZeroExt {
-            by: *by,
-            arg: b(arg),
-        },
-        BvTerm::SignExt { by, arg } => BvTerm::SignExt {
-            by: *by,
-            arg: b(arg),
-        },
-        BvTerm::Ite { cond, then_, else_ } => BvTerm::Ite {
-            cond: Box::new(rename_bool(cond)),
-            then_: b(then_),
-            else_: b(else_),
-        },
-    }
-}
-
-pub(super) fn rename_bool(t: &BoolTerm) -> BoolTerm {
-    let v = |x: &BvTerm| Box::new(rename_bv(x));
-    let p = |x: &BoolTerm| Box::new(rename_bool(x));
-    match t {
-        BoolTerm::Eq(a, b) => BoolTerm::Eq(v(a), v(b)),
-        BoolTerm::Ne(a, b) => BoolTerm::Ne(v(a), v(b)),
-        BoolTerm::Ult(a, b) => BoolTerm::Ult(v(a), v(b)),
-        BoolTerm::Ule(a, b) => BoolTerm::Ule(v(a), v(b)),
-        BoolTerm::Ugt(a, b) => BoolTerm::Ugt(v(a), v(b)),
-        BoolTerm::Uge(a, b) => BoolTerm::Uge(v(a), v(b)),
-        BoolTerm::Slt(a, b) => BoolTerm::Slt(v(a), v(b)),
-        BoolTerm::Sle(a, b) => BoolTerm::Sle(v(a), v(b)),
-        BoolTerm::Sgt(a, b) => BoolTerm::Sgt(v(a), v(b)),
-        BoolTerm::Sge(a, b) => BoolTerm::Sge(v(a), v(b)),
-        BoolTerm::Not(a) => BoolTerm::Not(p(a)),
-        BoolTerm::And(a, b) => BoolTerm::And(p(a), p(b)),
-        BoolTerm::Or(a, b) => BoolTerm::Or(p(a), p(b)),
-    }
-}
-
 /// `b ⇔ (b₁ = #b1)` for every `Bool` name: Z3's `Bool` constant against the
 /// BV1 variable ordeal holds it as.
 pub(super) fn bool_links(reading: &ScriptReading) -> Vec<Bool> {
@@ -169,7 +97,7 @@ pub(super) fn bool_links(reading: &ScriptReading) -> Vec<Bool> {
         .bool_names
         .iter()
         .map(|n| {
-            let s = symbol_of(n);
+            let s = n.as_str();
             let as_bv1 = to_z3(&BoolTerm::Eq(
                 Box::new(BvTerm::Var {
                     name: s.to_string(),
@@ -307,7 +235,7 @@ fn classify(z3: Z3Reading, ord: Result<ScriptReading, smtlib::SmtError>) -> Fron
     let mut params = Params::new();
     params.set_u32("timeout", CHECK_TIMEOUT_MS);
     for (k, (az, ao)) in z3_asserts.iter().zip(&reading.assertions).enumerate() {
-        let ord = to_z3(&rename_bool(ao));
+        let ord = to_z3(ao);
         let solver = Solver::new();
         solver.set_params(&params);
         for l in &links {

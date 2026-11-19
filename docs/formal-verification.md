@@ -732,11 +732,15 @@ walk over node indices is a `partial_fixpoint` definition proved by strong
 induction on the index (operands are earlier nodes, by `ext_wf`), one case
 per `DagNode` arm.
 
-Phase E1 is the printer and its proof only: no bundle carries an echo and
-no entry point calls the printer yet, so **the trusted base below is
-unchanged**. Bundle format `ordeal-cert/v5`, the `ordeal-recheck` rows and
-the conditional trust sentence are phases E2 and E3 of
-`docs/design/query-echo.md`.
+Phase E1 is the printer and its proof. Phase E2 (TR-097) puts its output
+in the bundle: `ordeal-cert/v5` is the v3 or v4 bundle plus an `echo`
+block, written by `ordeal check … --cert-out PATH --echo` and
+`EchoCertificate::to_cert_v5`, and `ordeal-recheck` re-derives it, byte
+for byte, with the same proven `echo_term` / `echo_ext` over the bundle's
+`term` / `ext` block after the full v3 / v4 recheck. The printer and its
+Lean proof are unchanged by E2. Nobody compares the echo with an input
+yet: that comparison (`echo-check`) and the conditional trust sentence
+are phase E3, so **the trusted base below is unchanged**.
 
 **The trusted base after TR-073 — the canonical statement.** This sentence
 is the single source every other document carries verbatim (`README.md`,

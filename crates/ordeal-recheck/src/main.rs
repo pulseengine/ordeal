@@ -1,4 +1,4 @@
-//! `ordeal-recheck` — re-check `ordeal-cert/v1`..`v4` certificate bundles
+//! `ordeal-recheck` — re-check `ordeal-cert/v1`..`v5` certificate bundles
 //! with no solver in the dependency closure (TR-075, issue #277).
 //!
 //! An auditor holding a bundle does not have to trust, build or even have
@@ -15,6 +15,12 @@
 //! | `ordeal-cert/v2` | `check_query` (re-encodes the DAG) | `check_query_model` |
 //! | `ordeal-cert/v3` | `check_term_dag` + `check_query` | + term bindings, `check_tree_model` |
 //! | `ordeal-cert/v4` | `check_sliver_lowering` + v3 | + pullback, `check_tree_model_ext` |
+//! | `ordeal-cert/v5` | v3 / v4, then `echo_term` / `echo_ext` == `echo.text` | the same |
+//!
+//! A v5 bundle (#281 E2) is a v3 bundle (no `ext` block) or a v4 bundle
+//! with the certified echo of its question: the full v3 / v4 recheck runs,
+//! then the trusted printer prints the `term` / `ext` block again and the
+//! bytes must equal `echo.text` (no SMT-LIB parser is involved).
 //!
 //! Exit status: 0 iff every bundle was accepted; 1 if any was rejected,
 //! unreadable or malformed; 2 on a usage error.
@@ -23,8 +29,8 @@ use std::process::ExitCode;
 
 use ordeal_cert::cert_bundle::{BundleError, bundle_header};
 use ordeal_cert::{
-    Certificate, QueryCertificate, QuerySatCertificate, SatCertificate, SliverCertificate,
-    SliverSatCertificate, TermCertificate, TermSatCertificate,
+    Certificate, EchoCertificate, QueryCertificate, QuerySatCertificate, SatCertificate,
+    SliverCertificate, SliverSatCertificate, TermCertificate, TermSatCertificate,
 };
 
 const USAGE: &str = "Usage: ordeal-recheck [--format text|json] <bundle.json>...";
@@ -129,7 +135,7 @@ fn main() -> ExitCode {
 
 fn help() {
     println!("ordeal-recheck {}", env!("CARGO_PKG_VERSION"));
-    println!("re-check ordeal-cert/v1..v4 certificate bundles with the trusted");
+    println!("re-check ordeal-cert/v1..v5 certificate bundles with the trusted");
     println!("ordeal-lrat checks — no solver in the dependency closure");
     println!();
     println!("{USAGE}");
@@ -139,7 +145,7 @@ fn help() {
     println!("  -V, --version        print `ordeal-recheck <semver>` and exit");
     println!("  -h, --help           print this help and exit");
     println!();
-    println!("The bundle's `format` (ordeal-cert/v1..v4) and `verdict` (unsat |");
+    println!("The bundle's `format` (ordeal-cert/v1..v5) and `verdict` (unsat |");
     println!("sat) are detected; the content hashes are verified, then the full");
     println!("recheck of that format runs. Exit 0 iff every bundle is accepted,");
     println!("1 if any is rejected or malformed, 2 on a usage error.");
@@ -212,9 +218,17 @@ fn recheck(json: &str, format: &str, verdict: &str) -> Result<(), String> {
         ("ordeal-cert/v4", "sat") => {
             checked(decode(SliverSatCertificate::from_cert_v4(json))?.recheck())
         }
-        ("ordeal-cert/v1" | "ordeal-cert/v2" | "ordeal-cert/v3" | "ordeal-cert/v4", v) => Err(
-            format!("unexpected verdict: {v} (expected 'unsat' or 'sat')"),
-        ),
+        // v5 (#281 E2): the v3 / v4 recheck, then the echo re-derived.
+        ("ordeal-cert/v5", "unsat" | "sat") => {
+            checked(decode(EchoCertificate::from_cert_v5(json))?.recheck())
+        }
+        (
+            "ordeal-cert/v1" | "ordeal-cert/v2" | "ordeal-cert/v3" | "ordeal-cert/v4"
+            | "ordeal-cert/v5",
+            v,
+        ) => Err(format!(
+            "unexpected verdict: {v} (expected 'unsat' or 'sat')"
+        )),
         (f, _) => Err(format!("unsupported bundle format: {f}")),
     }
 }

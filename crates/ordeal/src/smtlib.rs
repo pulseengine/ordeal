@@ -18,9 +18,15 @@
 //!   `declare-fun name () S` with `S` a `(_ BitVec N)` or `Bool`, `assert`,
 //!   `check-sat`, `get-model`, `get-value` (accepted, prints the model),
 //!   `exit`; `set-info` / `set-option` are ignored.
-//! - **Symbols:** `|x|` and `x` are one symbol (SMT-LIB 2.6 §3.1): a quoted
-//!   symbol whose content is a simple, non-reserved symbol is read as its
-//!   bare spelling; any other quoted symbol keeps its bars. A `Bool` name is
+//! - **Symbols:** a symbol is named by its content (SMT-LIB 2.6 §3.1, #281
+//!   E2): `|x|` and `x` are one symbol when `x` is a simple symbol, and a
+//!   quoted symbol whose content is not one (`|a b|`, `||`, `|0v|`) is the
+//!   name `a b`, `` (empty), `0v`, which no bare token denotes (a bare
+//!   `0v` is not a symbol and is refused). A quoted symbol is never a
+//!   literal, keyword, operator or reserved word (`|let|` is the symbol
+//!   `let`; declaring it is still refused, #315). A quoted symbol holding
+//!   `\` or a control character other than tab, newline and carriage
+//!   return is refused (§3.1 excludes them). A `Bool` name is
 //!   never a bitvector, and redeclaring a name at another sort is an error;
 //!   an identical redeclaration is tolerated (concatenated logs, #139), the
 //!   one place a script that changes the query is read more laxly than
@@ -173,53 +179,141 @@ pub struct Outcome {
 
 // ─── S-expression front end ──────────────────────────────────────────────────
 
-/// A parsed s-expression: either an atom (symbol/literal) or a nested list.
+/// A parsed s-expression: a bare atom (a simple symbol, a literal, a
+/// keyword or a reserved word), a quoted symbol that is not a simple
+/// symbol, or a nested list.
 enum Sexp {
+    /// A bare token, or a `|…|` whose content is a simple symbol (SMT-LIB
+    /// 2.6 §3.1: `|x|` and `x` are one symbol, so the bars are dropped).
     Atom(String),
+    /// A `|…|` quoted symbol whose content is NOT a simple symbol (`|a b|`,
+    /// `||`, `|0v|`, `|let|`), held as its content (#281 E2). It is always
+    /// a symbol: never a literal, a keyword, a reserved word or an
+    /// operator, and no bare token denotes it.
+    Quoted(String),
     List(Vec<Sexp>),
 }
 
-/// Borrow an atom's text, if `s` is an atom.
+/// Borrow a bare atom's text, if `s` is one. A quoted symbol is not an
+/// atom here, so it never matches a keyword, operator or literal.
 fn as_atom(s: &Sexp) -> Option<&str> {
     match s {
         Sexp::Atom(a) => Some(a.as_str()),
-        Sexp::List(_) => None,
+        Sexp::Quoted(_) | Sexp::List(_) => None,
     }
 }
 
-/// The canonical spelling of a `|...|` token (#294): its bare content when
-/// that is a simple symbol and not a reserved word, else the token as read.
-fn canonical_quoted(tok: String) -> String {
-    let inner = match tok.strip_prefix('|').and_then(|t| t.strip_suffix('|')) {
-        Some(i) => i,
-        None => return tok, // unterminated: left as read, refused later
-    };
-    const RESERVED: &[&str] = &[
-        "_",
-        "!",
-        "as",
-        "let",
-        "exists",
-        "forall",
-        "match",
-        "par",
-        "BINARY",
-        "DECIMAL",
-        "HEXADECIMAL",
-        "NUMERAL",
-        "STRING",
-    ];
+/// The SMT-LIB 2.6 §3.1 reserved words: the eight general ones, the five
+/// placeholders of the syntax, and every command name. None of them is a
+/// symbol; `|w|` is the symbol whose content is `w`, distinct from `w`.
+const RESERVED_WORDS: &[&str] = &[
+    "!",
+    "_",
+    "as",
+    "BINARY",
+    "DECIMAL",
+    "exists",
+    "HEXADECIMAL",
+    "forall",
+    "let",
+    "match",
+    "NUMERAL",
+    "par",
+    "STRING",
+    // command names (§3.1: "each command name … is also a reserved word")
+    "assert",
+    "check-sat",
+    "check-sat-assuming",
+    "declare-const",
+    "declare-datatype",
+    "declare-datatypes",
+    "declare-fun",
+    "declare-sort",
+    "define-fun",
+    "define-fun-rec",
+    "define-funs-rec",
+    "define-sort",
+    "echo",
+    "exit",
+    "get-assertions",
+    "get-assignment",
+    "get-info",
+    "get-model",
+    "get-option",
+    "get-proof",
+    "get-unsat-assumptions",
+    "get-unsat-core",
+    "get-value",
+    "pop",
+    "push",
+    "reset",
+    "reset-assertions",
+    "set-info",
+    "set-logic",
+    "set-option",
+];
+
+/// Whether `s` is an SMT-LIB 2.6 §3.1 simple symbol: a non-empty sequence
+/// of letters, digits and `~ ! @ $ % ^ & * _ - + = < > . ? /` that does not
+/// start with a digit and is not a reserved word.
+pub fn is_simple_symbol(s: &str) -> bool {
     let simple_char = |c: char| c.is_ascii_alphanumeric() || "~!@$%^&*_-+=<>.?/".contains(c);
-    let simple = inner.chars().next().is_some_and(|c| !c.is_ascii_digit())
-        && inner.chars().all(simple_char)
-        && !RESERVED.contains(&inner);
-    if simple { inner.to_string() } else { tok }
+    s.chars().next().is_some_and(|c| !c.is_ascii_digit())
+        && s.chars().all(simple_char)
+        && !RESERVED_WORDS.contains(&s)
 }
 
-/// Split raw source into s-expression tokens: `(`, `)`, `|quoted|` symbols,
-/// `"string"` literals, and bare atoms. Whitespace separates; `;` starts a line
+/// How `name` (a symbol's content, as the reader stores it) is written in
+/// SMT-LIB: bare when it is a simple symbol, else quoted as `|name|`. The
+/// reader never stores a name containing `|` or `\` (§3.1 excludes both
+/// from a quoted symbol), so the result reads back as `name`.
+pub fn symbol_text(name: &str) -> String {
+    if is_simple_symbol(name) {
+        name.to_string()
+    } else {
+        format!("|{name}|")
+    }
+}
+
+/// The symbol `s` denotes, by its content (SMT-LIB 2.6 §3.1): a bare
+/// simple symbol is itself, a quoted symbol is its content. A bare token
+/// that is not a simple symbol (a literal, a numeral, a keyword, a
+/// reserved word, or text like `0v` that SMT-LIB does not lex as one
+/// symbol) denotes none, so it can never reach a quoted symbol's name.
+fn symbol(s: &Sexp) -> Option<&str> {
+    match s {
+        Sexp::Atom(a) if is_simple_symbol(a) => Some(a.as_str()),
+        Sexp::Quoted(c) => Some(c.as_str()),
+        Sexp::Atom(_) | Sexp::List(_) => None,
+    }
+}
+
+/// One lexical token.
+enum Tok {
+    Open,
+    Close,
+    /// A bare atom, a string literal (quotes kept), or the content of a
+    /// `|…|` that is a simple symbol.
+    Atom(String),
+    /// The content of a `|…|` that is not a simple symbol.
+    Quoted(String),
+}
+
+/// The token of a `|…|` quoted symbol with content `inner` (#294, #281
+/// E2): its bare spelling when `inner` is a simple symbol (`|x|` is `x`),
+/// else the content itself as a quoted symbol.
+fn quoted_token(inner: String) -> Tok {
+    if is_simple_symbol(&inner) {
+        Tok::Atom(inner)
+    } else {
+        Tok::Quoted(inner)
+    }
+}
+
+/// Split raw source into tokens: `(`, `)`, `|quoted|` symbols, `"string"`
+/// literals, and bare atoms. Whitespace separates; `;` starts a line
 /// comment (outside a string or a quoted symbol).
-fn tokenize(src: &str) -> Result<Vec<String>, SmtError> {
+fn tokenize(src: &str) -> Result<Vec<Tok>, SmtError> {
     let mut toks = Vec::new();
     let mut chars = src.chars().peekable();
     while let Some(&c) = chars.peek() {
@@ -235,9 +329,13 @@ fn tokenize(src: &str) -> Result<Vec<String>, SmtError> {
                     }
                 }
             }
-            '(' | ')' => {
+            '(' => {
                 chars.next();
-                toks.push(c.to_string());
+                toks.push(Tok::Open);
+            }
+            ')' => {
+                chars.next();
+                toks.push(Tok::Close);
             }
             '"' => {
                 // An SMT-LIB string literal (§3.1, #311): one token up to the
@@ -264,24 +362,41 @@ fn tokenize(src: &str) -> Result<Vec<String>, SmtError> {
                         Some(c) => s.push(c),
                     }
                 }
-                toks.push(s);
+                toks.push(Tok::Atom(s));
             }
             '|' => {
-                // A `|...|` quoted symbol. SMT-LIB 2.6 §3.1: `|x|` and `x`
-                // are the same symbol, so a quoted symbol whose content is a
-                // simple, non-reserved symbol is canonicalized to its bare
-                // spelling (#294). Any other content keeps its bars, so it
-                // stays one atom (spaces) and can never be read as a literal
-                // (`|#x01|`) or a reserved word (`|let|`).
+                // A `|...|` quoted symbol (SMT-LIB 2.6 §3.1): whitespace and
+                // printable characters other than `|` and `\` between two
+                // bars. The symbol is its CONTENT (#281 E2): `|x|` and `x`
+                // are one symbol, and a content that is not a simple symbol
+                // (`|a b|`) is a symbol no bare token can spell.
                 chars.next();
-                let mut s = String::from("|");
-                for c in chars.by_ref() {
-                    s.push(c);
-                    if c == '|' {
-                        break;
+                let mut inner = String::new();
+                loop {
+                    match chars.next() {
+                        None => {
+                            return Err(SmtError::Parse("unterminated quoted symbol".into()));
+                        }
+                        Some('|') => break,
+                        Some('\\') => {
+                            return Err(SmtError::Parse(
+                                "a quoted symbol may not contain '\\' (SMT-LIB 2.6 section 3.1)"
+                                    .into(),
+                            ));
+                        }
+                        Some(c)
+                            if ((c as u32) < 0x20 && !matches!(c, '\t' | '\n' | '\r'))
+                                || c == '\u{7f}' =>
+                        {
+                            return Err(SmtError::Parse(format!(
+                                "a quoted symbol may not contain the control character U+{:04X}",
+                                c as u32
+                            )));
+                        }
+                        Some(c) => inner.push(c),
                     }
                 }
-                toks.push(canonical_quoted(s));
+                toks.push(quoted_token(inner));
             }
             _ => {
                 // A bare atom runs until whitespace, a paren, or a comment.
@@ -293,7 +408,7 @@ fn tokenize(src: &str) -> Result<Vec<String>, SmtError> {
                     s.push(c);
                     chars.next();
                 }
-                toks.push(s);
+                toks.push(Tok::Atom(s));
             }
         }
     }
@@ -302,7 +417,7 @@ fn tokenize(src: &str) -> Result<Vec<String>, SmtError> {
 
 /// Parse a whole token stream into the sequence of top-level s-expressions
 /// (one per command).
-fn parse_sexps(toks: &[String]) -> Result<Vec<Sexp>, SmtError> {
+fn parse_sexps(toks: &[Tok]) -> Result<Vec<Sexp>, SmtError> {
     let mut pos = 0;
     let mut out = Vec::new();
     while pos < toks.len() {
@@ -315,18 +430,18 @@ fn parse_sexps(toks: &[String]) -> Result<Vec<Sexp>, SmtError> {
 
 /// Parse a single s-expression starting at `pos`, returning it and the index
 /// just past it.
-fn parse_one(toks: &[String], pos: usize) -> Result<(Sexp, usize), SmtError> {
+fn parse_one(toks: &[Tok], pos: usize) -> Result<(Sexp, usize), SmtError> {
     let tok = toks
         .get(pos)
         .ok_or_else(|| SmtError::Parse("unexpected end of input".into()))?;
-    match tok.as_str() {
-        "(" => {
+    match tok {
+        Tok::Open => {
             let mut items = Vec::new();
             let mut p = pos + 1;
             loop {
                 match toks.get(p) {
                     None => return Err(SmtError::Parse("unclosed '('".into())),
-                    Some(t) if t == ")" => return Ok((Sexp::List(items), p + 1)),
+                    Some(Tok::Close) => return Ok((Sexp::List(items), p + 1)),
                     Some(_) => {
                         let (s, next) = parse_one(toks, p)?;
                         items.push(s);
@@ -335,8 +450,9 @@ fn parse_one(toks: &[String], pos: usize) -> Result<(Sexp, usize), SmtError> {
                 }
             }
         }
-        ")" => Err(SmtError::Parse("unexpected ')'".into())),
-        _ => Ok((Sexp::Atom(tok.clone()), pos + 1)),
+        Tok::Close => Err(SmtError::Parse("unexpected ')'".into())),
+        Tok::Atom(a) => Ok((Sexp::Atom(a.clone()), pos + 1)),
+        Tok::Quoted(q) => Ok((Sexp::Quoted(q.clone()), pos + 1)),
     }
 }
 
@@ -379,7 +495,10 @@ impl Ctx {
     /// be a boolean leaf.
     fn is_bool_sexp(&self, s: &Sexp) -> bool {
         match s {
-            Sexp::Atom(a) => a == "true" || a == "false" || self.bool_decls.contains(a.as_str()),
+            Sexp::Atom(a) if a == "true" || a == "false" => true,
+            Sexp::Atom(_) | Sexp::Quoted(_) => {
+                symbol(s).is_some_and(|name| self.bool_decls.contains(name))
+            }
             // `(ite c p q)` is Bool when its branches are (#312).
             Sexp::List(items) if items.first().and_then(as_atom) == Some("ite") => {
                 items.get(2).is_some_and(|b| self.is_bool_sexp(b))
@@ -410,6 +529,7 @@ impl Ctx {
     fn parse_bv(&self, s: &Sexp) -> Result<BvTerm, SmtError> {
         match s {
             Sexp::Atom(a) => self.parse_bv_atom(a),
+            Sexp::Quoted(name) => self.parse_bv_name(name),
             Sexp::List(items) => {
                 let head = items
                     .first()
@@ -421,6 +541,11 @@ impl Ctx {
                     Sexp::List(_) => self.parse_indexed_app(items),
                     // `(op args...)` ordinary operator.
                     Sexp::Atom(op) => self.parse_bv_op(op, &items[1..]),
+                    // A quoted symbol is never an operator (#281 E2).
+                    Sexp::Quoted(q) => Err(SmtError::Unsupported(format!(
+                        "operator '{}'",
+                        symbol_text(q)
+                    ))),
                 }
             }
         }
@@ -458,19 +583,33 @@ impl Ctx {
                 .map_err(|_| SmtError::Parse(format!("bad binary literal '{a}'")))?;
             return Ok(const_bv(value, width));
         }
-        if self.bool_decls.contains(a) {
+        // A bare token that is not a simple symbol (`0v`, `a,b`) denotes no
+        // symbol, so it never reaches a quoted name (`|0v|`, #281 E2).
+        if !is_simple_symbol(a) {
+            return Err(SmtError::Parse(format!("unknown symbol '{a}'")));
+        }
+        self.parse_bv_name(a)
+    }
+
+    /// A declared bitvector name, by the symbol's content (#281 E2).
+    fn parse_bv_name(&self, name: &str) -> Result<BvTerm, SmtError> {
+        if self.bool_decls.contains(name) {
             // A `Bool` is not a bitvector (Z3: "Sorts (_ BitVec 1) and Bool
             // are incompatible"), even though it is held as a BV1 (#294).
             return Err(SmtError::Parse(format!(
-                "sort mismatch: Bool '{a}' used as a bitvector"
+                "sort mismatch: Bool '{}' used as a bitvector",
+                symbol_text(name)
             )));
         }
-        match self.decls.get(a) {
+        match self.decls.get(name) {
             Some(&width) => Ok(BvTerm::Var {
-                name: a.to_string(),
+                name: name.to_string(),
                 sort: Sort::new(width),
             }),
-            None => Err(SmtError::Parse(format!("unknown symbol '{a}'"))),
+            None => Err(SmtError::Parse(format!(
+                "unknown symbol '{}'",
+                symbol_text(name)
+            ))),
         }
     }
 
@@ -682,29 +821,37 @@ impl Ctx {
     /// Parse a boolean-sorted term (a predicate or a connective).
     fn parse_bool(&self, s: &Sexp) -> Result<BoolTerm, SmtError> {
         match s {
-            Sexp::Atom(a) => match a.as_str() {
-                // No boolean literal exists in the core; encode via a trivial
-                // equality so `true`/`false` still round-trip.
-                "true" => Ok(BoolTerm::Eq(
-                    Box::new(const_bv(0, 1)),
-                    Box::new(const_bv(0, 1)),
-                )),
-                "false" => Ok(BoolTerm::Eq(
-                    Box::new(const_bv(0, 1)),
-                    Box::new(const_bv(1, 1)),
-                )),
-                // A `Bool`-declared name reads as `name = #b1` (see
-                // `Ctx::bool_decls`). Verus guards every by(bit_vector) goal
-                // with `(declare-const %%location_label%%N Bool)`.
-                name if self.bool_decls.contains(name) => Ok(BoolTerm::Eq(
+            // No boolean literal exists in the core; encode via a trivial
+            // equality so `true`/`false` still round-trip.
+            Sexp::Atom(a) if a == "true" => Ok(BoolTerm::Eq(
+                Box::new(const_bv(0, 1)),
+                Box::new(const_bv(0, 1)),
+            )),
+            Sexp::Atom(a) if a == "false" => Ok(BoolTerm::Eq(
+                Box::new(const_bv(0, 1)),
+                Box::new(const_bv(1, 1)),
+            )),
+            // A `Bool`-declared name reads as `name = #b1` (see
+            // `Ctx::bool_decls`). Verus guards every by(bit_vector) goal
+            // with `(declare-const %%location_label%%N Bool)`. The name is
+            // the symbol's content, so `|p|`, `p` and `|a b|` all resolve.
+            Sexp::Atom(_) | Sexp::Quoted(_)
+                if symbol(s).is_some_and(|name| self.bool_decls.contains(name)) =>
+            {
+                let name = symbol(s).unwrap_or_default();
+                Ok(BoolTerm::Eq(
                     Box::new(BvTerm::Var {
                         name: name.to_string(),
                         sort: Sort::new(1),
                     }),
                     Box::new(const_bv(1, 1)),
-                )),
-                other => Err(SmtError::Unsupported(format!("boolean atom '{other}'"))),
-            },
+                ))
+            }
+            Sexp::Atom(other) => Err(SmtError::Unsupported(format!("boolean atom '{other}'"))),
+            Sexp::Quoted(other) => Err(SmtError::Unsupported(format!(
+                "boolean atom '{}'",
+                symbol_text(other)
+            ))),
             Sexp::List(items) => {
                 let op = items
                     .first()
@@ -1466,22 +1613,29 @@ const RESERVED_SYMBOLS: &[&str] = &[
     "nat2bv",
 ];
 
-/// Read a declaration's name atom; a reserved word or theory symbol, bare or
-/// quoted, is refused (#315).
+/// Read a declaration's name: a symbol, held as its content (`x`, `|x|`
+/// and `|a b|` are the names `x`, `x` and `a b`; #281 E2). A reserved word
+/// or theory symbol, bare or quoted, is refused (#315), and so is a bare
+/// token that is not a simple symbol (`0v`, `#x01`: SMT-LIB does not lex
+/// them as one symbol, and only `|0v|` names the symbol `0v`).
 fn decl_name(items: &[Sexp], n: usize) -> Result<String, SmtError> {
-    let name = as_atom(item(items, n, "declaration")?)
-        .map(str::to_string)
-        .ok_or_else(|| SmtError::Parse("declaration name must be a symbol".into()))?;
-    let bare = name
-        .strip_prefix('|')
-        .and_then(|t| t.strip_suffix('|'))
-        .unwrap_or(&name);
-    if RESERVED_SYMBOLS.contains(&bare) {
-        return Err(SmtError::Parse(format!(
-            "'{bare}' is a reserved word or theory symbol and cannot be declared"
-        )));
+    let it = item(items, n, "declaration")?;
+    let reserved = |w: &str| {
+        SmtError::Parse(format!(
+            "'{w}' is a reserved word or theory symbol and cannot be declared"
+        ))
+    };
+    let name = match (symbol(it), as_atom(it)) {
+        (Some(name), _) => name,
+        (None, Some(a)) if RESERVED_SYMBOLS.contains(&a) => return Err(reserved(a)),
+        (None, _) => {
+            return Err(SmtError::Parse("declaration name must be a symbol".into()));
+        }
+    };
+    if RESERVED_SYMBOLS.contains(&name) {
+        return Err(reserved(name));
     }
-    Ok(name)
+    Ok(name.to_string())
 }
 
 /// `a <-> b`, expressed with the core's Not/Or/And — no new operation.
@@ -2307,6 +2461,167 @@ mod tests {
                 "(set-logic QF_BV)(declare-fun {name} () (_ BitVec 8))(assert (= {name} #x01))(check-sat)"
             );
             assert!(is_sat(&src), "{src}: {:?}", verdict_of(&src).err());
+        }
+    }
+
+    // ── #281 E2: a quoted symbol is named by its content ────────────────
+
+    fn names_of(src: &str) -> Vec<String> {
+        read_script(src)
+            .expect("reads")
+            .declared
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect()
+    }
+
+    fn is_unsat(src: &str) -> bool {
+        matches!(verdict_of(src), Ok(Some(CheckResult::Unsat(_))))
+    }
+
+    // rivet: verifies VER-097
+    #[test]
+    fn a_quoted_symbol_is_named_by_its_content() {
+        // SMT-LIB 2.6 section 3.1: the bars are not part of the symbol.
+        let src = "(declare-const |a b| (_ BitVec 8))(declare-const |0v| (_ BitVec 8))\
+                   (declare-const |v#0| (_ BitVec 8))(declare-const |x| (_ BitVec 8))\
+                   (declare-const || (_ BitVec 8))(declare-const |a(b);c\"d| (_ BitVec 8))\
+                   (declare-const |let| (_ BitVec 8))(check-sat)";
+        // `|let|` is the symbol `let`, refused as a declaration (#315)...
+        assert!(matches!(verdict_of(src), Err(SmtError::Parse(_))));
+        // ...and without it every content is the name, bars dropped.
+        let src = src.replace("(declare-const |let| (_ BitVec 8))", "");
+        assert_eq!(
+            names_of(&src),
+            ["a b", "0v", "v#0", "x", "", "a(b);c\"d"].map(String::from)
+        );
+        // Tab, newline and carriage return are whitespace a quoted symbol
+        // may hold; the name keeps them.
+        assert_eq!(
+            names_of("(declare-const |a\tb\nc| (_ BitVec 8))"),
+            ["a\tb\nc"]
+        );
+        // No name the reader stores contains a bar, so the internal
+        // placeholder `|too wide|` cannot be a declared name.
+        assert_eq!(
+            names_of("(declare-const |too wide| (_ BitVec 8))"),
+            ["too wide"]
+        );
+    }
+
+    // rivet: verifies VER-097
+    #[test]
+    fn quoted_and_bare_are_one_symbol_only_for_a_simple_content() {
+        // `x` and `|x|`: one symbol. Declaring both is a redeclaration
+        // (tolerated when identical, #139; an error at another width or
+        // sort), and the two spellings are one variable.
+        let both = "(declare-const x (_ BitVec 8))(declare-const |x| (_ BitVec 8))\
+                    (assert (= x #x01))(assert (= |x| #x02))(check-sat)";
+        assert!(is_unsat(both));
+        assert_eq!(names_of(both), ["x", "x"]);
+        for bad in [
+            "(declare-const x (_ BitVec 8))(declare-const |x| (_ BitVec 16))(check-sat)",
+            "(declare-const |x| (_ BitVec 1))(declare-const x Bool)(check-sat)",
+            "(declare-const |a b| (_ BitVec 8))(declare-const |a b| (_ BitVec 4))(check-sat)",
+            "(declare-const |a b| Bool)(declare-const |a b| (_ BitVec 1))(check-sat)",
+            "(declare-const || Bool)(declare-fun || () (_ BitVec 1))(check-sat)",
+        ] {
+            assert!(matches!(verdict_of(bad), Err(SmtError::Solver(_))), "{bad}");
+        }
+        // `|0v|` is the symbol `0v`; a bare `0v` is not a symbol at all
+        // (SMT-LIB does not lex it as one), so it never reaches `|0v|` and
+        // cannot be declared.
+        let q = "(declare-const |0v| (_ BitVec 8))";
+        assert!(verdict_of(&format!("{q}(assert (= 0v #x01))(check-sat)")).is_err());
+        assert!(is_sat(&format!("{q}(assert (= |0v| #x01))(check-sat)")));
+        for bad in [
+            "(declare-const 0v (_ BitVec 8))(check-sat)",
+            "(declare-const #x01 (_ BitVec 8))(check-sat)",
+            "(declare-const a,b (_ BitVec 8))(check-sat)",
+        ] {
+            assert!(matches!(verdict_of(bad), Err(SmtError::Parse(_))), "{bad}");
+        }
+        // `|a b|` is distinct from every bare token and from every other
+        // quoted content: two declarations, two variables.
+        let two = "(declare-const |a b| (_ BitVec 8))(declare-const |a  b| (_ BitVec 8))\
+                   (declare-const ab (_ BitVec 8))(declare-const || (_ BitVec 8))\
+                   (assert (= |a b| #x01))(assert (= |a  b| #x02))(assert (= ab #x03))\
+                   (assert (= || #x04))(check-sat)";
+        assert!(is_sat(two));
+        let o = solve_str(two).expect("solves");
+        assert_eq!(o.declared.len(), 4);
+        // The empty symbol is a symbol: x = 1 and `||` = 2 with `||` = x is
+        // unsat only because the two names are distinct variables tied by
+        // the assertion.
+        let empty = "(declare-const || (_ BitVec 8))(declare-const x (_ BitVec 8))\
+                     (assert (= || x))(assert (= x #x01))(assert (= || #x02))(check-sat)";
+        assert!(is_unsat(empty));
+        // `|true|` is the theory symbol `true` (its content is simple).
+        assert!(is_sat("(assert |true|)(check-sat)"));
+        assert!(is_unsat("(assert |false|)(check-sat)"));
+        // A quoted symbol is never a literal, operator or reserved word.
+        let x = "(declare-const x (_ BitVec 8))";
+        for bad in [
+            format!("{x}(assert (= x |#x01|))(check-sat)"),
+            format!("{x}(assert (= x (|a b| x)))(check-sat)"),
+            format!("{x}(|assert| (= x #x01))(check-sat)"),
+            format!("{x}(assert (= x (|_| bv1 8)))(check-sat)"),
+        ] {
+            assert!(verdict_of(&bad).is_err(), "{bad}");
+        }
+    }
+
+    // rivet: verifies VER-097
+    #[test]
+    fn malformed_quoted_symbols_are_refused() {
+        for bad in [
+            "(declare-const |a\\b| (_ BitVec 8))(check-sat)",
+            "(declare-const |a\u{1}b| (_ BitVec 8))(check-sat)",
+            "(declare-const |a\u{7f}b| (_ BitVec 8))(check-sat)",
+            "(declare-const |ab (_ BitVec 8))(check-sat)",
+        ] {
+            assert!(
+                matches!(verdict_of(bad), Err(SmtError::Parse(_))),
+                "{bad:?}"
+            );
+        }
+    }
+
+    // rivet: verifies VER-097
+    #[test]
+    fn symbol_text_reads_back_as_the_same_name() {
+        for name in [
+            "x", "a b", "", "0v", "v#0", "let", "assert", "a(b)", "x;y", "\"s\"", "#x01", "a\tb",
+            ":k", "true",
+        ] {
+            let text = symbol_text(name);
+            let src = format!("(declare-const {text} (_ BitVec 8))");
+            match verdict_of(&src) {
+                // `let` and `assert` are reserved for declarations (#315),
+                // but still print quoted.
+                Err(SmtError::Parse(_)) if ["let", "assert", "true"].contains(&name) => {
+                    assert_eq!(text, format!("|{name}|").replace("|true|", "true"));
+                }
+                _ => assert_eq!(names_of(&src), [name], "{text}"),
+            }
+        }
+        assert_eq!(symbol_text("x"), "x");
+        assert_eq!(symbol_text("a b"), "|a b|");
+        assert_eq!(symbol_text(""), "||");
+    }
+
+    /// The model the CLI prints names a quoted symbol quoted again.
+    // rivet: verifies VER-097
+    #[test]
+    fn the_model_of_a_quoted_name_is_its_content() {
+        let src = "(declare-const |a b| (_ BitVec 8))(assert (= |a b| #x07))(check-sat)";
+        let (r, declared) = solve_str_with_witness(src).expect("solves");
+        assert_eq!(declared, vec![("a b".to_string(), 8)]);
+        match r {
+            Some(crate::witness::WitnessCheckResult::Sat(c)) => {
+                assert_eq!(c.model.assignments, vec![("a b".to_string(), 7)]);
+            }
+            other => panic!("{other:?}"),
         }
     }
 }

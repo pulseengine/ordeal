@@ -1,5 +1,5 @@
 //! `ordeal-cert` — the ordeal certificate data types, their trusted
-//! re-checks, and (behind the `json` feature) the `ordeal-cert/v1`..`v4`
+//! re-checks, and (behind the `json` feature) the `ordeal-cert/v1`..`v5`
 //! bundle encoder and hash-verifying decoder (TR-075).
 //!
 //! This is the half of ordeal an auditor needs to re-check a certificate
@@ -20,7 +20,7 @@
 //! returned, and why the `ordeal-recheck` binary runs the full recheck
 //! of the strongest certificate the bundle's `format` names.
 
-/// The `ordeal-cert` JSON envelopes (`v1`..`v4`): emit and hash-verified
+/// The `ordeal-cert` JSON envelopes (`v1`..`v5`): emit and hash-verified
 /// parse. Behind the `json` feature (serde): the default build is
 /// dependency-free beyond `ordeal-lrat`.
 #[cfg(feature = "json")]
@@ -28,6 +28,9 @@ pub mod cert_bundle;
 /// The v1 certificate pair ([`Certificate`]) and the model type
 /// ([`Model`]).
 pub mod certificate;
+/// The certified query echo a `v5` bundle carries (#281 E2):
+/// [`EchoCertificate`], printed and re-derived by the trusted printer.
+pub mod echo;
 /// The certificate-carried query, term and extended query, and their
 /// trusted re-checks.
 pub mod query;
@@ -40,6 +43,7 @@ pub mod sliver;
 pub mod witness;
 
 pub use certificate::{Certificate, CertificateError, Model};
+pub use echo::{EchoCertificate, EchoRecheckError, EchoSubject, QueryEcho};
 pub use query::{
     QueryCertificate, QueryDag, QueryInputs, QueryModelRecheckError, QueryRecheckError,
     QuerySatCertificate, QueryTerm, SliverBlock, SliverCertificate, SliverModelRecheckError,

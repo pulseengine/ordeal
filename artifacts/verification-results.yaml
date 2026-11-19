@@ -3632,3 +3632,31 @@ artifacts:
         target: VER-096
       - type: part-of-execution
         target: VE-078
+
+  - id: VE-079
+    type: verification-execution
+    title: "Query echo E2 run (VER-097): content names, ordeal-cert/v5, recheck, CLI, wasm parity, planted controls"
+    status: implemented
+    description: "Local run on branch feat/281-e2-quoted-content (based on 78b335d). cargo fmt --check 0; cargo clippy --all-targets -D warnings 0 (default, -p ordeal oracle, -p ordeal cert-bundle, -p ordeal-recheck -p ordeal-cert json); cargo test -p ordeal --no-fail-fast 334 passed 0 failed; with cert-bundle 364 passed; ordeal-lrat 58 passed; ordeal-cert json 7; ordeal-recheck 8 (corpus with 10 v5 bundles, 93 mutants all rejected by the recheck, echo byte without rehash rejected by hash, 6 committed fixtures accepted). Oracle (release, Z3 5.1.0): 15 passed; echo leg 27 repository files 26 compared agree 26; 10^4 generated 9604 compared, 0 printer refusals (E1: 8490 refused for the name), 396 reserved-word scripts not echoed, 7397 scripts quote a non-simple symbol; front leg 9604 agree 0 disagree; 10^5 nightly echo run 95988 compared 0 refused 0 disagree. Planted control (quoted_token keeping the bars): smtlib 4 tests red, cli_echo 1 red, oracle 5 of 15 red (front leg 5451 disagree, echo leg 8326 Name refusals). wasm32-wasip2 ordeal-recheck on the 6 fixtures accepted 6, cmp-identical to native; planted fixture (|a b| -> |a c| in the echo, rehashed) rejected on both, assertion red. v0.37.0 release binary vs this tree: 24 repository scripts that produce a bundle are byte-identical, a quoted-name script differs only in the term block names; the new ordeal-recheck accepts all 25 v0.37.0 bundles; the 26 v1..v4 corpus bundles emitted at v0.37.0 are byte-identical to this tree's. ordeal-lrat and lean/ unchanged."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew), LIBRARY_PATH=/opt/homebrew/lib, wasmtime (cargo install)
+      executor: local
+      timestamp: 2026-11-19 12:10:46+00:00
+      version: 78b335d + feat/281-e2-quoted-content
+    links:
+      - type: traces-to
+        target: TR-097
+
+  - id: VV-157
+    type: verification-verdict
+    title: "VER-097 pass: quoted symbols named by content, 0 echo refusals for names, ordeal-cert/v5 accepted and its echo re-derived"
+    status: implemented
+    description: quoted symbols named by content, 0 echo refusals for names, ordeal-cert/v5 accepted and its echo re-derived
+    fields:
+      evidence: smtlib::tests (5 new) pass; cli_echo 4 passed (5 with cert-bundle); ordeal-recheck 8 passed incl. 40 v5 mutants rejected; oracle 15 passed, 0 of 9604 echoes refused for a name; a bar-keeping reader turns 10 tests red
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-097
+      - type: part-of-execution
+        target: VE-079
