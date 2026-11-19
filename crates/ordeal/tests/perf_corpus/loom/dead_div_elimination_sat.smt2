@@ -1,0 +1,20 @@
+; thread: trap_gate::tests::dead_div_elimination_is_rejected
+; entry: check
+; assertions: 1
+(set-logic QF_BV)
+(declare-fun a () (_ BitVec 32))
+(declare-fun b () (_ BitVec 32))
+(define-fun |n0| () Bool (= b (_ bv0 32)))
+(define-fun |n1| () Bool (not |n0|))
+(define-fun |n2| () Bool (distinct (_ bv0 8) (_ bv0 8)))
+(define-fun |n3| () Bool (or |n1| |n2|))
+(define-fun |n4| () Bool (not |n2|))
+(define-fun |n5| () Bool (or |n4| |n0|))
+(define-fun |n6| () Bool (and |n3| |n5|))
+(define-fun |n7| () (_ BitVec 32) (bvudiv a b))
+(define-fun |n8| () Bool (= |n7| |n7|))
+(define-fun |n9| () Bool (or |n0| |n8|))
+(define-fun |n10| () Bool (and |n6| |n9|))
+(define-fun |n11| () Bool (not |n10|))
+(assert |n11|)
+(check-sat)

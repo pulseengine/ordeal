@@ -29,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--cert-out` no file is written and the exit code is 1 (#314, TR-093). A
   verdict reached in time is unchanged. This bounds the wait on queries such
   as #314's 128-bit `bvudiv` by 2^64; it does not decide them.
+- A performance and proof-size regression gate on real consumer queries
+  (#283, TR-081). `crates/ordeal/tests/perf_corpus/` holds 26 real queries
+  from gale (12, copied from `proofs/ordeal-bv`), synth (7, including the
+  I64Popcnt expansion from #308) and loom (7), each with its commit and
+  source in `manifest.json`, plus two labelled synthetic stand-ins for spar,
+  which has no ordeal dependency to take queries from. Every verdict is
+  re-checked by the trusted crate; the CNF clause count and the LRAT size
+  must equal the budgets in `budgets.json`, and release-build time has 5x
+  headroom. It runs as the advisory CI job `Perf + proof-size gate (#283)`,
+  with an injected slowdown and a one-byte LRAT inflation as planted
+  controls. This gates future regressions; it does not make synth's or
+  loom's queries faster.
 
 ### Changed
 

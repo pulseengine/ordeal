@@ -1,0 +1,207 @@
+{
+  "schema": "ordeal-perf-budgets/v1",
+  "policy": {
+    "proof_size": "pinned: cnf_clauses, lrat_bytes and lrat_lines must EQUAL these values (deterministic). Larger is a regression; smaller must lower the budget in the same change.",
+    "time": "time_ms = max(5 x measured_ms, measured_ms + 500), rounded up to 100 ms; measured_ms is the fastest of up to 3 in-process runs in the release build (cargo test --release).",
+    "calibrated_on": "Apple Silicon (aarch64-apple-darwin) mac mini, release build, 2026-11-18, ordeal 0.37.0 + main 2629ed5. Hosted ubuntu-24.04 runners are expected to be 1.5-3x slower; the 5x headroom absorbs that. Recalibrate from the CI job's printed table if the first hosted runs sit near the budgets.",
+    "regenerate": "ORDEAL_PERF_GATE_SUGGEST=1 cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets --nocapture"
+  },
+  "queries": {
+    "gale/cfsr_masks_partition": {
+      "cnf_clauses": 1145,
+      "lrat_bytes": 1832,
+      "lrat_lines": 1,
+      "measured_ms": 0.5,
+      "time_ms": 600
+    },
+    "gale/cfsr_partition_lossless": {
+      "cnf_clauses": 2,
+      "lrat_bytes": 10,
+      "lrat_lines": 1,
+      "measured_ms": 0.1,
+      "time_ms": 600
+    },
+    "gale/cfsr_partition_mutant": {
+      "cnf_clauses": 2,
+      "lrat_bytes": null,
+      "lrat_lines": null,
+      "measured_ms": 0.1,
+      "time_ms": 600
+    },
+    "gale/cpu_mask_pot": {
+      "cnf_clauses": 2890,
+      "lrat_bytes": 28210,
+      "lrat_lines": 33,
+      "measured_ms": 1.0,
+      "time_ms": 600
+    },
+    "gale/mpu_pow2_bwd": {
+      "cnf_clauses": 2598,
+      "lrat_bytes": 45156,
+      "lrat_lines": 32,
+      "measured_ms": 1.1,
+      "time_ms": 600
+    },
+    "gale/mpu_pow2_fwd": {
+      "cnf_clauses": 2596,
+      "lrat_bytes": 15193,
+      "lrat_lines": 93,
+      "measured_ms": 1.0,
+      "time_ms": 600
+    },
+    "gale/mpu_pow2_fwd_mutant": {
+      "cnf_clauses": 2503,
+      "lrat_bytes": null,
+      "lrat_lines": null,
+      "measured_ms": 1.2,
+      "time_ms": 600
+    },
+    "gale/sv_cpu_recover": {
+      "cnf_clauses": 740,
+      "lrat_bytes": 1064,
+      "lrat_lines": 4,
+      "measured_ms": 0.3,
+      "time_ms": 600
+    },
+    "gale/sv_cpu_recover_mutant": {
+      "cnf_clauses": 739,
+      "lrat_bytes": null,
+      "lrat_lines": null,
+      "measured_ms": 0.1,
+      "time_ms": 600
+    },
+    "gale/sv_thread_recover": {
+      "cnf_clauses": 989,
+      "lrat_bytes": 8128,
+      "lrat_lines": 61,
+      "measured_ms": 1.0,
+      "time_ms": 600
+    },
+    "gale/verus_cpu_mask_realvc": {
+      "cnf_clauses": 2893,
+      "lrat_bytes": 28250,
+      "lrat_lines": 33,
+      "measured_ms": 1.8,
+      "time_ms": 600
+    },
+    "gale/verus_mpu_pow2_realvc": {
+      "cnf_clauses": 2610,
+      "lrat_bytes": 60043,
+      "lrat_lines": 193,
+      "measured_ms": 5.0,
+      "time_ms": 600
+    },
+    "synth/i64_mul": {
+      "cnf_clauses": 62177,
+      "lrat_bytes": 2150577,
+      "lrat_lines": 9758,
+      "measured_ms": 240.0,
+      "time_ms": 1300
+    },
+    "synth/i64_lt_s": {
+      "cnf_clauses": 2852,
+      "lrat_bytes": 21042,
+      "lrat_lines": 99,
+      "measured_ms": 4.2,
+      "time_ms": 600
+    },
+    "synth/i64_eqz": {
+      "cnf_clauses": 677,
+      "lrat_bytes": 17511,
+      "lrat_lines": 36,
+      "measured_ms": 0.9,
+      "time_ms": 600
+    },
+    "synth/i64_shl": {
+      "cnf_clauses": 12962,
+      "lrat_bytes": 1824099,
+      "lrat_lines": 4329,
+      "measured_ms": 314.2,
+      "time_ms": 1600
+    },
+    "synth/i64_rotl": {
+      "cnf_clauses": 22367,
+      "lrat_bytes": 2825605,
+      "lrat_lines": 6568,
+      "measured_ms": 743.7,
+      "time_ms": 3800
+    },
+    "synth/i64_ctz": {
+      "cnf_clauses": 4568,
+      "lrat_bytes": 166215,
+      "lrat_lines": 65,
+      "measured_ms": 572.3,
+      "time_ms": 2900
+    },
+    "synth/i64_popcnt": {
+      "cnf_clauses": 7025,
+      "lrat_bytes": 9933759,
+      "lrat_lines": 23723,
+      "measured_ms": 5850.9,
+      "time_ms": 29300
+    },
+    "loom/optimize_quicksort": {
+      "cnf_clauses": 17739,
+      "lrat_bytes": 1268755,
+      "lrat_lines": 2187,
+      "measured_ms": 113.3,
+      "time_ms": 700
+    },
+    "loom/optimize_state_machine": {
+      "cnf_clauses": 29129,
+      "lrat_bytes": 18,
+      "lrat_lines": 1,
+      "measured_ms": 7.1,
+      "time_ms": 600
+    },
+    "loom/tier2_signed_div_rem": {
+      "cnf_clauses": 154490,
+      "lrat_bytes": 20,
+      "lrat_lines": 1,
+      "measured_ms": 28.7,
+      "time_ms": 600
+    },
+    "loom/slice4_memory_budget": {
+      "cnf_clauses": 72794,
+      "lrat_bytes": 18,
+      "lrat_lines": 1,
+      "measured_ms": 19.6,
+      "time_ms": 600
+    },
+    "loom/tier2_both_mode": {
+      "cnf_clauses": 1586,
+      "lrat_bytes": 91163,
+      "lrat_lines": 97,
+      "measured_ms": 2.8,
+      "time_ms": 600
+    },
+    "loom/wrong_memory_transform_sat": {
+      "cnf_clauses": 23207,
+      "lrat_bytes": null,
+      "lrat_lines": null,
+      "measured_ms": 5.8,
+      "time_ms": 600
+    },
+    "loom/dead_div_elimination_sat": {
+      "cnf_clauses": 36497,
+      "lrat_bytes": null,
+      "lrat_lines": null,
+      "measured_ms": 3.4,
+      "time_ms": 600
+    },
+    "spar/bmc_queue_overflow_k32": {
+      "cnf_clauses": 17654,
+      "lrat_bytes": 1012859,
+      "lrat_lines": 2297,
+      "measured_ms": 97.5,
+      "time_ms": 600
+    },
+    "spar/bmc_deadlock_inverted_k24": {
+      "cnf_clauses": 8391,
+      "lrat_bytes": null,
+      "lrat_lines": null,
+      "measured_ms": 4.4,
+      "time_ms": 600
+    }
+  }
+}

@@ -3574,3 +3574,33 @@ artifacts:
         target: VER-094
       - type: part-of-execution
         target: VE-076
+
+  - id: VE-077
+    type: verification-execution
+    title: "Perf + proof-size gate run (VER-095): 28-query corpus in release, self-tests, planted controls, Z3 parser legs over the new files"
+    status: implemented
+    description: "Local run on branch feat/283-perf-gate at 544d4f5 (base origin/main 2629ed5). Release gate (cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets) exit 0: 28 queries checked (26 real: gale 12, synth 7, loom 7; 2 synthetic spar stand-ins), every verdict as expected and re-checked, every CNF/LRAT pin equal; synth/i64_popcnt 5851 ms (budget 29300), 7025 clauses, 9933759 LRAT bytes; total solving 7.0-14.3 s across runs (host load). Reader fidelity: every synth and loom Unsat query reproduced the CNF clause count and LRAT size the consumer's own API call produced at dump time (ordeal 0.36.1 / 0.34.0). Self-tests cargo test -p ordeal --test perf_gate: 12 passed. Planted controls, each exit 101 for the stated reason: SLOWDOWN=20 on synth/i64_shl (5551 ms > 1600 ms); INFLATE_LRAT=1 (28211 > 28210, 1268756 > 1268755); budget cut on I64Popcnt (lrat -1, time 1000 ms); ONLY=no/such (0 queries checked). The CI job's two step scripts were run locally: gate exit 0, planted-control step exit 0 ('both planted controls are red'). cargo test -p ordeal exit 0 (lib 292 passed); nextest --workspace --features ordeal/cert-bundle 436 passed and junit_to_rivet exit 0 (VER-095 12 mapped, the ignored corpus test SKIP-listed); check_verification_citations.sh exit 0; claim_check 68/68 (CONTRIB-PERF-GATE red at 67/68 with TIME_FACTOR planted as 6); fork guard self-test 27/27 and check exit 0; Z3 parser legs (oracle::front, oracle::echo, trap_refinement) 15 passed over 53 repository .smt2 files including the new corpus."
+    fields:
+      environment: macOS arm64 (Apple Silicon mac mini), rustc stable 1.99.1, release + debug builds, nice -n 19, Z3 5.1.0 (Homebrew) for the oracle legs
+      executor: local
+      timestamp: 2026-11-18 11:42:45+00:00
+      version: 544d4f5 (feat/283-perf-gate on 2629ed5)
+    links:
+      - type: traces-to
+        target: TR-081
+
+      - type: traces-to
+        target: VER-095
+  - id: VV-155
+    type: verification-verdict
+    title: "VER-095 pass: 28 corpus queries on verdict and within pinned proof sizes and time budgets; planted slowdown and LRAT inflation red"
+    status: implemented
+    description: Verdict of VE-077 for VER-095.
+    fields:
+      evidence: "VE-077: release gate exit 0 over 28 queries (26 real); perf_gate self-tests 12 passed; planted slowdown, LRAT inflation, budget cut and empty run each exit 101 for the stated reason"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-095
+      - type: part-of-execution
+        target: VE-077

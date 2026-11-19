@@ -1865,3 +1865,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-094
+
+  - id: VER-095
+    type: sw-verification
+    title: "Real-consumer-query gate holds 28 queries (26 real: gale, synth, loom) to pinned proof sizes and time budgets; planted slowdown and LRAT inflation turn it red (TR-081)"
+    status: verified
+    release: v0.38.0
+    description: "crates/ordeal/tests/perf_gate_corpus.rs real_consumer_queries_within_budgets (release build, #[ignore]; run by the 'Perf + proof-size gate (#283)' CI job) solves every query in tests/perf_corpus/manifest.json, asserts its expected verdict, re-checks every Unsat certificate (Certificate::recheck) and every Sat witness (SatCertificate::recheck), and compares CNF clauses, LRAT bytes and lines (exact) and time (budget) with budgets.json. crates/ordeal/tests/perf_gate.rs (default run): manifest/budget set agreement and provenance, the judgement red on each planted defect, the api-dag reader on every file, and the quick queries' pinned sizes in the debug build. The CI job then runs the two planted controls (ORDEAL_PERF_GATE_SLOWDOWN=20 on synth/i64_shl; ORDEAL_PERF_GATE_INFLATE_LRAT=1) and requires each to fail for its stated reason."
+    tags: [perf, proof-size, regression-gate, consumer-corpus]
+    fields:
+      coverage: "gale 12 (smtlib + verus paths, 3 sat), synth 7 (shipped i64 expansions incl. I64Popcnt, #308), loom 7 (optimize --verify on two modules + 5 loom-core obligations, 2 sat); spar uncovered (2 labelled synthetic stand-ins); planted slowdown, LRAT inflation, budget cut, empty run"
+      method: automated-test
+      steps: "run: cargo test -p ordeal --test perf_gate && cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets"
+    links:
+      - type: verifies
+        target: TR-081

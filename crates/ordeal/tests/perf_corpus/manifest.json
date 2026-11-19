@@ -1,0 +1,573 @@
+{
+  "schema": "ordeal-perf-corpus/v1",
+  "about": "Real consumer queries for the #283 performance and proof-size gate (TR-081). Budgets: budgets.json. Gate: crates/ordeal/tests/perf_gate_corpus.rs. A query's consumer_api block is what the consumer's own API call produced when the query was taken (that ordeal version, that build), recorded for the reader-fidelity check.",
+  "consumers_not_covered": [
+    {
+      "repo": "pulseengine/spar",
+      "checked_commit": "3e5d4aeca42488caebf0136fdb02989cb70624ef",
+      "reason": "spar's main has no ordeal dependency (Cargo.lock has no ordeal; spar#327 was withdrawn, spar#350 is an open proposal), so there is no real spar query to take. The two spar/* entries are labelled synthetic stand-ins from ordeal's own bmc_corpus and are not counted as real."
+    }
+  ],
+  "excluded": [
+    {
+      "what": "ordeal#314: 128-bit (and 64-bit) bvudiv by a power-of-two constant",
+      "reason": "a liveness gap the built-in search does not decide in minutes; it would make the gate measure a timeout, not a regression. Bounded separately by `ordeal check --timeout-ms` (TR-093)."
+    }
+  ],
+  "queries": [
+    {
+      "id": "gale/cfsr_masks_partition",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/cfsr_masks_partition.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/cfsr_masks_partition.smt2",
+        "what": "fault_decode.rs lemma_cfsr_masks_partition (pilot 4, transcription)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "1db608a4dc386181eb87be694ed580e09e22b9e7b016c8bf7c080603bdde89f9"
+    },
+    {
+      "id": "gale/cfsr_partition_lossless",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/cfsr_partition_lossless.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/cfsr_partition_lossless.smt2",
+        "what": "fault_decode.rs CFSR partition, parametric strengthening (pilot 4)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "0e6fd8e8ee9d980a5deadee81a5225755558b5b5283dc2a7d53b50844f81cd87"
+    },
+    {
+      "id": "gale/cfsr_partition_mutant",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/cfsr_partition_mutant.smt2",
+      "driver": "smtlib",
+      "expect": "sat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/cfsr_partition_mutant.smt2",
+        "what": "pilot 4 discrimination mutant (UFSR bit 31 dropped)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "86e8e4b8a58494ee6e7ba637f2c979e1b2d655c29f95e2bd055ca2949830d51a"
+    },
+    {
+      "id": "gale/cpu_mask_pot",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/cpu_mask_pot.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/cpu_mask_pot.smt2",
+        "what": "cpu_mask.rs:179 power-of-two obligation (pilot 1, transcription)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "9b0fc6aaf07b02427990db8a3b90d3cf86f875efda77214b70ed62d2635f68e7"
+    },
+    {
+      "id": "gale/mpu_pow2_bwd",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/mpu_pow2_bwd.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/mpu_pow2_bwd.smt2",
+        "what": "mpu.rs:98 is_power_of_two, backward direction (pilot 2)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "6dfdea7bb6507fa73159000e2129f288773c9b1e82442591457ed4baaebb9210"
+    },
+    {
+      "id": "gale/mpu_pow2_fwd",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/mpu_pow2_fwd.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/mpu_pow2_fwd.smt2",
+        "what": "mpu.rs:98 is_power_of_two, forward direction (pilot 2)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "8c94537adc7f98ed2c7a415c48e44a64fb32cb554257909ed4f49ff8b8c260d9"
+    },
+    {
+      "id": "gale/mpu_pow2_fwd_mutant",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/mpu_pow2_fwd_mutant.smt2",
+      "driver": "smtlib",
+      "expect": "sat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/mpu_pow2_fwd_mutant.smt2",
+        "what": "pilot 2 discrimination mutant (bv2 dropped)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "7392a0d627215c13dcb527c4ed2e9f81ad97e30d441dc30ac7376eeffcad7fb9"
+    },
+    {
+      "id": "gale/sv_cpu_recover",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/sv_cpu_recover.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/sv_cpu_recover.smt2",
+        "what": "spinlock_validate.rs SV4 owner decode (pilot 3)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "4da7ccd57e11d4c1a3d01818a272bcc1d20f8e1c55c3a36db97ec40c112e7dce"
+    },
+    {
+      "id": "gale/sv_cpu_recover_mutant",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/sv_cpu_recover_mutant.smt2",
+      "driver": "smtlib",
+      "expect": "sat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/sv_cpu_recover_mutant.smt2",
+        "what": "pilot 3 discrimination mutant (alignment premise dropped)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "3d96f6b7a1bb38c7064fd5809f3e0c3fc88c0c4256e5143b0c29ed5f423c405a"
+    },
+    {
+      "id": "gale/sv_thread_recover",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/sv_thread_recover.smt2",
+      "driver": "smtlib",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/sv_thread_recover.smt2",
+        "what": "spinlock_validate.rs SV5 owner decode (pilot 3)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal check` (proofs/ordeal-bv/run.sh section A)"
+      },
+      "sha256": "03eed7d192abf70bd1c81502328b0dd98a7afee945a4c406e1ea7cd0f9475509"
+    },
+    {
+      "id": "gale/verus_cpu_mask_realvc",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/verus_cpu_mask_realvc.smt2",
+      "driver": "verus",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/verus_cpu_mask_realvc.smt2",
+        "what": "the real Verus by(bit_vector) VC for cpu_mask.rs:171 (obligation-proof)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal verus` (proofs/ordeal-bv/run.sh section B)"
+      },
+      "sha256": "d801baab28e74c9638786915a89e42a29fad61e0747f7ab76a66199c3206952f"
+    },
+    {
+      "id": "gale/verus_mpu_pow2_realvc",
+      "consumer": "gale",
+      "real": true,
+      "file": "gale/verus_mpu_pow2_realvc.smt2",
+      "driver": "verus",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/gale",
+        "commit": "f0411664d5b061ee6d72743dbf8ca38ff1893886",
+        "source": "proofs/ordeal-bv/verus_mpu_pow2_realvc.smt2",
+        "what": "the real Verus by(bit_vector) VC for mpu.rs:98 (obligation-proof)",
+        "produced_by": "copied byte-for-byte from the gale repository; gale runs it with `ordeal verus` (proofs/ordeal-bv/run.sh section B)"
+      },
+      "sha256": "935f47de29d5b67f3e93f6c56aa26a23fd777aa5b6707e68b237a35f0aefb9c9"
+    },
+    {
+      "id": "synth/i64_mul",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_mul.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64Mul Thumb-2 expansion certified against its wasm reference",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #0 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 228,
+          "cnf_clauses": 62177,
+          "lrat_bytes": 2150577,
+          "lrat_lines": 9758,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "d0f35207a1a436b0ce02a260c2e45c9c30db5addc95e935dfd8fe690771020a5"
+    },
+    {
+      "id": "synth/i64_lt_s",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_lt_s.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64LtS Thumb-2 expansion certified against its wasm reference",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #3 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 3,
+          "cnf_clauses": 2852,
+          "lrat_bytes": 21042,
+          "lrat_lines": 99,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "89899c792adc35af5983bff18a8236a6ead72419f09656e1bfdf0b76a51d8d38"
+    },
+    {
+      "id": "synth/i64_eqz",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_eqz.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64Eqz Thumb-2 expansion certified against its wasm reference",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #11 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 0,
+          "cnf_clauses": 677,
+          "lrat_bytes": 17511,
+          "lrat_lines": 36,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "0c5ceb1a3a48b372c1ab35d34b8b85e4c25b8351368ece93e61a83a624c9d393"
+    },
+    {
+      "id": "synth/i64_shl",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_shl.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64Shl Thumb-2 expansion certified against its wasm reference",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #12 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 313,
+          "cnf_clauses": 12962,
+          "lrat_bytes": 1824099,
+          "lrat_lines": 4329,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "1eed0073d0981214fd6bed9f8bd03169bd87782a49734b46cb123a7295cfb124"
+    },
+    {
+      "id": "synth/i64_rotl",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_rotl.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64Rotl Thumb-2 expansion certified against its wasm reference",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #15 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 809,
+          "cnf_clauses": 22367,
+          "lrat_bytes": 2825605,
+          "lrat_lines": 6568,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "65938d98148345f2b66f4abeb3176773782ee3b27ed36199c60d6010b93bda20"
+    },
+    {
+      "id": "synth/i64_ctz",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_ctz.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64Ctz Thumb-2 expansion certified against its wasm reference",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #18 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 608,
+          "cnf_clauses": 4568,
+          "lrat_bytes": 166215,
+          "lrat_lines": 65,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "2c07b72172613fb1e114e14cbfbd957d0394f8fcf183fcbf1e551ece65d95ba0"
+    },
+    {
+      "id": "synth/i64_popcnt",
+      "consumer": "synth",
+      "real": true,
+      "file": "synth/i64_popcnt.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/synth",
+        "commit": "265235dc29aa73076bd08d11b090388e283a0989",
+        "source": "crates/synth-backend/tests/i64_expansion_certification.rs::shipped_expansions_certify",
+        "what": "the I64Popcnt Thumb-2 expansion certified against its wasm reference (the ordeal#308 data point)",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.36.1 (synth's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; `SYNTH_ORDEAL_DEADLINE_MS=3600000 cargo test -p synth-backend --test i64_expansion_certification shipped_expansions_certify -- --exact`; query #19 of 20 in the test's order",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 6830,
+          "cnf_clauses": 7025,
+          "lrat_bytes": 9933759,
+          "lrat_lines": 23723,
+          "ordeal": "0.36.1",
+          "entry": "check_with_deadline"
+        }
+      },
+      "sha256": "14b0f4128330d64d9329b5401bccd3b9efa7fffa92903b151926be01ef26eda5"
+    },
+    {
+      "id": "loom/optimize_quicksort",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/optimize_quicksort.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-cli optimize --verify on tests/fixtures/quicksort.wat",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `loom optimize tests/fixtures/quicksort.wat --verify` (loom-cli, debug build); query #1 of 10",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 146,
+          "cnf_clauses": 17739,
+          "lrat_bytes": 1268755,
+          "lrat_lines": 2187,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "5ca3145b7184848631bdda20cae0952d903dcf0e0a71ff0e9de0613153b586b1"
+    },
+    {
+      "id": "loom/optimize_state_machine",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/optimize_state_machine.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-cli optimize --verify on tests/corpus/state_machine.wasm",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `loom optimize tests/corpus/state_machine.wasm --verify`; query #0 of 28",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 6,
+          "cnf_clauses": 29129,
+          "lrat_bytes": 18,
+          "lrat_lines": 1,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "86e37c29832bf34975f63138c7ededa93a75305a025a9a9dd61cca21f0843548"
+    },
+    {
+      "id": "loom/tier2_signed_div_rem",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/tier2_signed_div_rem.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-core/src/verify.rs tier2_slice2_signed_div_and_rem_are_routed_from_real_wasm",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `cargo test -p loom-core --lib`, test verify::tests::tier2_slice2_signed_div_and_rem_are_routed_from_real_wasm",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 45,
+          "cnf_clauses": 154490,
+          "lrat_bytes": 20,
+          "lrat_lines": 1,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "c1b844ab52c12b25bb19f8737b0f543ee249e4f9eac73d94512f7b055892113f"
+    },
+    {
+      "id": "loom/slice4_memory_budget",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/slice4_memory_budget.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-core/src/verify_solver.rs slice4_the_memory_budget_is_measured",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `cargo test -p loom-core --lib`, test verify_solver::tests::slice4_the_memory_budget_is_measured",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 16,
+          "cnf_clauses": 72794,
+          "lrat_bytes": 18,
+          "lrat_lines": 1,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "7115b49674680775239f7b7b78f39543baaa0f64bfff9428a78b118c18202c21"
+    },
+    {
+      "id": "loom/tier2_both_mode",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/tier2_both_mode.smt2",
+      "driver": "api-dag",
+      "expect": "unsat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-core/src/verify.rs tier2_slice1_both_mode_finds_no_divergence_on_real_obligations",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `cargo test -p loom-core --lib`, test verify::tests::tier2_slice1_both_mode_finds_no_divergence_on_real_obligations",
+        "consumer_api": {
+          "verdict": "unsat",
+          "api_ms": 4,
+          "cnf_clauses": 1586,
+          "lrat_bytes": 91163,
+          "lrat_lines": 97,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "1f24012bba26841b55598150e3dc8b47bc9cac8e8a01e531b85ed5e1c0459351"
+    },
+    {
+      "id": "loom/wrong_memory_transform_sat",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/wrong_memory_transform_sat.smt2",
+      "driver": "api-dag",
+      "expect": "sat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-core/src/verify.rs tier2_slice4_a_wrong_memory_transform_is_rejected_by_the_new_engine",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `cargo test -p loom-core --lib`, test verify::tests::tier2_slice4_a_wrong_memory_transform_is_rejected_by_the_new_engine",
+        "consumer_api": {
+          "verdict": "sat",
+          "api_ms": 5,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "b24b60918a0df3ffb6bdba2977b15bcc728e9a715b38ac2c3cfbc07f3f6ce10a"
+    },
+    {
+      "id": "loom/dead_div_elimination_sat",
+      "consumer": "loom",
+      "real": true,
+      "file": "loom/dead_div_elimination_sat.smt2",
+      "driver": "api-dag",
+      "expect": "sat",
+      "provenance": {
+        "repo": "pulseengine/loom",
+        "commit": "333f6c24bb6be7d911efe8f87925fe3584c84e4d",
+        "source": "loom-core/src/trap_gate.rs dead_div_elimination_is_rejected",
+        "produced_by": "ordeal#283 corpus dump hook (tests/perf_corpus/dump_hook.rs) applied to ordeal 0.34.0 (loom's pin), patched into the consumer with [patch.crates-io]; ORDEAL_DUMP_SMT2 set; loom-core built against the system Z3 (vendored feature off) for the dump only; `cargo test -p loom-core --lib`, test trap_gate::tests::dead_div_elimination_is_rejected",
+        "consumer_api": {
+          "verdict": "sat",
+          "api_ms": 7,
+          "ordeal": "0.34.0"
+        }
+      },
+      "sha256": "ff0085741a5007007f61d6e7af544c210bfb8103ddaaba8a3d832b82dc5e6445"
+    },
+    {
+      "id": "spar/bmc_queue_overflow_k32",
+      "consumer": "spar",
+      "real": false,
+      "driver": "bmc",
+      "expect": "unsat",
+      "bmc": {
+        "generator": "queue_overflow",
+        "k": 32,
+        "arg": 32
+      },
+      "provenance": {
+        "synthetic": "STAND-IN, not a spar query: spar has no ordeal dependency on main; this is ordeal's own TR-031 BMC shape for the spar#350 proposal",
+        "produced_by": "ordeal::bmc_corpus::queue_overflow(32, 32), generated in-process"
+      }
+    },
+    {
+      "id": "spar/bmc_deadlock_inverted_k24",
+      "consumer": "spar",
+      "real": false,
+      "driver": "bmc",
+      "expect": "sat",
+      "bmc": {
+        "generator": "deadlock",
+        "k": 24,
+        "arg": 1
+      },
+      "provenance": {
+        "synthetic": "STAND-IN, not a spar query: see spar/bmc_queue_overflow_k32",
+        "produced_by": "ordeal::bmc_corpus::deadlock(24, true), generated in-process"
+      }
+    }
+  ]
+}

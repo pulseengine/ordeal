@@ -656,6 +656,59 @@ jobs:
           echo "$out" | grep -q 'test result: ok. 15 passed' \
             || { echo "::error::expected the 5 front-leg, 5 echo-leg and 5 trap-refinement tests to pass"; exit 1; }
 
+  # #283 / TR-081 / VER-095: the performance and proof-size regression gate
+  # on real consumer queries (gale, synth, loom; spar has none to give and
+  # is covered only by labelled synthetic stand-ins). The corpus, its
+  # provenance and the published budgets live in
+  # crates/ordeal/tests/perf_corpus/. Proof size (CNF clauses, LRAT bytes
+  # and lines) is pinned exactly; time has 5x headroom over a release-build
+  # measurement. Every verdict is re-checked by the trusted crate. Not a
+  # required check (the owner decides); its planted controls run on every
+  # change: an injected 20x slowdown and a one-byte LRAT inflation must
+  # each turn the gate red for the stated reason.
+  perf-gate:
+    name: Perf + proof-size gate (#283)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: perf-gate
+      - name: Build the gate (release)
+        run: cargo test --release -p ordeal --test perf_gate_corpus --no-run
+      # rivet: verifies VER-095
+      - name: Real consumer queries within their budgets
+        run: |
+          set -euo pipefail
+          out="$(cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets --nocapture 2>&1)" \
+            || { echo "$out"; exit 1; }
+          echo "$out" | grep -E '^(query|gale/|synth/|loom/|spar/|perf gate:)'
+          # No vacuous pass: the one gate test ran, over the whole corpus.
+          echo "$out" | grep -q 'test result: ok. 1 passed' \
+            || { echo "::error::the perf gate test did not run"; exit 1; }
+          echo "$out" | grep -qE '^perf gate: [1-9][0-9]* queries checked' \
+            || { echo "::error::the perf gate checked no queries"; exit 1; }
+          if echo "$out" | grep -q 'SUBSET RUN'; then echo "::error::subset run"; exit 1; fi
+      - name: Planted controls (injected slowdown, inflated LRAT) must be red
+        run: |
+          set -uo pipefail
+          planted() {
+            local want="$1"; shift
+            # The control MUST fail; under `bash -e` a bare failing assignment
+            # would end the step before rc is read, so capture it explicitly.
+            out="$(env "$@" cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real_consumer_queries_within_budgets --nocapture 2>&1)" \
+              && rc=0 || rc=$?
+            echo "$out" | grep -E '^(perf gate:|FAIL )' || true
+            if [ "$rc" -eq 0 ]; then echo "::error::planted control passed ($*): the gate is vacuous"; exit 1; fi
+            echo "$out" | grep -qF "$want" \
+              || { echo "::error::planted control red for the wrong reason ($*)"; exit 1; }
+          }
+          planted 'synth/i64_shl: time' ORDEAL_PERF_GATE_ONLY=synth/i64_shl ORDEAL_PERF_GATE_SLOWDOWN=20
+          planted 'lrat_bytes 1268756 exceeds the budget 1268755 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
+          echo "both planted controls are red"
+
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
   # change, not first at release time: install varve the verified way,
   # install and verify the pinned layer against the realm root, then run the
