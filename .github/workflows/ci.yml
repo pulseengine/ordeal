@@ -422,12 +422,16 @@ jobs:
     continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Owner decision 2026-11-20: Bazel runs with --lockfile_mode=error
+      # fleet-wide. A MODULE.bazel change the committed lock lacks fails.
+      - name: Bazel lockfile is committed
+        run: git ls-files --error-unmatch MODULE.bazel.lock
       - name: Bazel build //...
-        run: bazel build //... --config=dev
+        run: bazel build //... --config=dev --lockfile_mode=error
       # #136: a built-but-never-run test binary is the relay-class smell —
       # the Bazel-built tests must actually execute, not just link.
       - name: Bazel test //...
-        run: bazel test //... --config=dev --test_output=errors
+        run: bazel test //... --config=dev --lockfile_mode=error --test_output=errors
 
   # ── Lean model + soundness proof (VER-015) ────────────────────────────
   # Two obligations, both gated here:
