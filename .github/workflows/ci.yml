@@ -162,6 +162,29 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      # Lockfile sweep 2026-11-20: every Cargo workspace in the repository
+      # (the root, fuzz/ and mcdc/ordeal-lrat/ are three) must have a
+      # tracked Cargo.lock that resolves with --locked, so no CI build can
+      # float a dependency past its lock. Workspaces are found from every
+      # tracked Cargo.toml, not listed by hand; finding none fails.
+      - name: Lockfiles committed and current (cargo --locked, every workspace)
+        run: |
+          set -euo pipefail
+          roots=$(git ls-files '*Cargo.toml' | while read -r m; do
+            cargo locate-project --workspace --message-format plain --manifest-path "$m"
+          done | sort -u)
+          n=0
+          for root in $roots; do
+            lock="$(dirname "$root")/Cargo.lock"
+            rel="${lock#"$PWD"/}"
+            git ls-files --error-unmatch "$rel" >/dev/null || { echo "::error::$rel is not committed"; exit 1; }
+            cargo metadata --locked --format-version 1 --manifest-path "$root" >/dev/null \
+              || { echo "::error::$rel is out of date with its Cargo.toml (cargo --locked)"; exit 1; }
+            echo "locked: $rel"
+            n=$((n + 1))
+          done
+          [ "$n" -ge 1 ] || { echo "::error::no Cargo workspace found"; exit 1; }
+          echo "::notice::$n workspace lockfile(s) committed and current"
       - name: Assert dependency-free default build
         run: |
           # #187: build-dependencies count (they run at build time), and the
@@ -184,6 +207,18 @@ jobs:
       - name: Advisories — full lockfile incl. dev/bench/optional (advisory)
         continue-on-error: true
         run: cargo deny --all-features check advisories
+      # The nested workspaces have their own Cargo.lock, which the two
+      # steps above never read (lockfile sweep 2026-11-20). Neither ships
+      # in a release, so, like the dev/bench closure above, an advisory
+      # here fails the step and is reported without blocking the job.
+      - name: Advisories — nested lockfiles fuzz/ and mcdc/ordeal-lrat/ (advisory)
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          for m in fuzz/Cargo.toml mcdc/ordeal-lrat/Cargo.toml; do
+            echo "== $m"
+            cargo deny --manifest-path "$m" --all-features check --config deny.toml advisories
+          done
       - name: VEX generator self-test
         run: python3 scripts/vex.py self-test
       - name: Build twice, compare bit-for-bit
