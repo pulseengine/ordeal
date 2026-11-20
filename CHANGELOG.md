@@ -87,6 +87,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **No x86_64-apple-darwin (Intel macOS) archives from v0.38.0 on.** Intel Mac
+  users: build from source. The release no longer builds `x86_64-apple-darwin`
+  for `ordeal` or `ordeal-recheck` (fleet-wide owner decision, 2026-11-20); macOS
+  ships for Apple Silicon (`aarch64-apple-darwin`) only.
+  `scripts/verify_release.sh` expects five archives per binary from v0.38.0 and
+  fails if an Intel macOS archive is published. rules_ordeal refuses an Intel
+  Mac with the same message from its v0.38.0 pin (rules_ordeal#32).
+
 - **The SMT-LIB reader names a quoted symbol by its content** (TR-097,
   #281 E2; owner decision 20261117T185255-a55cd4). SMT-LIB 2.6 §3.1:
   `|x|` and `x` are one symbol when `x` is a simple symbol, and a quoted

@@ -10,7 +10,7 @@
 #   scripts/verify_release.sh v0.21.0
 #
 # From v0.36.0 on (TR-075) it also covers the standalone `ordeal-recheck`
-# assets: six native archives and the wasm32-wasip2 component in the signed
+# assets: its native archives (six, five from v0.38.0) and the wasm32-wasip2 component in the signed
 # sums, the darwin binary's version and exit codes (2 on a bad flag, 1 on a
 # malformed bundle), the component's version, and the two new crates.
 #
@@ -53,8 +53,14 @@ cosign verify-blob --certificate-identity-regexp "https://github.com/$REPO/.gith
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   --bundle SHA256SUMS.txt.cosign.bundle SHA256SUMS.txt >/dev/null 2>&1 && ok "cosign verify-blob on SHA256SUMS" || bad "cosign"
 
-# 2. six archives: 4 gnu/darwin + 2 musl
-n=$(ls ordeal-$TAG-*.tar.gz 2>/dev/null | wc -l | tr -d ' '); [ "$n" = "6" ] && ok "6 platform archives ($n)" || bad "expected 6 archives, got $n"
+# 2. platform archives: 4 gnu/darwin + 2 musl; from v0.38.0 five, because
+#    Intel macOS (x86_64-apple-darwin) is no longer built (owner decision
+#    2026-11-20), and its archive must be absent.
+if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 38, 0) else 1)"; then NARCH=5; else NARCH=6; fi
+n=$(ls ordeal-$TAG-*.tar.gz 2>/dev/null | wc -l | tr -d ' '); [ "$n" = "$NARCH" ] && ok "$NARCH platform archives ($n)" || bad "expected $NARCH archives, got $n"
+if [ "$NARCH" = 5 ]; then
+  for p in ordeal ordeal-recheck; do [ ! -e "$p-$TAG-x86_64-apple-darwin.tar.gz" ] && ok "no Intel macOS archive: $p" || bad "Intel macOS archive published: $p-$TAG-x86_64-apple-darwin.tar.gz"; done
+fi
 for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do [ -f "ordeal-$TAG-$t.tar.gz" ] && ok "musl asset $t" || bad "musl asset $t missing"; done
 mkdir -p musl && tar -xzf ordeal-$TAG-x86_64-unknown-linux-musl.tar.gz -C musl ordeal 2>/dev/null
 python3 - musl/ordeal <<'ELF' && ok "x86_64 musl binary is static (ELF: no PT_INTERP, no DT_NEEDED)" || bad "musl binary not static (ELF parse)"
@@ -143,11 +149,11 @@ if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= 
   else skip "wasmtime not installed: wasm component not executed"; fi
 else skip "wasm component published from v0.23.0 on"; fi
 
-# 7. ordeal-recheck (TR-075, from v0.36.0): six archives + the wasm component
+# 7. ordeal-recheck (TR-075, from v0.36.0): six archives (five from v0.38.0) + the wasm component
 #    in the signed sums; the published binary reports the tag, exits 2 on
 #    a bad flag and 1 on a malformed bundle (darwin-arm64), the component runs.
 if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 36, 0) else 1)"; then
-  n=$(ls ordeal-recheck-$TAG-*.tar.gz 2>/dev/null | wc -l | tr -d ' '); [ "$n" = "6" ] && ok "6 ordeal-recheck archives ($n)" || bad "expected 6 ordeal-recheck archives, got $n"
+  n=$(ls ordeal-recheck-$TAG-*.tar.gz 2>/dev/null | wc -l | tr -d ' '); [ "$n" = "$NARCH" ] && ok "$NARCH ordeal-recheck archives ($n)" || bad "expected $NARCH ordeal-recheck archives, got $n"
   for f in ordeal-recheck-$TAG-*.tar.gz ordeal-recheck-$TAG-wasm32-wasip2.wasm; do
     [ -f "$f" ] && grep -q " ./$f\$" SHA256SUMS.txt && ok "listed in SHA256SUMS: $f" || bad "not listed in SHA256SUMS: $f"
   done
