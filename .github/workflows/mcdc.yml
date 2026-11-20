@@ -31,7 +31,7 @@ jobs:
       # Pinned, not `stable`: the decision structure witness reads comes from
       # rustc's DWARF, so the baseline is only meaningful for the toolchain it
       # was measured with (mcdc/baseline.txt header). Bump both together.
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
         with:
           toolchain: 1.99.1
           targets: wasm32-wasip1

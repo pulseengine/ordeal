@@ -94,7 +94,7 @@ jobs:
           TAG: ${{ steps.rel.outputs.tag }}
         run: git checkout --quiet "$TAG"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
         if: steps.rel.outputs.skip != 'true'
 
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
