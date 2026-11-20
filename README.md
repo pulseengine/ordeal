@@ -69,7 +69,7 @@ ordeal --version                      # dispatched from the pinned layer
 ```
 
 **Release binaries.** Each [release](https://github.com/pulseengine/ordeal/releases)
-ships archives for Linux (glibc and static musl, x86_64 and aarch64) and macOS.
+ships archives for Linux (glibc and static musl, x86_64 and aarch64) and macOS on Apple Silicon.
 `SHA256SUMS.txt` is cosign-signed, and a CycloneDX SBOM and VEX are listed in it:
 
 ```sh

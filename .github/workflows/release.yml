@@ -133,9 +133,9 @@ jobs:
             os: ubuntu-24.04
             archive: tar.gz
             cross: true
-          - target: x86_64-apple-darwin
-            os: macos-latest  # macos-14 retired by GitHub 2026-11-05 (v0.36.0 run 42092397312); arm64, x86_64 binary smoke-runs under Rosetta as before
-            archive: tar.gz
+          # Apple Silicon only: Intel macOS builds stopped fleet-wide (owner
+          # decision 2026-11-20); verify_release.sh asserts the
+          # x86_64-apple-darwin archive is absent from v0.38.0 on.
           - target: aarch64-apple-darwin
             os: macos-latest
             archive: tar.gz

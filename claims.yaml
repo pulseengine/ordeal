@@ -234,7 +234,7 @@ claims:
 
   - id: README-RELEASE-ARCHIVES
     doc: README.md
-    text: "ships archives for Linux (glibc and static musl, x86_64 and aarch64) and macOS"
+    text: "ships archives for Linux (glibc and static musl, x86_64 and aarch64) and macOS on Apple Silicon"
     evidence:
       - kind: count-min
         pattern: '- target: (x86_64|aarch64)-unknown-linux-gnu$'
@@ -245,9 +245,13 @@ claims:
         glob: .github/workflows/release.yml
         min: 2
       - kind: count-min
-        pattern: '- target: (x86_64|aarch64)-apple-darwin$'
+        pattern: '- target: aarch64-apple-darwin$'
         glob: .github/workflows/release.yml
-        min: 2
+        min: 1
+      - kind: count-max            # Intel macOS is not built (owner decision 2026-11-20)
+        pattern: '- target: x86_64-apple-darwin'
+        glob: .github/workflows/release.yml
+        max: 0
 
   - id: README-SIGNED-SUMS
     doc: README.md

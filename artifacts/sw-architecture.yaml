@@ -404,7 +404,7 @@ artifacts:
     type: sw-arch-component
     title: ordeal-release-pipeline (signed release, SBOM, VEX, musl, verification of published bytes)
     status: verified
-    description: "The delivery pipeline: .github/workflows/release.yml builds six archives (gnu/darwin plus static musl), executes each where the host can, composes the release body from the tag annotation and rivet release notes, emits a CycloneDX SBOM and VEX (scripts/vex.py, deny.toml) into the cosign-signed SHA256SUMS.txt, and attaches SLSA provenance; vex-reissue.yml re-audits weekly; scripts/verify_release.sh verifies the published bytes after a cut. Carries no solver logic; its correctness is that what ships is what was built and verified."
+    description: "The delivery pipeline: .github/workflows/release.yml builds the native archives (gnu, static musl, and darwin on Apple Silicon only from v0.38.0), executes each where the host can, composes the release body from the tag annotation and rivet release notes, emits a CycloneDX SBOM and VEX (scripts/vex.py, deny.toml) into the cosign-signed SHA256SUMS.txt, and attaches SLSA provenance; vex-reissue.yml re-audits weekly; scripts/verify_release.sh verifies the published bytes after a cut. Carries no solver logic; its correctness is that what ships is what was built and verified."
     links:
       - type: allocated-from
         target: TR-033
