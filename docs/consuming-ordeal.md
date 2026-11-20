@@ -7,7 +7,7 @@ guide for trying it as a dependency and reporting back.
 
 ```toml
 [dependencies]
-ordeal = "0.37"
+ordeal = "0.38"
 ```
 
 `ordeal-lrat` (the trusted checker) is pulled transitively. The default

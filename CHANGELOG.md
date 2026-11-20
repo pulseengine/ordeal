@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-20
+
+Three strands. The certified query echo is complete (#281, E2 and E3): an
+`ordeal-cert/v5` bundle carries the SMT-LIB script the trusted printer
+makes of the query ordeal decided, `ordeal-recheck` re-derives it byte for
+byte, and `ordeal echo-check` asks Z3 whether your input implies it. The
+echo is opt-in (`--echo`); without it every bundle is v3 as before. The
+second strand is the trusted mux fold (#314): `bvudiv` / `bvurem` by a
+constant power of two, which ran into the search deadline, are decided in
+milliseconds, proven in Lean, and the certificates of the queries the fold
+fires on change. The third is consumer-facing: trap refinement for loom
+(#284), `--timeout-ms`, a perf and proof-size gate on real consumer
+queries (#283), and the refusal of scripts with more than one `check-sat`
+(#321). No Intel macOS archives are built from this release on.
+
 ### Added
 
 - **Trap refinement for loom** (TR-082, #284; loom#313 / loom#300).
@@ -2442,7 +2457,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.38.0
 [0.37.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.37.0
 [0.36.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.1
 [0.36.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.0
