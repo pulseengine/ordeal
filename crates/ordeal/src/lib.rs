@@ -98,6 +98,10 @@ pub mod oracle;
 #[cfg(all(feature = "cadical", not(target_family = "wasm")))]
 pub mod sat_cadical;
 
+/// The certified query echo in a certificate (#281 E2, `ordeal-cert/v5`):
+/// re-exported from the solver-free `ordeal-cert` crate.
+pub use ordeal_cert::echo;
+pub use ordeal_cert::echo::{EchoCertificate, EchoRecheckError, EchoSubject, QueryEcho};
 pub use query::{
     QueryCertificate, QueryCheckResult, QueryDag, QueryInputs, QueryModelRecheckError,
     QueryRecheckError, QuerySatCertificate, QueryTerm, SliverBlock, SliverCertificate,

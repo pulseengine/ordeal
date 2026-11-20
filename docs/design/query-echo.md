@@ -436,6 +436,52 @@ theorems above is kept; the shapes moved where the proof asked for it:
   any checker file with no decisions (`docs/mcdc.md`). The printer has
   one literal form, `#b`; it never prints `#x`.
 
+### Addendum: E2 as built (2026-11-19, TR-097)
+
+- **Names: the content (owner decision 20261117T185255-a55cd4).** The
+  reader stores a quoted symbol's content as the name, per SMT-LIB 2.6
+  §3.1: a simple-symbol content is the bare symbol (`|x|` is `x`, `|true|`
+  is `true`), any other content (`|a b|`, `||`, `|0v|`, `|let|`) is a
+  quoted symbol that is always a symbol (never a literal, keyword,
+  operator or reserved word) and that no bare token denotes. A bare token
+  that is not a simple symbol (`0v`, `#x01`) is not a name. The reserved
+  words are §3.1's thirteen plus every command name. A quoted symbol with
+  `\` or a control character other than tab, newline and carriage return
+  is refused (§3.1 excludes them; Z3 accepts `|a\b|`, an
+  ordeal-refuses-Z3-accepts deviation). The printer is unchanged: it
+  quotes every name, so `a b` prints as `|a b|`. Echo leg, same seed: 9604
+  of 10^4 generated scripts echoed and compared, 0 refused for a name
+  (E1: 1510 compared, 8490 refused), 396 not echoed (the marked
+  reserved-word declarations); 7397 of them quote a non-simple symbol.
+  The 27 repository files are unchanged (26 compared, 1 refused by both
+  readers). The `content` second pass of the leg is gone, and so is the
+  front leg's bar stripping: both link names as read, so a reader that
+  kept the bars again names a different Z3 constant and goes red.
+  Residual printer refusals on read names: the empty name `||`, a byte
+  outside 0x20–0x7E (tab, newline, non-ASCII), a leading `@` or `.`, and
+  the printer's reserved list beyond the reader's (none reached by the
+  generator).
+- **Format (question 2): one `ordeal-cert/v5`, `ext` optional.** The v3
+  envelope (core) or v4 envelope (extended query) with `format`,
+  `recheck.min_version` (`0.38.0`) and `recheck.cmd` (an `echo_term` /
+  `echo_ext` clause appended) rewritten, plus `echo` after `recheck`. The
+  v3 / v4 writers and readers are unchanged; their v5 use goes through
+  the same code with the format as a parameter. `EchoCertificate`
+  (`ordeal-cert`, always compiled) holds the subject (UNSAT / SAT, core /
+  extended) and the echo; `recheck` is the subject's recheck, then
+  `echo_term` / `echo_ext` over the block, byte-compared with
+  `echo.text`, and `echo.logic` against the text's first line.
+- **Opt-in (question 3).** The maintainer's Q3 says on by default from
+  v5; the issue's E1 report scopes E2 to "`ordeal-cert/v5`, recheck rows,
+  the CLI flag". E2 ships the flag: `ordeal check … --cert-out PATH
+  --echo`, and `ordeal verus … --cert-out DIR --echo` (question 8: a v5
+  `<name>.cert.json` beside each `.lrat`, the obligation solved on the
+  term path). Making v5 the default is left to the maintainer.
+- **Compatibility with `ordeal-dag/v3` (#314, PR #328).** A v5 bundle's
+  `recheck.min_version` is 0.38.0, which is also what an
+  `ordeal-dag/v3` query block demands, so `min_reader_version(0.38.0)`
+  over a v5 envelope stays 0.38.0 once both land.
+
 ## 6. The Z3 parser differential
 
 Three legs per script `S`, all in one test module behind `oracle`:

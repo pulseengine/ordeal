@@ -26,7 +26,7 @@ path = "src/main.rs"
 ordeal-lrat = { path = "../ordeal-lrat", version = "=0.37.0" }
 
 # The certificate data types, their trusted re-checks and the
-# `ordeal-cert/v1..v4` bundle codec (TR-075): extracted so `ordeal-recheck`
+# `ordeal-cert/v1..v5` bundle codec (TR-075): extracted so `ordeal-recheck`
 # is built without the solver. In-workspace and dependency-free beyond
 # ordeal-lrat with no features on, so the default build stays free of
 # third-party deps. Everything is re-exported at its old `ordeal::` path.
@@ -35,7 +35,7 @@ ordeal-cert = { path = "../ordeal-cert", version = "=0.37.0", default-features =
 # hashes ship in the dependency-free default binary; #162 / TR-045.)
 
 [features]
-# `ordeal-cert/v1..v4` bundle serialization (issue #91 / TR-025 ordeal
+# `ordeal-cert/v1..v5` bundle serialization (issue #91 / TR-025 ordeal
 # half): the serde envelope is ordeal-cert's `json` feature. Optional: the
 # default build stays dependency-free; rivet (the consumer) enables
 # `cert-bundle`.

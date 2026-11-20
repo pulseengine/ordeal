@@ -1,6 +1,6 @@
 [package]
 name = "ordeal-cert"
-description = "Ordeal's certificate types, their trusted re-checks and the ordeal-cert/v1..v4 bundle codec — no solver in the dependency closure"
+description = "Ordeal's certificate types, their trusted re-checks and the ordeal-cert/v1..v5 bundle codec — no solver in the dependency closure"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -17,7 +17,7 @@ path = "src/lib.rs"
 # and scripts/recheck_closure.sh gates that closure in CI.
 ordeal-lrat = { path = "../ordeal-lrat", version = "=0.37.0" }
 
-# The `ordeal-cert/v1..v4` JSON envelope. Optional: without `json` the crate
+# The `ordeal-cert/v1..v5` JSON envelope. Optional: without `json` the crate
 # is dependency-free beyond ordeal-lrat (the default `ordeal` build enables
 # no features here).
 serde = { version = "1", features = ["derive"], optional = true }

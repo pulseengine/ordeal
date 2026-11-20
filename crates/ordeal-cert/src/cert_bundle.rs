@@ -1124,10 +1124,15 @@ impl TermCertificate {
     /// bundle unchanged.
     #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
     pub fn to_cert_v3(&self, attests: &Attests) -> String {
+        serde_json::to_string_pretty(&self.envelope_v3(attests)).expect("own-struct serialization")
+    }
+
+    /// The `v3` envelope of [`Self::to_cert_v3`], for `ordeal-cert/v5`.
+    fn envelope_v3(&self, attests: &Attests) -> UnsatEnvelopeV3 {
         let cert = &self.query.certificate;
         let problem_text = cnf_text(&cert.cnf);
         let proof_text = cert.lrat_text().unwrap_or_default().to_string();
-        let env = UnsatEnvelopeV3 {
+        UnsatEnvelopeV3 {
             format: "ordeal-cert/v3".into(),
             verdict: "unsat".into(),
             produced_by: Tool {
@@ -1157,8 +1162,7 @@ impl TermCertificate {
                 problem_sha256: sha256_hex(problem_text.as_bytes()),
                 proof_sha256: sha256_hex(proof_text.as_bytes()),
             },
-        };
-        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+        }
     }
 
     /// Parse an `ordeal-cert/v3` UNSAT bundle, verifying all four content
@@ -1166,10 +1170,16 @@ impl TermCertificate {
     /// then runs [`TermBundle::recheck`]. A v1 or v2 bundle is
     /// [`BundleError::WrongFormat`]: read it with its own reader.
     pub fn from_cert_v3(json: &str) -> Result<TermBundle, BundleError> {
+        Self::decode_v3(json, "ordeal-cert/v3")
+    }
+
+    /// [`Self::from_cert_v3`] for a bundle declaring `format` (`ordeal-cert/v3`,
+    /// or `ordeal-cert/v5`, whose blocks are the `v3` envelope's).
+    fn decode_v3(json: &str, format: &str) -> Result<TermBundle, BundleError> {
         let head: serde_json::Value =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
         match head.get("format").and_then(|f| f.as_str()) {
-            Some("ordeal-cert/v3") => {}
+            Some(f) if f == format => {}
             Some(other) => return Err(BundleError::WrongFormat(other.into())),
             None => return Err(BundleError::Malformed("missing format".into())),
         }
@@ -1307,9 +1317,14 @@ impl TermSatCertificate {
     /// `term` block, `format: "ordeal-cert/v3"`.
     #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
     pub fn to_cert_v3(&self, attests: &Attests) -> String {
+        serde_json::to_string_pretty(&self.envelope_v3(attests)).expect("own-struct serialization")
+    }
+
+    /// The `v3` envelope of [`Self::to_cert_v3`], for `ordeal-cert/v5`.
+    fn envelope_v3(&self, attests: &Attests) -> SatEnvelopeV3 {
         let w = &self.query.witness;
         let problem_text = cnf_text(&w.cnf);
-        let env = SatEnvelopeV3 {
+        SatEnvelopeV3 {
             format: "ordeal-cert/v3".into(),
             verdict: "sat".into(),
             produced_by: Tool {
@@ -1363,18 +1378,23 @@ impl TermSatCertificate {
                     .into(),
                 problem_sha256: sha256_hex(problem_text.as_bytes()),
             },
-        };
-        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+        }
     }
 
     /// Parse an `ordeal-cert/v3` SAT bundle, verifying all six content
     /// hashes (problem, witness assignment, bit map, query, inputs, term)
     /// BEFORE returning. The caller then runs [`TermSatBundle::recheck`].
     pub fn from_cert_v3(json: &str) -> Result<TermSatBundle, BundleError> {
+        Self::decode_v3(json, "ordeal-cert/v3")
+    }
+
+    /// [`Self::from_cert_v3`] for a bundle declaring `format` (`ordeal-cert/v3`,
+    /// or `ordeal-cert/v5`, whose blocks are the `v3` envelope's).
+    fn decode_v3(json: &str, format: &str) -> Result<TermSatBundle, BundleError> {
         let head: serde_json::Value =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
         match head.get("format").and_then(|f| f.as_str()) {
-            Some("ordeal-cert/v3") => {}
+            Some(f) if f == format => {}
             Some(other) => return Err(BundleError::WrongFormat(other.into())),
             None => return Err(BundleError::Malformed("missing format".into())),
         }
@@ -1385,7 +1405,7 @@ impl TermSatCertificate {
         }
         let env: SatEnvelopeV3In =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
-        if env.format != "ordeal-cert/v3" {
+        if env.format != format {
             return Err(BundleError::WrongFormat(env.format));
         }
         if env.verdict != "sat" {
@@ -1699,10 +1719,15 @@ impl SliverCertificate {
     /// v3 bundle about the lowered core.
     #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
     pub fn to_cert_v4(&self, attests: &Attests) -> String {
+        serde_json::to_string_pretty(&self.envelope_v4(attests)).expect("own-struct serialization")
+    }
+
+    /// The `v4` envelope of [`Self::to_cert_v4`], for `ordeal-cert/v5`.
+    fn envelope_v4(&self, attests: &Attests) -> UnsatEnvelopeV4 {
         let cert = &self.term.query.certificate;
         let problem_text = cnf_text(&cert.cnf);
         let proof_text = cert.lrat_text().unwrap_or_default().to_string();
-        let env = UnsatEnvelopeV4 {
+        UnsatEnvelopeV4 {
             format: "ordeal-cert/v4".into(),
             verdict: "unsat".into(),
             produced_by: Tool {
@@ -1738,8 +1763,7 @@ impl SliverCertificate {
                 problem_sha256: sha256_hex(problem_text.as_bytes()),
                 proof_sha256: sha256_hex(proof_text.as_bytes()),
             },
-        };
-        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+        }
     }
 
     /// Parse an `ordeal-cert/v4` UNSAT bundle, verifying all five content
@@ -1747,10 +1771,16 @@ impl SliverCertificate {
     /// caller then runs [`SliverBundle::recheck`]. A v1, v2 or v3 bundle
     /// is [`BundleError::WrongFormat`]: read it with its own reader.
     pub fn from_cert_v4(json: &str) -> Result<SliverBundle, BundleError> {
+        Self::decode_v4(json, "ordeal-cert/v4")
+    }
+
+    /// [`Self::from_cert_v4`] for a bundle declaring `format` (`ordeal-cert/v4`,
+    /// or `ordeal-cert/v5`, whose blocks are the `v4` envelope's).
+    fn decode_v4(json: &str, format: &str) -> Result<SliverBundle, BundleError> {
         let head: serde_json::Value =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
         match head.get("format").and_then(|f| f.as_str()) {
-            Some("ordeal-cert/v4") => {}
+            Some(f) if f == format => {}
             Some(other) => return Err(BundleError::WrongFormat(other.into())),
             None => return Err(BundleError::Malformed("missing format".into())),
         }
@@ -1874,9 +1904,14 @@ impl SliverSatCertificate {
     /// `ext` and `ext_model` blocks, `format: "ordeal-cert/v4"`.
     #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
     pub fn to_cert_v4(&self, attests: &Attests) -> String {
+        serde_json::to_string_pretty(&self.envelope_v4(attests)).expect("own-struct serialization")
+    }
+
+    /// The `v4` envelope of [`Self::to_cert_v4`], for `ordeal-cert/v5`.
+    fn envelope_v4(&self, attests: &Attests) -> SatEnvelopeV4 {
         let w = &self.term.query.witness;
         let problem_text = cnf_text(&w.cnf);
-        let env = SatEnvelopeV4 {
+        SatEnvelopeV4 {
             format: "ordeal-cert/v4".into(),
             verdict: "sat".into(),
             produced_by: Tool {
@@ -1942,8 +1977,7 @@ impl SliverSatCertificate {
                         .into(),
                 problem_sha256: sha256_hex(problem_text.as_bytes()),
             },
-        };
-        serde_json::to_string_pretty(&env).expect("own-struct serialization")
+        }
     }
 
     /// Parse an `ordeal-cert/v4` SAT bundle, verifying all seven content
@@ -1951,10 +1985,16 @@ impl SliverSatCertificate {
     /// ext) BEFORE returning. The caller then runs
     /// [`SliverSatBundle::recheck`].
     pub fn from_cert_v4(json: &str) -> Result<SliverSatBundle, BundleError> {
+        Self::decode_v4(json, "ordeal-cert/v4")
+    }
+
+    /// [`Self::from_cert_v4`] for a bundle declaring `format` (`ordeal-cert/v4`,
+    /// or `ordeal-cert/v5`, whose blocks are the `v4` envelope's).
+    fn decode_v4(json: &str, format: &str) -> Result<SliverSatBundle, BundleError> {
         let head: serde_json::Value =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
         match head.get("format").and_then(|f| f.as_str()) {
-            Some("ordeal-cert/v4") => {}
+            Some(f) if f == format => {}
             Some(other) => return Err(BundleError::WrongFormat(other.into())),
             None => return Err(BundleError::Malformed("missing format".into())),
         }
@@ -1965,7 +2005,7 @@ impl SliverSatCertificate {
         }
         let env: SatEnvelopeV4In =
             serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
-        if env.format != "ordeal-cert/v4" {
+        if env.format != format {
             return Err(BundleError::WrongFormat(env.format));
         }
         if env.verdict != "sat" {
@@ -1992,6 +2032,203 @@ impl SliverSatCertificate {
             },
             attests: env.attests,
             produced_by: env.produced_by,
+        })
+    }
+}
+
+// ── ordeal-cert/v5: the certified query echo (#281 E2) ──────────────────
+
+pub use crate::echo::V5_MIN_VERSION;
+use crate::echo::{
+    ECHO_ENCODING, EchoCertificate, EchoSubject, QueryEcho, V5_ECHO_EXT_CMD, V5_ECHO_TERM_CMD,
+};
+
+/// The `echo` block of an `ordeal-cert/v5` bundle.
+#[derive(Serialize, Deserialize)]
+struct EchoBlock {
+    encoding: String,
+    logic: String,
+    text: String,
+    sha256: String,
+}
+
+/// A v5 bundle: the v3 or v4 envelope of the same certificate, with
+/// `format` and `recheck` rewritten for v5, plus the `echo` block (after
+/// `recheck`: serde's `flatten` writes the envelope's fields first).
+#[derive(Serialize)]
+struct EnvelopeV5<E> {
+    #[serde(flatten)]
+    envelope: E,
+    echo: EchoBlock,
+}
+
+/// `major.minor.patch` as numbers, for comparing `recheck.min_version`s;
+/// a part that is not a number counts as 0.
+fn version_key(v: &str) -> Vec<u64> {
+    v.split('.').map(|p| p.parse().unwrap_or(0)).collect()
+}
+
+/// A parsed, hash-verified `ordeal-cert/v5` bundle: a term-carrying
+/// certificate with the certified echo of its question.
+#[derive(Debug)]
+pub struct EchoBundle {
+    /// The certificate and its echo, reconstructed.
+    pub certificate: EchoCertificate,
+    /// What the bundle claims to attest.
+    pub attests: Attests,
+    /// Producer identification, as recorded.
+    pub produced_by: Tool,
+}
+
+impl EchoBundle {
+    /// The full v5 recheck ([`EchoCertificate::recheck`]): the v3 / v4
+    /// recheck, then the echo re-derived byte for byte by the trusted
+    /// printer.
+    pub fn recheck(&self) -> Result<(), crate::echo::EchoRecheckError> {
+        self.certificate.recheck()
+    }
+}
+
+impl EchoCertificate {
+    /// Serialize as an `ordeal-cert/v5` bundle (#281 E2): the v3 envelope
+    /// (core) or v4 envelope (extended query) of the same certificate —
+    /// every block and hash identical to what `to_cert_v3` / `to_cert_v4`
+    /// write — with `format: "ordeal-cert/v5"`, `recheck.min_version`
+    /// [`V5_MIN_VERSION`] and the echo clause appended to `recheck.cmd`,
+    /// plus the `echo` block. A v1..v4 reader rejects it by format, so no
+    /// reader accepts the echo without re-deriving it.
+    #[allow(clippy::missing_panics_doc)] // serde_json on our own structs
+    pub fn to_cert_v5(&self, attests: &Attests) -> String {
+        let echo = EchoBlock {
+            encoding: ECHO_ENCODING.into(),
+            logic: self.echo.logic.clone(),
+            text: self.echo.text.clone(),
+            sha256: self.echo.sha256(),
+        };
+        let v5 = |format: &mut String, min_version: &mut String, cmd: &mut String, tail: &str| {
+            *format = crate::echo::V5_FORMAT.into();
+            // The later of v5's floor and what the v3 / v4 blocks already
+            // demand (a query block may need a newer reader of its own).
+            if version_key(min_version) < version_key(V5_MIN_VERSION) {
+                *min_version = V5_MIN_VERSION.into();
+            }
+            cmd.push_str(tail);
+        };
+        let text = match &self.subject {
+            EchoSubject::Unsat(c) => {
+                let mut e = c.envelope_v3(attests);
+                let r = &mut e.recheck;
+                v5(
+                    &mut e.format,
+                    &mut r.min_version,
+                    &mut r.cmd,
+                    V5_ECHO_TERM_CMD,
+                );
+                serde_json::to_string_pretty(&EnvelopeV5 { envelope: e, echo })
+            }
+            EchoSubject::UnsatExt(c) => {
+                let mut e = c.envelope_v4(attests);
+                let r = &mut e.recheck;
+                v5(
+                    &mut e.format,
+                    &mut r.min_version,
+                    &mut r.cmd,
+                    V5_ECHO_EXT_CMD,
+                );
+                serde_json::to_string_pretty(&EnvelopeV5 { envelope: e, echo })
+            }
+            EchoSubject::Sat(c) => {
+                let mut e = c.envelope_v3(attests);
+                let r = &mut e.recheck;
+                v5(
+                    &mut e.format,
+                    &mut r.min_version,
+                    &mut r.cmd,
+                    V5_ECHO_TERM_CMD,
+                );
+                serde_json::to_string_pretty(&EnvelopeV5 { envelope: e, echo })
+            }
+            EchoSubject::SatExt(c) => {
+                let mut e = c.envelope_v4(attests);
+                let r = &mut e.recheck;
+                v5(
+                    &mut e.format,
+                    &mut r.min_version,
+                    &mut r.cmd,
+                    V5_ECHO_EXT_CMD,
+                );
+                serde_json::to_string_pretty(&EnvelopeV5 { envelope: e, echo })
+            }
+        };
+        text.expect("own-struct serialization")
+    }
+
+    /// Parse an `ordeal-cert/v5` bundle, verifying every content hash
+    /// BEFORE returning: the v3 / v4 blocks' (by the v3 / v4 reader, with
+    /// the v5 format) and `echo.sha256`. UNSAT or SAT by `verdict`; core
+    /// or extended by whether an `ext` block is present. The caller then
+    /// runs [`EchoBundle::recheck`]. A v1..v4 bundle is
+    /// [`BundleError::WrongFormat`]: read it with its own reader.
+    pub fn from_cert_v5(json: &str) -> Result<EchoBundle, BundleError> {
+        const V5: &str = crate::echo::V5_FORMAT;
+        let head: serde_json::Value =
+            serde_json::from_str(json).map_err(|e| BundleError::Malformed(e.to_string()))?;
+        match head.get("format").and_then(|f| f.as_str()) {
+            Some(V5) => {}
+            Some(other) => return Err(BundleError::WrongFormat(other.into())),
+            None => return Err(BundleError::Malformed("missing format".into())),
+        }
+        let verdict = match head.get("verdict").and_then(|f| f.as_str()) {
+            Some(v @ ("unsat" | "sat")) => v,
+            Some(other) => return Err(BundleError::WrongVerdict(other.into())),
+            None => return Err(BundleError::Malformed("missing verdict".into())),
+        };
+        let echo: EchoBlock = serde_json::from_value(
+            head.get("echo")
+                .cloned()
+                .ok_or_else(|| BundleError::Malformed("missing echo".into()))?,
+        )
+        .map_err(|e| BundleError::Malformed(format!("echo: {e}")))?;
+        if echo.encoding != ECHO_ENCODING {
+            return Err(BundleError::Unsupported(format!(
+                "echo encoding {}",
+                echo.encoding
+            )));
+        }
+        if sha256_hex(echo.text.as_bytes()) != echo.sha256 {
+            return Err(BundleError::HashMismatch("echo"));
+        }
+        let echo = QueryEcho {
+            text: echo.text,
+            logic: echo.logic,
+        };
+        let ext = head.get("ext").is_some();
+        let (subject, attests, produced_by) = match (verdict, ext) {
+            ("unsat", false) => {
+                let b = TermCertificate::decode_v3(json, V5)?;
+                (EchoSubject::Unsat(b.certificate), b.attests, b.produced_by)
+            }
+            ("unsat", true) => {
+                let b = SliverCertificate::decode_v4(json, V5)?;
+                (
+                    EchoSubject::UnsatExt(b.certificate),
+                    b.attests,
+                    b.produced_by,
+                )
+            }
+            (_, false) => {
+                let b = TermSatCertificate::decode_v3(json, V5)?;
+                (EchoSubject::Sat(b.certificate), b.attests, b.produced_by)
+            }
+            (_, true) => {
+                let b = SliverSatCertificate::decode_v4(json, V5)?;
+                (EchoSubject::SatExt(b.certificate), b.attests, b.produced_by)
+            }
+        };
+        Ok(EchoBundle {
+            certificate: EchoCertificate { subject, echo },
+            attests,
+            produced_by,
         })
     }
 }
@@ -2037,6 +2274,19 @@ mod wire_indices {
                     .ok_or_else(|| D::Error::custom(format!("index {x} does not fit usize")))
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod v5_version_tests {
+    use super::version_key;
+
+    #[test]
+    fn min_versions_compare_numerically() {
+        assert!(version_key("0.31.0") < version_key("0.38.0"));
+        assert!(version_key("0.38.0") < version_key("0.38.1"));
+        assert!(version_key("0.9.0") < version_key("0.38.0"));
+        assert!(version_key("1.0.0") > version_key("0.38.0"));
     }
 }
 

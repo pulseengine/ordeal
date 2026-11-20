@@ -41,10 +41,10 @@ fn main() -> ExitCode {
         Some(other) => {
             eprintln!("ordeal: unknown command '{other}'");
             eprintln!(
-                "Usage: ordeal check [FILE | -] [--format json] [--with-query | --with-term] [--cert-out PATH] [--timeout-ms N]   (reads stdin if FILE is '-' or omitted)"
+                "Usage: ordeal check [FILE | -] [--format json] [--with-query | --with-term] [--cert-out PATH [--echo]] [--timeout-ms N]   (reads stdin if FILE is '-' or omitted)"
             );
             eprintln!(
-                "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]"
+                "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR [--echo]] [--format json]"
             );
             ExitCode::from(2)
         }
@@ -109,6 +109,11 @@ fn run_check(args: &[String]) -> ExitCode {
     // re-checked against the query by the trusted crate before a verdict
     // is printed. Opt-in, JSON only, a superset of `--with-query`.
     let with_term = rest.contains(&"--with-term");
+    // `--echo` (#281 E2, with `--cert-out`): write `ordeal-cert/v5`, the v3
+    // bundle plus the certified echo of its term, re-derived by
+    // `ordeal-recheck` with the trusted printer. Without it the bundle is
+    // v3, byte-identical to earlier releases.
+    let echo = rest.contains(&"--echo");
     // `--cert-out PATH` (#316): write the `ordeal-cert/v3` bundle of the
     // verdict, for `ordeal-recheck`. Not the `--format json` report.
     let mut cert_out: Option<&str> = None;
@@ -120,7 +125,7 @@ fn run_check(args: &[String]) -> ExitCode {
     let mut i = 0;
     while i < rest.len() {
         match rest[i] {
-            "--with-query" | "--with-term" => i += 1,
+            "--with-query" | "--with-term" | "--echo" => i += 1,
             "--cert-out" => match rest.get(i + 1) {
                 Some(p) => {
                     cert_out = Some(*p);
@@ -169,6 +174,10 @@ fn run_check(args: &[String]) -> ExitCode {
         eprintln!("ordeal: --with-term requires --format json");
         return ExitCode::from(2);
     }
+    if echo && cert_out.is_none() {
+        eprintln!("ordeal: --echo requires --cert-out");
+        return ExitCode::from(2);
+    }
     let path = rest.first().copied();
     let input = match path {
         None | Some("-") => {
@@ -189,7 +198,7 @@ fn run_check(args: &[String]) -> ExitCode {
     };
 
     if let Some(out) = cert_out {
-        return run_check_with_bundle(input, out, format, with_query, with_term, timeout_ms);
+        return run_check_with_bundle(input, out, format, with_query, with_term, echo, timeout_ms);
     }
     if with_term {
         // The term-carrying solve (#192 phase 7): a verdict is only ever
@@ -306,6 +315,7 @@ fn run_check_with_bundle(
     format: Format,
     with_query: bool,
     with_term: bool,
+    echo: bool,
     timeout_ms: Option<u64>,
 ) -> ExitCode {
     use ordeal::TermCheckResult;
@@ -321,8 +331,10 @@ fn run_check_with_bundle(
         }
     };
     let bundle = match &result {
-        Some(TermCheckResult::Unsat(cert)) => Some(unsat_bundle_v3(cert)),
-        Some(TermCheckResult::Sat(cert)) => Some(sat_bundle_v3(cert)),
+        Some(TermCheckResult::Unsat(cert)) => {
+            Some(unsat_bundle_v3(cert, echo_of(echo, &cert.term)))
+        }
+        Some(TermCheckResult::Sat(cert)) => Some(sat_bundle_v3(cert, echo_of(echo, &cert.term))),
         Some(TermCheckResult::Unknown) | None => None,
     };
     if let Some(text) = &bundle
@@ -359,11 +371,53 @@ fn run_check_with_bundle(
     printed
 }
 
-/// The `ordeal-cert/v3` envelope's `produced_by` .. `attests` head.
-fn bundle_head(verdict: &str, kind: &str, claim: &str) -> String {
+/// The certified echo of `term` for `--echo` (#281 E2), or `None` without
+/// the flag or when the trusted printer refuses the term (a refusal is not
+/// a verdict: the bundle is then written as `ordeal-cert/v3`, and stderr
+/// says why).
+fn echo_of(wanted: bool, term: &ordeal::QueryTerm) -> Option<ordeal::QueryEcho> {
+    if !wanted {
+        return None;
+    }
+    match term.echo() {
+        Ok(bytes) => ordeal::QueryEcho::from_printed(bytes),
+        Err(e) => {
+            eprintln!(
+                "ordeal: no echo (the printer refuses the term: {e:?}); writing ordeal-cert/v3"
+            );
+            None
+        }
+    }
+}
+
+/// The `format` and `recheck` fields a bundle with `echo` carries instead
+/// of the v3 ones, and its trailing `echo` block (`EchoCertificate::to_cert_v5`).
+fn v5_fields(
+    echo: Option<&ordeal::QueryEcho>,
+) -> (&'static str, &'static str, &'static str, String) {
+    match echo {
+        None => ("ordeal-cert/v3", "0.31.0", "", String::new()),
+        Some(e) => (
+            ordeal::echo::V5_FORMAT,
+            ordeal::echo::V5_MIN_VERSION,
+            ordeal::echo::V5_ECHO_TERM_CMD,
+            format!(
+                ",\"echo\":{{\"encoding\":\"{}\",\"logic\":\"{}\",\"text\":\"{}\",\"sha256\":\"{}\"}}",
+                ordeal::echo::ECHO_ENCODING,
+                json_escape(&e.logic),
+                json_escape(&e.text),
+                e.sha256()
+            ),
+        ),
+    }
+}
+
+/// The `ordeal-cert/v3` (or, with an echo, `v5`) envelope's `produced_by`
+/// .. `attests` head.
+fn bundle_head(format: &str, verdict: &str, kind: &str, claim: &str) -> String {
     let v = env!("CARGO_PKG_VERSION");
     format!(
-        "{{\"format\":\"ordeal-cert/v3\",\"verdict\":\"{verdict}\",\"produced_by\":{{\"name\":\"ordeal\",\"version\":\"{v}\"}},\"checked_by\":{{\"name\":\"ordeal-lrat\",\"version\":\"{v}\"}},\"attests\":{{\"kind\":\"{}\",\"claim\":\"{}\"}}",
+        "{{\"format\":\"{format}\",\"verdict\":\"{verdict}\",\"produced_by\":{{\"name\":\"ordeal\",\"version\":\"{v}\"}},\"checked_by\":{{\"name\":\"ordeal-lrat\",\"version\":\"{v}\"}},\"attests\":{{\"kind\":\"{}\",\"claim\":\"{}\"}}",
         json_escape(kind),
         json_escape(claim)
     )
@@ -391,14 +445,19 @@ fn problem_json(cnf: &[Vec<i32>]) -> String {
     )
 }
 
-/// An `ordeal-cert/v3` UNSAT bundle (`TermCertificate::to_cert_v3`).
-fn unsat_bundle_v3(cert: &ordeal::TermCertificate) -> String {
+/// An `ordeal-cert/v3` UNSAT bundle (`TermCertificate::to_cert_v3`), or
+/// with `echo` the `ordeal-cert/v5` one (`EchoCertificate::to_cert_v5`).
+fn unsat_bundle_v3(cert: &ordeal::TermCertificate, echo: Option<ordeal::QueryEcho>) -> String {
     let c = &cert.query.certificate;
     let problem = dimacs_text(&c.cnf);
     let proof = c.lrat_text().unwrap_or_default();
+    let (format, min_version, cmd_tail, echo_block) = v5_fields(echo.as_ref());
+    // #314: a query that requests the mux fold needs a v0.38.0 reader too.
+    let min_version = cert.query.query.min_reader_version(min_version);
     format!(
-        "{},\"problem\":{},\"proof\":{{\"encoding\":\"lrat\",\"body\":\"{}\"}},\"query\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"{}\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\",\"proof_sha256\":\"{}\"}}}}\n",
+        "{},\"problem\":{},\"proof\":{{\"encoding\":\"lrat\",\"body\":\"{}\"}},\"query\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"{min_version}\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\",\"proof_sha256\":\"{}\"}}{echo_block}}}\n",
         bundle_head(
+            format,
             "unsat",
             "qf_bv_validity",
             "the asserted QF_BV script is unsatisfiable"
@@ -407,20 +466,24 @@ fn unsat_bundle_v3(cert: &ordeal::TermCertificate) -> String {
         json_escape(proof),
         query_json(&cert.query.query),
         term_json(&cert.term),
-        cert.query.query.min_reader_version("0.31.0"),
-        json_escape(
+        json_escape(&format!(
+            "{}{cmd_tail}",
             "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
              query.nodes, query.bits, query.roots) == Ok(()) && \
              ordeal_lrat::check_query(query.nodes, query.bits, query.roots, query.hints, proof.body) \
              == Ok(problem.clauses)"
-        ),
+        )),
         ordeal::sha256::sha256_hex(problem.as_bytes()),
         ordeal::sha256::sha256_hex(proof.as_bytes()),
     )
 }
 
-/// An `ordeal-cert/v3` SAT bundle (`TermSatCertificate::to_cert_v3`).
-fn sat_bundle_v3(cert: &ordeal::TermSatCertificate) -> String {
+/// An `ordeal-cert/v3` SAT bundle (`TermSatCertificate::to_cert_v3`), or
+/// with `echo` the `ordeal-cert/v5` one (`EchoCertificate::to_cert_v5`).
+fn sat_bundle_v3(cert: &ordeal::TermSatCertificate, echo: Option<ordeal::QueryEcho>) -> String {
+    let (format, min_version, cmd_tail, echo_block) = v5_fields(echo.as_ref());
+    // #314: a query that requests the mux fold needs a v0.38.0 reader too.
+    let min_version = cert.query.query.min_reader_version(min_version);
     let w = &cert.query.witness;
     let problem = dimacs_text(&w.cnf);
     let assignments: Vec<String> = w
@@ -442,8 +505,9 @@ fn sat_bundle_v3(cert: &ordeal::TermSatCertificate) -> String {
         })
         .collect();
     format!(
-        "{},\"problem\":{},\"model\":{{\"encoding\":\"assignments\",\"assignments\":[{}]}},\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}},\"query\":{},\"inputs\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"{}\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\"}}}}\n",
+        "{},\"problem\":{},\"model\":{{\"encoding\":\"assignments\",\"assignments\":[{}]}},\"witness\":{{\"encoding\":\"{}\",\"assignment\":\"{}\",\"bit_map\":[{}],\"assignment_sha256\":\"{}\",\"bit_map_sha256\":\"{}\"}},\"query\":{},\"inputs\":{},\"term\":{},\"recheck\":{{\"tool\":\"ordeal-lrat\",\"min_version\":\"{min_version}\",\"cmd\":\"{}\",\"problem_sha256\":\"{}\"}}{echo_block}}}\n",
         bundle_head(
+            format,
             "sat",
             "qf_bv_validity",
             "the asserted QF_BV script is satisfiable (model self-checked)"
@@ -458,8 +522,8 @@ fn sat_bundle_v3(cert: &ordeal::TermSatCertificate) -> String {
         query_json(&cert.query.query),
         inputs_json(&cert.query.inputs),
         term_json(&cert.term),
-        cert.query.query.min_reader_version("0.31.0"),
-        json_escape(
+        json_escape(&format!(
+            "{}{cmd_tail}",
             "ordeal_lrat::check_term_dag(term.nodes, term.bits, term.roots, term.map, \
              query.nodes, query.bits, query.roots) == Ok(()) + \
              ordeal_lrat::check_sat(problem, witness.assignment) + \
@@ -468,7 +532,7 @@ fn sat_bundle_v3(cert: &ordeal::TermSatCertificate) -> String {
              inputs.bits) == Ok(()) + ordeal_lrat::check_input_value(inputs.bits, \
              ordeal_lrat::var_offset(query.nodes, term.map[term.vars[name].node]), \
              width, value) per model binding"
-        ),
+        )),
         ordeal::sha256::sha256_hex(problem.as_bytes()),
     )
 }
@@ -823,7 +887,7 @@ fn print_outcome(result: Option<&WitnessCheckResult>, declared: &[(String, u32)]
 }
 
 /// Print a satisfying model in SMT-LIB style, one binding per line:
-/// `((x #x0000002a) (y #b101))`. Every declared variable is shown; one that
+/// `((x #x0000002a) (|a b| #b101))`. Every declared variable is shown; one that
 /// never reached an assertion is unconstrained and printed as zero.
 fn print_model(model: &ordeal::Model, declared: &[(String, u32)]) {
     if declared.is_empty() {
@@ -841,7 +905,13 @@ fn print_model(model: &ordeal::Model, declared: &[(String, u32)]) {
     for (i, (name, width)) in declared.iter().enumerate() {
         let open = if i == 0 { "(" } else { " " };
         let close = if i + 1 == n { ")" } else { "" };
-        println!("{open}({name} {}){close}", fmt_bv(*width, value_of(name)));
+        // The reader stores a symbol's content (#281 E2): `|a b|` is the
+        // name `a b`, printed quoted again so the model reads back.
+        println!(
+            "{open}({} {}){close}",
+            smtlib::symbol_text(name),
+            fmt_bv(*width, value_of(name))
+        );
     }
 }
 
@@ -891,6 +961,11 @@ fn banner() {
     println!("                             The --format json report is NOT a bundle and");
     println!("                             ordeal-recheck rejects it; an unknown verdict");
     println!("                             writes no file and exits 1");
+    println!("  --echo                     (with --cert-out) write ordeal-cert/v5: the");
+    println!("                             bundle plus the certified echo of the term");
+    println!("                             (the query as ordeal read it, as SMT-LIB),");
+    println!("                             re-derived by ordeal-recheck; for verus, a");
+    println!("                             <name>.cert.json beside each <name>.lrat");
     println!("  --timeout-ms N             (check) give up after N milliseconds and");
     println!("                             answer unknown (always sound); without it");
     println!("                             the solve is unbounded");
@@ -925,9 +1000,18 @@ fn run_verus(args: &[String]) -> ExitCode {
     };
     let mut path: Option<&str> = None;
     let mut cert_out: Option<&str> = None;
+    // `--echo` (#281 E2, with `--cert-out`): solve each obligation on the
+    // term-carrying path and write `<name>.cert.json` beside `<name>.lrat`:
+    // an `ordeal-cert/v5` bundle whose echo is the obligation as ordeal
+    // read it (v3 if the printer refuses), for `ordeal-recheck`.
+    let mut echo = false;
     let mut i = 0;
     while i < rest.len() {
         match rest[i] {
+            "--echo" => {
+                echo = true;
+                i += 1;
+            }
             "--cert-out" => match rest.get(i + 1) {
                 Some(d) => {
                     cert_out = Some(*d);
@@ -945,9 +1029,15 @@ fn run_verus(args: &[String]) -> ExitCode {
         }
     }
     let Some(path) = path else {
-        eprintln!("Usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR] [--format json]");
+        eprintln!(
+            "Usage: ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR [--echo]] [--format json]"
+        );
         return ExitCode::from(2);
     };
+    if echo && cert_out.is_none() {
+        eprintln!("ordeal: --echo requires --cert-out");
+        return ExitCode::from(2);
+    }
     // Per-obligation records for --format json: (name, verdict, lrat_bytes).
     let mut records: Vec<(String, &'static str, usize)> = Vec::new();
     let text = format == Format::Text;
@@ -1007,8 +1097,34 @@ fn run_verus(args: &[String]) -> ExitCode {
             .location
             .clone()
             .unwrap_or_else(|| f.display().to_string());
-        match smtlib::solve_str(&ob.script) {
-            Ok(outcome) => match outcome.result {
+        // With `--echo`, the term-carrying solve: its bundle (v5 with the
+        // echo, or v3) is written beside the `.lrat`, whose bytes are the
+        // term certificate's proof.
+        let (solved, bundle) = if echo {
+            match smtlib::solve_str_with_term(&ob.script) {
+                Ok((r, _)) => {
+                    let bundle = match &r {
+                        Some(ordeal::TermCheckResult::Unsat(c)) => {
+                            Some(unsat_bundle_v3(c, echo_of(true, &c.term)))
+                        }
+                        _ => None,
+                    };
+                    let r = r.map(|t| match t {
+                        ordeal::TermCheckResult::Unsat(c) => {
+                            CheckResult::Unsat(c.query.certificate)
+                        }
+                        ordeal::TermCheckResult::Sat(c) => CheckResult::Sat(c.query.witness.model),
+                        ordeal::TermCheckResult::Unknown => CheckResult::Unknown,
+                    });
+                    (Ok(r), bundle)
+                }
+                Err(e) => (Err(e), None),
+            }
+        } else {
+            (smtlib::solve_str(&ob.script).map(|o| o.result), None)
+        };
+        match solved {
+            Ok(result) => match result {
                 Some(CheckResult::Unsat(cert)) => {
                     // The verdict is only worth as much as the re-check.
                     if let Err(e) = cert.recheck() {
@@ -1033,6 +1149,13 @@ fn run_verus(args: &[String]) -> ExitCode {
                         if let Err(e) = std::fs::write(&out, &cert.lrat) {
                             eprintln!("ordeal: cannot write '{}': {e}", out.display());
                             failed += 1;
+                        }
+                        if let Some(text) = &bundle {
+                            let out = std::path::Path::new(dir).join(format!("{name}.cert.json"));
+                            if let Err(e) = std::fs::write(&out, text) {
+                                eprintln!("ordeal: cannot write '{}': {e}", out.display());
+                                failed += 1;
+                            }
                         }
                     }
                 }

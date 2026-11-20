@@ -1895,3 +1895,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-096
+
+  - id: VER-097
+    type: sw-verification
+    title: Quoted symbols are named by their content and ordeal-cert/v5 carries an echo the recheck re-derives (TR-097)
+    status: verified
+    release: v0.38.0
+    description: "crates/ordeal/src/smtlib.rs tests a_quoted_symbol_is_named_by_its_content, quoted_and_bare_are_one_symbol_only_for_a_simple_content, malformed_quoted_symbols_are_refused, symbol_text_reads_back_as_the_same_name, the_model_of_a_quoted_name_is_its_content; crates/ordeal/src/oracle_echo.rs (feature oracle, blocking SMT-LIB parser differential job): every non-reserved generated script echoed and compared with 0 refused for a name, the quoted-name fixture echoed as |a b|; crates/ordeal-recheck/tests (corpus with ten v5 bundles: UNSAT/SAT, core/extended, quoted names; four v5 mutants each refused by the recheck; an un-rehashed echo byte refused by hash; the committed v5 fixtures accepted, and by the wasm32 build in CI byte-identically to native); crates/ordeal/tests/cli_echo.rs with the real binaries (check and verus --echo write v5 that ordeal-recheck accepts, an echo byte refused by hash and, rehashed, by re-derivation, a printer refusal writes v3, --echo without --cert-out exits 2, and under cert-bundle the CLI bundle equals to_cert_v5)."
+    tags: [echo, front-end, cert-bundle, recheck, cli]
+    fields:
+      coverage: reader quoted/simple equivalence, distinctness, collisions and refusals; echo leg names; v5 encode/decode/recheck for all four subjects; mutation and tamper rejection; CLI check and verus --echo; wasm/native parity; v0.37.0 bundles
+      method: automated-test
+      steps: "run: cargo test -p ordeal --lib smtlib::tests; run: cargo test -p ordeal --test cli_echo; run: cargo test -p ordeal --features cert-bundle --test cli_echo; run: cargo test -p ordeal-recheck; run: cargo test -p ordeal --features oracle --release --lib oracle::echo::tests"
+    links:
+      - type: verifies
+        target: TR-097

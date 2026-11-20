@@ -2365,3 +2365,27 @@ artifacts:
         target: SYS-003
       - type: allocated-to
         target: ARC-006
+
+  - id: TR-097
+    type: sw-req
+    title: The certified query echo in the bundle (ordeal-cert/v5), with quoted SMT-LIB symbols named by their content (query echo, E2)
+    status: verified
+    release: v0.38.0
+    description: "Issue #281 phase E2, owner decision 20261117T185255-a55cd4 (option content). (1) The SMT-LIB reader (crates/ordeal/src/smtlib.rs) names a quoted symbol by its content, per SMT-LIB 2.6 section 3.1: |x| and x are one symbol when x is a simple symbol (non-empty, letters, digits and ~!@$%^&*_-+=<>.?/, not starting with a digit, not a reserved word; the reserved words are the thirteen of section 3.1 plus every command name), and a quoted symbol whose content is not simple (|a b|, ||, |0v|, |let|) is a symbol of its own, never a literal, keyword, operator or reserved word, which no bare token denotes; a bare token that is not a simple symbol is not a name; a quoted symbol containing a backslash or a control character other than tab, newline and carriage return is refused. Before, the reader kept such a symbol with its bars and the proven printer refused the name (8490 of 10^4 generated scripts). Names in bundles change only for scripts that declare a non-simple quoted symbol. (2) ordeal-cert/v5: the v3 envelope (core) or v4 envelope (extended query) of the same certificate, every block and hash unchanged, with format ordeal-cert/v5, recheck.min_version 0.38.0, an echo clause in recheck.cmd, and an echo block (encoding ordeal-echo/v1, logic, text, sha256) holding ordeal_lrat::echo_term over the term block or echo_ext over the ext block. EchoCertificate (ordeal-cert, always compiled): new, recheck (the v3/v4 recheck, then the block printed again by the trusted printer and compared byte for byte with echo.text, and echo.logic with its first line), to_cert_v5 / from_cert_v5 (every hash verified, echo.sha256 included). ordeal-recheck accepts v5 UNSAT and SAT. The CLI writes v5 with ordeal check FILE --cert-out PATH --echo and ordeal verus LOG --cert-out DIR --echo (a <name>.cert.json beside each .lrat); without --echo the bundle is v3 as before; a printer refusal writes v3 and is never a verdict. The printer and its Lean proof (TR-079) are unchanged; the trusted base is unchanged until E3 (echo-check). Effect: behaviour (bundle content, reader names)."
+    tags: [echo, front-end, cert-bundle, recheck, cli]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: "Reader unit tests: quoted content is the name; x and |x| one symbol (redeclaration tolerated when identical, an error at another width or sort), |a b|, ||, |0v| distinct from every bare token, a bare 0v refused, quoted symbols never literals or operators or command heads, backslash and control characters refused, symbol_text reads back. Echo leg of the Z3 differential: 0 echoes refused for a name over the 10^4 generated scripts (every non-reserved script compared, 0 disagree) and the 27 repository files; a reader that keeps the bars turns the leg and the reader tests red. Bundle: ordeal-recheck accepts every v5 bundle the solver emits (UNSAT/SAT, core/extended, quoted names) and every v1..v4 bundle as before; a flipped echo byte is refused by hash, and with the hash recomputed by re-derivation; a swapped term node is refused with the echo kept or reprinted; the CLI v5 bundle equals to_cert_v5 as JSON; the wasm32 ordeal-recheck output equals the native one on the v5 fixtures; v0.37.0 bundles still re-check."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: allocated-to
+        target: ARC-010
+      - type: allocated-to
+        target: ARC-011
+      - type: traces-to
+        target: TR-079

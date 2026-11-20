@@ -628,6 +628,66 @@ variables are bound BY NAME through the kernel's table and the two
 maps). Core queries are untouched: they keep producing v3 bundles, byte
 for byte.
 
+## The certified query echo: `ordeal-cert/v5`
+
+Since v0.38.0 (TR-097, #281 phase E2) a bundle can carry the **echo** of
+its question: the SMT-LIB script the trusted printer
+(`ordeal_lrat::echo_term` for the `term` block, `echo_ext` for the `ext`
+block; `lean/Echo.lean`: an accepted Unsat means no interpretation
+satisfies those bytes) makes of the block the certificate is about. An
+`ordeal-cert/v5` bundle is the v3 bundle (no `ext` block) or the v4
+bundle of the same certificate, every block and hash unchanged, with
+`format: "ordeal-cert/v5"`, `recheck.min_version` `0.38.0`, an echo clause
+appended to `recheck.cmd`, and, after `recheck`:
+
+```json
+"echo": { "encoding": "ordeal-echo/v1", "logic": "QF_BV",
+          "text": "(set-logic QF_BV)\n(declare-const |a b| (_ BitVec 8))\n…(check-sat)\n",
+          "sha256": "…" }
+```
+
+```rust
+use ordeal::{EchoCertificate, EchoSubject, TermCheckResult};
+
+if let TermCheckResult::Unsat(cert) = solver.check_with_term() {
+    match EchoCertificate::new(EchoSubject::Unsat(cert)) {
+        Ok(c) => {
+            #[cfg(feature = "cert-bundle")]
+            let json = c.to_cert_v5(&attests);         // "format": "ordeal-cert/v5"
+        }
+        Err(refused) => { /* the printer refuses (EchoError): write v3 instead */ }
+    }
+}
+```
+
+To verify a received v5 bundle: `EchoCertificate::from_cert_v5(json)`
+(every content hash verified, `echo.sha256` included) then
+`bundle.recheck()`, or `ordeal-recheck bundle.json`. The recheck is the
+full v3 / v4 recheck, then the block printed again by the trusted printer
+and compared with `echo.text` byte for byte, and `echo.logic` with the
+text's `(set-logic …)`; no SMT-LIB parser runs. v1..v4 readers refuse a
+v5 bundle by its `format`; v5 readers keep reading v1..v4 unchanged.
+From the CLI, `ordeal check FILE --cert-out PATH --echo` writes v5 (v3
+without `--echo`); `ordeal verus LOG --cert-out DIR --echo` writes
+`<name>.cert.json` beside `<name>.lrat`.
+
+**Names.** The reader names a quoted symbol by its content (SMT-LIB 2.6
+§3.1): `|x|` and `x` are one name, `|a b|` is the name `a b`, `||` the
+empty name, and a bare `0v` is not a symbol. The printer quotes every
+name, so the echo reads back to the same symbols. Before v0.38.0 the
+reader kept the bars of a quoted symbol whose content is not a simple
+symbol (`|a b|` was the name `|a b|`), so for such scripts the names in
+every bundle block, and the bundle bytes, differ from v0.37.0's; a script
+whose symbols are all simple keeps its bytes. Old bundles re-check as
+before.
+
+**What the echo does not do yet.** It is text the bundle commits to and
+the recheck re-derives; it shrinks your trusted base only once you compare
+it with your own input (the design note's §2 script, `echo-check` in phase
+E3). The printer refuses some names (empty, a byte outside 0x20–0x7E,
+reserved words, a leading `@` or `.`) and rotates by a term amount; the
+bundle is then v3 / v4 without an echo, and the verdict is unchanged.
+
 ## Supply chain: SBOM and VEX
 
 From v0.20.0 each GitHub Release carries a CycloneDX SBOM

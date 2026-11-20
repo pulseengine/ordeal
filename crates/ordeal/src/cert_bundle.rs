@@ -1,4 +1,4 @@
-//! `ordeal-cert/v1`..`v4` — the stable certificate bundles (issue #91 /
+//! `ordeal-cert/v1`..`v5` — the stable certificate bundles (issue #91 /
 //! TR-025 and successors). Since TR-075 the envelopes, their emitters
 //! (`to_cert_v*`) and hash-verifying readers (`from_cert_v*`) live in
 //! the solver-free `ordeal-cert` crate (`ordeal_cert::cert_bundle`,

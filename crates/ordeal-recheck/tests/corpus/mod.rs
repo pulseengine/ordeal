@@ -1,4 +1,4 @@
-//! The TR-075 bundle corpus: `ordeal-cert/v1`..`v4` bundles, UNSAT and
+//! The TR-075 bundle corpus: `ordeal-cert/v1`..`v5` bundles, UNSAT and
 //! SAT, produced by the REAL solver through `ordeal`'s public API (the
 //! same `to_cert_v*` emitters downstream uses). Shared by the
 //! `recheck_cli` integration test and the `emit_corpus` example, which
@@ -17,7 +17,7 @@
 use ordeal::query::{QueryCheckResult, SliverCheckResult, TermCheckResult};
 use ordeal::sliver::{ArrayTerm, ExtBoolTerm, ExtBvTerm, ExtOp};
 use ordeal::witness::WitnessCheckResult;
-use ordeal::{BoolTerm, BvTerm, CheckResult, Solver, Sort};
+use ordeal::{BoolTerm, BvTerm, CheckResult, EchoCertificate, EchoSubject, Solver, Sort};
 use ordeal_cert::cert_bundle::{Attests, model_to_cert_v1};
 
 fn b<T>(t: T) -> Box<T> {
@@ -72,6 +72,32 @@ fn unsat_term_query(w: u32) -> Solver {
         b(BvTerm::Mul(b(var("b", w)), b(var("a", w)))),
     ));
     s
+}
+
+/// [`unsat_term_query`] with quoted-symbol names (`a b`, `0v`, `v#0`; #281
+/// E2): the echo prints them as `|a b|`, `|0v|`, `|v#0|`.
+fn unsat_quoted_query(w: u32) -> Solver {
+    let mut s = Solver::new();
+    s.assert(BoolTerm::Ugt(
+        b(BvTerm::Add(
+            b(var("a b", w)),
+            b(BvTerm::Mul(b(konst(2, w)), b(konst(3, w)))),
+        )),
+        b(BvTerm::Add(b(var("a b", w)), b(konst(6, w)))),
+    ));
+    s.assert(BoolTerm::Ne(
+        b(BvTerm::Mul(b(var("0v", w)), b(var("v#0", w)))),
+        b(BvTerm::Mul(b(var("v#0", w)), b(var("0v", w)))),
+    ));
+    s
+}
+
+/// The `ordeal-cert/v5` bundle of `subject` (#281 E2): the trusted printer
+/// must accept it.
+fn v5(subject: EchoSubject, a: &Attests) -> String {
+    EchoCertificate::new(subject)
+        .expect("the printer accepts the corpus queries")
+        .to_cert_v5(a)
 }
 
 /// `a + b = 9 ∧ b > a ∧ a * 2 = b` at width `w` — SAT (`a = 3, b = 6`).
@@ -181,10 +207,14 @@ pub fn corpus() -> Vec<Entry> {
             }
             other => panic!("v2 unsat w{w}: {other:?}"),
         }
-        // v3 UNSAT: plus the term as asked.
+        // v3 UNSAT: plus the term as asked; v5: plus its echo.
         match unsat_term_query(w).check_with_term() {
             TermCheckResult::Unsat(c) => {
                 out.push(entry(format!("v3-unsat-w{w}.json"), c.to_cert_v3(&a)));
+                out.push(entry(
+                    format!("v5-unsat-w{w}.json"),
+                    v5(EchoSubject::Unsat(c), &a),
+                ));
             }
             other => panic!("v3 unsat w{w}: {other:?}"),
         }
@@ -213,6 +243,10 @@ pub fn corpus() -> Vec<Entry> {
         match sat_query(w).check_with_term() {
             TermCheckResult::Sat(c) => {
                 out.push(entry(format!("v3-sat-w{w}.json"), c.to_cert_v3(&a)));
+                out.push(entry(
+                    format!("v5-sat-w{w}.json"),
+                    v5(EchoSubject::Sat(c), &a),
+                ));
             }
             other => panic!("v3 sat w{w}: {other:?}"),
         }
@@ -221,15 +255,34 @@ pub fn corpus() -> Vec<Entry> {
         .expect("in the sliver")
         .check_sliver_with_term()
     {
-        SliverCheckResult::Unsat(c) => out.push(entry("v4-unsat.json".into(), c.to_cert_v4(&a))),
+        SliverCheckResult::Unsat(c) => {
+            out.push(entry("v4-unsat.json".into(), c.to_cert_v4(&a)));
+            out.push(entry(
+                "v5-unsat-ext.json".into(),
+                v5(EchoSubject::UnsatExt(c), &a),
+            ));
+        }
         other => panic!("v4 unsat: {other:?}"),
     }
     match Solver::from_sliver(&sat_sliver())
         .expect("in the sliver")
         .check_sliver_with_term()
     {
-        SliverCheckResult::Sat(c) => out.push(entry("v4-sat.json".into(), c.to_cert_v4(&a))),
+        SliverCheckResult::Sat(c) => {
+            out.push(entry("v4-sat.json".into(), c.to_cert_v4(&a)));
+            out.push(entry(
+                "v5-sat-ext.json".into(),
+                v5(EchoSubject::SatExt(c), &a),
+            ));
+        }
         other => panic!("v4 sat: {other:?}"),
+    }
+    match unsat_quoted_query(8).check_with_term() {
+        TermCheckResult::Unsat(c) => out.push(entry(
+            "v5-unsat-quoted.json".into(),
+            v5(EchoSubject::Unsat(c), &a),
+        )),
+        other => panic!("v5 quoted: {other:?}"),
     }
     out
 }
