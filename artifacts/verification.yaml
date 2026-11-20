@@ -1910,3 +1910,18 @@ artifacts:
     links:
       - type: verifies
         target: TR-097
+
+  - id: VER-098
+    type: sw-verification
+    title: echo-check implies the certified echo for every certified repository script and refuses weaker inputs, misread echoes and bad bundles (TR-098)
+    status: verified
+    release: v0.38.0
+    description: "crates/ordeal/src/oracle_echo_check.rs (features oracle + cert-bundle, blocking SMT-LIB parser differential job, 8 passed): the_input_implies_its_own_echo, a_weaker_input_does_not_imply_the_echo, an_echo_that_misreads_an_operator_is_not_implied (operator, constant, Bool polarity on a satisfiable input), an_unsat_input_implies_any_echo (the stated blind spot), a_bool_is_linked_through_bv1, the_prefix_avoids_the_inputs_names, scopes_are_refused_not_compared, the_script_runs_as_text; crates/ordeal/tests/cli_echo_check.rs with the real binary (same job, 4 passed): every_certified_repository_script_implies_its_echo (fails on 0 compared, needs at least 10 bundles and 2 Verus logs), a_weaker_input_is_not_implied_and_the_script_is_written, a_tampered_or_sat_bundle_is_refused, the_gale_verus_log_implies_its_echo; in the default run echo_check_without_the_features_exits_2."
+    tags: [echo, front-end, cli, oracle, trust-base]
+    fields:
+      coverage: comparison script construction (rename, links, negation, prefix, refusals); Z3 verdict classes; CLI exit codes and JSON; end-to-end over the repository corpus and the gale Verus logs; bundle tamper and SAT refusal
+      method: automated-test
+      steps: "run: cargo test -p ordeal --features oracle,cert-bundle --release --lib -- oracle::echo_check::; run: cargo test -p ordeal --features oracle,cert-bundle --release --test cli_echo_check; run: cargo test -p ordeal --test cli_echo_check"
+    links:
+      - type: verifies
+        target: TR-098

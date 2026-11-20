@@ -272,12 +272,18 @@ depth and per property. That independence is where your speedup lives:
 - **Anything the trusted crate rejects is `Unknown`**, on every entry
   point — the solver, the search, the proof and the model are all
   untrusted, and a rejection never becomes a verdict.
-- **What you are still trusting.** What stays trusted, on every path: the
-  SMT-LIB / Verus front ends, the 1:1 copy of the trees into the kernel's
-  mirror type (`crates/ordeal/src/mirror.rs`, one `match` arm per
-  constructor), and the toolchain — Lean's kernel with its three standard
-  axioms, the pinned Charon/Aeneas translation of the Rust source, and
-  rustc. (Single-sourced in `docs/formal-verification.md`; gated by
+- **What you are still trusting.** What stays trusted, on every path,
+  unless the consumer checks the echo (next sentence): the SMT-LIB /
+  Verus front ends, the 1:1 copy of the trees into the kernel's mirror
+  type (`crates/ordeal/src/mirror.rs`, one `match` arm per constructor),
+  and the toolchain — Lean's kernel with its three standard axioms, the
+  pinned Charon/Aeneas translation of the Rust source, and rustc. A
+  consumer who checks an `unsat` bundle's certified echo against their
+  own script (`ordeal echo-check`, `ordeal-cert/v5`) trusts, instead of
+  the front ends and the mirror copy, the solver and parser that decide
+  that comparison, the script `echo-check` writes, and the Lean model of
+  SMT-LIB meaning the printer is proven against (`lean/EchoSpec.lean`).
+  (Single-sourced in `docs/formal-verification.md`; gated by
   `claims.yaml`.) If you build terms through the Rust API, the front ends
   are not in your path at all.
 
@@ -681,10 +687,26 @@ every bundle block, and the bundle bytes, differ from v0.37.0's; a script
 whose symbols are all simple keeps its bytes. Old bundles re-check as
 before.
 
-**What the echo does not do yet.** It is text the bundle commits to and
-the recheck re-derives; it shrinks your trusted base only once you compare
-it with your own input (the design note's §2 script, `echo-check` in phase
-E3). The printer refuses some names (empty, a byte outside 0x20–0x7E,
+**Checking the echo against your input.** The echo shrinks your trusted
+base only once you compare it with your own script. `ordeal echo-check
+INPUT.smt2 BUNDLE.json` (build with `--features oracle,cert-bundle`; it
+links Z3) re-checks the v5 `unsat` bundle, then writes and runs the
+design note's §2 comparison: your script up to its `check-sat`, the echo
+with its constants renamed `|n|` → `|e.n|`, a link per shared name (`(=
+b (= |e.b| #b1))` for a `Bool`), and `(assert (not (and E₁ … Eₙ)))`.
+Z3's `unsat` means your input implies the echo, so the certified `unsat`
+holds for it (exit 0, `implied`); `sat` means the certificate is not
+about your input (exit 1, `not-implied`, with Z3's model); a bundle that
+does not re-check is exit 1 too; a script with `push` / `pop`,
+`check-sat-assuming` or anything Z3 cannot decide is exit 3,
+`cannot-compare`, never a verdict. `--script-out PATH` keeps the script:
+`z3 PATH` answers the same, and so can any other solver. For a Verus
+`by (bit_vector)` obligation, pass the `--log-all` file itself as INPUT:
+Z3 reads its prelude and block, and no slicing of ordeal's is involved.
+One limit: an unsat input implies every echo, so on such an input Z3 may
+decide your script by itself, and `implied` then rests on Z3 alone.
+
+The printer refuses some names (empty, a byte outside 0x20–0x7E,
 reserved words, a leading `@` or `.`) and rotates by a term amount; the
 bundle is then v3 / v4 without an echo, and the verdict is unchanged.
 

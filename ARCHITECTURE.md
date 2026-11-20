@@ -64,12 +64,19 @@ Lean 4's `bv_decide`, OOPSLA 2025). The system splits cleanly in two:
   `check_term_dag` (the term), `check_sliver_lowering` (arrays / UFs) and,
   since v0.34.0, `flatten_tree` (TR-073: the trees AS THE CALLER BUILT THEM,
   variables, arrays and functions by name) all live in the trusted crate and
-  run on every path; what a trusted check rejects is `Unknown`. What stays
-  trusted, on every path: the SMT-LIB / Verus front ends, the 1:1 copy of
-  the trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`,
-  one `match` arm per constructor), and the toolchain — Lean's kernel with
-  its three standard axioms, the pinned Charon/Aeneas translation of the
-  Rust source, and rustc. The defence for the first two is tests at every
+  run on every path; what a trusted check rejects is `Unknown`. What
+  stays trusted, on every path, unless the consumer checks the echo
+  (next sentence): the SMT-LIB / Verus front ends, the 1:1 copy of the
+  trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`,
+  one `match` arm per constructor), and the toolchain — Lean's kernel
+  with its three standard axioms, the pinned Charon/Aeneas translation
+  of the Rust source, and rustc. A consumer who checks an `unsat`
+  bundle's certified echo against their own script (`ordeal echo-check`,
+  `ordeal-cert/v5`) trusts, instead of the front ends and the mirror
+  copy, the solver and parser that decide that comparison, the script
+  `echo-check` writes, and the Lean model of SMT-LIB meaning the printer
+  is proven against (`lean/EchoSpec.lean`). The defence for the first
+  two is tests at every
   width and the Z3 differential; for the translation, the TR-035
   dual-mechanisation differential. See
   [docs/formal-verification.md](docs/formal-verification.md) for the exact

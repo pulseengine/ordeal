@@ -2389,3 +2389,27 @@ artifacts:
         target: ARC-011
       - type: traces-to
         target: TR-079
+
+  - id: TR-098
+    type: sw-req
+    title: "ordeal echo-check: the consumer compares a v5 bundle's certified echo with their own script (query echo, E3)"
+    status: verified
+    release: v0.38.0
+    description: "Issue #281 phase E3 (design note docs/design/query-echo.md section 2 and section 7). ordeal echo-check INPUT BUNDLE, behind the oracle and cert-bundle features (untrusted, links Z3): (1) reads BUNDLE with EchoCertificate::from_cert_v5 (every hash verified) and refuses a non-v5 or SAT bundle (exit 2); (2) runs the full v5 recheck (exit 1, bundle-rejected, if it fails); (3) writes the comparison script: INPUT's commands up to its first check-sat verbatim, minus set-logic, set-option, set-info, echo and get-* (push, pop, reset, reset-assertions and check-sat-assuming are refused, exit 3, never a verdict); the echo's declare-const names renamed by the byte substitution |n| -> |<p>n| with a prefix p (e., e1., ...) no name of INPUT starts with, its declare-fun names shared with INPUT; a link per echo constant INPUT declares, (= |n| |p.n|) or (= |n| (= |p.n| #b1)) for a Bool; (assert (not (and E1 ... En))) and (check-sat); (4) Z3 decides it: unsat is implied (exit 0, the certified unsat holds for INPUT), sat is not-implied (exit 1, with Z3's model), unknown or a Z3 parse error is cannot-compare (exit 3). --script-out PATH writes the script, which z3 PATH decides the same way; --format json gives {command, result, detail}. A Verus --log-all file is compared as it is (no ordeal slicing). Without the features the command exits 2 naming them. The trusted-base sentence (docs/formal-verification.md, claims.yaml and five gated copies) names the exception: a consumer who runs the check trusts the comparison's solver and parser, the script echo-check writes and lean/EchoSpec.lean instead of the front ends and the mirror copy. Stated limit: an unsat input implies every echo, so Z3 may decide such an input by itself. Effect: behaviour (new command; trust statement)."
+    tags: [echo, front-end, cli, oracle, trust-base]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: "Unit tests on a satisfiable input: its own echo is implied; an operator, a constant and a Bool polarity misread in the echo are each not implied; a weaker input is not implied; a Bool is linked through BV1; the prefix avoids the input's names; push/pop is refused; the script reads back in Z3. An unsat input implying a misread echo is pinned as the stated blind spot. A planted link-polarity mutant turns two unit tests red. End to end with the real binary: every repository .smt2 script ordeal certifies unsat with a v5 echo (21, 4 of them gale Verus logs) is implied; a weaker input is not implied (exit 1, script written); a tampered bundle and a SAT bundle exit 2; usage errors exit 2. claim_check passes with the new sentence and a one-word drift in a copy turns it red."
+    links:
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-003
+      - type: allocated-to
+        target: ARC-010
+      - type: allocated-to
+        target: ARC-007
+      - type: traces-to
+        target: TR-079

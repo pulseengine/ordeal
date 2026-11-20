@@ -23,12 +23,16 @@
 # The canonical trusted-base sentence. Whitespace is normalised by the gate
 # (a re-wrapped copy matches; a re-worded one does not).
 x-trusted-base: &trusted-base >-
-  What stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1
-  copy of the trees into the kernel's mirror type
-  (`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
-  toolchain — Lean's kernel with its three standard axioms, the pinned
-  Charon/Aeneas translation of the Rust source, and rustc.
-
+  What stays trusted, on every path, unless the consumer checks the echo
+  (next sentence): the SMT-LIB / Verus front ends, the 1:1 copy of the trees
+  into the kernel's mirror type (`crates/ordeal/src/mirror.rs`, one `match`
+  arm per constructor), and the toolchain — Lean's kernel with its three
+  standard axioms, the pinned Charon/Aeneas translation of the Rust source,
+  and rustc. A consumer who checks an `unsat` bundle's certified echo
+  against their own script (`ordeal echo-check`, `ordeal-cert/v5`) trusts,
+  instead of the front ends and the mirror copy, the solver and parser that
+  decide that comparison, the script `echo-check` writes, and the Lean model
+  of SMT-LIB meaning the printer is proven against (`lean/EchoSpec.lean`).
 x-epoch-proofs: &epoch-proofs >-
   Every Lean claim is about the Aeneas model generated at the Charon/Aeneas
   revisions in lean/toolchain-pins.env and elaborated by the toolchain in
@@ -94,7 +98,7 @@ claims:
     epoch: *epoch-proofs
     evidence:
       - kind: verbatim
-        text: "The trusted base after TR-073 — the canonical statement."
+        text: "The trusted base after TR-073 and TR-098 — the canonical statement."
       - kind: file-exists
         path: crates/ordeal/src/mirror.rs
       - kind: file-exists
@@ -111,6 +115,18 @@ claims:
         pattern: 'fn the_mirror_copy_is_a_bijection_on_(closed|extended)_terms'
         glob: ['crates/ordeal/src/**/*.rs']
         min: 2
+      # The echo exception (TR-098): the command exists, its comparison is
+      # the one-direction script, and the spec the printer is proven against.
+      - kind: file-exists
+        path: lean/EchoSpec.lean
+      - kind: count-min
+        pattern: 'Some\("echo-check"\) => run_echo_check'
+        glob: crates/ordeal/src/main.rs
+        min: 1
+      - kind: count-min
+        pattern: '\(assert \(not \(and \{\}\)\)\)'
+        glob: crates/ordeal/src/oracle_echo_check.rs
+        min: 1
   - id: README-TRUSTED-BASE
     doc: README.md
     evidence: [{kind: verbatim, text: *trusted-base}]

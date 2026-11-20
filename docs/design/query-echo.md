@@ -572,6 +572,13 @@ Each phase ships on its own and changes no existing bundle byte.
   in which case that check (its solver and parser) and the Lean model
   of SMT-LIB meaning are trusted instead; …*". *Accept:*
   `claim_check.py` passes; the gale Verus fixtures go end to end.
+  *Delivered in v0.38.0 (TR-098):* `ordeal echo-check INPUT BUNDLE
+  [--script-out PATH]`, behind `oracle` + `cert-bundle`; it also re-checks
+  the bundle. It cuts the input at its `check-sat`, refuses `push` / `pop`
+  and `check-sat-assuming`, shares `declare-fun` names instead of linking
+  them (a function link would need a quantifier), and leaves a name the
+  input does not declare unlinked. Measured blind spot: an unsat input
+  implies every echo.
 - **E4 (later, optional):** `define-fun` macros for term-amount
   rotates; the echo on by default.
 

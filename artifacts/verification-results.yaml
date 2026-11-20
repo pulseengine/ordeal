@@ -3660,3 +3660,31 @@ artifacts:
         target: VER-097
       - type: part-of-execution
         target: VE-079
+
+  - id: VE-080
+    type: verification-execution
+    title: "Query echo E3 run (VER-098): echo-check unit and end-to-end legs, trust sentence, planted controls"
+    status: implemented
+    description: "Local run on branch feat/281-e3-echo-check (based on a92673a). cargo fmt --check 0; cargo clippy --all-targets -D warnings 0 (workspace default; -p ordeal with oracle, cert-bundle, and oracle+cert-bundle). cargo test --workspace 0 (ordeal lib 302 passed); -p ordeal --features cert-bundle 0 (lib 331 passed). Blocking Z3 job command unchanged: 17 passed. oracle::echo_check (oracle + cert-bundle, release): 8 passed. tests/cli_echo_check (same features, release binary): 4 passed; 21 unsat v5 bundles compared of 43 repository .smt2 files, 4 of them gale Verus --log-all files compared as they are, all implied; the gale cpu_mask comparison takes 37 ms and its --script-out script, run by the z3 5.1.0 binary, answers unsat. claim_check 68/68 with the new trusted-base sentence. Planted controls: a link written with #b0 instead of #b1 turns 2 of 8 unit tests red (the satisfiable-input self-implication among them); a one-word drift of the sentence in README.md turns README-TRUSTED-BASE red (67/68). The first unit-test draft mutated the echo of an unsat input and found it still implied: the blind spot, now pinned by an_unsat_input_implies_any_echo and stated in the docs. ordeal-lrat and lean/ unchanged."
+    fields:
+      environment: macOS arm64, rustc 1.99.1, Z3 5.1.0 (Homebrew), LIBRARY_PATH=/opt/homebrew/lib
+      executor: local
+      timestamp: 2026-11-20 02:28:56+00:00
+      version: a92673a + feat/281-e3-echo-check
+    links:
+      - type: traces-to
+        target: TR-098
+
+  - id: VV-158
+    type: verification-verdict
+    title: "VER-098 pass: every certified repository script implies its echo; weaker inputs, misread echoes and bad bundles refused"
+    status: implemented
+    description: every certified repository script implies its echo; weaker inputs, misread echoes and bad bundles refused
+    fields:
+      evidence: oracle::echo_check 8 passed; cli_echo_check 4 passed, 21 bundles compared (4 Verus); a link-polarity mutant turns 2 unit tests red; claim_check 68/68, a sentence drift turns it red
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-098
+      - type: part-of-execution
+        target: VE-080
