@@ -738,19 +738,31 @@ block, written by `ordeal check … --cert-out PATH --echo` and
 `EchoCertificate::to_cert_v5`, and `ordeal-recheck` re-derives it, byte
 for byte, with the same proven `echo_term` / `echo_ext` over the bundle's
 `term` / `ext` block after the full v3 / v4 recheck. The printer and its
-Lean proof are unchanged by E2. Nobody compares the echo with an input
-yet: that comparison (`echo-check`) and the conditional trust sentence
-are phase E3, so **the trusted base below is unchanged**.
+Lean proof are unchanged by E2. Phase E3 (TR-098) adds the comparison:
+`ordeal echo-check INPUT BUNDLE` (features `oracle` + `cert-bundle`)
+re-checks a v5 `unsat` bundle, writes the design note's §2 script (the
+input up to its `check-sat`, the echo's constants renamed, a link per
+shared name, the negated echo) and asks Z3 for `unsat`, which means the
+input implies the echo. That is the condition in the sentence below. Its
+blind spot: an unsat input implies every echo, so on such an input Z3 may
+decide the input by itself and `implied` then rests on Z3 alone (pinned
+by `an_unsat_input_implies_any_echo`).
 
-**The trusted base after TR-073 — the canonical statement.** This sentence
+**The trusted base after TR-073 and TR-098 — the canonical statement.** This sentence
 is the single source every other document carries verbatim (`README.md`,
 `ARCHITECTURE.md`, `AGENTS.md`, `lean/README.md`,
 `docs/consuming-ordeal.md`; `claims.yaml` gates each copy against this
-one). What stays trusted, on every path: the SMT-LIB / Verus front ends,
-the 1:1 copy of the trees into the kernel's mirror type
-(`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
-toolchain — Lean's kernel with its three standard axioms, the pinned
-Charon/Aeneas translation of the Rust source, and rustc. The flattening,
+one). What stays trusted, on every path, unless the consumer checks the
+echo (next sentence): the SMT-LIB / Verus front ends, the 1:1 copy of
+the trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`,
+one `match` arm per constructor), and the toolchain — Lean's kernel with
+its three standard axioms, the pinned Charon/Aeneas translation of the
+Rust source, and rustc. A consumer who checks an `unsat` bundle's
+certified echo against their own script (`ordeal echo-check`,
+`ordeal-cert/v5`) trusts, instead of the front ends and the mirror copy,
+the solver and parser that decide that comparison, the script
+`echo-check` writes, and the Lean model of SMT-LIB meaning the printer
+is proven against (`lean/EchoSpec.lean`). The flattening,
 the variable / array / function names and the width guard are no longer in
 the list: an answer rests on the query AS THE CALLER BUILT IT. The two
 pieces of Rust are defended by tests at every width and by the Z3

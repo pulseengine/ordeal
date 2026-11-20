@@ -659,6 +659,24 @@ jobs:
           # (five front-leg, five echo-leg, five trap-refinement, two #314 mux-fold).
           echo "$out" | grep -q 'test result: ok. 17 passed' \
             || { echo "::error::expected the 5 front-leg, 5 echo-leg, 5 trap-refinement and 2 mux-fold tests to pass"; exit 1; }
+      - name: echo-check (TR-098, #281 E3) — the consumer's comparison, end to end
+        run: |
+          set -euo pipefail
+          # Unit leg: satisfiable inputs, so a wrong link or a misread echo
+          # operator is a model (the negative controls), not a vacuous unsat.
+          out="$(cargo test -p ordeal --features oracle,cert-bundle --release --lib -- oracle::echo_check:: 2>&1)" \
+            || { echo "$out"; exit 1; }
+          echo "$out" | tail -3
+          echo "$out" | grep -q 'test result: ok. 8 passed' \
+            || { echo "::error::expected the 8 oracle::echo_check unit tests to pass"; exit 1; }
+          # End-to-end leg with the real binary: every repository script
+          # certified unsat (the gale Verus logs included) implies its echo;
+          # a weaker input, a tampered bundle and a sat bundle are refused.
+          out="$(cargo test -p ordeal --features oracle,cert-bundle --release --test cli_echo_check -- --nocapture 2>&1)" \
+            || { echo "$out"; exit 1; }
+          echo "$out" | grep -E '^echo-check:'
+          echo "$out" | grep -q 'test result: ok. 4 passed' \
+            || { echo "::error::expected the 4 cli_echo_check tests to pass"; exit 1; }
 
   # #283 / TR-081 / VER-095: the performance and proof-size regression gate
   # on real consumer queries (gale, synth, loom; spar has none to give and

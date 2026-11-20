@@ -27,6 +27,7 @@ fn main() -> ExitCode {
         }
         Some("check") => run_check(&args[2..]),
         Some("verus") => run_verus(&args[2..]),
+        Some("echo-check") => run_echo_check(&args[2..]),
         Some("-h" | "--help") => {
             banner();
             ExitCode::SUCCESS
@@ -45,6 +46,9 @@ fn main() -> ExitCode {
             );
             eprintln!(
                 "       ordeal verus <VERUS-LOG.smt2 | DIR> [--cert-out DIR [--echo]] [--format json]"
+            );
+            eprintln!(
+                "       ordeal echo-check <INPUT.smt2> <BUNDLE.json> [--script-out PATH] [--timeout-ms N] [--format json]"
             );
             ExitCode::from(2)
         }
@@ -947,6 +951,13 @@ fn banner() {
     println!("  ordeal check -             solve a script read from stdin");
     println!("  ordeal verus <log | dir>   discharge Verus `by (bit_vector)`");
     println!("                             obligations from a --log-all dump");
+    println!("  ordeal echo-check <input.smt2> <bundle.json>");
+    println!("                             re-check an ordeal-cert/v5 unsat bundle and");
+    println!("                             ask Z3 whether the input implies its certified");
+    println!("                             echo (exit 0 implied, 1 not implied or bundle");
+    println!("                             rejected, 3 cannot compare); needs a build with");
+    println!("                             --features oracle,cert-bundle");
+    println!("  --script-out PATH          (echo-check) write the comparison script");
     println!("  ordeal -V | --version      print `ordeal <semver>` and exit");
     println!("  --format json              structured verdict on stdout (check and");
     println!("                             verus); unsat carries the full checkable");
@@ -982,6 +993,155 @@ fn banner() {
     println!("(Aeneas -> Lean 4) is discharged and CI-gated against the");
     println!("regenerated model.");
     println!("See ROADMAP.md for where the roadmap lives (the rivet graph).");
+}
+
+/// `ordeal echo-check INPUT BUNDLE` (#281 E3, design note §2): re-check an
+/// `ordeal-cert/v5` UNSAT bundle, then ask Z3 whether `INPUT` implies the
+/// bundle's certified echo. Untrusted, behind `oracle` + `cert-bundle`.
+///
+/// Exit codes: 0 implied; 1 not implied, or the bundle did not re-check;
+/// 2 usage, I/O, a malformed or non-v5 bundle, or a SAT bundle; 3 cannot
+/// compare (the script could not be written, Z3 refused or could not
+/// decide it).
+#[cfg(not(all(feature = "oracle", feature = "cert-bundle")))]
+fn run_echo_check(_args: &[String]) -> ExitCode {
+    eprintln!(
+        "ordeal: echo-check needs a build with --features oracle,cert-bundle \
+         (it runs Z3 and reads ordeal-cert/v5 bundles)"
+    );
+    ExitCode::from(2)
+}
+
+#[cfg(all(feature = "oracle", feature = "cert-bundle"))]
+fn run_echo_check(args: &[String]) -> ExitCode {
+    use ordeal::oracle::echo_check::{self, ECHO_CHECK_TIMEOUT_MS, EchoCheck};
+    let (format, rest) = match parse_format(args) {
+        Ok(pair) => pair,
+        Err(code) => return code,
+    };
+    let mut paths: Vec<&str> = Vec::new();
+    let mut script_out: Option<&str> = None;
+    let mut timeout_ms = ECHO_CHECK_TIMEOUT_MS;
+    let mut i = 0;
+    while i < rest.len() {
+        match rest[i] {
+            "--script-out" => match rest.get(i + 1) {
+                Some(p) => {
+                    script_out = Some(p);
+                    i += 2;
+                }
+                None => {
+                    eprintln!("ordeal: --script-out needs a path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--timeout-ms" => match rest.get(i + 1).and_then(|v| v.parse::<u32>().ok()) {
+                Some(n) if n > 0 => {
+                    timeout_ms = n;
+                    i += 2;
+                }
+                _ => {
+                    eprintln!("ordeal: --timeout-ms needs a positive number of milliseconds");
+                    return ExitCode::from(2);
+                }
+            },
+            a if a.starts_with('-') => {
+                eprintln!("ordeal: unknown echo-check option '{a}'");
+                return ExitCode::from(2);
+            }
+            a => {
+                paths.push(a);
+                i += 1;
+            }
+        }
+    }
+    let [input_path, bundle_path] = paths[..] else {
+        eprintln!(
+            "Usage: ordeal echo-check <INPUT.smt2> <BUNDLE.json> [--script-out PATH] [--timeout-ms N] [--format json]"
+        );
+        return ExitCode::from(2);
+    };
+    let read = |p: &str| {
+        std::fs::read_to_string(p).map_err(|e| {
+            eprintln!("ordeal: cannot read '{p}': {e}");
+            ExitCode::from(2)
+        })
+    };
+    let input = match read(input_path) {
+        Ok(s) => s,
+        Err(c) => return c,
+    };
+    let json = match read(bundle_path) {
+        Ok(s) => s,
+        Err(c) => return c,
+    };
+    let report = |result: &str, detail: &str, code: u8| {
+        match format {
+            Format::Json => println!(
+                "{{\"command\":\"echo-check\",\"result\":\"{result}\",\"detail\":\"{}\"}}",
+                json_escape(detail)
+            ),
+            Format::Text => {
+                println!("{result}");
+                if !detail.is_empty() {
+                    println!("{detail}");
+                }
+            }
+        }
+        ExitCode::from(code)
+    };
+    let bundle = match ordeal::EchoCertificate::from_cert_v5(&json) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("ordeal: '{bundle_path}' is not a readable ordeal-cert/v5 bundle: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    if bundle.certificate.subject.verdict() != "unsat" {
+        eprintln!(
+            "ordeal: '{bundle_path}' is a sat bundle: check its model against your input; \
+             echo-check compares the echo of an unsat bundle"
+        );
+        return ExitCode::from(2);
+    }
+    if let Err(e) = bundle.recheck() {
+        return report(
+            "bundle-rejected",
+            &format!("the bundle did not re-check: {e}"),
+            1,
+        );
+    }
+    let cmp = match echo_check::comparison_script(&input, &bundle.certificate.echo.text) {
+        Ok(c) => c,
+        Err(e) => return report("cannot-compare", &e.to_string(), 3),
+    };
+    if let Some(out) = script_out
+        && let Err(e) = std::fs::write(out, &cmp.script)
+    {
+        eprintln!("ordeal: cannot write '{out}': {e}");
+        return ExitCode::from(2);
+    }
+    match echo_check::run(&cmp.script, timeout_ms) {
+        EchoCheck::Implied => report(
+            "implied",
+            &format!(
+                "the bundle re-checked and Z3 finds that the input implies its certified echo \
+                 ({} assertion(s), {} link(s)): the certified unsat holds for the input",
+                cmp.echo_asserts, cmp.links
+            ),
+            0,
+        ),
+        EchoCheck::NotImplied(model) => report(
+            "not-implied",
+            &format!(
+                "the input does not imply the certified echo; the certificate is not about \
+                 this input. Z3's model: {}",
+                model.replace('\n', " ")
+            ),
+            1,
+        ),
+        EchoCheck::Unknown(why) => report("cannot-compare", &why, 3),
+    }
 }
 
 /// `ordeal verus <log|dir> [--cert-out DIR]` — discharge the `by (bit_vector)`

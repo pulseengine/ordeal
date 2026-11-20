@@ -24,6 +24,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through `Solver::from_sliver`. Tests include loom-shaped worked examples
   with negative controls (a dropped trap, a wrong value, a signalling NaN)
   and a Z3 differential under `oracle` against an FP-theory spelling.
+- **`ordeal echo-check`: compare a bundle's certified echo with your
+  input** (TR-098, #281 phase E3). `ordeal echo-check INPUT.smt2
+  BUNDLE.json` (features `oracle` + `cert-bundle`) re-checks an
+  `ordeal-cert/v5` `unsat` bundle, then writes the comparison script of
+  the query-echo design note §2 (the input up to its `check-sat`, the echo
+  with its constants renamed `|n|` → `|e.n|`, a link per shared name, the
+  negated echo) and asks Z3: `unsat` means the input implies the echo
+  (exit 0, `implied`); `sat` means the certificate is not about the input
+  (exit 1); a bundle that does not re-check is exit 1; `push` / `pop`,
+  `check-sat-assuming` or an undecided comparison is exit 3,
+  `cannot-compare`. `--script-out PATH` keeps the script for any solver; a
+  Verus `--log-all` file is compared as it is, without ordeal's slicing.
+  The trusted-base sentence now names that exception: a consumer who runs
+  the check trusts the comparison's solver and parser, the script
+  `echo-check` writes and the Lean model of SMT-LIB meaning
+  (`lean/EchoSpec.lean`) instead of the front ends and the mirror copy.
+  Limit: an unsat input implies every echo, so Z3 may decide such an input
+  by itself. The blocking `SMT-LIB parser differential (Z3)` job runs the
+  unit tests and the end-to-end leg (every repository script certified
+  `unsat`, the gale Verus logs included).
 - **`ordeal-cert/v5`: the certified query echo in the bundle** (TR-097,
   #281 phase E2). `ordeal check FILE --cert-out PATH --echo` writes the
   v3 bundle plus an `echo` block (`ordeal-echo/v1`: `logic`, `text`,
@@ -44,8 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuse v5 by `format`. The echo is opt-in in this release: without
   `--echo` the CLI writes the v3 bundle as before, and the API's
   `to_cert_v1..v4` are unchanged. Comparing the echo with your own input
-  (`echo-check`) is #281's next phase (E3); until then the echo is text
-  the bundle commits to, not a check you have run.
+  is `ordeal echo-check` (above); without it the echo is text the bundle
+  commits to, not a check you have run.
 - `ordeal check --timeout-ms N` bounds the solve by wall-clock time; when it
   elapses the verdict is `unknown` in every output shape, and under
   `--cert-out` no file is written and the exit code is 1 (#314, TR-093). A

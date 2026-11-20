@@ -142,6 +142,17 @@ $ ordeal-recheck query.cert.json
 query.cert.json: accepted (ordeal-cert/v5, unsat)
 ```
 
+To check that the certificate is about your script, build with `--features oracle,cert-bundle` (it links Z3) and run
+`ordeal echo-check`: it re-checks the bundle, then asks Z3 whether your script implies the certified echo (exit 0
+`implied`, 1 `not-implied`, 3 `cannot-compare`). `--script-out PATH` keeps the comparison script for any solver. An
+unsat script implies every echo, so on such a script Z3 may decide it by itself
+([docs/consuming-ordeal.md](docs/consuming-ordeal.md)).
+
+```sh
+$ ordeal echo-check query.smt2 query.cert.json
+implied
+```
+
 `--timeout-ms N` gives up after N milliseconds and answers `unknown`, which is always sound. Without it the
 search runs until it decides, and some queries take minutes or longer (#314). An unknown option is a usage
 error (exit 2).
@@ -229,11 +240,17 @@ name — into the node lists those checks are stated over
 `ext_tree_model_sound`, v0.34.0). Every one of these theorems is
 `sorry`-free and pinned axiom-clean in `lean/AxiomCheck.lean`, and
 whatever a trusted check rejects is answered `Unknown`, never a verdict.
-What stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1
-copy of the trees into the kernel's mirror type
-(`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
-toolchain — Lean's kernel with its three standard axioms, the pinned
-Charon/Aeneas translation of the Rust source, and rustc. The two pieces of
+What stays trusted, on every path, unless the consumer checks the echo
+(next sentence): the SMT-LIB / Verus front ends, the 1:1 copy of the
+trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`, one
+`match` arm per constructor), and the toolchain — Lean's kernel with its
+three standard axioms, the pinned Charon/Aeneas translation of the Rust
+source, and rustc. A consumer who checks an `unsat` bundle's certified
+echo against their own script (`ordeal echo-check`, `ordeal-cert/v5`)
+trusts, instead of the front ends and the mirror copy, the solver and
+parser that decide that comparison, the script `echo-check` writes, and
+the Lean model of SMT-LIB meaning the printer is proven against
+(`lean/EchoSpec.lean`). The two pieces of
 Rust are defended by tests at every width and by the differential against
 Z3, not by proof; the translation by the TR-035 differential against Lean
 core's own LRAT checker; Lean's kernel and rustc are assumed. Exact scope,

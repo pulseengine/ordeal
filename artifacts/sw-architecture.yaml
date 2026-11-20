@@ -259,6 +259,8 @@ artifacts:
 
       - type: allocated-from
         target: FEAT-001
+      - type: allocated-to
+        target: TR-098
   - id: ARC-008
     type: sw-arch-component
     title: ordeal-backend-split (own core everywhere / CaDiCaL native opt-in cfg gate)
@@ -328,6 +330,8 @@ artifacts:
         target: TR-094
       - type: allocated-from
         target: TR-097
+      - type: allocated-to
+        target: TR-098
   - id: ARC-011
     type: sw-arch-component
     title: ordeal-evidence (portable certificate, ordeal-cert/v1..v5 bundles, SAT witness, in-tree SHA-256; the ordeal-cert crate and the ordeal-recheck re-checker)

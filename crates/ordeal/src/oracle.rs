@@ -61,6 +61,11 @@ pub use front::gen_smtlib_text;
 #[path = "oracle_echo.rs"]
 pub mod echo;
 
+/// `ordeal echo-check` (#281 E3): the consumer's one-direction comparison
+/// of their script with a v5 bundle's certified echo (design note §2).
+#[path = "oracle_echo_check.rs"]
+pub mod echo_check;
+
 // ─── Translation: closed fragment → Z3 ──────────────────────────────────────
 
 fn mask(width: u32) -> u128 {

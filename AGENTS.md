@@ -24,11 +24,17 @@ blueprint = Lean 4 `bv_decide`, OOPSLA 2025):
 > in the solver can at worst fail to produce a valid certificate — it can
 > never make a wrong answer be accepted.
 
-What stays trusted, on every path: the SMT-LIB / Verus front ends, the 1:1
-copy of the trees into the kernel's mirror type
-(`crates/ordeal/src/mirror.rs`, one `match` arm per constructor), and the
-toolchain — Lean's kernel with its three standard axioms, the pinned
-Charon/Aeneas translation of the Rust source, and rustc. (That sentence is
+What stays trusted, on every path, unless the consumer checks the echo
+(next sentence): the SMT-LIB / Verus front ends, the 1:1 copy of the
+trees into the kernel's mirror type (`crates/ordeal/src/mirror.rs`, one
+`match` arm per constructor), and the toolchain — Lean's kernel with its
+three standard axioms, the pinned Charon/Aeneas translation of the Rust
+source, and rustc. A consumer who checks an `unsat` bundle's certified
+echo against their own script (`ordeal echo-check`, `ordeal-cert/v5`)
+trusts, instead of the front ends and the mirror copy, the solver and
+parser that decide that comparison, the script `echo-check` writes, and
+the Lean model of SMT-LIB meaning the printer is proven against
+(`lean/EchoSpec.lean`). (That sentence is
 single-sourced in `docs/formal-verification.md` and gated by `claims.yaml`;
 do not paraphrase it.)
 
