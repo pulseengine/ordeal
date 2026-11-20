@@ -220,15 +220,28 @@ jobs:
             | "$BIN" check - | head -1 | grep -qx unsat
           echo "::notice::'$GOT' matches the tag; certified-unsat smoke OK"
           # TR-075: ordeal-recheck reports the tag and re-checks the
-          # committed real-solver bundles (v3 unsat + sat), so its deepest
-          # exercised path is the trusted recheck, not `--version`.
+          # committed real-solver bundles (v3 unsat + sat, and the v5
+          # bundles whose echo it re-derives with the trusted printer), so
+          # its deepest exercised path is the trusted recheck, not
+          # `--version`. A v5 bundle with one echo byte changed must be
+          # rejected, or the smoke proves nothing about the echo path.
           RBIN="target/${TARGET}/release/ordeal-recheck"
           RGOT=$("$RBIN" --version)
           if [ "$RGOT" != "ordeal-recheck ${VERSION#v}" ]; then
             echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
             exit 1
           fi
-          "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v5-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-ext.json crates/ordeal-recheck/tests/fixtures/v5-unsat-quoted.json
+          sed 's/(declare-const |x| (_ BitVec 3))/(declare-const |y| (_ BitVec 3))/' \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json > planted-v5.json
+          if cmp -s planted-v5.json crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json; then
+            echo "::error::planted v5 bundle is unchanged"; exit 1
+          fi
+          if "$RBIN" planted-v5.json; then
+            echo "::error::ordeal-recheck accepted a v5 bundle with a changed echo"; exit 1
+          fi
           echo "::notice::'$RGOT' matches the tag; fixture recheck smoke OK"
 
       # #135: the cross MUSL leg is static, so it executes under qemu-user —
@@ -263,7 +276,17 @@ jobs:
             echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
             exit 1
           fi
-          qemu-aarch64 "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          qemu-aarch64 "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v5-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-ext.json crates/ordeal-recheck/tests/fixtures/v5-unsat-quoted.json
+          sed 's/(declare-const |x| (_ BitVec 3))/(declare-const |y| (_ BitVec 3))/' \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json > planted-v5.json
+          if cmp -s planted-v5.json crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json; then
+            echo "::error::planted v5 bundle is unchanged"; exit 1
+          fi
+          if qemu-aarch64 "$RBIN" planted-v5.json; then
+            echo "::error::ordeal-recheck accepted a v5 bundle with a changed echo"; exit 1
+          fi
           echo "::notice::'$RGOT' matches the tag under qemu; fixture recheck smoke OK"
 
       - name: Package archive

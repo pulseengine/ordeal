@@ -476,7 +476,9 @@ theorems above is kept; the shapes moved where the proof asked for it:
   the CLI flag". E2 ships the flag: `ordeal check … --cert-out PATH
   --echo`, and `ordeal verus … --cert-out DIR --echo` (question 8: a v5
   `<name>.cert.json` beside each `.lrat`, the obligation solved on the
-  term path). Making v5 the default is left to the maintainer.
+  term path). Making v5 the default is left to the maintainer; the owner
+  kept it opt-in for v0.38.0 (decision 20261119T121338-d5d63a, answered
+  2026-11-20, see Decisions).
 - **Compatibility with `ordeal-dag/v3` (#314, PR #328).** A v5 bundle's
   `recheck.min_version` is 0.38.0, which is also what an
   `ordeal-dag/v3` query block demands, so `min_reader_version(0.38.0)`
@@ -614,6 +616,10 @@ reading.
   release that ships `ordeal-cert/v5`; v5 becomes the default format there
   (v1..v4 stay readable). Consumers (rivet, gale) must accept v5 when they
   upgrade, so that release's notes and consuming-ordeal.md say so.
+  *Superseded for v0.38.0 (owner, 2026-11-20, decision
+  20261119T121338-d5d63a, option opt-in):* the echo ships behind
+  `--echo`, and without it every bundle is v3 as before, so no consumer
+  has to accept v5 to upgrade. Making it the default is E4.
 - **Q6 → blocking, its own job.** The parser differential moves out of the
   `continue-on-error` Z3 Oracle job into a job that fails CI, with a rivet
   verdict the release gate requires.
