@@ -325,7 +325,7 @@ jobs:
       # (measured 2026-11-13, PR #307 run 43370607269). Shipping that would
       # break every consumer's runtime, so the wasm build stays on 1.99.1
       # until a stable toolchain stops importing it (#309).
-      - uses: dtolnay/rust-toolchain@263313d2989f864a2b8613f97277288638e7d8f8 # 1.99.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # 1.99.1
         with:
           targets: wasm32-wasip2
       - name: Add wasm32-wasip2 target
@@ -466,7 +466,7 @@ jobs:
       # BEFORE the checksum step so its digest is cosign-signed with
       # everything else. Re-issues after release are handled by
       # vex-reissue.yml and never touch these signed sums.
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
         with:
           tool: cargo-audit@0.22.2
 

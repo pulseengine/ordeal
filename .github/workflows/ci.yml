@@ -138,7 +138,7 @@ jobs:
       # `// rivet: verifies <ID>` markers name (and FAILS on a marker that
       # matches no test), and the mapped XML is uploaded. The release gate
       # downloads it from the tagged commit's own main CI run.
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
         with:
           tool: cargo-nextest@0.9.146
       - name: Test results as rivet evidence (nextest JUnit, mapped to measures)
@@ -176,7 +176,7 @@ jobs:
       # Cargo.lock. Negative-controlled 2026-09-24: RUSTSEC-2020-0071 in the
       # shipped closure -> blocking red; same crate dev-only -> blocking
       # green, advisory red.
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
         with:
           tool: cargo-deny@0.20.2
       - name: Advisories — shipped closure (BLOCKING)
@@ -233,7 +233,7 @@ jobs:
       # (measured 2026-11-13, PR #307 run 43370607269). Shipping that would
       # break every consumer's runtime, so the wasm build stays on 1.99.1
       # until a stable toolchain stops importing it (#309).
-      - uses: dtolnay/rust-toolchain@263313d2989f864a2b8613f97277288638e7d8f8 # 1.99.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # 1.99.1
         with:
           targets: wasm32-wasip2
       - name: Add wasm32-wasip2 target
@@ -336,7 +336,7 @@ jobs:
           cp "$SBOM" /tmp/smoke.cdx.json
       # #146: the EXACT release VEX recipe, per PR, so it cannot first fail
       # at a tag cut (the #135 lesson).
-      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
+      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2
         with:
           tool: cargo-audit@0.22.2
       - name: VEX generation smoke (release recipe)
