@@ -216,7 +216,7 @@ jobs:
           set -euo pipefail
           for m in fuzz/Cargo.toml mcdc/ordeal-lrat/Cargo.toml; do
             echo "== $m"
-            cargo deny --manifest-path "$m" --all-features check --config deny.toml advisories
+            cargo deny --manifest-path "$m" --all-features --config deny.toml check advisories
           done
       - name: VEX generator self-test
         run: python3 scripts/vex.py self-test
