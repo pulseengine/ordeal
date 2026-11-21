@@ -8,10 +8,12 @@ version: 2
 # workspace; `crates/ordeal` is a member of `/`, not a root of its own, so an
 # entry for it fails every run ("not the workspace root").
 updates:
+  # PAUSED 2026-11-21 under the fleet CI hold; restore the previous limits when it lifts.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     labels:
       - dependencies
     groups:
@@ -22,11 +24,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     labels:
       - dependencies
   - package-ecosystem: cargo
     directory: /fuzz
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     labels:
       - dependencies
