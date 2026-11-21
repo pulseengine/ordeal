@@ -514,7 +514,7 @@ claims:
           - macOS build + smoke
           - musl build + SBOM smoke
           - cross aarch64-musl + qemu smoke
-          - Bazel build (optional)
+          - Bazel build   # blocking job (owner 2026-11-21); not yet a required context in the ruleset
           - Z3 Oracle (optional)
           - varve layer pin resolves (pinned rivet validates the graph)
           - Perf + proof-size gate (#283)   # advisory until the owner decides (TR-081)
