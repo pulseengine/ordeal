@@ -70,8 +70,9 @@ any `crates/ordeal-lrat/src/*.rs` file:
 A decrease prints an `IMPROVEMENT` note. The baseline is updated **by hand**
 (copy `current.txt` over `mcdc/baseline.txt` in the commit that adds the
 rows), never by the script. The baseline is tied to witness 0.45.0 and rustc
-1.99.1 (the CI job pins both); a toolchain bump can move the numbers and is
-re-baselined deliberately. The job is not a required check, same stance as
+1.100.0 (the CI job pins both); a toolchain bump can move the numbers and is
+re-baselined deliberately. The move from 1.99.1 to 1.100.0 (2026-11-21) left
+every per-file count unchanged. The job is not a required check, same stance as
 `varve-pin`.
 
 Negative controls, run when this landed: removing the 15 sliver call-site

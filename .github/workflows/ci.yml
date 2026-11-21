@@ -22,8 +22,9 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","x64","light"]') || 'ubuntu-24.04' }}  # light pool only for pushes and same-repo PRs; fails closed (2026-11-14)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
+          toolchain: 1.100.0
           components: rustfmt
       - name: Check formatting
         run: cargo fmt --all --check
@@ -37,8 +38,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
+          toolchain: 1.100.0
           components: clippy
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run clippy
@@ -57,7 +59,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Build release
         run: cargo build --release
@@ -69,7 +73,9 @@ jobs:
       RUSTFLAGS: -Dwarnings
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Run tests
         # Default build must NOT require Z3 — the Z3-backed `oracle` feature is
@@ -161,7 +167,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       # Lockfile sweep 2026-11-20: every Cargo workspace in the repository
       # (the root, fuzz/ and mcdc/ordeal-lrat/ are three) must have a
       # tracked Cargo.lock that resolves with --locked, so no CI build can
@@ -258,26 +266,26 @@ jobs:
     name: Build (wasm32-wasip2)
     runs-on: ubuntu-24.04
     env:
-      RUSTUP_TOOLCHAIN: "1.99.1"
+      RUSTUP_TOOLCHAIN: "1.100.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      # Rust 1.100.0's wasm32-wasip2 std imports wasi:cli/exit@0.2.12
-      # `exit-with-code`, an @unstable WASI API: the component does not even
-      # instantiate on wasmtime 27 or 42 without `-S cli-exit-with-code=y`
-      # (measured 2026-11-13, PR #307 run 43370607269). Shipping that would
-      # break every consumer's runtime, so the wasm build stays on 1.99.1
-      # until a stable toolchain stops importing it (#309).
+      # Exact Rust 1.100.0 (owner rule 2026-11-21: every workflow names the
+      # exact toolchain). Its wasm32-wasip2 std imports wasi:cli/exit@0.2.12
+      # `exit-with-code` (#309). wasmtime 46.0.0 and later instantiate such a
+      # component without `-S cli-exit-with-code=y`; 45.0.0 and earlier
+      # (incl. the old 27.0.0 pin) refuse it (measured 2026-11-21 on
+      # 42.0.2, 44, 45, 46, 47, 48, 50.0.3, 51.0.0). So the wasmtime pin
+      # below is 51.0.0 and consumers need wasmtime >= 46.
       # The toolchain comes from the input, not from the pinned commit:
-      # dependabot moves the SHA (it moved the 1.99.1 branch pin to the
-      # stable branch head in #329), and the input keeps it 1.99.1.
+      # dependabot moves the SHA (#329), the input does not move.
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
           targets: wasm32-wasip2
-      - name: Assert the wasm build runs on Rust 1.99.1 (#309)
+      - name: Assert the wasm build runs on Rust 1.100.0
         run: |
           v=$(rustc --version | awk '{print $2}')
-          [ "$v" = "1.99.1" ] || { echo "::error::wasm build would use rustc $v, not 1.99.1 (#309)"; exit 1; }
+          [ "$v" = "1.100.0" ] || { echo "::error::wasm build would use rustc $v, not 1.100.0"; exit 1; }
       - name: Add wasm32-wasip2 target
         run: rustup target add wasm32-wasip2
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -290,7 +298,7 @@ jobs:
       - name: Install wasmtime
         uses: bytecodealliance/actions/wasmtime/setup@9152e710e9f7182e4c29ad218e4f335a7b203613 # v1.1.3
         with:
-          version: "27.0.0"
+          version: "51.0.0"
       - name: wasm ↔ native behavioral differential
         run: |
           scripts/wasm_native_differential.sh \
@@ -327,7 +335,9 @@ jobs:
     runs-on: macos-latest  # macos-14 retired 2026-11-05
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: macos
@@ -352,8 +362,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
+          toolchain: 1.100.0
           targets: x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -398,7 +409,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       # #189: the same pinned cross rev the release builds the shipped
       # aarch64 binaries with (release.yml), not crates.io's 0.2.5.
       - name: Install cross (pinned rev)
@@ -593,7 +606,9 @@ jobs:
       # translation-faithfulness gap or a spec ambiguity and fails CI here.
       # This job has no Rust toolchain of its own (everything above is
       # nix/elan), so install one for the corpus dumper.
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: diffcheck
@@ -614,7 +629,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: cadical
@@ -642,7 +659,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: oracle
@@ -685,7 +704,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: parser-differential
@@ -739,7 +760,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
           key: perf-gate

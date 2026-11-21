@@ -110,6 +110,19 @@ queries (#283), and the refusal of scripts with more than one `check-sat`
   fails if an Intel macOS archive is published. rules_ordeal refuses an Intel
   Mac with the same message from its v0.38.0 pin (rules_ordeal#32).
 
+- **The wasm components are built with Rust 1.100.0 and need wasmtime 46.0.0
+  or later.** Every workflow now names the exact toolchain: Rust 1.100.0
+  (`rust-toolchain.toml` and every `dtolnay/rust-toolchain` step), and
+  `nightly-2026-11-20` for fuzzing (fleet-wide owner rule, 2026-11-21). Rust
+  1.100.0's wasm32-wasip2 std imports `wasi:cli/exit@0.2.12`
+  `exit-with-code` (#309). wasmtime 46.0.0 and later run such a component as
+  is; 45.0.0 and earlier refuse to instantiate it unless given
+  `-S cli-exit-with-code=y`. If you run `ordeal.wasm` or
+  `ordeal-recheck.wasm` from this release, use wasmtime 46.0.0 or later. The
+  v0.37.0 components (Rust 1.99.1) still run on older wasmtime. CI and the
+  release now run the wasm differentials on wasmtime 51.0.0 instead of
+  27.0.0.
+
 - **The SMT-LIB reader names a quoted symbol by its content** (TR-097,
   #281 E2; owner decision 20261117T185255-a55cd4). SMT-LIB 2.6 §3.1:
   `|x|` and `x` are one symbol when `x` is a simple symbol, and a quoted

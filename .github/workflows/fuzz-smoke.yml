@@ -45,11 +45,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Install nightly Rust
-        # nightly comes from the input; the pinned commit only fixes the
-        # action's code (dependabot moved the nightly branch pin in #329).
+        # A dated nightly from the input (owner rule 2026-11-21: exact
+        # toolchains); the pinned commit only fixes the action's code
+        # (dependabot moved the nightly branch pin in #329).
         uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-11-20
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
@@ -83,7 +84,7 @@ jobs:
           # libfuzzer-sys). The GNU target has a dynamic libc and works.
           # #187: a failed or empty `fuzz list` must fail the job; inside
           # `for ... in $(...)` its exit status is ignored even under set -e.
-          targets="$(cargo +nightly fuzz list)"
+          targets="$(cargo +nightly-2026-11-20 fuzz list)"
           if [ -z "$targets" ]; then
             echo "::error::cargo fuzz list returned no targets — nothing would be fuzzed"
             exit 1
@@ -95,7 +96,7 @@ jobs:
             # committed regression inputs (fuzz-found #139 crash included);
             # -timeout bounds a single adversarial solve, -max_len keeps
             # inputs in the parser-robustness regime.
-            cargo +nightly fuzz run "$target" \
+            cargo +nightly-2026-11-20 fuzz run "$target" \
               --target x86_64-unknown-linux-gnu \
               "fuzz/corpus/$target" "fuzz/seeds/smtlib" \
               -- -max_total_time=60 -timeout=20 -max_len=1024 -print_final_stats=1

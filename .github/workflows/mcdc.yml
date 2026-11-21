@@ -31,9 +31,9 @@ jobs:
       # Pinned, not `stable`: the decision structure witness reads comes from
       # rustc's DWARF, so the baseline is only meaningful for the toolchain it
       # was measured with (mcdc/baseline.txt header). Bump both together.
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
           targets: wasm32-wasip1
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Install varve (verified) and the pinned layer (witness)
@@ -42,11 +42,11 @@ jobs:
         run: bash scripts/install_varve.sh
       - name: Row harness passes natively (each row returns its expected verdict)
         env:
-          RUSTUP_TOOLCHAIN: "1.99.1"
+          RUSTUP_TOOLCHAIN: "1.100.0"
         run: cargo test --manifest-path mcdc/ordeal-lrat/Cargo.toml --locked
       - name: MC/DC ratchet
         env:
-          RUSTUP_TOOLCHAIN: "1.99.1"
+          RUSTUP_TOOLCHAIN: "1.100.0"
         run: scripts/mcdc_gate.sh target/mcdc-ordeal-lrat
       - name: Upload the truth table
         if: always()
