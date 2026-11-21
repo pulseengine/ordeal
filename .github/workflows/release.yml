@@ -325,9 +325,17 @@ jobs:
       # (measured 2026-11-13, PR #307 run 43370607269). Shipping that would
       # break every consumer's runtime, so the wasm build stays on 1.99.1
       # until a stable toolchain stops importing it (#309).
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # 1.99.1
+      # The toolchain comes from the input, not from the pinned commit:
+      # dependabot moves the SHA (it moved the 1.99.1 branch pin to the
+      # stable branch head in #329), and the input keeps it 1.99.1.
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
+          toolchain: 1.99.1
           targets: wasm32-wasip2
+      - name: Assert the wasm build runs on Rust 1.99.1 (#309)
+        run: |
+          v=$(rustc --version | awk '{print $2}')
+          [ "$v" = "1.99.1" ] || { echo "::error::wasm build would use rustc $v, not 1.99.1 (#309)"; exit 1; }
       - name: Add wasm32-wasip2 target
         run: rustup target add wasm32-wasip2
       - name: Build twice, require identical bytes
