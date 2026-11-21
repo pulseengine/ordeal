@@ -321,5 +321,7 @@ Ordeal builds two ways, both from the same cargo workspace:
   | `bazel/platforms/BUILD.bazel` | `wasm32_wasip2` platform for `--config=wasm`. |
   | `crates/ordeal/BUILD.bazel` | `rust_library` + `rust_binary` + `rust_test`; commented `rust_wasm_component` (activates once a WIT world exists). |
 
-  The Bazel build is advisory in CI (the module graph fetches the org rules from
-  the registry/git); the enforced wasip2 gate is the cargo command above.
+  The Bazel job in CI builds and tests with `--lockfile_mode=error` against the
+  committed `MODULE.bazel.lock`, and a failure fails the job (owner decision
+  2026-11-21). The wasip2 component that ships is still built by the cargo
+  command above.

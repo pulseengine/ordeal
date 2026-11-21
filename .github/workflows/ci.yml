@@ -208,11 +208,10 @@ jobs:
         continue-on-error: true
         run: cargo deny --all-features check advisories
       # The nested workspaces have their own Cargo.lock, which the two
-      # steps above never read (lockfile sweep 2026-11-20). Neither ships
-      # in a release, so, like the dev/bench closure above, an advisory
-      # here fails the step and is reported without blocking the job.
-      - name: Advisories — nested lockfiles fuzz/ and mcdc/ordeal-lrat/ (advisory)
-        continue-on-error: true
+      # steps above never read (lockfile sweep 2026-11-20). Owner decision
+      # 2026-11-21: an advisory in either nested lock fails this job
+      # (and so the required Reproducible build check), not just the step.
+      - name: Advisories — nested lockfiles fuzz/ and mcdc/ordeal-lrat/ (BLOCKING)
         run: |
           set -euo pipefail
           for m in fuzz/Cargo.toml mcdc/ordeal-lrat/Cargo.toml; do
@@ -419,15 +418,14 @@ jobs:
           test "$(qemu-aarch64 "$BIN" --version)" = "ordeal $VER"
           printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' | qemu-aarch64 "$BIN" check - | head -1 | grep -qx unsat
 
-  # ── Bazel build via rules_rust + rules_wasm_component (non-blocking) ──
-  # Mirrors the org Bazel setup (see synth). Non-blocking (continue-on-error):
-  # the module graph pulls rules_rust + the pulseengine rules_wasm_component
-  # fork from the registry/git, and a registry/network hiccup must never block
-  # the core cargo gate. The cargo `wasip2` job above is the enforced gate.
+  # ── Bazel build via rules_rust + rules_wasm_component (blocking) ──────
+  # Mirrors the org Bazel setup (see synth). Blocking since the owner
+  # decision of 2026-11-21: with --lockfile_mode=error and a committed
+  # MODULE.bazel.lock, a failure here is a real defect (a stale lock or a
+  # broken BUILD), not a network hiccup to wave through.
   bazel:
-    name: Bazel build (optional)
+    name: Bazel build
     runs-on: ubuntu-24.04
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # Owner decision 2026-11-20: Bazel runs with --lockfile_mode=error
