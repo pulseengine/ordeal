@@ -1632,13 +1632,13 @@
         "bzlTransitiveDigest": "Fz8XX//e0xhkf8iOYXaLeNcLI/WcIVu/mEpVK8pLcwA=",
         "usagesDigest": "/SFnGA82AMxsgRA95+bS1b3mlAsMij/z/GwyNK83xqg=",
         "recordedFileInputs": {
-          "@@//crates/ordeal/Cargo.toml": "000354b6ebcd160d61d1381b51f6b13419baecc23d0767206f5add845e2cf398",
-          "@@//Cargo.toml": "90943aad98db4525cf3788337d35b6807b9ea46aa154e0c0ab3804821c5f7c09",
-          "@@//Cargo.lock": "946a8673a663eca021927f16f6a69b1d90e811bc17c907c745bb17aa4b24e671",
+          "@@//crates/ordeal/Cargo.toml": "ee7f948f8920e6825c86f5edbe9132d735489a20b494f5597e7a5f5b587658d2",
+          "@@//Cargo.toml": "b3a7762fa0340b534d47116e2e312a5be0abdf693090add773ff6b298a3f20c9",
+          "@@//Cargo.lock": "ec8d55d6d2f32c24303f25b6998a338587e59924e0017d647a6ccb2c67bb2e4d",
           "@@//crates/ordeal-lrat/Cargo.toml": "cfc303233cd01965a78761982c28204a6fad4b2d85054660828cd27b8502aa01",
-          "@@//crates/ordeal-recheck/Cargo.toml": "b8a78cc0ff07f4ccd75c535d9989695b1304623d064937e4f62fbbe788f002e7",
+          "@@//crates/ordeal-recheck/Cargo.toml": "e40a8e248913a54c4f41b74cb2eb53522bad0d5955ef74dffe12152284ca812e",
           "@@//MODULE.bazel": "0a2e0c6e3c436b53687bb7d731142c4b4410cdaa38f35347141ea68ee5669491",
-          "@@//crates/ordeal-cert/Cargo.toml": "30726f82757443e3480b10318014e7a8824304181f1aebd7bd07f52c31168ec3",
+          "@@//crates/ordeal-cert/Cargo.toml": "78720356c9297570a34c12ff6384c7b15abc88ac75544926764afc9a3a2b7648",
           "@@rules_rust~~rust_host_tools~rust_host_tools//rust_host_tools": "ENOENT"
         },
         "recordedDirentsInputs": {},
