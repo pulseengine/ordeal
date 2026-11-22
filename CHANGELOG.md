@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.0] - 2026-11-20
+
+Three strands. The certified query echo is complete (#281, E2 and E3): an
+`ordeal-cert/v5` bundle carries the SMT-LIB script the trusted printer
+makes of the query ordeal decided, `ordeal-recheck` re-derives it byte for
+byte, and `ordeal echo-check` asks Z3 whether your input implies it. The
+echo is opt-in (`--echo`); without it every bundle is v3 as before. The
+second strand is the trusted mux fold (#314): `bvudiv` / `bvurem` by a
+constant power of two, which ran into the search deadline, are decided in
+milliseconds, proven in Lean, and the certificates of the queries the fold
+fires on change. The third is consumer-facing: trap refinement for loom
+(#284), `--timeout-ms`, a perf and proof-size gate on real consumer
+queries (#283), and the refusal of scripts with more than one `check-sat`
+(#321). No Intel macOS archives are built from this release on.
+
 ### Added
 
 - **Trap refinement for loom** (TR-082, #284; loom#313 / loom#300).
@@ -94,6 +109,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/verify_release.sh` expects five archives per binary from v0.38.0 and
   fails if an Intel macOS archive is published. rules_ordeal refuses an Intel
   Mac with the same message from its v0.38.0 pin (rules_ordeal#32).
+
+- **The wasm components are built with Rust 1.100.0 and need wasmtime 46.0.0
+  or later.** Every workflow now names the exact toolchain: Rust 1.100.0
+  (`rust-toolchain.toml` and every `dtolnay/rust-toolchain` step), and
+  `nightly-2026-11-20` for fuzzing (fleet-wide owner rule, 2026-11-21). Rust
+  1.100.0's wasm32-wasip2 std imports `wasi:cli/exit@0.2.12`
+  `exit-with-code` (#309). wasmtime 46.0.0 and later run such a component as
+  is; 45.0.0 and earlier refuse to instantiate it unless given
+  `-S cli-exit-with-code=y`. If you run `ordeal.wasm` or
+  `ordeal-recheck.wasm` from this release, use wasmtime 46.0.0 or later. The
+  v0.37.0 components (Rust 1.99.1) still run on older wasmtime. CI and the
+  release now run the wasm differentials on wasmtime 51.0.0 instead of
+  27.0.0.
 
 - **The SMT-LIB reader names a quoted symbol by its content** (TR-097,
   #281 E2; owner decision 20261117T185255-a55cd4). SMT-LIB 2.6 §3.1:
@@ -2442,7 +2470,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.38.0
 [0.37.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.37.0
 [0.36.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.1
 [0.36.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.0

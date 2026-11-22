@@ -158,8 +158,9 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
+          toolchain: 1.100.0
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
@@ -220,15 +221,28 @@ jobs:
             | "$BIN" check - | head -1 | grep -qx unsat
           echo "::notice::'$GOT' matches the tag; certified-unsat smoke OK"
           # TR-075: ordeal-recheck reports the tag and re-checks the
-          # committed real-solver bundles (v3 unsat + sat), so its deepest
-          # exercised path is the trusted recheck, not `--version`.
+          # committed real-solver bundles (v3 unsat + sat, and the v5
+          # bundles whose echo it re-derives with the trusted printer), so
+          # its deepest exercised path is the trusted recheck, not
+          # `--version`. A v5 bundle with one echo byte changed must be
+          # rejected, or the smoke proves nothing about the echo path.
           RBIN="target/${TARGET}/release/ordeal-recheck"
           RGOT=$("$RBIN" --version)
           if [ "$RGOT" != "ordeal-recheck ${VERSION#v}" ]; then
             echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
             exit 1
           fi
-          "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v5-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-ext.json crates/ordeal-recheck/tests/fixtures/v5-unsat-quoted.json
+          sed 's/(declare-const |x| (_ BitVec 3))/(declare-const |y| (_ BitVec 3))/' \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json > planted-v5.json
+          if cmp -s planted-v5.json crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json; then
+            echo "::error::planted v5 bundle is unchanged"; exit 1
+          fi
+          if "$RBIN" planted-v5.json; then
+            echo "::error::ordeal-recheck accepted a v5 bundle with a changed echo"; exit 1
+          fi
           echo "::notice::'$RGOT' matches the tag; fixture recheck smoke OK"
 
       # #135: the cross MUSL leg is static, so it executes under qemu-user —
@@ -263,7 +277,17 @@ jobs:
             echo "::error::version mismatch: ordeal-recheck says '$RGOT', tag demands 'ordeal-recheck ${VERSION#v}'"
             exit 1
           fi
-          qemu-aarch64 "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json
+          qemu-aarch64 "$RBIN" crates/ordeal-recheck/tests/fixtures/v3-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v3-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json crates/ordeal-recheck/tests/fixtures/v5-sat-w5.json \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-ext.json crates/ordeal-recheck/tests/fixtures/v5-unsat-quoted.json
+          sed 's/(declare-const |x| (_ BitVec 3))/(declare-const |y| (_ BitVec 3))/' \
+            crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json > planted-v5.json
+          if cmp -s planted-v5.json crates/ordeal-recheck/tests/fixtures/v5-unsat-w3.json; then
+            echo "::error::planted v5 bundle is unchanged"; exit 1
+          fi
+          if qemu-aarch64 "$RBIN" planted-v5.json; then
+            echo "::error::ordeal-recheck accepted a v5 bundle with a changed echo"; exit 1
+          fi
           echo "::notice::'$RGOT' matches the tag under qemu; fixture recheck smoke OK"
 
       - name: Package archive
@@ -314,28 +338,28 @@ jobs:
     needs: [gate]
     runs-on: ubuntu-24.04
     env:
-      RUSTUP_TOOLCHAIN: "1.99.1"
+      RUSTUP_TOOLCHAIN: "1.100.0"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.tag || github.ref }}
-      # Rust 1.100.0's wasm32-wasip2 std imports wasi:cli/exit@0.2.12
-      # `exit-with-code`, an @unstable WASI API: the component does not even
-      # instantiate on wasmtime 27 or 42 without `-S cli-exit-with-code=y`
-      # (measured 2026-11-13, PR #307 run 43370607269). Shipping that would
-      # break every consumer's runtime, so the wasm build stays on 1.99.1
-      # until a stable toolchain stops importing it (#309).
+      # Exact Rust 1.100.0 (owner rule 2026-11-21: every workflow names the
+      # exact toolchain). Its wasm32-wasip2 std imports wasi:cli/exit@0.2.12
+      # `exit-with-code` (#309). wasmtime 46.0.0 and later instantiate such a
+      # component without `-S cli-exit-with-code=y`; 45.0.0 and earlier
+      # (incl. the old 27.0.0 pin) refuse it (measured 2026-11-21 on
+      # 42.0.2, 44, 45, 46, 47, 48, 50.0.3, 51.0.0). So the wasmtime pin
+      # below is 51.0.0 and consumers need wasmtime >= 46.
       # The toolchain comes from the input, not from the pinned commit:
-      # dependabot moves the SHA (it moved the 1.99.1 branch pin to the
-      # stable branch head in #329), and the input keeps it 1.99.1.
+      # dependabot moves the SHA (#329), the input does not move.
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
         with:
-          toolchain: 1.99.1
+          toolchain: 1.100.0
           targets: wasm32-wasip2
-      - name: Assert the wasm build runs on Rust 1.99.1 (#309)
+      - name: Assert the wasm build runs on Rust 1.100.0
         run: |
           v=$(rustc --version | awk '{print $2}')
-          [ "$v" = "1.99.1" ] || { echo "::error::wasm build would use rustc $v, not 1.99.1 (#309)"; exit 1; }
+          [ "$v" = "1.100.0" ] || { echo "::error::wasm build would use rustc $v, not 1.100.0"; exit 1; }
       - name: Add wasm32-wasip2 target
         run: rustup target add wasm32-wasip2
       - name: Build twice, require identical bytes
@@ -363,7 +387,7 @@ jobs:
       - name: Install wasmtime
         uses: bytecodealliance/actions/wasmtime/setup@9152e710e9f7182e4c29ad218e4f335a7b203613 # v1.1.3
         with:
-          version: "27.0.0"
+          version: "51.0.0"
       - name: wasm ↔ native differential on the published bytes
         run: |
           scripts/wasm_native_differential.sh \
@@ -437,7 +461,9 @@ jobs:
       # (The cargo-package dirty-tree trap doesn't apply here — this
       # workflow never runs `cargo package` — but the SBOM is copied out of
       # the crate dir immediately regardless.)
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable (branch head 2026-11-20)
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        with:
+          toolchain: 1.100.0
 
       - name: Install cargo-cyclonedx
         run: cargo install --locked cargo-cyclonedx --version 0.5.9

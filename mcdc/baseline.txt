@@ -1,6 +1,6 @@
 # MC/DC ratchet baseline for ordeal-lrat (issue #279). Updated by hand, never by the gate.
 # Copy <outdir>/current.txt here in the same commit as the rows that lowered a count.
-# Measured with witness 0.45.0, rustc 1.99.1 stable, wasm32-wasip1; a toolchain bump can move these.
+# Measured with witness 0.45.0, rustc 1.100.0, wasm32-wasip1 (re-measured 2026-11-21: identical to 1.99.1); a toolchain bump can move these.
 # file decisions not_full gap_conditions dead_conditions proved_conditions
 src/blast_kernel.rs 67 66 246 74 61
 src/echo_kernel.rs 72 69 631 356 234
