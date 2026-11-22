@@ -22,8 +22,8 @@ build --action_env=http_proxy
 build --action_env=https_proxy
 build --action_env=no_proxy
 
-# Rust settings
-build --@rules_rust//rust/toolchain/channel=stable
+# Rust settings: the compiler is the exact `versions` pin in MODULE.bazel
+# (1.100.0), not a channel.
 
 # Enable workers for faster builds
 build --worker_max_instances=4

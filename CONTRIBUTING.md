@@ -109,6 +109,7 @@ cargo test --release -p ordeal --test perf_gate_corpus -- --ignored --exact real
    - `Lean model + soundness proof`
    - `CaDiCaL backend (cadical feature)`
    - `SMT-LIB parser differential (Z3)`
+   - `Bazel build`
 
    `claims.yaml` checks this list against the job names in `ci.yml`, so a
    job added to the workflow must be listed here or waived there.

@@ -314,7 +314,7 @@ Ordeal builds two ways, both from the same cargo workspace:
 
   | File | Purpose |
   |------|---------|
-  | `MODULE.bazel` | Deps: `rules_rust`, `rules_wasm_component` (pinned to the pulseengine fork), commented `rules_lean` placeholder. Crates resolved from `Cargo.lock` via `crate_universe`. |
+  | `MODULE.bazel` | Deps: `rules_rust`, `rules_wasm_component` (pinned to the pulseengine fork), commented `rules_lean` placeholder. Crates resolved from `Cargo.lock` via `crate_universe`. The `rules_rust` toolchain is exact Rust 1.100.0 with every archive's sha256 pinned, the same compiler the workflows name. |
   | `.bazelrc` | Native + `--config=wasm` (wasm32-wasip2) build configs. |
   | `.bazelversion` | Bazel 7.4.1 (lockstep with synth). |
   | `BUILD.bazel` | Root: exported files + docs filegroup. |
@@ -322,6 +322,6 @@ Ordeal builds two ways, both from the same cargo workspace:
   | `crates/ordeal/BUILD.bazel` | `rust_library` + `rust_binary` + `rust_test`; commented `rust_wasm_component` (activates once a WIT world exists). |
 
   The Bazel job in CI builds and tests with `--lockfile_mode=error` against the
-  committed `MODULE.bazel.lock`, and a failure fails the job (owner decision
+  committed `MODULE.bazel.lock`; `Bazel build` is a required check (owner decision
   2026-11-21). The wasip2 component that ships is still built by the cargo
   command above.

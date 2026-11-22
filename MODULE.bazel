@@ -37,7 +37,27 @@ register_toolchains("@local_config_cc_toolchains//:all")
 rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
 rust.toolchain(
     edition = "2024",
-    versions = ["1.88.0"],
+    # Exact Rust 1.100.0, the same compiler every workflow names (fleet rule
+    # 2026-11-21). rules_rust 0.68.1 ships no checksums for 1.100.0 and would
+    # otherwise fetch the toolchain unverified. Values are static.rust-lang.org's
+    # published .sha256 files; the aarch64-apple-darwin ones also match what
+    # Bazel computed locally.
+    versions = ["1.100.0"],
+    sha256s = {
+        "cargo-1.100.0-aarch64-apple-darwin.tar.xz": "7e18265d2d2cda8dec6cac4d0faa3bbafe927b401e5185350abc7d669f9adafb",
+        "cargo-1.100.0-x86_64-unknown-linux-gnu.tar.xz": "7e29ce07d7c6e92d1826870575ba27d57fff6cb3e754aa57d99099cb88fab35d",
+        "clippy-1.100.0-aarch64-apple-darwin.tar.xz": "fb57f639b5b9bcf1262df1ff81bcfc9e44338fbc729b0d5aad531b96493d6391",
+        "clippy-1.100.0-x86_64-unknown-linux-gnu.tar.xz": "0d18df3bff6c852ef8243727fed075ecb33dbf93b8ab8c138c2f45e3f270102a",
+        "llvm-tools-1.100.0-aarch64-apple-darwin.tar.xz": "855138deaa04b955a7dadef55e7d583c5bbefd9fb7db6879aac126c4e4c2e526",
+        "llvm-tools-1.100.0-x86_64-unknown-linux-gnu.tar.xz": "2c84cada1aef73339b1a2d101a35cd78d71072c8f6a3921bf1abb852c3f42ad3",
+        "rust-std-1.100.0-aarch64-apple-darwin.tar.xz": "9345645b6f56eea28bf8cc2c0f628a61d507a688f91c1bec5ae6bfad216a16c7",
+        "rust-std-1.100.0-wasm32-wasip2.tar.xz": "532d5210ca87ddc4a7697170524d271f51b74ff9296e25e2b2d6df436d624d6f",
+        "rust-std-1.100.0-x86_64-unknown-linux-gnu.tar.xz": "4591b6486594ded52ecd6135db95bf9355bbd3ca7a380888b141528bbcf9a5d4",
+        "rustc-1.100.0-aarch64-apple-darwin.tar.xz": "3fcd7f1709f62dda58bf4db2dcfd630a451e750aadaaa551a21cc4a627a37b4c",
+        "rustc-1.100.0-x86_64-unknown-linux-gnu.tar.xz": "f1d0b1dec81dab6f523cd098507763487b0d4bd7fd2c87582f154128719be03b",
+        "rustfmt-1.100.0-aarch64-apple-darwin.tar.xz": "dd5f60c6b87c9fae4bfa706d3b20ce648f9e5c595473aa9a4cfb31cec7a7a8fa",
+        "rustfmt-1.100.0-x86_64-unknown-linux-gnu.tar.xz": "4c9389e4722b16499e5d47d89837ec84a4ef755f105ed2a84c038156064e01ab",
+    },
     extra_target_triples = ["wasm32-wasip2"],
 )
 use_repo(rust, "rust_toolchains")
