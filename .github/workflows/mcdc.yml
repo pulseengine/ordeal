@@ -38,12 +38,29 @@ jobs:
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Install varve (verified) and the pinned layer (witness)
         env:
-          VARVE_VERSION: v0.38.0
+          VARVE_VERSION: v0.47.0
         run: bash scripts/install_varve.sh
       - name: Row harness passes natively (each row returns its expected verdict)
         env:
           RUSTUP_TOOLCHAIN: "1.100.0"
         run: cargo test --manifest-path mcdc/ordeal-lrat/Cargo.toml --locked
+      # The baseline may only loosen for a stated cause: a changed witness
+      # version in its header, or a new "# reason:" line (docs/mcdc.md).
+      # The planted loosening (same witness, no reason) must be refused.
+      - name: Baseline loosens only with a witness change or a reason (planted control)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags --depth=1 origin "$BASE_REF"
+          git show FETCH_HEAD:mcdc/baseline.txt > "$RUNNER_TEMP/base-baseline.txt"
+          bash scripts/check_mcdc_baseline_change.sh "$RUNNER_TEMP/base-baseline.txt" mcdc/baseline.txt
+          f=$(awk '$1 ~ /^src\//{print $1; exit}' mcdc/baseline.txt)
+          awk -v f="$f" '$1==f{$6=$6-1} {print}' mcdc/baseline.txt > "$RUNNER_TEMP/plant.txt"
+          rc=0; bash scripts/check_mcdc_baseline_change.sh mcdc/baseline.txt "$RUNNER_TEMP/plant.txt" || rc=$?
+          [ "$rc" = 1 ] || { echo "::error::planted loosening of $f was not refused (rc=$rc)"; exit 1; }
+          echo "planted loosening of $f refused"
       - name: MC/DC ratchet
         env:
           RUSTUP_TOOLCHAIN: "1.100.0"

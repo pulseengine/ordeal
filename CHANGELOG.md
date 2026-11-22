@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sha256 of each toolchain archive, since rules_rust 0.68.1 ships none for
   1.100.0; a wrong checksum fails the fetch.
 - `Bazel build` is a required check on `main`, and CONTRIBUTING lists it.
+- The varve pin moves from realm `pulseengine` 2026.10.23 to realm `covalent`
+  2026.11.23 (digest-pinned), which composes `pulseengine` 2026.11.32 (rivet
+  0.43.0, wsc 0.12.2, witness 0.46.0) with `pulseengine-wasm` 2026.11.6
+  (wasmtime 51.0.0). `scripts/verify_release.sh` now runs the published wasm
+  components under the layer's signed wasmtime instead of one from PATH. CI
+  installs varve v0.47.0 (was v0.38.0). The MC/DC baseline for
+  `term_kernel.rs` drops 3 proved conditions (68 -> 65): witness 0.45.0
+  over-claimed them (witness#352), and 0.46.0 reports them as unmeasured.
 
 ## [0.38.0] - 2026-11-22
 

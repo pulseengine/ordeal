@@ -1,8 +1,12 @@
 # ordeal's toolchain pin (varve layer).
 #
-# Why: the PulseEngine tools ordeal's own workflow uses (today: rivet, in the
-# release job's `rivet release notes`) come from ONE pinned, signed, dated
-# layer instead of version strings scattered across workflow files. The
+# Why: the PulseEngine tools ordeal's own workflow uses (rivet, wsc, witness,
+# and wasmtime for verify_release.sh's component smokes) come from ONE pinned,
+# signed, dated layer instead of version strings scattered across workflow
+# files. Realm `covalent` composes `pulseengine` (rivet, wsc, witness) and
+# `pulseengine-wasm` (wasmtime); `varve verify` checks each composed layer
+# against its own realm's root. varve-realms.toml is varve main's file at
+# d1e94bd5 (covalent first ships in the varve v0.48.0 asset; replace it then). The
 # realm supplies registry + trust root (varve-realms.toml beside this file),
 # so no environment variable is needed.
 #
@@ -12,8 +16,15 @@
 manifest-version = 1
 
 [toolchain]
-realm   = "pulseengine"
+realm   = "covalent"
 channel = "rolling"
-layer   = "2026.10.23"
-# The digest `varve install` verified against the realm root on 2026-10-20.
-digest  = "sha256:af711b5d81e55df7068297bd422d24b527d9d6019baddb9c63cbce0d6d92c285"
+layer   = "2026.11.23"
+# The digest `varve install` verified against the covalent root on 2026-11-22.
+digest  = "sha256:925ab18e1ce2701beb34e622c18080b94eaae9c16e55c330a8476fcdea90d93e"
+# Only the four tools ordeal runs. The pulseengine-wasm layer also carries
+# wac, wkg and wit-bindgen-wrpc with no proof of origin (`varve inspect`:
+# ingest_proof = unverified); this subset keeps them, and wasm-tools and
+# wit-bindgen, off PATH, including in the release jobs that hold id-token
+# and crates.io credentials. wasmtime itself carries build provenance from
+# bytecodealliance/wasmtime publish-artifacts.yml@refs/tags/v51.0.0.
+tools   = ["rivet", "wsc", "witness", "wasmtime"]
