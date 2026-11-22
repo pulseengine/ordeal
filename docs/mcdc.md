@@ -8,7 +8,7 @@ exercise independently?*
 
 ## What is measured
 
-[`witness`](https://github.com/pulseengine/witness) (0.45.0, from the pinned
+[`witness`](https://github.com/pulseengine/witness) (0.46.0, from the pinned
 varve layer) instruments a `wasm32-wasip1` build of the row harness
 `mcdc/ordeal-lrat/`, invokes every no-arg `run_row_*` export, and reconstructs
 the MC/DC truth table of every decision in the module from rustc's DWARF. The
@@ -69,10 +69,15 @@ any `crates/ordeal-lrat/src/*.rs` file:
 
 A decrease prints an `IMPROVEMENT` note. The baseline is updated **by hand**
 (copy `current.txt` over `mcdc/baseline.txt` in the commit that adds the
-rows), never by the script. The baseline is tied to witness 0.45.0 and rustc
+rows), never by the script. The baseline is tied to witness 0.46.0 and rustc
 1.100.0 (the CI job pins both); a toolchain bump can move the numbers and is
 re-baselined deliberately. The move from 1.99.1 to 1.100.0 (2026-11-21) left
-every per-file count unchanged. The job is not a required check, same stance as
+every per-file count unchanged. The move from witness 0.45.0 to 0.46.0
+(2026-11-22, with the covalent layer) moved 3 `term_kernel.rs` conditions
+from proved to gap (proved 68 -> 65, gap 144 -> 147) and nothing else:
+0.45.0 reported a short-circuit decision's unobserved last operand as proved
+(witness#352), and 0.46.0 reports those decisions (lines 342, 866) as
+`no_witness` instead. The lower count is the honest one. The job is not a required check, same stance as
 `varve-pin`.
 
 Negative controls, run when this landed: removing the 15 sliver call-site

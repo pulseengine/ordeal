@@ -828,7 +828,7 @@ jobs:
           echo "VARVE_INSTALL_DIR=$RUNNER_TEMP/varve/bin" >> "$GITHUB_ENV"
       - name: Install varve (verified) and the pinned layer
         env:
-          VARVE_VERSION: v0.38.0
+          VARVE_VERSION: v0.47.0
         run: bash scripts/install_varve.sh
       - name: The pinned rivet is the one on PATH, and it validates the graph
         run: |
@@ -838,6 +838,19 @@ jobs:
           rivet --version
           "$VARVE_INSTALL_DIR/varve" status
           rivet validate
+      # verify_release.sh runs the published wasm components under the layer's
+      # wasmtime (covalent composes pulseengine-wasm); from v0.38.0 they need
+      # wasmtime >= 46.0.0. The planted 45.0.0 must be refused by the same test.
+      - name: The pinned layer carries wasmtime >= 46.0.0 (planted 45.0.0 refused)
+        run: |
+          set -euo pipefail
+          wt_ok() { [ -n "$1" ] && [ "${1%%.*}" -ge 46 ]; }
+          W="$("$VARVE_INSTALL_DIR/varve" which wasmtime | head -1)"
+          v="$("$W" --version | awk '$1=="wasmtime"{print $2}')"
+          echo "layer wasmtime: $W ($v)"
+          wt_ok "$v" || { echo "::error::pinned layer wasmtime '$v' is older than 46.0.0"; exit 1; }
+          if wt_ok "45.0.0"; then echo "::error::planted wasmtime 45.0.0 was accepted"; exit 1; fi
+          echo "layer wasmtime $v accepted; planted 45.0.0 refused"
       # rivet: verifies VER-054
       # #188: every commit of the PR carries real artifact trailers or is
       # exempt; `Trace: skip` may not cancel Implements/Verifies trailers.

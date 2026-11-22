@@ -79,7 +79,7 @@ jobs:
 
       - name: Install rivet from the pinned varve layer (varve.toml)
         env:
-          VARVE_VERSION: v0.38.0
+          VARVE_VERSION: v0.47.0
         run: |
           bash scripts/install_varve.sh
           ~/.varve/bin/varve run rivet --version
@@ -530,7 +530,7 @@ jobs:
 
       - name: Install the pinned varve layer (rivet, wsc)
         env:
-          VARVE_VERSION: v0.38.0
+          VARVE_VERSION: v0.47.0
         run: |
           bash scripts/install_varve.sh
           ~/.varve/bin/varve run rivet --version
