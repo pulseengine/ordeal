@@ -21,3 +21,10 @@ channel = "rolling"
 layer   = "2026.11.23"
 # The digest `varve install` verified against the covalent root on 2026-11-22.
 digest  = "sha256:925ab18e1ce2701beb34e622c18080b94eaae9c16e55c330a8476fcdea90d93e"
+# Only the four tools ordeal runs. The pulseengine-wasm layer also carries
+# wac, wkg and wit-bindgen-wrpc with no proof of origin (`varve inspect`:
+# ingest_proof = unverified); this subset keeps them, and wasm-tools and
+# wit-bindgen, off PATH, including in the release jobs that hold id-token
+# and crates.io credentials. wasmtime itself carries build provenance from
+# bytecodealliance/wasmtime publish-artifacts.yml@refs/tags/v51.0.0.
+tools   = ["rivet", "wsc", "witness", "wasmtime"]

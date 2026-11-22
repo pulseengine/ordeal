@@ -77,7 +77,15 @@ every per-file count unchanged. The move from witness 0.45.0 to 0.46.0
 from proved to gap (proved 68 -> 65, gap 144 -> 147) and nothing else:
 0.45.0 reported a short-circuit decision's unobserved last operand as proved
 (witness#352), and 0.46.0 reports those decisions (lines 342, 866) as
-`no_witness` instead. The lower count is the honest one. The job is not a required check, same stance as
+`no_witness` instead. The lower count is the honest one.
+
+The baseline may only loosen for a stated cause. On every pull request,
+`scripts/check_mcdc_baseline_change.sh` compares the PR's `mcdc/baseline.txt`
+with the base branch's. A file whose uncovered conditions rose, whose proved
+conditions fell, or which left the file fails the job unless the
+"Measured with witness X" header names a different witness version (an
+instrument change) or the PR adds a `# reason:` line saying why. The job also
+plants a loosening with neither and requires the script to refuse it. The job is not a required check, same stance as
 `varve-pin`.
 
 Negative controls, run when this landed: removing the 15 sliver call-site
