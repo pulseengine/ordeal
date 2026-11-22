@@ -23,7 +23,9 @@
 #
 # Every check prints PASS/FAIL; exits nonzero on any FAIL. Needs gh, cosign,
 # shasum, python3, tar, curl, network; from v0.36.0 also wsc (on PATH, or
-# from the varve layer pinned in this repo when run from its checkout). The darwin-arm64 execution checks run
+# from the varve layer pinned in this repo when run from its checkout); wasmtime for
+# the component smokes ($WASMTIME, the layer's, or PATH; from v0.38.0 it must be
+# >= 46.0.0 and its absence is a FAIL naming what is needed, before that a SKIP). The darwin-arm64 execution checks run
 # only on an arm64 mac; elsewhere they are reported as SKIP.
 set -uo pipefail
 TAG="${1:?usage: $0 vX.Y.Z}"; BARE="${TAG#v}"; REPO=pulseengine/ordeal
@@ -36,6 +38,25 @@ WSC=$({ [ -x "$HOME/.varve/bin/varve" ] && "$HOME/.varve/bin/varve" which wsc 2>
 if [ -z "$WSC" ] || [ ! -x "$WSC" ]; then
   WSC=$(command -v wsc 2>/dev/null || true)
   case "$WSC" in */.varve/shims/*) WSC="" ;; esac
+fi
+# wasmtime for the component smokes: $WASMTIME, else the pinned varve layer's,
+# else a `wasmtime` on PATH that answers --version. A varve shim for a tool the
+# pinned layer lacks refuses to run, which made both smokes FAIL on v0.38.0's
+# good components with no hint why. From v0.38.0 the components are built with
+# Rust 1.100.0 and import wasi:cli/exit@0.2.12, so they need wasmtime >= 46.0.0.
+WT_WHY="the component file is missing"
+# From v0.38.0 the falsification statement names the wasm run, so an unusable
+# wasmtime is a FAIL there, not a SKIP that lets "ALL PASS" hide it.
+if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 38, 0) else 1)"; then wt_off() { bad "$1"; }; else wt_off() { skip "$1"; }; fi
+WT_NEED="install wasmtime >= 46.0.0 or set WASMTIME=/path/to/wasmtime"
+WT="${WASMTIME:-}"
+[ -n "$WT" ] || WT=$({ [ -x "$HOME/.varve/bin/varve" ] && "$HOME/.varve/bin/varve" which wasmtime 2>/dev/null | head -1; } || true)
+[ -n "$WT" ] && [ -x "$WT" ] || WT=$(command -v wasmtime 2>/dev/null || true)
+WT_V=$([ -n "$WT" ] && "$WT" --version 2>/dev/null | awk '$1=="wasmtime"{print $2; exit}')
+if [ -z "$WT" ]; then WT_WHY="no wasmtime found: $WT_NEED"; WT=""
+elif [ -z "$WT_V" ]; then WT_WHY="'$WT --version' failed (a varve shim refuses a tool its layer lacks): $WT_NEED"; WT=""
+elif python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 38, 0) else 1)" && [ "${WT_V%%.*}" -lt 46 ]; then
+  WT_WHY="wasmtime $WT_V is older than 46.0.0, which the v0.38.0+ components need: $WT_NEED"; WT=""
 fi
 D="${TMPDIR:-/tmp}/ordeal-verify-$TAG"
 rm -rf "$D"; mkdir -p "$D"; cd "$D"
@@ -135,18 +156,19 @@ grep -qE "\`(TR|VER)-[0-9]{3}\` \(verified\)" body.md && ok "release body lists 
 CRATES="ordeal ordeal-lrat"
 python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 36, 0) else 1)" && CRATES="ordeal ordeal-lrat ordeal-cert ordeal-recheck"
 for c in $CRATES; do
-  V=$(curl -s -H "User-Agent: ordeal-release-verify (release-verify)" "https://crates.io/api/v1/crates/$c" | python3 -c 'import json,sys; print(json.load(sys.stdin)["crate"]["max_version"])' 2>/dev/null)
-  [ "$V" = "$BARE" ] && ok "crates.io $c = $V" || bad "crates.io $c = '$V' (want $BARE)"
+  # The exact version, not max_version: an older tag must still verify after a newer release.
+  V=$(curl -s -H "User-Agent: ordeal-release-verify (release-verify)" "https://crates.io/api/v1/crates/$c/$BARE" | python3 -c 'import json,sys; v=json.load(sys.stdin)["version"]; print(v["num"] + (" (yanked)" if v["yanked"] else ""))' 2>/dev/null)
+  [ "$V" = "$BARE" ] && ok "crates.io $c = $V" || bad "crates.io $c $BARE: '$V' (want published, not yanked)"
 done
 # 6. the wasm32-wasip2 component (#189, from v0.23.0): listed in the signed
 #    sums, and it solves (certified unsat) under wasmtime when available.
 if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= (0, 23, 0) else 1)"; then
   W="ordeal-$TAG-wasm32-wasip2.wasm"
   [ -f "$W" ] && grep -q " ./$W\$" SHA256SUMS.txt && ok "wasm component listed in SHA256SUMS: $W" || bad "wasm component missing or unlisted: $W"
-  if command -v wasmtime >/dev/null 2>&1 && [ -f "$W" ]; then
+  if [ -n "$WT" ] && [ -f "$W" ]; then
     printf '(set-logic QF_BV)\n(declare-const a (_ BitVec 8))\n(assert (distinct (bvurem a #x01) #x00))\n(check-sat)\n' > wq.smt2
-    wasmtime run --dir . "$W" check wq.smt2 2>/dev/null | head -1 | grep -qx unsat && ok "published wasm component: certified unsat" || bad "wasm component smoke"
-  else skip "wasmtime not installed: wasm component not executed"; fi
+    "$WT" run --dir . "$W" check wq.smt2 2>/dev/null | head -1 | grep -qx unsat && ok "published wasm component: certified unsat (wasmtime $WT_V)" || bad "wasm component smoke (wasmtime $WT_V)"
+  else wt_off "wasm component not executed: $WT_WHY"; fi
 else skip "wasm component published from v0.23.0 on"; fi
 
 # 7. ordeal-recheck (TR-075, from v0.36.0): six archives (five from v0.38.0) + the wasm component
@@ -158,9 +180,9 @@ if python3 -c "import sys; sys.exit(0 if tuple(map(int, '$BARE'.split('.'))) >= 
     [ -f "$f" ] && grep -q " ./$f\$" SHA256SUMS.txt && ok "listed in SHA256SUMS: $f" || bad "not listed in SHA256SUMS: $f"
   done
   RW="ordeal-recheck-$TAG-wasm32-wasip2.wasm"
-  if command -v wasmtime >/dev/null 2>&1 && [ -f "$RW" ]; then
-    [ "$(wasmtime run --dir . "$RW" --version 2>/dev/null)" = "ordeal-recheck $BARE" ] && ok "published ordeal-recheck component reports ordeal-recheck $BARE" || bad "ordeal-recheck component version"
-  else skip "wasmtime not installed: ordeal-recheck component not executed"; fi
+  if [ -n "$WT" ] && [ -f "$RW" ]; then
+    [ "$("$WT" run --dir . "$RW" --version 2>/dev/null)" = "ordeal-recheck $BARE" ] && ok "published ordeal-recheck component reports ordeal-recheck $BARE (wasmtime $WT_V)" || bad "ordeal-recheck component version (wasmtime $WT_V)"
+  else wt_off "ordeal-recheck component not executed: $WT_WHY"; fi
   if [ "$(uname -s)-$(uname -m)" = "Darwin-arm64" ]; then
     mkdir -p rmac && tar -xzf ordeal-recheck-$TAG-aarch64-apple-darwin.tar.gz -C rmac ordeal-recheck
     [ "$(rmac/ordeal-recheck --version)" = "ordeal-recheck $BARE" ] && ok "published ordeal-recheck reports ordeal-recheck $BARE" || bad "ordeal-recheck version: $(rmac/ordeal-recheck --version)"
