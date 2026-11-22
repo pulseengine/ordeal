@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.38.0] - 2026-11-20
+## [0.38.0] - 2026-11-22
 
 Three strands. The certified query echo is complete (#281, E2 and E3): an
 `ordeal-cert/v5` bundle carries the SMT-LIB script the trusted printer
