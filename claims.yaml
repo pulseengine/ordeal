@@ -503,7 +503,7 @@ claims:
   - id: CONTRIB-REQUIRED-CHECKS
     doc: CONTRIBUTING.md
     text: "The checks branch protection requires on `main`"
-    # The required list (branch protection, read 2026-11-07 via the GitHub
+    # The required list (branch protection, read 2026-11-22 via the GitHub
     # API) against the job names in ci.yml. Advisory jobs are waived here —
     # printed every run. A job added to ci.yml must be listed or waived.
     evidence:
@@ -514,7 +514,6 @@ claims:
           - macOS build + smoke
           - musl build + SBOM smoke
           - cross aarch64-musl + qemu smoke
-          - Bazel build   # blocking job (owner 2026-11-21); not yet a required context in the ruleset
           - Z3 Oracle (optional)
           - varve layer pin resolves (pinned rivet validates the graph)
           - Perf + proof-size gate (#283)   # advisory until the owner decides (TR-081)

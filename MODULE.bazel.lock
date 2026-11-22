@@ -1637,7 +1637,7 @@
           "@@//Cargo.lock": "ec8d55d6d2f32c24303f25b6998a338587e59924e0017d647a6ccb2c67bb2e4d",
           "@@//crates/ordeal-lrat/Cargo.toml": "cfc303233cd01965a78761982c28204a6fad4b2d85054660828cd27b8502aa01",
           "@@//crates/ordeal-recheck/Cargo.toml": "e40a8e248913a54c4f41b74cb2eb53522bad0d5955ef74dffe12152284ca812e",
-          "@@//MODULE.bazel": "0a2e0c6e3c436b53687bb7d731142c4b4410cdaa38f35347141ea68ee5669491",
+          "@@//MODULE.bazel": "1508cbdfeb4aa534f9b1d967a27ea1135838b1cc7b60b2341af7175ad75146fc",
           "@@//crates/ordeal-cert/Cargo.toml": "78720356c9297570a34c12ff6384c7b15abc88ac75544926764afc9a3a2b7648",
           "@@rules_rust~~rust_host_tools~rust_host_tools//rust_host_tools": "ENOENT"
         },

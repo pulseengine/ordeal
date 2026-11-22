@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Bazel build uses exact Rust 1.100.0, like every workflow, instead of
+  rules_rust 1.88.0 on the `stable` channel flag. `MODULE.bazel` pins the
+  sha256 of each toolchain archive, since rules_rust 0.68.1 ships none for
+  1.100.0; a wrong checksum fails the fetch.
+- `Bazel build` is a required check on `main`, and CONTRIBUTING lists it.
+
 ## [0.38.0] - 2026-11-22
 
 Three strands. The certified query echo is complete (#281, E2 and E3): an
