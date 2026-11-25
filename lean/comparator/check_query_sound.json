@@ -1,0 +1,7 @@
+{
+  "challenge_module": "Challenge.CheckQuerySound",
+  "solution_module": "QueryCheck",
+  "theorem_names": ["kernel.spec.check_query_sound"],
+  "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
+  "enable_nanoda": true
+}

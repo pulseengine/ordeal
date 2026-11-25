@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Comparator pilot.** `lrat_check_sound`, `check_query_sound` and
+  `echo_unsat_sound` each have a trusted statement in `lean/Challenge/` and a
+  config in `lean/comparator/`. The required Lean job runs leanprover/comparator
+  (v4.30.0-rc2, matching ordeal's Lean) with nanoda as a second kernel. Each
+  proof must match its statement exactly, use only propext / Quot.sound /
+  Classical.choice, and be accepted by both kernels. Planted controls (a
+  weakened statement, an extra axiom, a renamed theorem) must each be refused.
+  The theorem list is derived from the configs and every entry must be pinned in
+  `AxiomCheck.lean`. The CNF semantics (`unsat`) moved out of `Sound.lean` into
+  `CnfSpec.lean`, so the challenge imports the statement without the proof.
+  A new `Challenge review` check flags any PR that changes a trusted statement
+  until the owner adds the `challenge-reviewed` label.
+
 ### Changed
 
 - Dependabot runs grouped and monthly (fleet template): github-actions as one

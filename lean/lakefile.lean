@@ -22,6 +22,10 @@ package «ordeal-lrat-proof» {}
 -- Classical.choice / Quot.sound — no `sorryAx`, no `native_decide`. Axiom-clean,
 -- like the mathematical core `pure_check_sound`.
 -- Scope + trust boundary: docs/formal-verification.md. Build: `lake build Sound`.
+-- The CNF semantics `lrat_check_sound` is stated in (definitions only), split
+-- out of Sound so the comparator challenge can import it without the proof.
+@[default_target] lean_lib «CnfSpec» {}
+
 lean_lib «Sound» {}
 
 -- Correctness of the bitwise blaster family against BitVec semantics
@@ -181,6 +185,13 @@ lean_lib «Sound» {}
 -- a stray `axiom`). This makes the "only propext / Classical.choice /
 -- Quot.sound" claim in docs/formal-verification.md a GATE, not prose.
 @[default_target] lean_lib «AxiomCheck» {}
+
+-- Comparator challenges (lean/comparator/*.json): the trusted statements of
+-- the headline theorems, each with `sorry`. NOT a default target, so plain
+-- `lake build` never compiles them; `lake exe comparator` builds each one, and
+-- the sorry budget excludes them (they are statements, not proofs).
+lean_lib «Challenge» where
+  globs := #[.submodules `Challenge]
 
 -- TR-035 (issue #47): the adversarial dual-mechanisation differential.
 -- Runs Lean core's INDEPENDENTLY verified LRAT checker

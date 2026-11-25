@@ -564,13 +564,15 @@ jobs:
           # the generated model (Kernel — definitions only; BlastKernel is
           # kept in the pattern for old branches),
           # DiffCheck (an exe with its own differential gate), AxiomCheck
-          # (fails the build directly via #guard_msgs), lakefile.
+          # (fails the build directly via #guard_msgs), lakefile, and the
+          # comparator challenges under Challenge/ (trusted STATEMENTS whose
+          # proof is `sorry` by design; scripts/comparator_check.sh).
           # Counting uses LEAN'S OWN `declaration uses `sorry`` warnings via
           # re-elaboration (cache-independent, catches every sorry form), and
           # the elaborator's EXIT CODE is checked before any count is
           # trusted — a crashed elaboration is not a zero (#138).
           set -uo pipefail
-          files=$(git ls-files . | grep '\.lean$' | grep -vE '(^|/)(Kernel|BlastKernel|DiffCheck|AxiomCheck)\.lean$' | grep -v lakefile || true)
+          files=$(git ls-files . | grep '\.lean$' | grep -vE '(^|/)(Kernel|BlastKernel|DiffCheck|AxiomCheck)\.lean$' | grep -v '^Challenge/' | grep -v lakefile || true)
           n=$(echo "$files" | grep -c . || true)
           if [ "$n" -lt 7 ]; then
             echo "::error::proof-file inventory has $n entries (< 7) — the guard's scope derivation broke or proofs were deleted"
@@ -617,6 +619,66 @@ jobs:
       - name: Differential — Lean core LRAT.check vs ordeal-lrat (TR-035)
         working-directory: lean
         run: lake exe diffcheck /tmp/lrat-corpus
+      # ── Comparator pilot (owner decision 2026-11-25) ────────────────────
+      # leanprover/comparator checks that each headline theorem's proof proves
+      # EXACTLY the trusted statement in lean/Challenge/, uses no axiom beyond
+      # propext / Quot.sound / Classical.choice, and is accepted by the Lean
+      # kernel and by nanoda (a second, independent kernel). The theorem list
+      # is derived from lean/comparator/*.json. Comparator is deprecated in
+      # favour of `lake comparator` (Lean >= v4.35.0); ordeal's toolchain is
+      # v4.30.0-rc2 (tied to the Aeneas pin), so the standalone tool at its
+      # v4.30.0-rc2 tag is used, with lean4export at the same tag.
+      # Caveat: comparator assumes the solution was never compiled before it
+      # runs; here the job built it above. That protects against a regressed
+      # or weakened proof, not against an adversarial build of the solution.
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version: "1.26.0"
+          cache: false
+      - name: Cache the comparator tools
+        id: cmp-tools
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/cmp-tools/bin
+          key: cmp-tools-${{ runner.os }}-landrun-573aa723-comparator-95e46e65-lean4export-12581a6b-nanoda-0da9f98f
+      - name: Build comparator, lean4export, landrun and nanoda (pinned)
+        if: steps.cmp-tools.outputs.cache-hit != 'true'
+        env:
+          LANDRUN_SHA: 573aa723afb16bb1da2dbe24fc00df46cd0ad13b    # Zouuup/landrun main 2026-11-21 (README: build from main)
+          COMPARATOR_SHA: 95e46e658f5955ba1b01596d4ac668630476008c # leanprover/comparator v4.30.0-rc2
+          LEAN4EXPORT_SHA: 12581a6b680d8478175596338eb2d53383a323e3 # leanprover/lean4export v4.30.0-rc2
+          NANODA_SHA: 0da9f98feadd3a0a2ef4b3dbcf52a298a6fef929    # ammkrn/nanoda_lib master 2026-11-07
+        run: |
+          set -euo pipefail
+          T="$HOME/cmp-tools"; mkdir -p "$T/bin"
+          fetch() { git init -q "$T/$1" && git -C "$T/$1" fetch -q --depth 1 "$2" "$3" && git -C "$T/$1" checkout -q FETCH_HEAD; test "$(git -C "$T/$1" rev-parse HEAD)" = "$3"; }
+          fetch landrun https://github.com/Zouuup/landrun.git "$LANDRUN_SHA"
+          (cd "$T/landrun" && go build -o "$T/bin/landrun" ./cmd/landrun)
+          fetch lean4export https://github.com/leanprover/lean4export.git "$LEAN4EXPORT_SHA"
+          (cd "$T/lean4export" && lake build lean4export && cp .lake/build/bin/lean4export "$T/bin/")
+          fetch comparator https://github.com/leanprover/comparator.git "$COMPARATOR_SHA"
+          (cd "$T/comparator" && lake build comparator && cp .lake/build/bin/comparator "$T/bin/")
+          fetch nanoda https://github.com/ammkrn/nanoda_lib.git "$NANODA_SHA"
+          (cd "$T/nanoda" && cargo build --release --locked && cp target/release/nanoda_bin "$T/bin/")
+          ls -la "$T/bin"
+      - name: Comparator — headline theorems match their trusted statements (Lean kernel + nanoda)
+        working-directory: lean
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/cmp-tools/bin:$PATH"
+          for t in landrun lean4export comparator nanoda_bin; do command -v "$t" >/dev/null || { echo "::error::$t missing"; exit 1; }; done
+          start=$(date +%s)
+          bash ../scripts/comparator_check.sh
+          echo "comparator wall time: $(( $(date +%s) - start ))s"
+      - name: Comparator planted controls (weakened statement, extra axiom, mismatched name)
+        working-directory: lean
+        run: |
+          export PATH="$HOME/cmp-tools/bin:$PATH"
+          start=$(date +%s)
+          bash ../scripts/comparator_controls.sh
+          rc=$?
+          echo "controls wall time: $(( $(date +%s) - start ))s"
+          exit $rc
 
   # ── Optional CaDiCaL accelerator backend (TR-004 / VER-008) ────────────
   # The off-by-default `cadical` feature builds CaDiCaL 2.1.3 hermetically

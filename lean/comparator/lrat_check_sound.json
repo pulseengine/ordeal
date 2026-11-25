@@ -1,0 +1,7 @@
+{
+  "challenge_module": "Challenge.LratCheckSound",
+  "solution_module": "Sound",
+  "theorem_names": ["kernel.spec.lrat_check_sound"],
+  "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
+  "enable_nanoda": true
+}
