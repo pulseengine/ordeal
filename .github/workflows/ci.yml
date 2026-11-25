@@ -640,11 +640,15 @@ jobs:
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ~/cmp-tools/bin
-          key: cmp-tools-${{ runner.os }}-landrun-573aa723-comparator-95e46e65-lean4export-12581a6b-nanoda-0da9f98f
+          key: cmp-tools-${{ runner.os }}-landrun-1a5085c3-comparator-95e46e65-lean4export-12581a6b-nanoda-0da9f98f
       - name: Build comparator, lean4export, landrun and nanoda (pinned)
         if: steps.cmp-tools.outputs.cache-hit != 'true'
         env:
-          LANDRUN_SHA: 573aa723afb16bb1da2dbe24fc00df46cd0ad13b    # Zouuup/landrun main 2026-11-21 (README: build from main)
+          # landrun v0.1.15 (urfave/cli v2), the release current when comparator
+          # v4.30.0-rc2 was cut. landrun main (urfave/cli v3) drops the `--`
+          # comparator puts between lean4export's module and its declarations,
+          # so lean4export read `Nat` as a module ("unknown module prefix").
+          LANDRUN_SHA: 1a5085c31a4e15b371e632a67b5c93a180901e0a    # Zouuup/landrun v0.1.15
           COMPARATOR_SHA: 95e46e658f5955ba1b01596d4ac668630476008c # leanprover/comparator v4.30.0-rc2
           LEAN4EXPORT_SHA: 12581a6b680d8478175596338eb2d53383a323e3 # leanprover/lean4export v4.30.0-rc2
           NANODA_SHA: 0da9f98feadd3a0a2ef4b3dbcf52a298a6fef929    # ammkrn/nanoda_lib master 2026-11-07
@@ -667,6 +671,10 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/cmp-tools/bin:$PATH"
           for t in landrun lean4export comparator nanoda_bin; do command -v "$t" >/dev/null || { echo "::error::$t missing"; exit 1; }; done
+          # landrun must pass a `--` after the command through unchanged
+          # (comparator relies on it); landrun main swallowed it.
+          out=$(landrun --best-effort --ro / --rw /dev -ldd -add-exec /usr/bin/echo a -- b)
+          [ "$out" = "a -- b" ] || { echo "::error::landrun mangles argv: got [$out], want [a -- b]"; exit 1; }
           start=$(date +%s)
           bash ../scripts/comparator_check.sh
           echo "comparator wall time: $(( $(date +%s) - start ))s"
