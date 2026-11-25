@@ -63,7 +63,7 @@ for c in "${cfgs[@]}"; do
   if lake env comparator "$c" > "${TMPDIR:-/tmp}/comparator-$(basename "$c" .json).log" 2>&1; then
     echo "ok: $(jq -r '.theorem_names|join(" ")' "$c") ($(( $(date +%s) - s ))s, nanoda=$(jq -r .enable_nanoda "$c"))"
   else
-    err "comparator refused $c"; grep -v '^Exporting' "${TMPDIR:-/tmp}/comparator-$(basename "$c" .json).log" | tail -5
+    err "comparator refused $c"; grep -v '^Exporting' "${TMPDIR:-/tmp}/comparator-$(basename "$c" .json).log" | tail -40
   fi
 done
 exit $fail
