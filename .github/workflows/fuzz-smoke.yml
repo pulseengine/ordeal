@@ -48,7 +48,7 @@ jobs:
         # A dated nightly from the input (owner rule 2026-11-21: exact
         # toolchains); the pinned commit only fixes the action's code
         # (dependabot moved the nightly branch pin in #329).
-        uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+        uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
         with:
           toolchain: nightly-2026-11-20
 

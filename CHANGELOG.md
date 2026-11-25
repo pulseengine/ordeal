@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Dependabot runs grouped and monthly (fleet template): github-actions as one
+  group, cargo for `/` and `/fuzz` in one entry with a `z3`/`z3-sys` lockstep
+  group, then minor-patch, majors ungrouped; 2 open PRs at most, 7-day cooldown.
+  Every `dtolnay/rust-toolchain` step is pinned to master `df2a88e9`, where the
+  `toolchain:` input is required, and each names its toolchain.
 - The Bazel build uses exact Rust 1.100.0, like every workflow, instead of
   rules_rust 1.88.0 on the `stable` channel flag. `MODULE.bazel` pins the
   sha256 of each toolchain archive, since rules_rust 0.68.1 ships none for

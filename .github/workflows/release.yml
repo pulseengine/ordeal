@@ -158,7 +158,7 @@ jobs:
         with:
           ref: ${{ inputs.tag || github.ref }}
 
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
         with:
           toolchain: 1.100.0
           targets: ${{ matrix.target }}
@@ -352,7 +352,7 @@ jobs:
       # below is 51.0.0 and consumers need wasmtime >= 46.
       # The toolchain comes from the input, not from the pinned commit:
       # dependabot moves the SHA (#329), the input does not move.
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
         with:
           toolchain: 1.100.0
           targets: wasm32-wasip2
@@ -461,7 +461,7 @@ jobs:
       # (The cargo-package dirty-tree trap doesn't apply here — this
       # workflow never runs `cargo package` — but the SBOM is copied out of
       # the crate dir immediately regardless.)
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch head 2026-11-20; toolchain from the input
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
         with:
           toolchain: 1.100.0
 
