@@ -1,19 +1,35 @@
 version: 2
-# Groups live inside the `updates` entry they apply to: a top-level `groups:`
-# key is not part of the dependabot schema, and a group only ever sees the
-# ecosystem of its own entry. Group patterns are globs, not regexes.
+# Grouped monthly updates (fleet template, owner decision 2026-11-21; from
+# pulseengine/rivet's .github/dependabot.yml). One entry per ecosystem with its
+# directories in one `directories:` list, so a release opens one PR and not one
+# per directory. Every entry runs monthly (the 1st, 02:00 UTC), keeps at most 2
+# PRs open, and waits 7 days after a release (cooldown). Lockstep groups come
+# first because Dependabot puts a dependency in the FIRST group it matches; then
+# one minor-patch group. Majors stay ungrouped, one PR each, so a breaking change
+# is read on its own. Security updates ignore the schedule and the limit.
 #
-# One PR per weekly round of github-actions pins (they used to arrive one PR
-# per action). The cargo workspaces are `/` and the separate `fuzz/`
+# Groups live inside the `updates` entry they apply to, and group patterns are
+# globs, not regexes. The cargo workspaces are `/` and the separate `fuzz/`
 # workspace; `crates/ordeal` is a member of `/`, not a root of its own, so an
-# entry for it fails every run ("not the workspace root").
+# entry for it fails every run ("not the workspace root"). `mcdc/ordeal-lrat/`
+# has no registry dependencies.
+#
+# A cargo update to `/` changes the root Cargo.lock, whose sha256 MODULE.bazel.lock
+# records (fuzz/Cargo.lock is not a Bazel input), so
+# the required `Bazel build` job (--lockfile_mode=error) refuses the PR until
+# MODULE.bazel.lock is regenerated on the branch (`bazel mod deps
+# --lockfile_mode=update`, REPIN unset). That check only verifies, it never
+# writes, so a Dependabot cargo PR cannot merge with a stale Bazel lock.
 updates:
-  # PAUSED 2026-11-21 under the fleet CI hold; restore the previous limits when it lifts.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 0
+      interval: monthly
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
     groups:
@@ -21,16 +37,25 @@ updates:
         patterns:
           - "*"
   - package-ecosystem: cargo
-    directory: /
+    directories:
+      - /
+      - /fuzz
     schedule:
-      interval: weekly
-    open-pull-requests-limit: 0
+      interval: monthly
+      time: "02:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
-  - package-ecosystem: cargo
-    directory: /fuzz
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 0
-    labels:
-      - dependencies
+    groups:
+      # Each z3 release pins a matching z3-sys; they must move together.
+      z3:
+        patterns:
+          - "z3"
+          - "z3-sys"
+      minor-patch:
+        update-types:
+          - minor
+          - patch
