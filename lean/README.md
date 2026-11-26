@@ -343,6 +343,10 @@ list against the directory, both ways.
 - `Kernel.lean` — the Aeneas-generated model of `crates/ordeal-lrat`
   (checker + lowering + sliver check + flattener). A build product of
   `regen.sh`, `.gitignore`d, never committed. Default `lake build` target.
+- `CnfSpec.lean` — the CNF semantics `lrat_check_sound` is stated in
+  (`Asn`, `litHolds`, `clauseHolds`, `cnfHolds`, `unsat`); definitions only,
+  so the comparator challenge can import the statement without the proof.
+  Default target.
 - `Sound.lean` — the pure RUP checker, `pure_check_sound`,
   `kernel_refines_pure`, `lrat_check_sound`. Default target.
 - `SatWitness.lean` — `check_sat_sound`, `check_sat_satisfiable`,
@@ -397,6 +401,27 @@ list against the directory, both ways.
   executable (`lake exe diffcheck`), run by the same CI job.
 - `lakefile.lean` — the Lake package: the Aeneas support library pinned to
   the translator's revision, one `lean_lib` per file above.
+
+## Comparator: the headline statements, checked against the proofs
+
+Three theorems have their trusted statement in `Challenge/` (each with
+`sorry`), one config each in `comparator/`: `lrat_check_sound` (solution
+`Sound`), `check_query_sound` (`QueryCheck`) and `echo_unsat_sound` (`Echo`).
+The required Lean CI job runs [leanprover/comparator](https://github.com/leanprover/comparator)
+(`scripts/comparator_check.sh`): each solution must prove exactly its
+challenge's statement, use no axiom beyond propext / Quot.sound /
+Classical.choice, and be accepted by the Lean kernel and by nanoda. The
+theorem list is derived from `comparator/*.json`, every listed theorem must be
+pinned in `AxiomCheck.lean`, and every challenge must have a config.
+`scripts/comparator_controls.sh` plants a weakened statement, an extra axiom
+and a renamed theorem, and each must be refused. They run on every push to
+main and on PRs that touch `lean/`, the comparator scripts or `ci.yml`
+(`scripts/comparator_controls_needed.sh`). comparator runs its builds in a
+landrun sandbox, pinned to landrun 5283024; landrun main drops the `--` that
+comparator passes to lean4export, and the job checks argv handling first. A PR that changes a challenge,
+a config, `CnfSpec.lean` or `EchoSpec.lean` changes what is claimed and is
+flagged for the owner (`scripts/check_challenge_files.sh`). `dagBool`, used by
+`check_query_sound`, is still defined in `BlasterDag.lean`.
 
 ## Trust boundary (what the proof does and does not cover)
 

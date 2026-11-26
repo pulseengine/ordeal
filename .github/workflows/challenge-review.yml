@@ -1,0 +1,35 @@
+name: Challenge review
+
+# Changes to the trusted statements of the comparator-checked theorems
+# (lean/Challenge/, lean/comparator/, lean/CnfSpec.lean, lean/EchoSpec.lean)
+# change what ordeal claims to have proven. This check turns red on such a PR
+# until the owner adds the `challenge-reviewed` label. The repository's rules
+# cannot require a code-owner review and agent sessions share one account, so
+# it is a visible flag for the owner, not an enforcement boundary
+# (scripts/check_challenge_files.sh). Not a required context.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  challenge-review:
+    name: Trusted statements changed? (owner review)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      # Planted control: the classifier must flag a challenge, a config and
+      # each statement module, and pass unrelated files and a labelled PR.
+      - name: Self-test (planted trusted-statement diffs)
+        run: bash scripts/check_challenge_files.sh --self-test
+      - name: Flag trusted-statement changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CHALLENGE_REVIEWED: ${{ contains(github.event.pull_request.labels.*.name, 'challenge-reviewed') }}
+        run: bash scripts/check_challenge_files.sh "$BASE_SHA" "$HEAD_SHA"

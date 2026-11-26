@@ -27,37 +27,14 @@
    * Acceptance is the exact success value: outer Aeneas `Result.ok` (no
      panic/divergence) wrapping the inner Rust `Ok ()`.
 -/
-import Kernel
+import CnfSpec
 
 open Aeneas Aeneas.Std Result
 
 namespace kernel.spec
 
-/- ══════════════════════════ SEMANTICS ══════════════════════════ -/
-
-/-- A total assignment of DIMACS variables to booleans. -/
-abbrev Asn := Nat → Bool
-
-/-- The DIMACS variable of a literal: its absolute value. -/
-def litVar (lit : Std.I32) : Nat := lit.val.natAbs
-
-/-- Literal semantics: a positive literal holds when its variable is true,
-    a negative one when its variable is false. -/
-def litHolds (σ : Asn) (lit : Std.I32) : Prop :=
-  if 0 < lit.val then σ (litVar lit) = true else σ (litVar lit) = false
-
-/-- Clause semantics: a disjunction — some literal holds. (The empty clause
-    holds under no assignment.) -/
-def clauseHolds (σ : Asn) (c : List Std.I32) : Prop :=
-  ∃ lit ∈ c, litHolds σ lit
-
-/-- CNF semantics: a conjunction — every clause holds. -/
-def cnfHolds (σ : Asn) (cnf : List (List Std.I32)) : Prop :=
-  ∀ c ∈ cnf, clauseHolds σ c
-
-/-- Unsatisfiability: no assignment satisfies the CNF. -/
-def unsat (cnf : List (List Std.I32)) : Prop :=
-  ∀ σ : Asn, ¬ cnfHolds σ cnf
+/- The semantics (Asn, litVar, litHolds, clauseHolds, cnfHolds, unsat) are in
+   CnfSpec.lean: the trusted statement vocabulary, kept apart from the proof. -/
 
 /-- One clause is semantically implied by a CNF. -/
 def implies (cnf : List (List Std.I32)) (c : List Std.I32) : Prop :=

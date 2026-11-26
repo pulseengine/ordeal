@@ -1,0 +1,7 @@
+{
+  "challenge_module": "Challenge.EchoUnsatSound",
+  "solution_module": "Echo",
+  "theorem_names": ["kernel.spec.echo_unsat_sound"],
+  "permitted_axioms": ["propext", "Quot.sound", "Classical.choice"],
+  "enable_nanoda": true
+}
