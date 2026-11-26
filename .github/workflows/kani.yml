@@ -118,6 +118,20 @@ jobs:
           key: kani-heavy
       - id: tier
         run: echo "args=$(bash scripts/kani_tiers.sh args heavy:${{ matrix.harness }})" >> "$GITHUB_OUTPUT"
+      # mul_8 blasts to 6.5M variables / 15.8M clauses. On 11-19/22/24/25 the
+      # standard runner (16 GB) died under it on an unchanged commit, right
+      # after a solve ("runner has received a shutdown signal") or with "lost
+      # communication": the memory-exhaustion signatures. Add swap, and sample
+      # memory so the next failure names its cause.
+      - name: Add 16 GB swap and sample memory
+        run: |
+          set -euo pipefail
+          sudo fallocate -l 16G /mnt/kani-swap
+          sudo chmod 600 /mnt/kani-swap
+          sudo mkswap /mnt/kani-swap >/dev/null
+          sudo swapon /mnt/kani-swap
+          free -m
+          nohup bash -c 'while :; do printf "%s used_mb=%s swap_mb=%s cbmc_rss_kb=%s\n" "$(date -u +%T)" "$(free -m | awk "/^Mem:/{print \$3}")" "$(free -m | awk "/^Swap:/{print \$3}")" "$(ps -C cbmc -o rss= | sort -n | tail -1)"; sleep 5; done' > "$RUNNER_TEMP/kani-mem.log" 2>&1 &
       - name: Run Kani (${{ matrix.harness }})
         uses: model-checking/kani-github-action@69d357bade1eb7b32bc3fc3d5c3d173c5bfa5237 # v1
         with:
@@ -125,6 +139,13 @@ jobs:
           # and a failed lookup failed a job (run 36821560393, and_32).
           kani-version: "0.68.0"
           args: ${{ steps.tier.outputs.args }}
+      - name: Memory peak (${{ matrix.harness }})
+        if: always()
+        run: |
+          f="$RUNNER_TEMP/kani-mem.log"
+          [ -s "$f" ] || { echo "no memory samples"; exit 0; }
+          awk '{for(i=1;i<=NF;i++){if(index($i,"=")==0)continue;split($i,a,"=");if(a[2]+0>m[a[1]])m[a[1]]=a[2]+0}} END{for(k in m)print "peak " k ": " m[k]}' "$f"
+          tail -5 "$f"
 
   wide:
     name: Wide tier — ${{ matrix.harness }} (nightly)
