@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **varve 0.48.0.** CI, MC/DC and release install varve v0.48.0 (was
+  v0.47.0), the first release whose `varve-realms.toml` asset carries the
+  `covalent` realm. The committed file is byte-identical to that asset
+  (sha256 `c0342808…9757d22f`, in the cosign-verified `SHA256SUMS.txt`);
+  `varve.toml` now names the asset as its source. The layer pin
+  (covalent 2026.11.23) is unchanged.
+
 - Dependabot runs grouped and monthly (fleet template): github-actions as one
   group, cargo for `/` and `/fuzz` in one entry with a `z3`/`z3-sys` lockstep
   group, then minor-patch, majors ungrouped; 2 open PRs at most, 7-day cooldown.
