@@ -5,9 +5,9 @@
 # signed, dated layer instead of version strings scattered across workflow
 # files. Realm `covalent` composes `pulseengine` (rivet, wsc, witness) and
 # `pulseengine-wasm` (wasmtime); `varve verify` checks each composed layer
-# against its own realm's root. varve-realms.toml is varve main's file at
-# d1e94bd5 (covalent first ships in the varve v0.48.0 asset; replace it then). The
-# realm supplies registry + trust root (varve-realms.toml beside this file),
+# against its own realm's root. varve-realms.toml is the varve v0.48.0
+# release asset (sha256 c0342808...9757d22f, listed in its cosign-verified
+# SHA256SUMS.txt). The realm supplies registry + trust root (varve-realms.toml beside this file),
 # so no environment variable is needed.
 #
 # Bumping: change `layer`, run `varve install`, and record the digest it
