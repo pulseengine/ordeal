@@ -414,7 +414,11 @@ Classical.choice, and be accepted by the Lean kernel and by nanoda. The
 theorem list is derived from `comparator/*.json`, every listed theorem must be
 pinned in `AxiomCheck.lean`, and every challenge must have a config.
 `scripts/comparator_controls.sh` plants a weakened statement, an extra axiom
-and a renamed theorem, and each must be refused. A PR that changes a challenge,
+and a renamed theorem, and each must be refused. They run on every push to
+main and on PRs that touch `lean/`, the comparator scripts or `ci.yml`
+(`scripts/comparator_controls_needed.sh`). comparator runs its builds in a
+landrun sandbox, pinned to landrun 5283024; landrun main drops the `--` that
+comparator passes to lean4export, and the job checks argv handling first. A PR that changes a challenge,
 a config, `CnfSpec.lean` or `EchoSpec.lean` changes what is claimed and is
 flagged for the owner (`scripts/check_challenge_files.sh`). `dagBool`, used by
 `check_query_sound`, is still defined in `BlasterDag.lean`.

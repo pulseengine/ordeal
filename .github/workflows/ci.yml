@@ -680,7 +680,25 @@ jobs:
           start=$(date +%s)
           bash ../scripts/comparator_check.sh
           echo "comparator wall time: $(( $(date +%s) - start ))s"
+      # The controls cost ~2.5 min: a PR runs them only when it touches lean/,
+      # the comparator scripts or this workflow; every push to main runs them.
+      - name: Do the comparator controls apply to this change?
+        id: cmp-controls
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          bash scripts/comparator_controls_needed.sh --self-test
+          if [ "$EVENT" = pull_request ]; then
+            git fetch -q --depth=1 origin "$BASE_SHA" || true
+            bash scripts/comparator_controls_needed.sh pull_request "$BASE_SHA" "$HEAD_SHA" | tee -a "$GITHUB_OUTPUT"
+          else
+            bash scripts/comparator_controls_needed.sh "$EVENT" | tee -a "$GITHUB_OUTPUT"
+          fi
       - name: Comparator planted controls (weakened statement, extra axiom, mismatched name)
+        if: steps.cmp-controls.outputs.run == 'true'
         working-directory: lean
         run: |
           export PATH="$HOME/cmp-tools/bin:$PATH"
