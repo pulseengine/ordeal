@@ -36,13 +36,26 @@ jobs:
             || { echo "::error::expected exactly 1 exhaustive test to pass"; exit 1; }
 
   # The SMT-LIB parser differential's long run (#281 E0, TR-087): 10^5
-  # generated scripts through Z3's parser and ordeal's reader, then their
-  # certified echoes through Z3's parser (#281 E1; per-PR CI runs 10^4 of
-  # each in the blocking "SMT-LIB parser differential" job).
+  # generated scripts through Z3's parser and ordeal's reader (front leg),
+  # then their certified echoes through Z3's parser (echo leg, #281 E1).
+  # Per-PR CI runs 10^4 of each in the blocking "SMT-LIB parser
+  # differential" job. One job per leg: on one 60-minute job the legs took
+  # 22-33 min and 25-31+ min on ubuntu-24.04 and the job timed out (cancelled)
+  # on 8 of the 10 nights 2026-11-17..26.
   parser-differential-1e5:
-    name: SMT-LIB parser differential, 10^5 scripts
+    name: SMT-LIB parser differential, 10^5 scripts (${{ matrix.leg }} leg)
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - leg: front
+            test: front_leg_agrees_on_1e5_generated_scripts
+            summary: '^(front leg:|[0-9]+ generated)'
+          - leg: echo
+            test: echo_leg_agrees_on_1e5_generated_scripts
+            summary: '^(echo leg|echo size:|[0-9]+ generated)'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
@@ -53,19 +66,17 @@ jobs:
           key: parser-differential
       - name: Install Z3
         run: sudo apt-get update && sudo apt-get install -y z3 libz3-dev
-      - name: Front leg, 10^5 generated scripts
+      - name: ${{ matrix.leg }} leg, 10^5 generated scripts
+        env:
+          TEST: ${{ matrix.test }}
+          SUMMARY: ${{ matrix.summary }}
+          LEG: ${{ matrix.leg }}
         run: |
           set -euo pipefail
-          out="$(cargo test -p ordeal --features oracle --release --lib front_leg_agrees_on_1e5_generated_scripts -- --ignored --nocapture 2>&1)" \
+          out="$(cargo test -p ordeal --features oracle --release --lib "$TEST" -- --ignored --nocapture 2>&1)" \
             || { echo "$out"; exit 1; }
-          echo "$out" | grep -E '^(front leg:|[0-9]+ generated)'
+          echo "$out" | grep -E "$SUMMARY"
+          # Exactly one test must run and pass: a filter that matches nothing
+          # is the vacuous green #187 is about.
           echo "$out" | grep -q 'test result: ok. 1 passed' \
-            || { echo "::error::expected exactly 1 front-leg test to pass"; exit 1; }
-      - name: Echo leg, 10^5 generated scripts
-        run: |
-          set -euo pipefail
-          out="$(cargo test -p ordeal --features oracle --release --lib echo_leg_agrees_on_1e5_generated_scripts -- --ignored --nocapture 2>&1)" \
-            || { echo "$out"; exit 1; }
-          echo "$out" | grep -E '^(echo leg|echo size:|[0-9]+ generated)'
-          echo "$out" | grep -q 'test result: ok. 1 passed' \
-            || { echo "::error::expected exactly 1 echo-leg test to pass"; exit 1; }
+            || { echo "::error::expected exactly 1 $LEG-leg test to pass"; exit 1; }

@@ -63,6 +63,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change must still be flagged, and the old two-dot diff must reproduce the
   false positive.
 
+- **Nightly 10^5 parser differential timed out.** Its front leg (22-33 min)
+  and echo leg (25-31+ min) shared one 60-minute job, which was cancelled on
+  8 of the 10 nights from 2026-11-17 to 2026-11-26. Each leg is now its own
+  matrix job with its own 60-minute limit; the exactly-one-test-passed guard
+  is unchanged.
+
 ## [0.38.0] - 2026-11-22
 
 Three strands. The certified query echo is complete (#281, E2 and E3): an
