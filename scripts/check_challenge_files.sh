@@ -16,6 +16,11 @@
 # definitions-only modules the challenges are stated in (CnfSpec for
 # `unsat`, EchoSpec for the SMT-LIB model). `dagBool` (check_query_sound)
 # still lives in BlasterDag.lean, a proof file, and is NOT flagged here.
+#
+# The diff is three-dot (BASE...HEAD): only what the PR branch changed since
+# it left the base. A two-dot diff also lists base-side changes made after the
+# branch point, in reverse, so a stale branch that touched none of these files
+# was flagged (#347, which predated #346's lean/comparator edits).
 set -uo pipefail
 
 TRUSTED_RE='^lean/(Challenge/|comparator/|CnfSpec\.lean$|EchoSpec\.lean$)'
@@ -30,6 +35,31 @@ flag() { # stdin: changed paths; $1: reviewed (true|false). Exit 0 ok, 1 flagged
   return 1
 }
 
+changed_paths() { # $1 BASE, $2 HEAD: files the branch changed since the merge base
+  git diff --name-only "$1...$2"
+}
+
+# Planted git history: main moves a trusted file after a branch point.
+git_self_test() {
+  local d rc=0 g
+  d=$(mktemp -d) || return 1
+  g() { git -C "$d" -c user.name=t -c user.email=t@t -c commit.gpgsign=false "$@" >/dev/null 2>&1; }
+  g init -q -b main && mkdir -p "$d/lean/comparator" "$d/lean/Challenge" &&
+  echo a > "$d/lean/comparator/c.json" && echo a > "$d/README.md" && g add -A && g commit -qm base &&
+  g branch stale && g branch real &&
+  echo b > "$d/lean/comparator/c.json" && g commit -qam main-moves-trusted &&
+  g checkout -q stale && echo b > "$d/README.md" && g commit -qam unrelated &&
+  g checkout -q real && echo x > "$d/lean/Challenge/X.lean" && g add -A && g commit -qm trusted || { echo "self-test FAIL: fixture"; rm -rf "$d"; return 1; }
+  (cd "$d" && changed_paths main stale | flag false) >/dev/null
+  [ $? -eq 0 ] || { echo "self-test FAIL: stale branch flagged for a base-side lean/comparator change"; rc=1; }
+  (cd "$d" && changed_paths main real | flag false) >/dev/null
+  [ $? -eq 1 ] || { echo "self-test FAIL: branch-side lean/Challenge change not flagged"; rc=1; }
+  (cd "$d" && git diff --name-only main stale | flag false) >/dev/null
+  [ $? -eq 1 ] || { echo "self-test FAIL: fixture does not reproduce the two-dot false positive"; rc=1; }
+  rm -rf "$d"
+  return $rc
+}
+
 if [ "${1:-}" = --self-test ]; then
   bad=0
   t() { local want=$1 rev=$2; shift 2; printf '%s\n' "$@" | flag "$rev" >/dev/null; local got=$?
@@ -41,10 +71,11 @@ if [ "${1:-}" = --self-test ]; then
   t 1 false "lean/EchoSpec.lean"
   t 0 true  "lean/Challenge/LratCheckSound.lean"
   t 0 false "lean/ChallengeNotes.md" "lean/CnfSpecProof.lean"
-  [ $bad -eq 0 ] && echo "self-test: 7/7 cases hold"
+  git_self_test || bad=1
+  [ $bad -eq 0 ] && echo "self-test: 7/7 path cases and 3/3 git-history cases hold"
   exit $bad
 fi
 
 [ $# -eq 2 ] || { echo "usage: $0 BASE_SHA HEAD_SHA | --self-test" >&2; exit 2; }
-changed=$(git diff --name-only "$1" "$2") || { echo "git diff $1 $2 failed" >&2; exit 2; }
+changed=$(changed_paths "$1" "$2") || { echo "git diff $1...$2 failed (no merge base?)" >&2; exit 2; }
 printf '%s\n' "$changed" | flag "${CHALLENGE_REVIEWED:-false}"
