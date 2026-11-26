@@ -45,6 +45,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `term_kernel.rs` drops 3 proved conditions (68 -> 65): witness 0.45.0
   over-claimed them (witness#352), and 0.46.0 reports them as unmeasured.
 
+### Fixed
+
+- **Challenge review false positive on stale branches.** The check diffed
+  `BASE HEAD` (two-dot), so a branch that predated a base-side change to
+  `lean/comparator/` was flagged for files it never touched (#347). It now
+  diffs `BASE...HEAD`, what the branch changed since its merge base. Its
+  self-test builds a git history where main moves a trusted file after the
+  branch point: the stale branch must pass, a branch-side `lean/Challenge/`
+  change must still be flagged, and the old two-dot diff must reproduce the
+  false positive.
+
 ## [0.38.0] - 2026-11-22
 
 Three strands. The certified query echo is complete (#281, E2 and E3): an
