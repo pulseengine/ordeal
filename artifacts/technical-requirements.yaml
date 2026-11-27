@@ -2433,3 +2433,25 @@ artifacts:
         target: SYS-001
       - type: allocated-to
         target: ARC-014
+
+  - id: TR-100
+    type: sw-req
+    title: A solver entry point that imports no WASI interface decides a script string and returns the verdict with its evidence
+    status: draft
+    release: v0.39.0
+    description: "synth's full-chain dogfood embeds ordeal as its first tool with no WASI host; ordeal.wasm today is a WASI CLI component (v0.38.1 imports 18 WASI 0.2.12 interfaces). Owner decision 2026-11-27: scope for v0.39.0, build after v0.38.1. Requirement: an exported entry point decides a QF_BV SMT-LIB script given as a string and returns sat with the model, unsat with the LRAT certificate (CNF + proof), unknown with a reason, or a reader error with its class (usage, unsupported, parse). The component that carries it imports no wasi:* interface. An unsat is returned only after the verified LRAT checker accepted it, as on every other path. Its interface is derived from a spar AADL model, not hand-written. Open for design: component export vs core module with a C ABI (synth to say which it consumes); how a time bound maps to fuel or steps without a clock. Effect: behaviour. Issue #357."
+    tags: [wasm, component, api, no-wasi, synth]
+    fields:
+      effect: behaviour
+      priority: should
+      req-type: functional
+      verification-criteria: (1) the built component's import list contains no wasi:* interface, checked mechanically with a planted WASI import that must fail; (2) over the differential corpus and the five documented exit cases its verdicts, models and certificates equal the CLI's --format json byte for byte, under wasmtime and under kiln without --wasi; (3) a planted checker rejection yields unknown, never unsat; (4) the WIT is generated from the spar model and a regenerate-and-diff gate fails on drift.
+    links:
+      - type: derives-from
+        target: SYS-001
+      - type: derives-from
+        target: SYS-002
+      - type: derives-from
+        target: SYS-006
+      - type: allocated-to
+        target: ARC-010
