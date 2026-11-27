@@ -939,6 +939,94 @@ jobs:
           planted 'lrat_bytes 618086 exceeds the budget 618085 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
           echo "both planted controls are red"
 
+  # ── WASI 0.3 canary (advisory, nightly) ───────────────────────────────
+  # Owner request 2026-11-27: start producing WASI p3 builds, with ordeal as
+  # the pilot (no dependencies, an existing native ↔ wasm differential).
+  # Rust's wasm32-wasip3 is Tier 3 and nightly only, so this job pins a
+  # dated nightly that ships rust-std for it; everything ordeal ships stays
+  # on exact Rust 1.100.0. It builds the component, requires every import to
+  # be a WASI 0.3.0 interface (a p2 build of the same source must fail that
+  # check), and runs the same differential as the wasip2 job under the
+  # pinned layer's wasmtime 51.0.0, which runs WASI 0.3 by default, with the
+  # planted exit-2-to-1 runner refused. kiln cannot run 0.3 yet (async is
+  # planned for kiln 0.10.0). Advisory: not a required context, and no
+  # continue-on-error, so a red run shows as red.
+  wasip3:
+    name: WASI 0.3 canary (advisory, nightly-2026-11-13, wasmtime)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      # The shipped toolchain builds the native reference and the p2 control.
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
+        with:
+          toolchain: 1.100.0
+          targets: wasm32-wasip2
+      # nightly-2026-11-13 = rustc 1.102.0-nightly (8eb778d04 2026-11-12);
+      # its dist manifest lists rust-std for wasm32-wasip3 (available = true).
+      - name: Install the pinned nightly with the wasm32-wasip3 target
+        run: |
+          set -euo pipefail
+          rustup toolchain install nightly-2026-11-13 --profile minimal --target wasm32-wasip3
+          v=$(rustc +nightly-2026-11-13 --version)
+          echo "$v"
+          [ "$v" = "rustc 1.102.0-nightly (8eb778d04 2026-11-12)" ] || { echo "::error::nightly pin resolved to '$v'"; exit 1; }
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: wasip3
+      - name: Build ordeal (wasm32-wasip3 on the nightly; native and wasip2 on 1.100.0)
+        run: |
+          cargo +nightly-2026-11-13 build --release --target wasm32-wasip3 -p ordeal
+          cargo +1.100.0 build --release -p ordeal
+          cargo +1.100.0 build --release --target wasm32-wasip2 -p ordeal
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2
+        with:
+          tool: wasm-tools@1.245.1
+      - name: The component imports only WASI 0.3.0 (a p2 build is refused)
+        run: |
+          set -euo pipefail
+          only_p3() { # <component>: every wasi import and the run export are @0.3.0
+            local wit; wit=$(wasm-tools component wit "$1")
+            local n bad
+            n=$(printf '%s\n' "$wit" | grep -cE '^\s*import wasi:[a-z-]+/[a-z-]+@0\.3\.0;' || true)
+            bad=$(printf '%s\n' "$wit" | grep -E '^\s*import wasi:' | grep -vE '@0\.3\.0;' || true)
+            [ "$n" -gt 0 ] && [ -z "$bad" ] && printf '%s\n' "$wit" | grep -qE '^\s*export wasi:cli/run@0\.3\.0;'
+          }
+          P3=target/wasm32-wasip3/release/ordeal.wasm
+          wasm-tools component wit "$P3" | grep -E '^\s*(import|export) ' | sort -u
+          only_p3 "$P3" || { echo "::error::the wasip3 component imports something other than WASI 0.3.0"; exit 1; }
+          if only_p3 target/wasm32-wasip2/release/ordeal.wasm; then
+            echo "::error::the 0.3-only check accepted the wasip2 component"; exit 1
+          fi
+          echo "wasip3 component: WASI 0.3.0 only; wasip2 control refused"
+      - name: A fresh varve root for this job
+        run: |
+          echo "VARVE_ROOT=$RUNNER_TEMP/varve" >> "$GITHUB_ENV"
+          echo "VARVE_INSTALL_DIR=$RUNNER_TEMP/varve/bin" >> "$GITHUB_ENV"
+      - name: Install varve (verified) and the pinned layer
+        env:
+          VARVE_VERSION: v0.48.0
+        run: bash scripts/install_varve.sh
+      - name: wasm ↔ native behavioral differential (wasip3, layer wasmtime)
+        run: |
+          set -euo pipefail
+          test "$(command -v wasmtime)" = "$VARVE_ROOT/shims/wasmtime"
+          wasmtime --version
+          scripts/wasm_native_differential.sh \
+            target/release/ordeal \
+            wasmtime run --dir . target/wasm32-wasip3/release/ordeal.wasm
+      - name: wasip3 differential refuses an exit-2-to-1 runner (planted)
+        run: |
+          # shellcheck disable=SC2016  # $@ and $c expand in the inner bash
+          if scripts/wasm_native_differential.sh target/release/ordeal \
+               bash -c '"$@"; c=$?; [ "$c" = 2 ] && exit 1; exit "$c"' squash \
+               wasmtime run --dir . target/wasm32-wasip3/release/ordeal.wasm > squash.txt 2>&1; then
+            cat squash.txt
+            echo "::error::the differential accepted a runner that reports exit 2 as 1"; exit 1
+          fi
+          grep WRONG squash.txt
+
   # ── kiln: a third runner for ordeal.wasm (advisory) ───────────────────
   # The same wasm ↔ native differential as the wasip2 job, with the
   # component run on our own chain instead of wasmtime: meld (from the

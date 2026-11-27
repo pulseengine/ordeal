@@ -518,6 +518,7 @@ claims:
           - varve layer pin resolves (pinned rivet validates the graph)
           - Perf + proof-size gate (#283)   # advisory until the owner decides (TR-081)
           - kiln runner (advisory, meld-fused ordeal.wasm)   # third wasm runner, advisory
+          - WASI 0.3 canary (advisory, nightly-2026-11-13, wasmtime)   # p3 pilot, nightly, advisory
       - kind: count-min            # the claim gate runs inside the required Test job (native build)
         pattern: 'tools/claim-check/target/release/claim-check claims\.yaml'
         glob: .github/workflows/ci.yml
