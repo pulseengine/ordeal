@@ -950,6 +950,76 @@ jobs:
           planted 'lrat_bytes 618086 exceeds the budget 618085 (+1)' ORDEAL_PERF_GATE_ONLY=gale/cpu_mask_pot,loom/optimize_quicksort ORDEAL_PERF_GATE_INFLATE_LRAT=1
           echo "both planted controls are red"
 
+  # ── kiln: a third runner for ordeal.wasm (advisory) ───────────────────
+  # The same wasm ↔ native differential as the wasip2 job, with the
+  # component run on our own chain instead of wasmtime: meld (from the
+  # pinned varve layer) fuses ordeal.wasm with --reproducible --memory multi
+  # (stated, not inferred: meld ADR-4), and kiln
+  # runs the fused module. The fusion must be byte-reproducible (two runs,
+  # one sha256), every invocation must agree with native byte for byte and
+  # exit for exit, and a runner that reports exit 2 as 1 must be refused.
+  # Advisory (continue-on-error, not a required context): a kiln or meld
+  # defect is filed against that tool and must not block ordeal merges.
+  kiln:
+    name: kiln runner (advisory, meld-fused ordeal.wasm)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
+      - uses: dtolnay/rust-toolchain@df2a88e9fe4098bad09cb42c3dec7187f15861fc # master 2026-11-15 (#190); toolchain input required
+        with:
+          toolchain: 1.100.0
+          targets: wasm32-wasip2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: kiln
+      - name: Build ordeal (wasm32-wasip2 and native, release)
+        run: |
+          cargo build --target wasm32-wasip2 --release -p ordeal
+          cargo build --release -p ordeal
+      - name: A fresh varve root for this job
+        run: |
+          echo "VARVE_ROOT=$RUNNER_TEMP/varve" >> "$GITHUB_ENV"
+          echo "VARVE_INSTALL_DIR=$RUNNER_TEMP/varve/bin" >> "$GITHUB_ENV"
+      - name: Install varve (verified) and the pinned layer
+        env:
+          VARVE_VERSION: v0.48.0
+        run: bash scripts/install_varve.sh
+      - name: meld and kiln come from the pinned layer
+        run: |
+          set -euo pipefail
+          test "$(command -v meld)" = "$VARVE_ROOT/shims/meld"
+          test "$(command -v kiln)" = "$VARVE_ROOT/shims/kiln"
+          "$VARVE_INSTALL_DIR/varve" which kiln
+          meld --version
+          kiln --version
+      - name: meld fuse --reproducible (two runs, one sha256)
+        run: |
+          set -euo pipefail
+          meld fuse --reproducible --memory multi -o fused-a.wasm target/wasm32-wasip2/release/ordeal.wasm
+          meld fuse --reproducible --memory multi -o fused-b.wasm target/wasm32-wasip2/release/ordeal.wasm
+          a=$(sha256sum fused-a.wasm | cut -d' ' -f1)
+          b=$(sha256sum fused-b.wasm | cut -d' ' -f1)
+          echo "fused ordeal.wasm: $a"
+          [ "$a" = "$b" ] || { echo "::error::meld --reproducible gave $a then $b"; exit 1; }
+      - name: wasm ↔ native behavioral differential under kiln
+        run: |
+          scripts/wasm_native_differential.sh \
+            target/release/ordeal \
+            kiln --wasi --component --dir . fused-a.wasm
+      - name: kiln differential refuses an exit-2-to-1 runner (planted)
+        run: |
+          # shellcheck disable=SC2016  # $@ and $c expand in the inner bash
+          if scripts/wasm_native_differential.sh target/release/ordeal \
+               bash -c '"$@"; c=$?; [ "$c" = 2 ] && exit 1; exit "$c"' squash \
+               kiln --wasi --component --dir . fused-a.wasm > squash.txt 2>&1; then
+            cat squash.txt
+            echo "::error::the differential accepted a runner that reports exit 2 as 1"; exit 1
+          fi
+          grep WRONG squash.txt
+
   # The toolchain pin (varve.toml + varve-realms.toml) must resolve on every
   # change, not first at release time: install varve the verified way,
   # install and verify the pinned layer against the realm root, then run the
