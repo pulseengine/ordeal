@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **WASI 0.3 canary (advisory).** A new CI job builds `ordeal.wasm` for
+  `wasm32-wasip3` on a pinned nightly (nightly-2026-11-13, rustc
+  1.102.0-nightly; the target is Tier 3), checks that every import is a
+  WASI 0.3.0 interface (the wasip2 build of the same source must fail that
+  check), and runs the wasm ↔ native differential under the layer's
+  wasmtime 51.0.0 with the planted exit-2-to-1 runner refused. Measured
+  locally on 2026-11-27: 26 of 26 invocations identical to native, exit
+  codes included. Shipped builds stay on Rust 1.100.0 and WASI 0.2.
+
 ### Removed
 
 - **`scripts/claim_check.py`.** The Rust `tools/claim-check`, which matched
