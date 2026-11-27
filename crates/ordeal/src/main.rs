@@ -12,13 +12,42 @@
 //! stdin/file reading, model formatting, and exit codes.
 
 use std::io::Read;
-use std::process::ExitCode;
 
 use ordeal::smtlib;
 use ordeal::verus;
 use ordeal::{CheckResult, QueryCheckResult, QueryDag, WitnessCheckResult};
 
-fn main() -> ExitCode {
+/// The exit status `main` hands to `std::process::exit`. Deliberately not
+/// `std::process::ExitCode`: a Rust 1.100 wasm32-wasip2 `main` that returns
+/// `ExitCode::from(2)` reaches the host as exit 1 (wasmtime 51.0.0, measured
+/// 2026-11-27), so the shipped component reported a documented exit 2 as 1.
+/// `process::exit(2)` arrives as 2. Same API as the std type, so call sites
+/// are unchanged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ExitCode(u8);
+
+impl ExitCode {
+    const SUCCESS: ExitCode = ExitCode(0);
+    #[allow(dead_code)]
+    const FAILURE: ExitCode = ExitCode(1);
+}
+
+impl From<u8> for ExitCode {
+    fn from(code: u8) -> Self {
+        ExitCode(code)
+    }
+}
+
+fn main() {
+    let code = run_main();
+    use std::io::Write as _;
+    // process::exit skips std's exit-time flush of buffered stdout.
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    std::process::exit(i32::from(code.0));
+}
+
+fn run_main() -> ExitCode {
     let args: Vec<String> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
         None => {
