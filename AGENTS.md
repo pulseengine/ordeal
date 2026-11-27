@@ -81,7 +81,7 @@ cargo run --bin ordeal -- check query.smt2
 
 # The documentation claim gate (claims.yaml, TR-074) — also a step of the
 # required Test job
-python3 scripts/claim_check.py
+cargo run --release --manifest-path tools/claim-check/Cargo.toml -- claims.yaml
 ```
 
 ## Layout

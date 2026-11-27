@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **`scripts/claim_check.py`.** The Rust `tools/claim-check`, which matched
+  it on 944 of 944 cases (#351), is now the claim gate. The required Test job
+  builds it natively and runs `--self-test` (31 cases, every predicate kind
+  failing and passing) and `claims.yaml`; the wasm32-wasip2 job runs the same
+  two under wasmtime. The equivalence harness `claim-check-equiv` went with
+  the script, since there is no second implementation left to compare. The
+  predicate reference moved to the header of `tools/claim-check/src/main.rs`.
+
 ## [0.38.1] - 2026-11-27
 
 A patch for a defect v0.38.0 shipped. **The v0.38.0 wasm components

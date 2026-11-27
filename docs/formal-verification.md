@@ -997,7 +997,7 @@ grep -c '^axiom' Kernel.lean        # expect 0 (CI-gated)
 The `kernel.spec.*` list above is every checker-level pin in
 `lean/AxiomCheck.lean` (the blaster rule pins, `kernel.blast_kernel.spec.*`,
 are listed there only); `claims.yaml` checks the two lists against each
-other, both ways. From the repository root, `python3 scripts/claim_check.py`
+other, both ways. From the repository root, `tools/claim-check` (`cargo run --release --manifest-path tools/claim-check/Cargo.toml`)
 re-derives every claim this document and the other documents make about
 the proofs — theorem names present in their files and pinned axiom-clean,
 no `sorry` / `native_decide` / `axiom` declaration in the hand-written

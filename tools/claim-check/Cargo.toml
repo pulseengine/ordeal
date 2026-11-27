@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 publish = false
-description = "ordeal's documentation claim gate (TR-074), a Rust port of scripts/claim_check.py that builds as a wasm32-wasip2 component"
+description = "ordeal's documentation claim gate (TR-074), built natively and as a wasm32-wasip2 component"
 
 # Its own workspace and lockfile: the gate's YAML/regex/glob dependencies stay
 # out of the ordeal workspace, whose default build is dependency-free.
@@ -13,11 +13,6 @@ description = "ordeal's documentation claim gate (TR-074), a Rust port of script
 [[bin]]
 name = "claim-check"
 path = "src/main.rs"
-
-# Native only: spawns the Python reference and the port and compares them.
-[[bin]]
-name = "claim-check-equiv"
-path = "src/bin/equiv.rs"
 
 [dependencies]
 rivet-yaml = { git = "https://github.com/pulseengine/rivet", tag = "v0.43.3" }

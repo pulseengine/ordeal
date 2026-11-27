@@ -117,8 +117,11 @@ jobs:
       - name: Documentation claims bound to evidence (claims.yaml, TR-074)
         run: |
           set -euo pipefail
-          python3 scripts/claim_check.py --self-test
-          python3 scripts/claim_check.py claims.yaml
+          # tools/claim-check is its own workspace (the gate's YAML/regex/glob
+          # dependencies stay out of ordeal's dependency-free default build).
+          cargo build --locked --release --manifest-path tools/claim-check/Cargo.toml
+          tools/claim-check/target/release/claim-check --self-test
+          tools/claim-check/target/release/claim-check claims.yaml
       # rivet: verifies VER-053
       # #186: nothing in the release may run, sign, attest or publish
       # before the release gate job.
@@ -352,39 +355,25 @@ jobs:
               || { echo "::error::ordeal-recheck $arg: native exit $n, wasm exit $w, documented $want"; exit 1; }
             echo "exit $want: ordeal-recheck $arg (native and wasm)"
           done
-      # The claim gate (TR-074) ported to Rust and run as a wasm32-wasip2
-      # component (tools/claim-check, owner decision 2026-11-27 "run what we
-      # build"). scripts/claim_check.py stays the blocking gate in the Test
-      # job and is the equivalence oracle here: claim-check-equiv runs both on
-      # the self-test, the real claims.yaml, per-claim and per-predicate
-      # mutants and structural files, and requires identical stdout and exit
-      # codes. Planted control: a reference with `n > limit` changed to
-      # `n >= limit` must break equivalence.
+      # The claim gate (TR-074) as a wasm32-wasip2 component (tools/claim-check,
+      # owner decision 2026-11-27 "run what we build"): the same checks the
+      # Test job runs natively, here under wasmtime. Its self-test shows every
+      # predicate kind failing and passing over fixtures (the gate's planted
+      # controls). scripts/claim_check.py, its equivalence oracle while the
+      # port bedded in (944 of 944 identical), was retired after v0.38.1.
       # rivet: verifies VER-074
-      - name: claim-check wasm32-wasip2 — build, run, equivalence with claim_check.py
+      - name: claim-check wasm32-wasip2 — build and run
         run: |
           set -euo pipefail
           # Its own workspace, so the root Format and Clippy jobs do not see it.
           (cd tools/claim-check \
             && cargo fmt --check \
             && cargo clippy --locked --release --all-targets -- -D warnings \
-            && cargo build --locked --release --target wasm32-wasip2 --bin claim-check \
-            && cargo build --locked --release)
+            && cargo build --locked --release --target wasm32-wasip2 --bin claim-check)
           mkdir -p "$RUNNER_TEMP/claim-tmp"
           W=(wasmtime run --dir . --dir "$RUNNER_TEMP/claim-tmp::/tmp" tools/claim-check/target/wasm32-wasip2/release/claim-check.wasm)
-          E=tools/claim-check/target/release/claim-check-equiv
           "${W[@]}" --self-test
           "${W[@]}" claims.yaml
-          CLAIM_CHECK_REF="python3 scripts/claim_check.py" CLAIM_CHECK_NEW="${W[*]}" $E claims.yaml
-          m="$RUNNER_TEMP/claim_check_mutant.py"
-          sed 's/elif n > limit:/elif n >= limit:/' scripts/claim_check.py > "$m"
-          grep -q 'elif n >= limit:' "$m" || { echo "::error::planted mutant did not apply"; exit 1; }
-          if CLAIM_CHECK_REF="python3 $m" CLAIM_CHECK_NEW=tools/claim-check/target/release/claim-check $E claims.yaml > "$RUNNER_TEMP/eq-mutant.txt"; then
-            cat "$RUNNER_TEMP/eq-mutant.txt"
-            echo "::error::equivalence harness accepted a mutant reference"; exit 1
-          fi
-          tail -1 "$RUNNER_TEMP/eq-mutant.txt"
-          echo "planted mutant refused"
 
   # ── macOS build + smoke (#189) ─────────────────────────────────────────
   # Both darwin release archives were only ever built at tag time, so a

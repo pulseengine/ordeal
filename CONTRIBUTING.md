@@ -49,7 +49,7 @@ cargo clippy --all-targets --features ordeal/cert-bundle,ordeal/cadical -- -D wa
 
 # The documentation claim gate (claims.yaml): every load-bearing doc claim
 # bound to evidence re-derived from the tree
-python3 scripts/claim_check.py
+cargo run --release --manifest-path tools/claim-check/Cargo.toml -- claims.yaml
 ```
 
 ### Testing

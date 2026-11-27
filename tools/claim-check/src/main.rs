@@ -1,22 +1,61 @@
 // rivet: verifies VER-074
 //! claim-check: gate ordeal's documentation claims against live evidence (TR-074).
 //!
-//! A Rust port of `scripts/claim_check.py`, kept behaviour-identical: the same
-//! CLI, the same stdout and the same exit codes. The Python script stays as the
-//! equivalence oracle (`claim-check-equiv`) while the port beds in. Builds as a
-//! wasm32-wasip2 component; run it with the repository preopened:
+//! A README is a claim about the system, the same species as a requirement.
+//! `claims.yaml` (repo root) binds each load-bearing doc claim (what is
+//! proven, by which theorem, what is trusted, every stated number, the
+//! badges) to evidence this tool re-derives from the tree. The required Test
+//! job runs it natively on every change, and the wasm32-wasip2 job runs it as
+//! a component under wasmtime; drift between a claim and the source fails the
+//! build.
 //!
 //!   wasmtime run --dir . claim-check.wasm claims.yaml
+//!   cargo run --release --manifest-path tools/claim-check/Cargo.toml -- claims.yaml
 //!
 //! Usage:  claim-check [claims.yaml]     (default: ./claims.yaml)
 //!         claim-check --self-test        (every predicate, both ways)
 //! Exit:   0 = all claims hold · 1 = one or more drifted, or a malformed
-//!         claims file (where the script raised) · 2 = no claims declared
+//!         claims file · 2 = no claims declared
 //!
-//! Evidence predicates, claim shape and their semantics are documented in the
-//! script's docstring; this file follows it line for line. Where Python's
-//! runtime semantics leak into the output (universal newlines, `errors="ignore"`
-//! decoding, `str.isspace`, `repr`, `str()` of lists), they are reproduced.
+//! Evidence predicates (all paths and globs resolve against the claims file's
+//! directory, never the CWD; a glob that matches no file FAILS, so a predicate
+//! can never green by measuring nothing):
+//!
+//! ```text
+//!   file-exists   path              the proof / harness the claim rests on is present
+//!   count-min     pattern glob min  PRESENCE: the pattern must appear >= min times
+//!                                   (catches drift-to-absent: a theorem renamed away,
+//!                                   a version bumped, a CI step deleted)
+//!   count-max     pattern glob max  GROWTH: the pattern may appear <= max times
+//!                                   (zero-sorry / zero-axiom claims: max 0)
+//!   no-new        pattern glob recorded  alias of count-max with the ledger's count
+//!   verbatim      text              the string is in the doc (whitespace-normalised:
+//!                                   a sentence re-wrapped by an editor still matches,
+//!                                   a sentence re-worded does not)
+//!   set-equal     left right [waive]  two sets of names agree in BOTH directions; a side
+//!                                   is {glob, name} (group 1 of each matching path) or
+//!                                   {file, pattern [, after, before]} (group 1 of each
+//!                                   match in the doc, optionally between two markers).
+//!                                   An EMPTY side fails. `waive` is printed every run.
+//!   count-equals  number set        a number stated in prose == the size of a set on disk
+//! ```
+//!
+//! Claim shape:
+//!
+//! ```text
+//!   - id: README-TRUSTED-BASE
+//!     doc: README.md
+//!     text: "…"      # optional; must appear in `doc` (normalised)
+//!     epoch: "…"     # optional; what expires this claim even while its evidence
+//!                    #   still passes (printed, so the reader sees the bound)
+//!     evidence: [ {kind: …}, … ]
+//! ```
+//!
+//! History: ported from `scripts/claim_check.py` (2026-11-27, #351), which it
+//! matched on 944 of 944 cases before the script was retired. The Python
+//! runtime semantics that reached the output (universal newlines,
+//! `errors="ignore"` decoding, `str.isspace`, `repr`, `str()` of lists) are
+//! still reproduced, so the output did not change at the switch.
 
 use fancy_regex::Regex;
 use rivet_yaml::Value;
