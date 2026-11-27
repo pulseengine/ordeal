@@ -4,9 +4,9 @@
 # pointing the other way. Each entry below marks one load-bearing assertion a
 # document makes — what is proven, by which theorem, what is trusted, every
 # stated number, the badges — and binds it to evidence that
-# `scripts/claim_check.py` re-derives from the tree on every change (a step of
-# the required `Test` job). Drift fails the build. The predicate kinds are
-# documented in the script's header.
+# `tools/claim-check` re-derives from the tree on every change (a step of the
+# required `Test` job, and of the wasm32-wasip2 job as a component). Drift
+# fails the build. The predicate kinds are documented in its src/main.rs header.
 #
 # Discipline (pulseengine-claude `claim-verification`):
 #   - mark the CLAIMS, not the narrative: rationale and examples stay free;
@@ -518,8 +518,8 @@ claims:
           - varve layer pin resolves (pinned rivet validates the graph)
           - Perf + proof-size gate (#283)   # advisory until the owner decides (TR-081)
           - kiln runner (advisory, meld-fused ordeal.wasm)   # third wasm runner, advisory
-      - kind: count-min            # the claim gate runs inside the required Test job
-        pattern: 'python3 scripts/claim_check\.py claims\.yaml'
+      - kind: count-min            # the claim gate runs inside the required Test job (native build)
+        pattern: 'tools/claim-check/target/release/claim-check claims\.yaml'
         glob: .github/workflows/ci.yml
         min: 1
 
