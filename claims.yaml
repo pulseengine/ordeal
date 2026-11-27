@@ -517,6 +517,7 @@ claims:
           - Z3 Oracle (optional)
           - varve layer pin resolves (pinned rivet validates the graph)
           - Perf + proof-size gate (#283)   # advisory until the owner decides (TR-081)
+          - kiln runner (advisory, meld-fused ordeal.wasm)   # third wasm runner, advisory
       - kind: count-min            # the claim gate runs inside the required Test job
         pattern: 'python3 scripts/claim_check\.py claims\.yaml'
         glob: .github/workflows/ci.yml

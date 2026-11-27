@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **kiln runs ordeal.wasm (advisory).** A new advisory CI job, "kiln runner
+  (advisory, meld-fused ordeal.wasm)", fuses the component with meld 0.70.0
+  (`--reproducible --memory multi`, two runs must give one sha256) and runs
+  the wasm ↔ native differential with kiln 0.9.0 as the runtime: 26 of 26
+  invocations byte-identical to native, exit codes included (measured
+  locally on 2026-11-27). A runner that reports exit 2 as 1 must be refused.
+  meld and kiln come from the pinned layer, now in the `tools` subset.
+
 - **claim-check, the claim gate as a wasm32-wasip2 component.**
   `tools/claim-check` ports `scripts/claim_check.py` (TR-074) to Rust: same
   CLI, stdout and exit codes, YAML through rivet-yaml (rivet v0.43.3). The
