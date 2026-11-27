@@ -2413,3 +2413,23 @@ artifacts:
         target: ARC-007
       - type: traces-to
         target: TR-079
+
+  - id: TR-099
+    type: sw-req
+    title: The wasm components return every documented exit code unchanged, and the differential pins each one
+    status: verified
+    release: v0.38.1
+    description: "ordeal.wasm and ordeal-recheck.wasm v0.38.0 returned std's ExitCode::from(2) from main; a Rust 1.100 wasm32-wasip2 build hands that to the host as exit 1 (wasmtime 51.0.0), so a usage error and the documented 'unsupported' refusal (more than one check-sat) looked like exit 1. Native builds were not affected. Requirement: both mains exit through std::process::exit with the documented code. The wasm/native differential pins each documented code of ordeal (2: unknown command, unknown --format, a second check-sat; 1: unknown verdict with --cert-out; 0: plain unknown) and of ordeal-recheck (2: usage; 1: rejected), on native and wasm alike, and a runner that turns exit 2 into 1 must make it red. Effect: behaviour. PR #352."
+    tags: [wasm, cli, differential, exit-codes]
+    fields:
+      effect: behaviour
+      priority: must
+      req-type: functional
+      verification-criteria: cli_exit_codes holds the five documented codes on the native binary (a planted wrong expectation fails it); in CI the differential agrees on all five under wasmtime and under kiln, and the planted exit-2-to-1 runner is refused with 3 WRONG lines.
+    links:
+      - type: derives-from
+        target: SYS-005
+      - type: derives-from
+        target: SYS-001
+      - type: allocated-to
+        target: ARC-014

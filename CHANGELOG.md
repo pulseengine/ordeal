@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-11-27
+
+A patch for a defect v0.38.0 shipped. **The v0.38.0 wasm components
+(`ordeal.wasm`, `ordeal-recheck.wasm`) report exit code 2 as exit 1**: a
+usage error, an unknown `--format`, and the refusal of a script with more
+than one `check-sat` all exit 1 under wasmtime instead of the documented 2.
+Verdicts, models and certificates were not affected, and neither were the
+native binaries. If you run the v0.38.0 component and branch on exit 1, a
+usage error was indistinguishable from "unknown verdict with
+`--cert-out`"; upgrade to 0.38.1. The crates' library API is unchanged.
+The rest is CI and tooling: the claim gate as a Rust wasm32-wasip2
+component, kiln as an advisory third runtime for `ordeal.wasm`, the
+covalent 2026.11.28 toolchain layer, and three CI fixes.
+
+Falsification: this release is wrong if the 0.38.1 `ordeal.wasm` or
+`ordeal-recheck.wasm` exits with any code other than the native binary's
+for the same arguments and input, under wasmtime >= 46 or kiln 0.9.
+
 ### Added
 
 - **kiln runs ordeal.wasm (advisory).** A new advisory CI job, "kiln runner
@@ -91,7 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   command, an unknown `--format` and a second check-sat; 1 for an
   `unknown` verdict with `--cert-out`; 0 for a plain `unknown`), and the
   ordeal-recheck step pins 2 (usage) and 1 (rejected). A runner that turns
-  exit 2 into 1 must make the differential red (planted, in CI).
+  exit 2 into 1 must make the differential red (planted, in CI). A native
+  test, `cli_exit_codes`, holds the same five codes (TR-099, VER-099).
 
 - **Challenge review false positive on stale branches.** The check diffed
   `BASE HEAD` (two-dot), so a branch that predated a base-side change to
@@ -2571,7 +2590,8 @@ Z3 on the same query.
   - Minimal CLI printing the version and roadmap status notice.
   - Documentation: README, ARCHITECTURE, ROADMAP, AGENTS, CLAUDE.
 
-[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/pulseengine/ordeal/compare/v0.38.1...HEAD
+[0.38.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.38.1
 [0.38.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.38.0
 [0.37.0]: https://github.com/pulseengine/ordeal/releases/tag/v0.37.0
 [0.36.1]: https://github.com/pulseengine/ordeal/releases/tag/v0.36.1
