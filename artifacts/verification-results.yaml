@@ -3688,3 +3688,29 @@ artifacts:
         target: VER-098
       - type: part-of-execution
         target: VE-080
+
+  - id: VE-081
+    type: verification-execution
+    title: "Exit-code run (VER-099): native test, wasm differential under wasmtime and kiln, planted runner"
+    status: implemented
+    fields:
+      environment: macOS arm64, rustc 1.100.0, release builds, nice -n 19; CI ubuntu-24.04 (wasmtime 51.0.0; kiln 0.9.0 and meld 0.70.0 from covalent 2026.11.28)
+      executor: local+ci
+      timestamp: 2026-11-27 16:49:54+00:00
+      version: 4f4d96c + release/v0.38.1
+    links:
+      - type: traces-to
+        target: TR-099
+
+  - id: VV-159
+    type: verification-verdict
+    title: "VER-099 pass: every documented exit code holds natively and through the wasm component"
+    status: implemented
+    fields:
+      evidence: "cargo test -p ordeal --test cli_exit_codes: 1 passed (planted expectation 1 for 'unknown command' failed it); CI Build (wasm32-wasip2) on #352: 5 AGREE exit cases under wasmtime, ordeal-recheck 2 and 1, planted squash runner WRONG x3; CI kiln job on #354: 26/26 invocations byte-identical incl. the 5 exit cases, planted runner WRONG x3; v0.38.0 component control failed the 3 exit-2 cases"
+      verdict: pass
+    links:
+      - type: result-of
+        target: VER-099
+      - type: part-of-execution
+        target: VE-081

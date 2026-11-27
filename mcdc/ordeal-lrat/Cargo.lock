@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ordeal-lrat"
-version = "0.38.0"
+version = "0.38.1"
 
 [[package]]
 name = "ordeal-lrat-mcdc"

@@ -1925,3 +1925,17 @@ artifacts:
     links:
       - type: verifies
         target: TR-098
+
+  - id: VER-099
+    type: sw-verification
+    title: Every documented exit code holds natively and through the wasm component; an exit-2-to-1 runner is refused (TR-099)
+    status: verified
+    release: v0.38.1
+    tags: [wasm, cli, differential, exit-codes]
+    fields:
+      coverage: five ordeal exit cases (2, 2, 2, 1, 0) native and wasm under wasmtime and kiln; ordeal-recheck 2 and 1 under wasmtime; planted exit-2-to-1 runner
+      method: automated-test
+      steps: "run: cargo test -p ordeal --test cli_exit_codes; CI Build (wasm32-wasip2): scripts/wasm_native_differential.sh and its planted squash step"
+    links:
+      - type: verifies
+        target: TR-099
