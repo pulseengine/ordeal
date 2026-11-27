@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Layer covalent 2026.11.28** (counter 29, digest `da7f6b48…bbbce`,
+  resolved from the signed line index and recorded after `varve install`
+  verified it). It composes `pulseengine` 2026.11.45 (rivet 0.43.3, wsc
+  0.12.2, witness 0.46.2, plus kiln 0.9.0 and meld 0.70.0 outside the tools
+  subset) with `pulseengine-wasm` 2026.11.6 (wasmtime 51.0.0, unchanged).
+  The `tools` subset stays rivet, wsc, witness, wasmtime.
+
 - **varve 0.48.0.** CI, MC/DC and release install varve v0.48.0 (was
   v0.47.0), the first release whose `varve-realms.toml` asset carries the
   `covalent` realm. The committed file is byte-identical to that asset

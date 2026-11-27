@@ -18,9 +18,9 @@ manifest-version = 1
 [toolchain]
 realm   = "covalent"
 channel = "rolling"
-layer   = "2026.11.23"
-# The digest `varve install` verified against the covalent root on 2026-11-22.
-digest  = "sha256:925ab18e1ce2701beb34e622c18080b94eaae9c16e55c330a8476fcdea90d93e"
+layer   = "2026.11.28"
+# The digest `varve install` verified against the covalent root on 2026-11-27.
+digest  = "sha256:da7f6b48f875349c020e46ba52958f022db4c03b90b70bf91c718ccbbebbbbce"
 # Only the four tools ordeal runs. The pulseengine-wasm layer also carries
 # wac, wkg and wit-bindgen-wrpc with no proof of origin (`varve inspect`:
 # ingest_proof = unverified); this subset keeps them, and wasm-tools and
