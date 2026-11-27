@@ -24,6 +24,7 @@ if [ "$#" -lt 2 ]; then
 fi
 NATIVE="$1"
 shift
+RUNNER=("$@")
 
 CORPUS="crates/ordeal/tests/fixtures/differential"
 test -d "$CORPUS" || { echo "corpus dir missing: $CORPUS" >&2; exit 2; }
@@ -102,9 +103,44 @@ fi
 expect_ok "file-mode probe native" "$(want_of "$probe")" text "$n_code" "$n_out" || fail=1
 expect_ok "file-mode probe wasm" "$(want_of "$probe")" text "$w_code" "$w_out" || fail=1
 
+# Every documented exit code, not only 0. 2026-11-27: a wasm32-wasip2 main
+# returning std's ExitCode::from(2) reached the host as exit 1, and the
+# corpus above (all exit 0) could not see it. Each case pins the code the
+# README documents; native and the component must both give it, with
+# identical stdout.
+TWO_CHECKSAT='(set-logic QF_BV)
+(declare-const x (_ BitVec 8))
+(assert (= x x))
+(check-sat)
+(check-sat)'
+WIDE='(set-logic QF_BV)
+(declare-const x (_ BitVec 200))
+(assert (= x x))
+(check-sat)'
+exit_case() { # <label> <documented exit> <stdin> <args...>
+  local label="$1" want="$2" input="$3"
+  shift 3
+  set +e
+  n_out=$(printf '%s\n' "$input" | "$NATIVE" "$@" 2>/dev/null); n_code=$?
+  w_out=$(printf '%s\n' "$input" | "${RUNNER[@]}" "$@" 2>/dev/null); w_code=$?
+  set -e
+  checked=$((checked + 1))
+  if [ "$n_code" != "$want" ] || [ "$w_code" != "$want" ] || [ "$n_out" != "$w_out" ]; then
+    echo "WRONG   exit case '$label': native exit $n_code, wasm exit $w_code, documented $want"
+    fail=1
+  else
+    echo "AGREE   exit case '$label' (exit $want)"
+  fi
+}
+exit_case "unknown command" 2 "" zz-no-such-command
+exit_case "unknown --format value" 2 "$WIDE" check - --format yaml
+exit_case "more than one check-sat (unsupported)" 2 "$TWO_CHECKSAT" check -
+exit_case "unknown verdict with --cert-out" 1 "$WIDE" check - --cert-out .wasm-diff-unknown.cert.json
+exit_case "unknown verdict, no certificate asked" 0 "$WIDE" check -
+
 if [ "$fail" -ne 0 ]; then
   echo "wasm/native differential: DIVERGENCE FOUND across $checked invocations" >&2
   exit 1
 fi
 [ "$checked" -gt 0 ] || { echo "wasm/native differential: compared nothing" >&2; exit 1; }
-echo "wasm/native differential: $checked invocations, byte-identical, each the fixture's expected verdict"
+echo "wasm/native differential: $checked invocations, byte-identical, each the fixture's expected verdict or the documented exit code"

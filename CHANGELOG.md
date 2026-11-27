@@ -65,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The wasm components reported exit 2 as exit 1.** `ordeal.wasm` and
+  `ordeal-recheck.wasm` (v0.38.0 and earlier) returned std's
+  `ExitCode::from(2)` from `main`, which a Rust 1.100 wasm32-wasip2 build
+  hands to the host as exit 1 (wasmtime 51.0.0). So a usage error and the
+  documented `unsupported` refusal (more than one check-sat) looked like
+  exit 1. Native builds were not affected. Both mains now exit through
+  `std::process::exit`. The wasm/native differential, whose corpus only
+  exercised exit 0, now pins every documented exit code (2 for an unknown
+  command, an unknown `--format` and a second check-sat; 1 for an
+  `unknown` verdict with `--cert-out`; 0 for a plain `unknown`), and the
+  ordeal-recheck step pins 2 (usage) and 1 (rejected). A runner that turns
+  exit 2 into 1 must make the differential red (planted, in CI).
+
 - **Challenge review false positive on stale branches.** The check diffed
   `BASE HEAD` (two-dot), so a branch that predated a base-side change to
   `lean/comparator/` was flagged for files it never touched (#347). It now

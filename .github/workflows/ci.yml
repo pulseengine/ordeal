@@ -305,6 +305,19 @@ jobs:
           scripts/wasm_native_differential.sh \
             target/release/ordeal \
             wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm
+      # Planted control for the exit-code cases: a runner that turns exit 2
+      # into 1 (what std's ExitCode::from(2) did on wasm32-wasip2 until
+      # 2026-11-27) must make the differential red.
+      - name: wasm ↔ native differential refuses an exit-2-to-1 runner (planted)
+        run: |
+          # shellcheck disable=SC2016  # $@ and $c expand in the inner bash
+          if scripts/wasm_native_differential.sh target/release/ordeal \
+               bash -c '"$@"; c=$?; [ "$c" = 2 ] && exit 1; exit "$c"' squash \
+               wasmtime run --dir . target/wasm32-wasip2/release/ordeal.wasm > squash.txt 2>&1; then
+            cat squash.txt
+            echo "::error::the differential accepted a runner that reports exit 2 as 1"; exit 1
+          fi
+          grep WRONG squash.txt
       # TR-075: the ordeal-recheck component (built on its own — it is not a
       # default member, see Cargo.toml) EXECUTES under wasmtime: it accepts
       # the committed real-solver fixtures with output byte-identical to the
@@ -325,6 +338,20 @@ jobs:
           cat recheck-wasm.json
           cmp recheck-wasm.json recheck-native.json
           python3 -c 'import json; d=json.load(open("recheck-wasm.json")); assert d["accepted"]==6 and d["rejected"]==0, d'
+          # Every documented exit code (2026-11-27: std ExitCode 2 reached the
+          # host as 1 on wasm32-wasip2): 2 for a usage error, 1 for a rejected
+          # bundle, from native and from the component alike.
+          echo '{}' > recheck-bad.json
+          for case in "2|--zz-no-such-flag" "1|recheck-bad.json"; do
+            want=${case%%|*}; arg=${case#*|}
+            set +e
+            target/release/ordeal-recheck "$arg" >/dev/null 2>&1; n=$?
+            $W "$arg" >/dev/null 2>&1; w=$?
+            set -e
+            [ "$n" = "$want" ] && [ "$w" = "$want" ] \
+              || { echo "::error::ordeal-recheck $arg: native exit $n, wasm exit $w, documented $want"; exit 1; }
+            echo "exit $want: ordeal-recheck $arg (native and wasm)"
+          done
       # The claim gate (TR-074) ported to Rust and run as a wasm32-wasip2
       # component (tools/claim-check, owner decision 2026-11-27 "run what we
       # build"). scripts/claim_check.py stays the blocking gate in the Test
