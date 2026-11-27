@@ -21,12 +21,17 @@ fn exit_code(stdin: &str, args: &[&str]) -> i32 {
         .stderr(Stdio::null())
         .spawn()
         .expect("run ordeal binary");
-    child
+    // A case refused from its arguments alone (an unknown `--format`) can
+    // exit before reading stdin; the write then fails with a broken pipe.
+    // That is not a test failure: the exit code below is what is checked.
+    if let Err(e) = child
         .stdin
         .take()
         .expect("stdin")
         .write_all(stdin.as_bytes())
-        .expect("write stdin");
+    {
+        assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "write stdin: {e}");
+    }
     child
         .wait()
         .expect("wait for ordeal")
