@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **claim-check, the claim gate as a wasm32-wasip2 component.**
+  `tools/claim-check` ports `scripts/claim_check.py` (TR-074) to Rust: same
+  CLI, stdout and exit codes, YAML through rivet-yaml (rivet v0.43.3). The
+  required "Build (wasm32-wasip2)" job builds it, runs it under wasmtime on
+  `claims.yaml`, and runs `claim-check-equiv`, which compares it with the
+  Python script on 944 cases (self-test, the real file, per-claim and
+  per-predicate mutants, structural files): 944 of 944 identical. A
+  reference with one planted change (`n > limit` to `n >= limit`) breaks
+  equivalence (824 of 944). The Python script stays the blocking gate in the
+  Test job and the oracle until the port has been green on main.
+
 - **Comparator pilot.** `lrat_check_sound`, `check_query_sound` and
   `echo_unsat_sound` each have a trusted statement in `lean/Challenge/` and a
   config in `lean/comparator/`. The required Lean job runs leanprover/comparator
