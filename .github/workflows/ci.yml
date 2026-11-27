@@ -282,6 +282,7 @@ jobs:
         with:
           toolchain: 1.100.0
           targets: wasm32-wasip2
+          components: rustfmt, clippy   # tools/claim-check fmt + clippy
       - name: Assert the wasm build runs on Rust 1.100.0
         run: |
           v=$(rustc --version | awk '{print $2}')
@@ -336,7 +337,10 @@ jobs:
       - name: claim-check wasm32-wasip2 — build, run, equivalence with claim_check.py
         run: |
           set -euo pipefail
+          # Its own workspace, so the root Format and Clippy jobs do not see it.
           (cd tools/claim-check \
+            && cargo fmt --check \
+            && cargo clippy --locked --release --all-targets -- -D warnings \
             && cargo build --locked --release --target wasm32-wasip2 --bin claim-check \
             && cargo build --locked --release)
           mkdir -p "$RUNNER_TEMP/claim-tmp"

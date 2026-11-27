@@ -117,11 +117,18 @@ fn ev_mutants(ev: &Value) -> Vec<Value> {
             out.push(with("glob", s("zz-nowhere/*.x")));
         }
         "count-max" | "no-new" => {
-            let k = if kind == "count-max" { "max" } else { "recorded" };
+            let k = if kind == "count-max" {
+                "max"
+            } else {
+                "recorded"
+            };
             out.push(with("pattern", s("(?s).")));
             out.push(with(k, Value::from(-1i64)));
             out.push(with("glob", s("zz-nowhere/*.x")));
-            out.push(with("glob", Value::Sequence(vec![s("zz-nowhere/*.x"), s("zz2/*")])));
+            out.push(with(
+                "glob",
+                Value::Sequence(vec![s("zz-nowhere/*.x"), s("zz2/*")]),
+            ));
         }
         "set-equal" => {
             out.push(with("waive", Value::Sequence(vec![s("zz-waived")])));
@@ -160,8 +167,13 @@ fn ev_mutants(ev: &Value) -> Vec<Value> {
 fn main() {
     let r = cmd_of("CLAIM_CHECK_REF");
     let n = cmd_of("CLAIM_CHECK_NEW");
-    let claims_path = std::env::args().nth(1).unwrap_or_else(|| "claims.yaml".into());
-    let dir = Path::new(&claims_path).parent().map(Path::to_path_buf).unwrap_or_default();
+    let claims_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "claims.yaml".into());
+    let dir = Path::new(&claims_path)
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
     let src = std::fs::read_to_string(&claims_path).unwrap_or_else(|e| {
         eprintln!("claim-check-equiv: {claims_path}: {e}");
         exit(2);
@@ -170,7 +182,11 @@ fn main() {
         eprintln!("claim-check-equiv: {claims_path}: {e}");
         exit(2);
     });
-    let claims: Vec<Value> = data.get("claims").and_then(Value::as_sequence).cloned().unwrap_or_default();
+    let claims: Vec<Value> = data
+        .get("claims")
+        .and_then(Value::as_sequence)
+        .cloned()
+        .unwrap_or_default();
     if claims.is_empty() {
         eprintln!("claim-check-equiv: {claims_path} declares no claims");
         exit(2);
@@ -180,12 +196,20 @@ fn main() {
     let mut variants: Vec<(String, Option<String>, Vec<String>)> = vec![
         ("self-test".into(), None, vec!["--self-test".into()]),
         (claims_path.clone(), None, vec![claims_path.clone()]),
-        ("missing path".into(), None, vec!["zz-missing-claims.yaml".into()]),
+        (
+            "missing path".into(),
+            None,
+            vec!["zz-missing-claims.yaml".into()],
+        ),
     ];
     let emit = |v: &Value| rivet_yaml::to_string(v).expect("emit variant");
     variants.push(("empty file".into(), Some(String::new()), vec![]));
     variants.push(("no claims".into(), Some(emit(&doc_of(vec![]))), vec![]));
-    variants.push(("duplicate id".into(), Some(emit(&doc_of(vec![claims[0].clone(), claims[0].clone()]))), vec![]));
+    variants.push((
+        "duplicate id".into(),
+        Some(emit(&doc_of(vec![claims[0].clone(), claims[0].clone()]))),
+        vec![],
+    ));
     let mut noid = claims[0].clone();
     if let Some(m) = noid.as_mapping_mut() {
         m.remove("id");
@@ -209,7 +233,11 @@ fn main() {
         let mut m = c.clone();
         set(&mut m, "evidence", Value::Sequence(vec![]));
         push("no evidence", m);
-        let evs: Vec<Value> = c.get("evidence").and_then(Value::as_sequence).cloned().unwrap_or_default();
+        let evs: Vec<Value> = c
+            .get("evidence")
+            .and_then(Value::as_sequence)
+            .cloned()
+            .unwrap_or_default();
         for (j, ev) in evs.iter().enumerate() {
             for (k, mev) in ev_mutants(ev).into_iter().enumerate() {
                 let mut e2 = evs.clone();
@@ -250,18 +278,31 @@ fn main() {
                     println!("  ref: {a}\n  new: {b}");
                 }
                 if rs.lines().count() != ns.lines().count() {
-                    println!("  lines: ref {} new {}", rs.lines().count(), ns.lines().count());
+                    println!(
+                        "  lines: ref {} new {}",
+                        rs.lines().count(),
+                        ns.lines().count()
+                    );
                 }
             }
         }
     }
     let total = identical + differ;
-    let codes: Vec<String> = ref_codes.iter().map(|(c, k)| format!("exit {c}: {k}")).collect();
+    let codes: Vec<String> = ref_codes
+        .iter()
+        .map(|(c, k)| format!("exit {c}: {k}"))
+        .collect();
     println!("reference exit codes over the cases: {}", codes.join(", "));
     println!("{identical} of {total} cases identical (stdout and exit code)");
     let covers = [0, 1, 2].iter().all(|c| ref_codes.contains_key(c));
     if !covers {
-        println!("claim-check-equiv: the reference did not exit 0, 1 and 2 across the cases; the mutants did not bite");
+        println!(
+            "claim-check-equiv: the reference did not exit 0, 1 and 2 across the cases; the mutants did not bite"
+        );
     }
-    exit(if differ == 0 && total > 0 && covers { 0 } else { 1 });
+    exit(if differ == 0 && total > 0 && covers {
+        0
+    } else {
+        1
+    });
 }

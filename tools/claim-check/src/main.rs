@@ -78,7 +78,11 @@ fn read_text(p: &Path) -> std::io::Result<String> {
 
 /// `repr(str)`.
 fn py_repr_str(s: &str) -> String {
-    let q = if s.contains('\'') && !s.contains('"') { '"' } else { '\'' };
+    let q = if s.contains('\'') && !s.contains('"') {
+        '"'
+    } else {
+        '\''
+    };
     let mut o = String::new();
     o.push(q);
     for c in s.chars() {
@@ -162,7 +166,8 @@ fn truthy(v: Option<&Value>) -> bool {
 }
 
 fn key<'a>(m: &'a Value, k: &str) -> R<&'a Value> {
-    m.get(k).ok_or_else(|| Internal(format!("KeyError: {}", py_repr_str(k))))
+    m.get(k)
+        .ok_or_else(|| Internal(format!("KeyError: {}", py_repr_str(k))))
 }
 
 fn key_str<'a>(m: &'a Value, k: &str) -> R<&'a str> {
@@ -178,7 +183,11 @@ fn key_int(m: &Value, k: &str) -> R<i64> {
 }
 
 fn rx(pattern: &str, multiline: bool) -> R<Regex> {
-    let p = if multiline { format!("(?m){pattern}") } else { pattern.to_string() };
+    let p = if multiline {
+        format!("(?m){pattern}")
+    } else {
+        pattern.to_string()
+    };
     // Python's `re` has no backtracking cap; fancy-regex's default (10^6)
     // tripped on ARCH-SORRY-FREE-GATED over the Lean tree.
     fancy_regex::RegexBuilder::new(&p)
@@ -190,7 +199,9 @@ fn rx(pattern: &str, multiline: bool) -> R<Regex> {
 /// `glob.glob(str(root / g), recursive=True)`.
 fn pyglob(root: &Path, g: &str) -> R<Vec<PathBuf>> {
     let pat = root.join(g);
-    let pat = pat.to_str().ok_or_else(|| Internal("non-UTF-8 glob".into()))?;
+    let pat = pat
+        .to_str()
+        .ok_or_else(|| Internal("non-UTF-8 glob".into()))?;
     let opts = glob::MatchOptions {
         case_sensitive: true,
         require_literal_separator: true,
@@ -215,7 +226,11 @@ fn globs_of(v: &Value) -> R<Vec<String>> {
         Value::String(s) => Ok(vec![s.clone()]),
         Value::Sequence(xs) => xs
             .iter()
-            .map(|x| x.as_str().map(str::to_string).ok_or_else(|| Internal("TypeError: glob".into())))
+            .map(|x| {
+                x.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| Internal("TypeError: glob".into()))
+            })
             .collect(),
         _ => internal("TypeError: glob must be a string or a list"),
     }
@@ -269,10 +284,14 @@ fn side(spec: &Value, root: &Path) -> R<(BTreeSet<String>, Option<String>)> {
         return internal("TypeError: side must be a mapping");
     }
     if let Some(gv) = spec.get("glob") {
-        let g = gv.as_str().ok_or_else(|| Internal("TypeError: glob".into()))?;
+        let g = gv
+            .as_str()
+            .ok_or_else(|| Internal("TypeError: glob".into()))?;
         let name = match spec.get("name") {
             None => DEFAULT_NAME,
-            Some(v) => v.as_str().ok_or_else(|| Internal("TypeError: name".into()))?,
+            Some(v) => v
+                .as_str()
+                .ok_or_else(|| Internal("TypeError: name".into()))?,
         };
         let re = rx(name, false)?;
         if re.captures_len() < 2 {
@@ -281,7 +300,10 @@ fn side(spec: &Value, root: &Path) -> R<(BTreeSet<String>, Option<String>)> {
         let mut names = BTreeSet::new();
         for f in pyglob(root, g)? {
             let rel = rel_posix(root, &f);
-            if let Some(c) = re.captures(&rel).map_err(|e| Internal(format!("regex: {e}")))? {
+            if let Some(c) = re
+                .captures(&rel)
+                .map_err(|e| Internal(format!("regex: {e}")))?
+            {
                 match c.get(1) {
                     Some(m) => names.insert(m.as_str().to_string()),
                     None => names.insert("None".to_string()),
@@ -297,7 +319,10 @@ fn side(spec: &Value, root: &Path) -> R<(BTreeSet<String>, Option<String>)> {
         let file = key_str(spec, "file")?;
         let p = root.join(file);
         if !p.exists() {
-            return Ok((BTreeSet::new(), Some(format!("side file not found: {file}"))));
+            return Ok((
+                BTreeSet::new(),
+                Some(format!("side file not found: {file}")),
+            ));
         }
         let mut text = read_text(&p).map_err(|e| Internal(format!("{file}: {e}")))?;
         if truthy(spec.get("after")) {
@@ -328,7 +353,10 @@ fn side(spec: &Value, root: &Path) -> R<(BTreeSet<String>, Option<String>)> {
             .then(|| format!("side pattern matched NOTHING in {file}"));
         return Ok((names, err));
     }
-    Ok((BTreeSet::new(), Some("side needs either glob or file".into())))
+    Ok((
+        BTreeSet::new(),
+        Some("side needs either glob or file".into()),
+    ))
 }
 
 fn check_claim(c: &Value, root: &Path) -> R<Vec<String>> {
@@ -351,10 +379,13 @@ fn check_claim(c: &Value, root: &Path) -> R<Vec<String>> {
         Some(v) if !truthy(Some(v)) => None,
         Some(_) => return internal("TypeError: text must be a string"),
     };
-    if let Some(t) = text.filter(|t| !t.is_empty()) {
-        if !doc_n.contains(&norm(t)) {
-            fails.push(format!("claim text not found in {doc_name}: \"{}\"", norm(t)));
-        }
+    if let Some(t) = text.filter(|t| !t.is_empty())
+        && !doc_n.contains(&norm(t))
+    {
+        fails.push(format!(
+            "claim text not found in {doc_name}: \"{}\"",
+            norm(t)
+        ));
     }
 
     let evidence: &[Value] = match c.get("evidence") {
@@ -452,11 +483,16 @@ fn check_claim(c: &Value, root: &Path) -> R<Vec<String>> {
                     for w in &waived {
                         println!("    waived (debt, printed every run): {w}");
                     }
-                    let only_l: Vec<&String> =
-                        left.iter().filter(|x| !right.contains(*x) && !waived.contains(*x)).collect();
-                    let only_r: Vec<&String> =
-                        right.iter().filter(|x| !left.contains(*x) && !waived.contains(*x)).collect();
-                    let join = |v: &[&String]| v.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
+                    let only_l: Vec<&String> = left
+                        .iter()
+                        .filter(|x| !right.contains(*x) && !waived.contains(*x))
+                        .collect();
+                    let only_r: Vec<&String> = right
+                        .iter()
+                        .filter(|x| !left.contains(*x) && !waived.contains(*x))
+                        .collect();
+                    let join =
+                        |v: &[&String]| v.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ");
                     if !only_l.is_empty() {
                         fails.push(format!("in left but not right: {}", join(&only_l)));
                     }
@@ -474,7 +510,10 @@ fn check_claim(c: &Value, root: &Path) -> R<Vec<String>> {
                 let m: Option<String> = if p.exists() {
                     let t = read_text(&p).map_err(|e| Internal(format!("{nfile}: {e}")))?;
                     let re = rx(npat, false)?;
-                    match re.captures(&t).map_err(|e| Internal(format!("regex: {e}")))? {
+                    match re
+                        .captures(&t)
+                        .map_err(|e| Internal(format!("regex: {e}")))?
+                    {
                         None => None,
                         Some(c) => {
                             if re.captures_len() < 2 {
@@ -490,9 +529,7 @@ fn check_claim(c: &Value, root: &Path) -> R<Vec<String>> {
                     fails.push(format!("{es}  — an empty side compares nothing"));
                 } else {
                     match m {
-                        None => fails.push(format!(
-                            "stated number not found: /{npat}/ in {nfile}"
-                        )),
+                        None => fails.push(format!("stated number not found: /{npat}/ in {nfile}")),
                         Some(g) => {
                             let stated: i64 = g
                                 .trim_matches(is_py_space)
@@ -527,12 +564,17 @@ impl TempDir {
     fn new() -> std::io::Result<TempDir> {
         use std::sync::atomic::{AtomicU64, Ordering};
         static N: AtomicU64 = AtomicU64::new(0);
-        let base = std::env::var_os("TMPDIR").map(PathBuf::from).unwrap_or_else(|| "/tmp".into());
+        let base = std::env::var_os("TMPDIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| "/tmp".into());
         let t = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        let p = base.join(format!("claim-check-{t}-{}", N.fetch_add(1, Ordering::Relaxed)));
+        let p = base.join(format!(
+            "claim-check-{t}-{}",
+            N.fetch_add(1, Ordering::Relaxed)
+        ));
         std::fs::create_dir_all(&p)?;
         Ok(TempDir(p))
     }
@@ -589,51 +631,176 @@ fn self_test() -> R<i32> {
         format!("{{kind: count-equals, number: {{file: doc.md, pattern: '{pat}'}}, set: {disk}}}")
     };
     let cn = r"# (\d+) custom";
-    let cases: Vec<(&str, Vec<(&str, &str)>, String, bool)> = vec![
-        ("verbatim: present -> holds", vec![("doc.md", "the trusted base is X\n")],
-         "{kind: verbatim, text: 'the trusted base is X'}".into(), false),
-        ("verbatim: re-wrapped -> still holds", vec![("doc.md", "the trusted\n  base is X\n")],
-         "{kind: verbatim, text: 'the trusted base is X'}".into(), false),
-        ("verbatim: re-worded -> fails", vec![("doc.md", "the trusted base is Y\n")],
-         "{kind: verbatim, text: 'the trusted base is X'}".into(), true),
-        ("verbatim: empty text -> fails", vec![("doc.md", "anything")],
-         "{kind: verbatim, text: ''}".into(), true),
-        ("claim text: absent -> fails", vec![("doc.md", "nothing")],
-         "{kind: file-exists, path: doc.md}".into(), true),
-        ("file-exists: present -> holds", vec![("p/A.lean", "")],
-         "{kind: file-exists, path: p/A.lean}".into(), false),
-        ("file-exists: missing -> fails", vec![],
-         "{kind: file-exists, path: p/A.lean}".into(), true),
-        ("count-min: present -> holds", src.clone(),
-         r"{kind: count-min, pattern: '^theorem a\b', glob: 'p/*.lean', min: 1}".into(), false),
-        ("count-min: pattern vanished -> fails", src.clone(),
-         r"{kind: count-min, pattern: '^theorem zzz\b', glob: 'p/*.lean', min: 1}".into(), true),
-        ("count-min: glob matches no file -> fails", src.clone(),
-         r"{kind: count-min, pattern: '^theorem a\b', glob: 'q/*.lean', min: 1}".into(), true),
-        ("count-max: under -> holds", src.clone(),
-         r"{kind: count-max, pattern: ':= by sorry\b', glob: p/A.lean, max: 0}".into(), false),
-        ("count-max: over -> fails", src.clone(),
-         r"{kind: count-max, pattern: ':= by sorry\b', glob: 'p/*.lean', max: 0}".into(), true),
-        ("count-max: glob matches no file -> fails", src.clone(),
-         "{kind: count-max, pattern: sorry, glob: 'q/*.lean', max: 0}".into(), true),
-        ("no-new: over recorded -> fails", src.clone(),
-         "{kind: no-new, pattern: sorry, glob: 'p/*.lean', recorded: 0}".into(), true),
-        ("set-equal: sets match -> holds", with_doc("## S\n- `a`\n- `b`\n## E\n"), se(""), false),
-        ("set-equal: doc lacks one -> fails", with_doc("## S\n- `a`\n## E\n"), se(""), true),
-        ("set-equal: doc lists a phantom -> fails", with_doc("## S\n- `a`\n- `b`\n- `c`\n## E\n"), se(""), true),
-        ("set-equal: empty doc side -> FAILS, not 0 mismatches", with_doc("## S\n## E\n"), se(""), true),
-        ("set-equal: empty disk side -> FAILS", vec![("doc.md", "## S\n- `a`\n## E\n")], se(""), true),
-        ("set-equal: empty doc side, differences waived -> still FAILS", with_doc("## S\n## E\n"),
-         se(", waive: [a, b]"), true),
-        ("set-equal: empty disk side, differences waived -> still FAILS", vec![("doc.md", "## S\n- `a`\n## E\n")],
-         se(", waive: [a]"), true),
-        ("set-equal: waived name excluded", with_doc("## S\n- `a`\n## E\n"), se(", waive: [b]"), false),
-        ("set-equal: section bounds respected", with_doc("- `z`\n## S\n- `a`\n- `b`\n## E\n- `y`\n"), se(""), false),
-        ("count-equals: stated == actual -> holds", with_doc("# 2 custom skills"), ce(cn), false),
-        ("count-equals: stated != actual -> fails", with_doc("# 18 custom skills"), ce(cn), true),
-        ("count-equals: number missing -> fails", with_doc("no number here"), ce(cn), true),
-        ("count-equals: empty set -> fails", vec![("doc.md", "# 0 custom skills")], ce(cn), true),
-        ("unknown kind -> fails", vec![], "{kind: guess}".into(), true),
+    type Case<'a> = (&'a str, Vec<(&'a str, &'a str)>, String, bool);
+    let cases: Vec<Case> = vec![
+        (
+            "verbatim: present -> holds",
+            vec![("doc.md", "the trusted base is X\n")],
+            "{kind: verbatim, text: 'the trusted base is X'}".into(),
+            false,
+        ),
+        (
+            "verbatim: re-wrapped -> still holds",
+            vec![("doc.md", "the trusted\n  base is X\n")],
+            "{kind: verbatim, text: 'the trusted base is X'}".into(),
+            false,
+        ),
+        (
+            "verbatim: re-worded -> fails",
+            vec![("doc.md", "the trusted base is Y\n")],
+            "{kind: verbatim, text: 'the trusted base is X'}".into(),
+            true,
+        ),
+        (
+            "verbatim: empty text -> fails",
+            vec![("doc.md", "anything")],
+            "{kind: verbatim, text: ''}".into(),
+            true,
+        ),
+        (
+            "claim text: absent -> fails",
+            vec![("doc.md", "nothing")],
+            "{kind: file-exists, path: doc.md}".into(),
+            true,
+        ),
+        (
+            "file-exists: present -> holds",
+            vec![("p/A.lean", "")],
+            "{kind: file-exists, path: p/A.lean}".into(),
+            false,
+        ),
+        (
+            "file-exists: missing -> fails",
+            vec![],
+            "{kind: file-exists, path: p/A.lean}".into(),
+            true,
+        ),
+        (
+            "count-min: present -> holds",
+            src.clone(),
+            r"{kind: count-min, pattern: '^theorem a\b', glob: 'p/*.lean', min: 1}".into(),
+            false,
+        ),
+        (
+            "count-min: pattern vanished -> fails",
+            src.clone(),
+            r"{kind: count-min, pattern: '^theorem zzz\b', glob: 'p/*.lean', min: 1}".into(),
+            true,
+        ),
+        (
+            "count-min: glob matches no file -> fails",
+            src.clone(),
+            r"{kind: count-min, pattern: '^theorem a\b', glob: 'q/*.lean', min: 1}".into(),
+            true,
+        ),
+        (
+            "count-max: under -> holds",
+            src.clone(),
+            r"{kind: count-max, pattern: ':= by sorry\b', glob: p/A.lean, max: 0}".into(),
+            false,
+        ),
+        (
+            "count-max: over -> fails",
+            src.clone(),
+            r"{kind: count-max, pattern: ':= by sorry\b', glob: 'p/*.lean', max: 0}".into(),
+            true,
+        ),
+        (
+            "count-max: glob matches no file -> fails",
+            src.clone(),
+            "{kind: count-max, pattern: sorry, glob: 'q/*.lean', max: 0}".into(),
+            true,
+        ),
+        (
+            "no-new: over recorded -> fails",
+            src.clone(),
+            "{kind: no-new, pattern: sorry, glob: 'p/*.lean', recorded: 0}".into(),
+            true,
+        ),
+        (
+            "set-equal: sets match -> holds",
+            with_doc("## S\n- `a`\n- `b`\n## E\n"),
+            se(""),
+            false,
+        ),
+        (
+            "set-equal: doc lacks one -> fails",
+            with_doc("## S\n- `a`\n## E\n"),
+            se(""),
+            true,
+        ),
+        (
+            "set-equal: doc lists a phantom -> fails",
+            with_doc("## S\n- `a`\n- `b`\n- `c`\n## E\n"),
+            se(""),
+            true,
+        ),
+        (
+            "set-equal: empty doc side -> FAILS, not 0 mismatches",
+            with_doc("## S\n## E\n"),
+            se(""),
+            true,
+        ),
+        (
+            "set-equal: empty disk side -> FAILS",
+            vec![("doc.md", "## S\n- `a`\n## E\n")],
+            se(""),
+            true,
+        ),
+        (
+            "set-equal: empty doc side, differences waived -> still FAILS",
+            with_doc("## S\n## E\n"),
+            se(", waive: [a, b]"),
+            true,
+        ),
+        (
+            "set-equal: empty disk side, differences waived -> still FAILS",
+            vec![("doc.md", "## S\n- `a`\n## E\n")],
+            se(", waive: [a]"),
+            true,
+        ),
+        (
+            "set-equal: waived name excluded",
+            with_doc("## S\n- `a`\n## E\n"),
+            se(", waive: [b]"),
+            false,
+        ),
+        (
+            "set-equal: section bounds respected",
+            with_doc("- `z`\n## S\n- `a`\n- `b`\n## E\n- `y`\n"),
+            se(""),
+            false,
+        ),
+        (
+            "count-equals: stated == actual -> holds",
+            with_doc("# 2 custom skills"),
+            ce(cn),
+            false,
+        ),
+        (
+            "count-equals: stated != actual -> fails",
+            with_doc("# 18 custom skills"),
+            ce(cn),
+            true,
+        ),
+        (
+            "count-equals: number missing -> fails",
+            with_doc("no number here"),
+            ce(cn),
+            true,
+        ),
+        (
+            "count-equals: empty set -> fails",
+            vec![("doc.md", "# 0 custom skills")],
+            ce(cn),
+            true,
+        ),
+        (
+            "unknown kind -> fails",
+            vec![],
+            "{kind: guess}".into(),
+            true,
+        ),
     ];
     let mut bad = 0;
     let mut total = cases.len();
@@ -648,9 +815,18 @@ fn self_test() -> R<i32> {
     let d = TempDir::new().map_err(|e| Internal(format!("tempdir: {e}")))?;
     std::fs::write(d.0.join("doc.md"), "the claim text\n").map_err(|e| Internal(e.to_string()))?;
     for (name, claim) in [
-        ("no evidence, id and doc only -> fails", "{id: T, doc: doc.md}"),
-        ("no evidence, empty list -> fails", "{id: T, doc: doc.md, evidence: []}"),
-        ("no evidence, text present -> fails", "{id: T, doc: doc.md, text: the claim text}"),
+        (
+            "no evidence, id and doc only -> fails",
+            "{id: T, doc: doc.md}",
+        ),
+        (
+            "no evidence, empty list -> fails",
+            "{id: T, doc: doc.md, evidence: []}",
+        ),
+        (
+            "no evidence, text present -> fails",
+            "{id: T, doc: doc.md, text: the claim text}",
+        ),
     ] {
         let ok = !check_claim(&yv(claim), &d.0)?.is_empty();
         bad += usize::from(!ok);
@@ -675,7 +851,8 @@ fn run() -> R<i32> {
         return Ok(1);
     }
     let root = path.parent().map(Path::to_path_buf).unwrap_or_default();
-    let src = std::fs::read_to_string(&path).map_err(|e| Internal(format!("{}: {e}", path.display())))?;
+    let src =
+        std::fs::read_to_string(&path).map_err(|e| Internal(format!("{}: {e}", path.display())))?;
     let src = src.replace("\r\n", "\n").replace('\r', "\n");
     let data: Value = if src.trim().is_empty() {
         Value::Null
@@ -709,10 +886,10 @@ fn run() -> R<i32> {
     }
     let mut dup: BTreeSet<&String> = BTreeSet::new();
     for (i, a) in ids.iter().enumerate() {
-        if let Some(a) = a {
-            if ids[i + 1..].iter().any(|b| b.as_ref() == Some(a)) {
-                dup.insert(a);
-            }
+        if let Some(a) = a
+            && ids[i + 1..].iter().any(|b| b.as_ref() == Some(a))
+        {
+            dup.insert(a);
         }
     }
     if !dup.is_empty() || ids.iter().any(Option::is_none) {
