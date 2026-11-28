@@ -19,7 +19,8 @@ permissions:
 
 concurrency:
   group: mcdc-${{ github.ref }}
-  cancel-in-progress: true
+  # Superseded PR runs are cancelled; a run on main never is (temper ci.concurrency).
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   mcdc-ordeal-lrat:
