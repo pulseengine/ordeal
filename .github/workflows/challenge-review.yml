@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# A newer push or label event supersedes the older run on the same PR.
+concurrency:
+  group: challenge-review-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   challenge-review:
     name: Trusted statements changed? (owner review)
